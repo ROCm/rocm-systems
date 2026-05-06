@@ -5,6 +5,7 @@
 
 #include "common/defines.h"
 #include "common/join.hpp"
+#include <cstdint>
 
 #include <atomic>
 #include <cstring>
@@ -35,18 +36,18 @@ template <typename FuncT, typename... Args>
 inline auto
 invoke(const char* _name, FuncT&& _func, Args... _args) ROCPROFSYS_HIDDEN_API;
 
-inline int32_t&
+inline std::int32_t&
 get_guard()
 {
-    static thread_local int32_t _v = 0;
+    static thread_local std::int32_t _v = 0;
     return _v;
 }
 
-inline int64_t
+inline std::int64_t
 get_thread_index()
 {
-    static std::atomic<int64_t> _c{ 0 };
-    static thread_local auto    _v = _c++;
+    static std::atomic<std::int64_t> _c{ 0 };
+    static thread_local auto         _v = _c++;
     return _v;
 }
 
@@ -81,7 +82,7 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
         // if _lk is ever greater than zero on the same thread, this
         // means a function within the current function is calling
         // our instrumentation so we ignore the call
-        int32_t _lk = get_guard()++;
+        std::int32_t _lk = get_guard()++;
         if(_lk == 0)
         {
             _toggle = !_toggle;

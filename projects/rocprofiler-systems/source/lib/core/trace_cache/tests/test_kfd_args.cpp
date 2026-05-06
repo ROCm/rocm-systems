@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/common_types.hpp"
+#include <cstdint>
 
 #include <gtest/gtest.h>
 
@@ -11,14 +12,14 @@ using namespace rocprofsys;
 
 TEST(kfd_args_test, page_fault_args_roundtrip)
 {
-    auto args_str = std::string("0;;uint64_t;;address;;0x7f4a00001000;;"
+    auto args_str = std::string("0;;std::uint64_t;;address;;0x7f4a00001000;;"
                                 "1;;string;;agent;;5;;");
 
     auto args = process_arguments_string(args_str);
     ASSERT_EQ(args.size(), 2u);
 
     EXPECT_EQ(args[0].arg_number, 0u);
-    EXPECT_EQ(args[0].arg_type, "uint64_t");
+    EXPECT_EQ(args[0].arg_type, "std::uint64_t");
     EXPECT_EQ(args[0].arg_name, "address");
     EXPECT_EQ(args[0].arg_value, "0x7f4a00001000");
 
@@ -36,8 +37,8 @@ TEST(kfd_args_test, page_fault_args_roundtrip)
 
 TEST(kfd_args_test, page_migrate_args_parse)
 {
-    auto args_str = std::string("0;;uint64_t;;start_address;;0x7fb100000000;;"
-                                "1;;uint64_t;;end_address;;0x7fb100200000;;"
+    auto args_str = std::string("0;;std::uint64_t;;start_address;;0x7fb100000000;;"
+                                "1;;std::uint64_t;;end_address;;0x7fb100200000;;"
                                 "2;;string;;src_agent;;1;;"
                                 "3;;string;;dst_agent;;2;;"
                                 "4;;string;;prefetch_agent;;null;;"
@@ -48,10 +49,10 @@ TEST(kfd_args_test, page_migrate_args_parse)
     ASSERT_EQ(args.size(), 7u);
 
     EXPECT_EQ(args[0].arg_name, "start_address");
-    EXPECT_EQ(args[0].arg_type, "uint64_t");
+    EXPECT_EQ(args[0].arg_type, "std::uint64_t");
 
     EXPECT_EQ(args[1].arg_name, "end_address");
-    EXPECT_EQ(args[1].arg_type, "uint64_t");
+    EXPECT_EQ(args[1].arg_type, "std::uint64_t");
 
     EXPECT_EQ(args[2].arg_name, "src_agent");
     EXPECT_EQ(args[2].arg_value, "1");
@@ -86,8 +87,8 @@ TEST(kfd_args_test, queue_args_parse)
 TEST(kfd_args_test, unmap_from_gpu_args_parse)
 {
     auto args_str = std::string("0;;string;;agent;;5;;"
-                                "1;;uint64_t;;start_address;;0x7f0000000000;;"
-                                "2;;uint64_t;;end_address;;0x7f0000100000;;");
+                                "1;;std::uint64_t;;start_address;;0x7f0000000000;;"
+                                "2;;std::uint64_t;;end_address;;0x7f0000100000;;");
 
     auto args = process_arguments_string(args_str);
     ASSERT_EQ(args.size(), 3u);
@@ -99,13 +100,13 @@ TEST(kfd_args_test, unmap_from_gpu_args_parse)
 
 TEST(kfd_args_test, dropped_events_args_parse)
 {
-    auto args_str = std::string("0;;uint64_t;;count;;42;;");
+    auto args_str = std::string("0;;std::uint64_t;;count;;42;;");
 
     auto args = process_arguments_string(args_str);
     ASSERT_EQ(args.size(), 1u);
 
     EXPECT_EQ(args[0].arg_number, 0u);
-    EXPECT_EQ(args[0].arg_type, "uint64_t");
+    EXPECT_EQ(args[0].arg_type, "std::uint64_t");
     EXPECT_EQ(args[0].arg_name, "count");
     EXPECT_EQ(args[0].arg_value, "42");
 }
@@ -118,7 +119,7 @@ TEST(kfd_args_test, empty_args_string)
 
 TEST(kfd_args_test, malformed_args_string_throws)
 {
-    EXPECT_THROW(process_arguments_string("0;;uint64_t;;address;;"),
+    EXPECT_THROW(process_arguments_string("0;;std::uint64_t;;address;;"),
                  std::invalid_argument);
 }
 

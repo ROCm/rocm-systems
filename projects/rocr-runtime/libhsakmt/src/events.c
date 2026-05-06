@@ -115,10 +115,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEventCtx(HsaKFDContext *ctx,
 			pthread_mutex_unlock(&hsakmt_mutex);
 			return HSAKMT_STATUS_ERROR;
 		}
-		if (hsakmt_use_model)
-			model_set_event_page(events_page, KFD_SIGNAL_EVENT_LIMIT);
-		else
+		if (!hsakmt_use_model)
 			hsakmt_fmm_get_handle(ctx, events_page, (uint64_t *)&args.event_page_offset, NULL);
+		// Note: In model mode, FFM handles event management entirely - no event page needed
 	}
 
 	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_CREATE_EVENT, &args) != 0) {
@@ -195,6 +194,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyEventCtx(HsaKFDContext *ctx,
 		return HSAKMT_STATUS_ERROR;
 
 	free(Event);
+
 	return HSAKMT_STATUS_SUCCESS;
 }
 
