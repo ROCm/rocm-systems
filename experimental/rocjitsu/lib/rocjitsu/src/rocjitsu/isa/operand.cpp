@@ -7,6 +7,8 @@
 
 namespace rocjitsu {
 
+std::optional<RegisterRef> Operand::to_register_ref() const { return std::nullopt; }
+
 uint32_t Operand::read_scalar(const amdgpu::Wavefront & /*wf*/) const {
   throw std::logic_error("read_scalar not implemented for this operand type");
 }

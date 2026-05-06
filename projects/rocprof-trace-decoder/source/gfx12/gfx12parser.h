@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #pragma once
-#include <unordered_map>
 #include "gfx12token.h"
 
 namespace gfx12
@@ -29,31 +28,11 @@ namespace gfx12
 class TokenLookupTable : public gfx11::TokenLookupTable
 {
 public:
-    TokenLookupTable()
-    {
-        AddEncoding({
-            RdnaType::INST, {0, 1, 0}
-        });
-        AddEncoding({
-            RdnaType::SHADER_DATA, {0, 1, 1, 0, 0, 0, 0}
-        });
-        AddEncoding({
-            RdnaType::SHADER_DATA_SHORT, {0, 1, 1, 0, 0, 0, 1}
-        });
-        AddEncoding({
-            RdnaType::EXEC_POPCOUNT1, {0, 1, 1, 0, 0, 1, 1}
-        });
-        AddEncoding({
-            RdnaType::EXEC_POPCOUNT3, {0, 1, 1, 0, 1, 0}
-        });
-        AddEncoding({
-            RdnaType::NEW_PC_GFX12, {1, 0, 0, 0, 0, 1, 0}
-        });
-    }
+    TokenLookupTable();
 
-    int64_t getTime(RdnaType type, uint64_t contents, int64_t cur_time, bool& PL, int64_t& rt)
+    int64_t getTime(const token_info_t& info, uint64_t contents, int64_t cur_time, bool& PL, int64_t& rt)
     {
-        if (type == RdnaType::TIMESTAMP)
+        if (info.type == RdnaType::TIMESTAMP)
         {
             timestamp_type stamp{.raw = contents};
             PL |= bool(stamp.pl && !stamp.rt);
@@ -62,18 +41,15 @@ public:
             if (stamp.pl == 0) rt = stamp.time;
             return cur_time;
         }
-        return getDelta(type, contents) + cur_time;
+        return getDelta(info, contents) + cur_time;
     };
 
 private:
-    int64_t getDelta(RdnaType type, uint64_t contents)
+    static int64_t getDelta(const token_info_t& info, uint64_t contents)
     {
-        auto res = time_bits.at(type);
-        uint64_t mask = (1ull << (res.second - res.first)) - 1;
-        return ((contents >> res.first) & mask) + 4 * (type == RdnaType::TIME);
+        uint64_t mask = (1ull << (info.time_end - info.time_begin)) - 1;
+        return ((contents >> info.time_begin) & mask) + 4 * (info.type == RdnaType::TIME);
     };
-
-    const static std::array<std::pair<int, int>, NAVI_TYPE_LAST> time_bits;
 };
 
 class TokenGenerator : public NaviTokenGenerator

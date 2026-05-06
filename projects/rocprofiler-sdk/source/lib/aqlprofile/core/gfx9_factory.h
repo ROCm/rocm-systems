@@ -22,7 +22,7 @@
 
 #ifndef _GFX9_FACTORY_H_
 #define _GFX9_FACTORY_H_
-#include "core/pm4_factory.h"
+#include "lib/aqlprofile/core/pm4_factory.h"
 
 namespace aql_profile
 {
@@ -58,7 +58,7 @@ protected:
 class Mi100Factory : public Gfx9Factory
 {
 public:
-    explicit Mi100Factory(const AgentInfo* agent_info);
+    explicit Mi100Factory(const AgentInfo* agent_info, bool is_base = false);
 
     virtual int GetAccumLowID() const override { return 1; }
 

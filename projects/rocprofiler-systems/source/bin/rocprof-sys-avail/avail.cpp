@@ -10,6 +10,7 @@
 #include "generate_config.hpp"
 #include "get_availability.hpp"
 #include "info_type.hpp"
+#include <cstdint>
 
 #include "hw_counter_query.hpp"
 
@@ -67,13 +68,13 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
 
 template <typename Tp>
 void
-write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool mark,
+write_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool center, bool mark,
             const format_options& fmt_opts);
 
 template <typename Tp, typename IntArrayT, size_t N>
 void
-write_wrap_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool mark,
-                 size_t _idx, IntArrayT _breaks, std::array<bool, N> _use,
+write_wrap_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool center,
+                 bool mark, size_t _idx, IntArrayT _breaks, std::array<bool, N> _use,
                  format_options& fmt_opts);
 
 template <typename IntArrayT, size_t N>
@@ -287,7 +288,7 @@ main(int argc, char** argv)
                     if(_show) _msg << " | " << std::setw(std::get<1>(_w)) << "Value";
                     _msg << " | " << std::setw(std::get<2>(_w)) << "Encoding" << " |\n";
 
-                    auto _dashes = [](int64_t _n) {
+                    auto _dashes = [](std::int64_t _n) {
                         std::stringstream _dss{};
                         _dss.fill('-');
                         _dss << std::setw(_n + 2) << "";
@@ -416,7 +417,7 @@ main(int argc, char** argv)
         .count(1)
         .dtype("int")
         .action([&fmt_opts](parser_t& p) {
-            fmt_opts.max_width = p.get<int32_t>("column-width");
+            fmt_opts.max_width = p.get<std::int32_t>("column-width");
         });
     parser
         .add_argument(
@@ -428,7 +429,7 @@ main(int argc, char** argv)
         .count(1)
         .dtype("int")
         .action([&fmt_opts](parser_t& p) {
-            fmt_opts.num_cols = p.get<int32_t>("max-total-width");
+            fmt_opts.num_cols = p.get<std::int32_t>("max-total-width");
         });
 
     parser.start_group("OUTPUT");
@@ -724,13 +725,13 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
                                }),
                 _info.end());
 
-    using width_type = std::vector<int64_t>;
+    using width_type = std::vector<std::int64_t>;
     using width_bool = std::array<bool, N + 2>;
 
-    auto       _available_column = !fmt_opts.force_brief && !fmt_opts.available_only;
-    width_type _widths           = width_type{ 30, 12, 20, 20, 20, 40, 20, 40, 10 };
-    width_bool _wusing           = width_bool{ true, _available_column };
-    int64_t    pad               = fmt_opts.padding;
+    auto         _available_column = !fmt_opts.force_brief && !fmt_opts.available_only;
+    width_type   _widths           = width_type{ 30, 12, 20, 20, 20, 40, 20, 40, 10 };
+    width_bool   _wusing           = width_bool{ true, _available_column };
+    std::int64_t pad               = fmt_opts.padding;
     for(size_t i = 0; i < options.size(); ++i)
         _wusing[i + 2] = options[i];
 
@@ -738,14 +739,16 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         constexpr size_t idx = 0;
         stringstream_t   ss;
         write_entry(ss, "COMPONENT", _widths.at(0), false, true, fmt_opts);
-        _widths.at(idx) = std::max<int64_t>(ss.str().length() + pad, _widths.at(idx));
+        _widths.at(idx) =
+            std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx));
     }
 
     {
         constexpr size_t idx = 1;
         stringstream_t   ss;
         write_entry(ss, "AVAILABLE", _widths.at(1), true, false, fmt_opts);
-        _widths.at(idx) = std::max<int64_t>(ss.str().length() + pad, _widths.at(idx));
+        _widths.at(idx) =
+            std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx));
     }
 
     for(size_t i = 0; i < fields.size(); ++i)
@@ -755,7 +758,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         if(!options[i]) continue;
         write_entry(ss, fields[i], _widths.at(i + 2), true, _mark.at(idx), fmt_opts);
         _widths.at(idx + i) =
-            std::max<int64_t>(ss.str().length() + pad, _widths.at(idx + i));
+            std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx + i));
     }
 
     if(fmt_opts.alphabetical)
@@ -800,14 +803,16 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             constexpr size_t idx = 0;
             stringstream_t   ss;
             write_entry(ss, std::get<idx>(itr), 0, true, true, fmt_opts);
-            _widths.at(idx) = std::max<int64_t>(ss.str().length() + pad, _widths.at(idx));
+            _widths.at(idx) =
+                std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx));
         }
 
         {
             constexpr size_t idx = 1;
             stringstream_t   ss;
             write_entry(ss, std::get<idx>(itr), 0, true, false, fmt_opts);
-            _widths.at(idx) = std::max<int64_t>(ss.str().length() + pad, _widths.at(idx));
+            _widths.at(idx) =
+                std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx));
         }
 
         constexpr size_t idx = 2;
@@ -816,7 +821,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             stringstream_t ss;
             write_entry(ss, std::get<idx>(itr)[i], 0, true, _mark.at(idx), fmt_opts);
             _widths.at(idx + i) =
-                std::max<int64_t>(ss.str().length() + pad, _widths.at(idx + i));
+                std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx + i));
         }
     }
 
@@ -897,7 +902,7 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
     static constexpr size_t size = 8;
     using archive_type           = cereal::SettingsTextArchive;
     using array_type             = typename archive_type::array_type;
-    using width_type             = array_t<int64_t, size>;
+    using width_type             = array_t<std::int64_t, size>;
     using width_bool             = array_t<bool, size>;
 
     width_type _widths = { 0, 0, 0, 0, 0, 0, 0, 0 };
@@ -1014,8 +1019,8 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
     for(size_t i = 0; i < _widths.size(); ++i)
     {
         if(_wusing.at(i))
-            _widths.at(i) = std::max<uint64_t>(_widths.at(i),
-                                               _labels.at(i).size() + fmt_opts.padding);
+            _widths.at(i) = std::max<std::uint64_t>(_widths.at(i), _labels.at(i).size() +
+                                                                       fmt_opts.padding);
         else
             _widths.at(i) = 0;
     }
@@ -1041,8 +1046,8 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
         for(size_t i = 0; i < itr.size(); ++i)
         {
             if(!_wusing.at(i)) continue;
-            _widths.at(i) =
-                std::max<uint64_t>(_widths.at(i), itr.at(i).length() + fmt_opts.padding);
+            _widths.at(i) = std::max<std::uint64_t>(_widths.at(i), itr.at(i).length() +
+                                                                       fmt_opts.padding);
             _selected += (is_selected(itr.at(i))) ? 1 : 0;
             write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
                         fmt_opts);
@@ -1113,7 +1118,7 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
     static_assert(N >= num_hw_counter_options,
                   "Error! Too few hw counter options + fields");
 
-    using width_type       = array_t<int64_t, N>;
+    using width_type       = array_t<std::int64_t, N>;
     using width_bool       = array_t<bool, N>;
     using hwcounter_info_t = std::vector<tim::hardware_counters::info>;
 
@@ -1144,13 +1149,13 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
     std::sort(_papi_events.begin(), _papi_events.end(), _sorter);
     std::sort(_rocm_events.begin(), _rocm_events.end(), _sorter);
 
-    auto _process_counters = [](auto& _events_v, int32_t _offset_v) {
+    auto _process_counters = [](auto& _events_v, std::int32_t _offset_v) {
         for(auto& iitr : _events_v)
             iitr.offset() += _offset_v;
-        return static_cast<int32_t>(_events_v.size());
+        return static_cast<std::int32_t>(_events_v.size());
     };
 
-    int32_t _offset = 0;
+    std::int32_t _offset = 0;
     _offset += _process_counters(_papi_events, _offset);
     _offset += _process_counters(_rocm_events, _offset);
 
@@ -1230,16 +1235,17 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
     {
         for(const auto& itr : fitr.second)
         {
-            width_type _w = { { (int64_t) itr.symbol().length(), (int64_t) 4, (int64_t) 6,
-                                (int64_t) itr.short_description().length(),
-                                (int64_t) itr.long_description().length() } };
+            width_type _w = { { (std::int64_t) itr.symbol().length(), (std::int64_t) 4,
+                                (std::int64_t) 6,
+                                (std::int64_t) itr.short_description().length(),
+                                (std::int64_t) itr.long_description().length() } };
             for(auto& witr : _w)
                 witr += fmt_opts.padding;
 
             for(size_t i = 0; i < N; ++i)
             {
                 if(_wusing.at(i))
-                    _widths.at(i) = std::max<uint64_t>(_widths.at(i), _w.at(i));
+                    _widths.at(i) = std::max<std::uint64_t>(_widths.at(i), _w.at(i));
             }
         }
     }
@@ -1349,9 +1355,9 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
         if(_midx < _widths.size()) _widths.at(_midx) -= 1;
     };
 
-    int32_t _max_width = fmt_opts.num_cols;
-    size_t  _n         = 0;
-    size_t  _nmax      = std::numeric_limits<uint16_t>::max();
+    std::int32_t _max_width = fmt_opts.num_cols;
+    size_t       _n         = 0;
+    size_t       _nmax      = std::numeric_limits<std::uint16_t>::max();
     while(_n++ < _nmax)
     {
         if(debug_msg)
@@ -1368,7 +1374,7 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
         _decrement_max();
     }
 
-    int32_t _maxw = _get_max().second;
+    std::int32_t _maxw = _get_max().second;
     if(fmt_opts.max_width == 0 || _maxw < fmt_opts.max_width) fmt_opts.max_width = _maxw;
 
     if(debug_msg)
@@ -1389,7 +1395,7 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
 
 template <typename Tp>
 void
-write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool mark,
+write_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool center, bool mark,
             const format_options& fmt_opts)
 {
     if(fmt_opts.max_width > 0 && _w > fmt_opts.max_width) _w = fmt_opts.max_width;
@@ -1454,8 +1460,8 @@ write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool ma
 
 template <typename Tp, typename IntArrayT, size_t N>
 void
-write_wrap_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool mark,
-                 size_t _idx, IntArrayT _breaks, std::array<bool, N> _use,
+write_wrap_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool center,
+                 bool mark, size_t _idx, IntArrayT _breaks, std::array<bool, N> _use,
                  format_options& fmt_opts)
 {
     if(fmt_opts.csv)
@@ -1478,7 +1484,7 @@ write_wrap_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bo
     {
         auto _decr   = (mark && fmt_opts.markdown) ? 4 : 3;
         auto _lspace = _sentry.substr(0, _w - _decr).find_last_of(" \t");
-        if(_lspace == std::string::npos || _lspace < static_cast<uint64_t>(_w / 2))
+        if(_lspace == std::string::npos || _lspace < static_cast<std::uint64_t>(_w / 2))
             _lspace = _w - _decr;
         _remainder = std::string{ " " } + _sentry.substr(_lspace);
         _sentry    = _sentry.substr(0, _lspace);
@@ -1556,7 +1562,7 @@ banner(IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts, ch
 
     stringstream_t ss;
     ss.fill(filler);
-    int64_t _remain = 0;
+    std::int64_t _remain = 0;
     for(size_t i = 0; i < _breaks.size(); ++i)
     {
         if(_use.at(i)) _remain += _breaks.at(i);
@@ -1596,7 +1602,7 @@ wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use, format_options& fm
 
     stringstream_t ss;
     ss.fill(filler);
-    int64_t _remain = 0;
+    std::int64_t _remain = 0;
     for(size_t i = 0; i < _breaks.size(); ++i)
     {
         if(_use.at(i)) _remain += _breaks.at(i);

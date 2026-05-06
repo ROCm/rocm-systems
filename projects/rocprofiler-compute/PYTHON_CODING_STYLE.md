@@ -6,6 +6,8 @@ This document outlines coding conventions and best practices for Python developm
 
 - [Function Length](#function-length)
 - [Naming Conventions](#naming-conventions)
+- [I/O and Computation Separation](#io-and-computation-separation)
+- [Nested Functions](#nested-functions)
 - [When to Use Helper Functions](#when-to-use-helper-functions)
 - [When NOT to Extract Helper Functions](#when-not-to-extract-helper-functions)
 - [Single Responsibility Principle](#single-responsibility-principle)
@@ -19,6 +21,13 @@ This document outlines coding conventions and best practices for Python developm
 Focus on what the function does, not arbitrary line counts. The right measure is whether the function has a single, clear purpose — not whether it exceeds a particular number of lines.
 
 Break code into smaller functions to improve readability and reusability.
+
+### Rules
+
+- Optimize for clarity of purpose, not line count.
+- Split a function as soon as it has more than one responsibility, regardless of length.
+
+### Example
 
 **Good:** Each function has a focused responsibility
 
@@ -53,6 +62,13 @@ Prefer descriptive names over brevity. A few extra characters in a name can save
 
 - The smaller the scope of a function, the longer and more specific its name should be — a private helper called only once can afford to be very explicit about what it does.
 - The larger the scope of a variable, the longer and more specific its name should be — a variable visible across many lines or modules should leave no ambiguity about its purpose.
+
+### Rules
+
+- Use descriptive names; never shorten for brevity.
+- The smaller the scope of a function, the more specific its name must be.
+- The larger the scope of a variable, the more specific its name must be.
+- Do not use single-letter names, abbreviations, or vague names (`data`, `info`, `result`, `tmp`, `val`) except within a very tight, obvious loop.
 
 ### Example 1: Concise Helper Functions
 
@@ -102,6 +118,81 @@ def resolve_library_path(library_path: Optional[str]) -> Optional[str]:
     # This makes the function hard to test and understand.
 ```
 
+## I/O and Computation Separation
+
+I/O — reading files, sockets, environment variables, or command-line arguments — depends on external state and is hard to test in isolation. Computation transforms inputs into outputs deterministically. Mixing the two in one function makes the computation impossible to reuse without paying the I/O cost, and impossible to verify without staging external state.
+
+Write pure computation functions that operate on in-memory data, and wrap them with thin I/O functions that load inputs and persist outputs.
+
+### Rules
+
+- Never mix I/O with computation in the same function.
+- Pure computation functions must accept data, not file paths or socket handles.
+- Confine I/O to thin wrappers that load/save data and delegate to the pure function.
+
+### Example
+
+**Good:** Pure computation, isolated I/O
+
+```python
+def compute_md5(data: bytes) -> str:
+    """Pure computation — testable with any byte payload."""
+    return hashlib.md5(data).hexdigest()
+
+def hash_file(filepath: Path) -> str:
+    """Thin I/O wrapper around the pure computation."""
+    return compute_md5(filepath.read_bytes())
+```
+
+**Bad:** Computation tangled with I/O
+
+```python
+def hash_file(filepath: Path) -> str:
+    """Cannot test the hashing without producing a file on disk."""
+    md5 = hashlib.md5()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            md5.update(chunk)
+    return md5.hexdigest()
+```
+
+## Nested Functions
+
+Defining a function inside another function (a closure or nested `def`) hides it from the rest of the module, prevents reuse, and makes the outer function harder to read. Reach for a module-level private helper (prefixed `_`) instead in almost every case.
+
+### Rules
+
+- Do not produce nested functions unless the inner function is genuinely private to the outer scope and not reusable elsewhere.
+- Always write module-level private helpers (prefixed `_`) over nested functions.
+
+### Example
+
+**Good:** Module-level private helper
+
+```python
+def _format_kernel_name(name: str, max_length: int) -> str:
+    if len(name) <= max_length:
+        return name
+    return name[: max_length - 3] + "..."
+
+def render_kernel_table(kernels: list[Kernel], max_length: int) -> str:
+    rows = [_format_kernel_name(k.name, max_length) for k in kernels]
+    return "\n".join(rows)
+```
+
+**Bad:** Nested function with no real reason to be nested
+
+```python
+def render_kernel_table(kernels: list[Kernel], max_length: int) -> str:
+    def format_name(name: str) -> str:
+        if len(name) <= max_length:
+            return name
+        return name[: max_length - 3] + "..."
+
+    rows = [format_name(k.name) for k in kernels]
+    return "\n".join(rows)
+```
+
 ## When to Use Helper Functions
 
 The main reasons to break code into smaller functions are:
@@ -112,6 +203,12 @@ The main reasons to break code into smaller functions are:
 Always consider breaking code into smaller functions even if the code is used only once.
 
 Extract helper functions when you encounter:
+
+### Rules
+
+- Extract a helper when logic is repeated, an expression benefits from a name, or a block mixes abstraction levels.
+- Search the codebase for an existing helper before writing a new one — reuse rather than duplicate.
+- Always combine existing helpers in new ways over modifying them (open-closed principle).
 
 ### 1. Repeated Code Patterns
 
@@ -179,45 +276,47 @@ result = (args[0].max() if len(args) == 1 and isinstance(args[0], pd.Series)
 
 ### 3. Improving Testability
 
-**Good:** Separate calculation from I/O
+See [I/O and Computation Separation](#io-and-computation-separation) for the
+canonical pattern: keep computation pure and confine I/O to thin wrappers so
+the computation can be exercised with in-memory inputs.
+
+**Good:** Pure computation is trivially testable
 
 ```python
-def compute_file_hash(filepath: Path) -> str:
-    """Compute MD5 hash of a file."""
-    md5 = hashlib.md5()
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            md5.update(chunk)
-    return md5.hexdigest()
+def compute_md5(data: bytes) -> str:
+    """Pure computation — testable with any byte payload."""
+    return hashlib.md5(data).hexdigest()
 
-# Pure function — easily tested with any file path
+def hash_file(filepath: Path) -> str:
+    """Thin I/O wrapper around the pure computation."""
+    return compute_md5(filepath.read_bytes())
 ```
 
-**Bad:** Mixing I/O and computation
+**Bad:** Bundling unrelated work makes everything hard to test
 
 ```python
 def process_and_hash_file(filepath: Path) -> tuple:
-    """Does too much — hard to unit test."""
-    md5 = hashlib.md5()
-    with open(filepath, "rb") as f:
-        data = f.read()
-        md5.update(data)
-
-    # Also validates
-    is_valid = validate_data(data)
-
-    # Also transforms
-    transformed = transform_data(data)
-
-    return md5.hexdigest(), is_valid, transformed
+    """Does too much — hash, validate, and transform are all entangled."""
+    data = filepath.read_bytes()
+    return (
+        hashlib.md5(data).hexdigest(),
+        validate_data(data),
+        transform_data(data),
+    )
 ```
 
 ## When NOT to Extract Helper Functions
 
-Don't extract if:
+Not every block deserves to become a function. Extracting when there's no clarity gain just adds indirection a reader has to chase.
 
-- The function name doesn't add value or clarify intent
-- The operation is trivially simple and the intent is already obvious from context
+### Rules
+
+- Don't extract when the helper's name adds no information over reading the code directly.
+- Don't extract when the operation is a single standard-library call.
+- Don't write functions whose body is a single, already-readable expression.
+- Don't write functions whose name merely repeats what the code obviously does (e.g., `def get_len(x): return len(x)`).
+
+### Example
 
 ```python
 # Bad: Unnecessary helper — the name adds no clarity
@@ -241,6 +340,11 @@ column_names = list(df.columns)
 ## Single Responsibility Principle
 
 Each function should do **ONE** thing well. If you use "and" to describe what it does, it likely needs splitting.
+
+### Rules
+
+- Every function must do exactly one thing.
+- If "and" appears in the function's description, split it.
 
 ### Example 1: Clear Single Purpose
 
@@ -338,6 +442,12 @@ An abstraction level refers to how much detail a piece of code exposes. High-lev
 
 Keep functions at one abstraction level. Don't mix high-level operations with low-level details.
 
+### Rules
+
+- Every statement in a function must operate at the same abstraction level.
+- High-level orchestration functions call named helpers — they do not contain raw file I/O, string manipulation, or byte operations inline.
+- Before adding a low-level operation to a high-level function, extract it into a helper.
+
 ### Example 1: Consistent Abstraction Level
 
 **Good:** High-level coordination
@@ -421,10 +531,14 @@ def convert_counter_format(counter_file: str, output_file: str) -> None:
 
 ## Avoiding Deep Nesting
 
-- Limit nesting to 2-3 levels, with 2 levels being preferable
-- Use early returns (guard clauses) — check for invalid/edge-case inputs at the top of a function and return immediately, keeping the main logic at a shallow level
-- Invert conditions when possible — prefer `if not condition: return` over `if condition: { entire body }`
-- Extract nested blocks into functions when nesting would otherwise exceed the limit
+Deep indentation forces a reader to hold many active conditions in their head at once. Keep the main path of a function at the leftmost level and push edge cases to the top.
+
+### Rules
+
+- Maximum 2 levels preferred; 3 levels is the hard limit.
+- Use guard clauses (early returns/continues) to eliminate nesting rather than adding `else` branches.
+- Invert conditions when possible — prefer `if not condition: return` over wrapping the body in `if condition: { ... }`.
+- If reaching the nesting limit, extract the inner block into a named function.
 
 ### Example 1: Early Returns
 
@@ -513,6 +627,13 @@ def create_filtered_stats(df_in, filter_nodes, ...) -> None:
 
 ## Code Organization
 
+### Rules
+
+- Module structure order: docstring → imports (stdlib → third-party → local, sorted within each group) → constants → public functions → private helpers → classes.
+- Public functions appear **before** private helpers in every file.
+- The `_` prefix marks privacy for module-level helpers and class members only — do not use it for helpers in test files (`test_*.py`). Test modules are imported only by pytest for collection and should not import each other (use `conftest.py` for shared fixtures), so there is no internal API to mark private.
+- Use `is None` / `is not None` — never `== None` or `!= None`.
+
 ### None Comparisons
 
 Always use `is None` and `is not None` — never `== None` or `!= None`. `None` is a singleton and identity comparison is both correct and more explicit.
@@ -529,7 +650,7 @@ if value == None:  # Caught by Ruff (E711)
 
 ### File Structure
 
-Organize Python modules with this structure. Prefer public functions first, then private/helper functions — private/helper functions are implementation details, and if their names are self-explanatory, readers often don't need to examine them.
+Organize Python modules with this structure. Putting public functions first lets a reader understand the module's API without wading through implementation detail.
 
 ```python
 # 1. Docstring

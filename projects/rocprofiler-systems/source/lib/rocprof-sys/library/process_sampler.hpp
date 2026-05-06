@@ -41,7 +41,7 @@ struct sampler
     using future_t  = std::future<void>;
     using state_t   = State;
 
-    using timestamp_t = int64_t;
+    using timestamp_t = std::int64_t;
 
     template <typename Tp                                                      = nsec_t,
               std::enable_if_t<!std::is_same_v<std::decay_t<Tp>, nsec_t>, int> = 0>
