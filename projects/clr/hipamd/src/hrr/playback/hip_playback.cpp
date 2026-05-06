@@ -46,16 +46,6 @@ static inline hipError_t hrr_hip_check(hipError_t e, const char* call,
 
 namespace {
 
-static inline uint32_t rd32(const uint8_t* p, size_t off) {
-    uint32_t v; memcpy(&v, p + off, 4); return v;
-}
-static inline uint64_t rd64(const uint8_t* p, size_t off) {
-    uint64_t v; memcpy(&v, p + off, 8); return v;
-}
-static inline int32_t rdi32(const uint8_t* p, size_t off) {
-    int32_t v; memcpy(&v, p + off, 4); return v;
-}
-
 // Build path: archive_dir/blobs/<2-char-prefix>/<hex>.blob
 static std::string blob_path(const std::string& archive_dir,
                              uint64_t hash_lo, uint64_t hash_hi) {
@@ -112,7 +102,8 @@ const void* PlaybackContext::load_blob(uint64_t hash_lo, uint64_t hash_hi,
 const void* PlaybackContext::load_code_object(uint64_t hash_lo, uint64_t hash_hi,
                                               size_t* sz_out) const {
     if (!hash_lo && !hash_hi) return nullptr;
-    std::string key = hrr::hash_hex(hash_lo, hash_hi);
+    // Prefix with "co:" to avoid colliding with blobs of the same hash in blob_cache_.
+    std::string key = "co:" + hrr::hash_hex(hash_lo, hash_hi);
     {
         std::shared_lock lk(map_mutex);
         auto it = blob_cache_.find(key);
@@ -124,7 +115,8 @@ const void* PlaybackContext::load_code_object(uint64_t hash_lo, uint64_t hash_hi
     auto data = read_file(co_path(archive_dir, hash_lo, hash_hi));
     if (data.empty()) return nullptr;
     std::unique_lock lk(map_mutex);
-    auto it = blob_cache_.emplace(key, std::move(data)).first;
+    auto [it, inserted] = blob_cache_.emplace(key, std::move(data));
+    (void)inserted;
     if (sz_out) *sz_out = it->second.size();
     return it->second.data();
 }
@@ -426,7 +418,11 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
 
     {
         std::unique_lock lk(ctx.map_mutex);
-        ctx.co_modules.emplace(hex, mod);
+        auto [it, inserted] = ctx.co_modules.emplace(hex, mod);
+        if (!inserted) {
+            // Another thread raced us between the shared_lock check and here — discard ours.
+            hipModuleUnload(mod);
+        }
     }
     if (ctx.verbose)
         fprintf(stderr, "[HRR] Loaded fat binary blob (%zu bytes) -> hipModule_t\n", sz);
@@ -642,27 +638,30 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
 
 hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostUnregister*>(pl);
-    void* live = ctx.translate_ptr(a->hostPtr);
+
+    // Retrieve the backing buffer regardless of whether translate_ptr succeeds —
+    // we must free it even if the alloc_map entry was already removed.
+    void* buf = nullptr;
+    {
+        std::unique_lock lk(ctx.map_mutex);
+        auto it = ctx.host_reg_bufs.find(a->hostPtr);
+        if (it != ctx.host_reg_bufs.end()) {
+            buf = it->second;
+            ctx.host_reg_bufs.erase(it);
+        }
+    }
+
+    void* live = buf ? buf : ctx.translate_ptr(a->hostPtr);
     if (!live) return hipSuccess;
 
     hipError_t r = hipHostUnregister(live);
-    if (r == hipSuccess) {
-        ctx.remove_alloc(a->hostPtr);
-        void* buf = nullptr;
-        {
-            std::unique_lock lk(ctx.map_mutex);
-            auto it = ctx.host_reg_bufs.find(a->hostPtr);
-            if (it != ctx.host_reg_bufs.end()) {
-                buf = it->second;
-                ctx.host_reg_bufs.erase(it);
-            }
-        }
+    if (r == hipSuccess) ctx.remove_alloc(a->hostPtr);
+
 #ifdef _WIN32
-        _aligned_free(buf);
+    _aligned_free(buf);
 #else
-        free(buf);
+    free(buf);
 #endif
-    }
     return r;
 }
 
@@ -751,9 +750,10 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
             } else {
                 copy_sz = std::min(copy_sz, blob_sz);
                 std::vector<uint8_t> actual(copy_sz);
-                // Sync the stream so all preceding GPU work (kernels, D2D copies) has
-                // completed before reading back the device buffer for comparison.
-                hipStreamSynchronize(stream);
+                // For async memcpy the stream may not yet have completed — sync it so
+                // all preceding GPU work has finished before reading back.
+                // Synchronous hipMemcpy already guarantees completion; no extra sync needed.
+                if (is_async) hipStreamSynchronize(stream);
                 r = hipMemcpy(actual.data(), src_dev, copy_sz, hipMemcpyDeviceToHost);
                 if (r != hipSuccess) {
                     fprintf(stderr, "[HRR] D2H validate: hipMemcpy failed: %d (%s)\n",

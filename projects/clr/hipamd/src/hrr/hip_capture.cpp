@@ -46,6 +46,7 @@
 #include "../hip_platform.hpp"   // PlatformState::Instance()
 
 #include <atomic>
+#include <climits>
 #include <cstring>
 #include <mutex>
 #include <unordered_map>
@@ -196,6 +197,11 @@ static void serialize_kernel_launch(
     }
   }
 
+  if (payload.size() > UINT16_MAX) {
+    LogPrintfWarning("[HRR capture] Kernel launch payload too large (%zu bytes) — truncating",
+                     payload.size());
+    payload.resize(UINT16_MAX);
+  }
   hrr_cap::writer::write_event_raw(HRR_API_HIPMODULELAUNCHKERNEL,
                                    reinterpret_cast<hrr_event_header*>(payload.data()),
                                    static_cast<uint16_t>(payload.size()));
@@ -270,8 +276,12 @@ hipError_t capture_hipMemcpyAsync(void* dst, const void* src,
       h = hrr_cap::writer::write_blob(src, sizeBytes);
     } else if (kind == hipMemcpyDeviceToHost && dst && sizeBytes > 0) {
       // Sync the stream so host dst is valid before we snapshot it.
-      g_real_table.hipStreamSynchronize_fn(stream);
-      h = hrr_cap::writer::write_blob(dst, sizeBytes);
+      hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+      if (sync_r == hipSuccess)
+        h = hrr_cap::writer::write_blob(dst, sizeBytes);
+      else
+        LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d) — D2H blob skipped",
+                         sync_r);
     }
     hrr_args_hipMemcpyAsync a{};
     a.ret          = static_cast<int32_t>(r);
@@ -383,12 +393,29 @@ hipError_t capture_hipModuleLoadDataEx(hipModule_t* module, const void* image,
 hipError_t capture_hipModuleLoad(hipModule_t* module, const char* fname) {
   hipError_t r = g_real_table.hipModuleLoad_fn(module, fname);
   if (r == hipSuccess) {
+    hrr_cap::Hash128 h{0, 0};
+    // Read the file from disk and snapshot it as a code object so the replay
+    // can load it by hash. Without this, fname is a capture-time address and
+    // is useless at replay time.
+    if (fname) {
+      if (FILE* fh = fopen(fname, "rb")) {
+        fseek(fh, 0, SEEK_END);
+        long sz = ftell(fh);
+        rewind(fh);
+        if (sz > 0) {
+          std::vector<uint8_t> buf(static_cast<size_t>(sz));
+          if (fread(buf.data(), 1, buf.size(), fh) == buf.size())
+            h = hrr_cap::writer::write_code_object(buf.data(), buf.size());
+        }
+        fclose(fh);
+      }
+    }
     hrr_args_hipModuleLoad a{};
     a.ret        = static_cast<int32_t>(r);
-    a.module     = reinterpret_cast<uint64_t>(*module);  // raw handle
-    a.fname      = reinterpret_cast<uint64_t>(fname);
-    a.co_hash_lo = 0;
-    a.co_hash_hi = 0;
+    a.module     = reinterpret_cast<uint64_t>(*module);
+    a.fname      = 0;  // not a valid cross-process address; hash identifies the file
+    a.co_hash_lo = h.lo;
+    a.co_hash_hi = h.hi;
     a.module_id  = 0;
     hrr_cap::writer::write_event_raw(HRR_API_HIPMODULELOAD, &a.hdr, sizeof(a));
   }
@@ -651,8 +678,8 @@ void hip_capture_shutdown() {
   hrr_cap::writer::flush(hip_capture_output_dir());
   hrr_cap::writer::close();
 
-  fprintf(stderr, "[HRR capture] Wrote %llu events, %llu blobs to: %s\n",
-          static_cast<unsigned long long>(hrr_cap::writer::event_count()),
-          static_cast<unsigned long long>(hrr_cap::writer::blob_count()),
-          hip_capture_output_dir());
+  LogPrintfInfo("[HRR capture] Wrote %llu events, %llu blobs to: %s",
+               static_cast<unsigned long long>(hrr_cap::writer::event_count()),
+               static_cast<unsigned long long>(hrr_cap::writer::blob_count()),
+               hip_capture_output_dir());
 }

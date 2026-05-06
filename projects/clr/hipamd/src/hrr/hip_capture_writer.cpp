@@ -13,28 +13,29 @@
 #include "hip_capture_writer.h"
 #include "hip_capture.h"
 
+#include "os/os.hpp"           // amd::Os::timeNanos()
+#include "utils/debug.hpp"     // LogPrintfError, LogPrintfWarning, LogPrintfInfo
+
 #include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <unordered_set>
 
 #ifdef _WIN32
 #  include <windows.h>
-static uint64_t now_ns() {
-  LARGE_INTEGER freq, count;
-  QueryPerformanceFrequency(&freq);
-  QueryPerformanceCounter(&count);
-  return static_cast<uint64_t>(count.QuadPart * 1000000000LL / freq.QuadPart);
+static inline uint64_t current_thread_id() {
+  static thread_local uint64_t cached = static_cast<uint64_t>(GetCurrentThreadId());
+  return cached;
 }
 #else
-#  include <time.h>
-static uint64_t now_ns() {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL +
-         static_cast<uint64_t>(ts.tv_nsec);
+#  include <unistd.h>
+#  include <sys/syscall.h>
+static inline uint64_t current_thread_id() {
+  static thread_local uint64_t cached = static_cast<uint64_t>(syscall(SYS_gettid));
+  return cached;
 }
 #endif
 
@@ -75,6 +76,13 @@ static std::atomic<uint64_t> g_seq_id{0};
 static std::atomic<uint64_t> g_event_count{0};
 static std::atomic<uint64_t> g_blob_count{0};
 
+// In-memory set of blob hex keys already written to disk.
+// Eliminates the fs::exists() stat syscall on repeated blobs (common for weight tensors).
+// Protected by g_blob_mu (separate from g_file_mu to avoid head-of-line blocking).
+// "co:" prefix for code objects matches the playback-side load_code_object key convention.
+static std::mutex                      g_blob_mu;
+static std::unordered_set<std::string> g_written_blobs;
+
 // ---------------------------------------------------------------------------
 // Directory helpers
 // ---------------------------------------------------------------------------
@@ -88,6 +96,7 @@ static void ensure_dir(const std::string& path) {
 // ---------------------------------------------------------------------------
 
 bool open(const char* output_dir) {
+  if (g_events_file) return true;  // already open — guard against double-invocation
   g_output_dir = output_dir;
   ensure_dir(g_output_dir);
   ensure_dir(g_output_dir + "/blobs");
@@ -96,8 +105,7 @@ bool open(const char* output_dir) {
   std::string events_path = g_output_dir + "/events.bin";
   g_events_file = fopen(events_path.c_str(), "wb");
   if (!g_events_file) {
-    fprintf(stderr, "[HRR capture] Failed to open %s for writing\n",
-            events_path.c_str());
+    LogPrintfError("[HRR capture] Failed to open %s for writing", events_path.c_str());
     return false;
   }
 
@@ -138,24 +146,6 @@ void close() {
 }
 
 // ---------------------------------------------------------------------------
-// Thread ID helper — cached per-thread (OS call runs once per thread)
-// ---------------------------------------------------------------------------
-
-#ifdef _WIN32
-static inline uint64_t current_thread_id() {
-  static thread_local uint64_t cached = static_cast<uint64_t>(GetCurrentThreadId());
-  return cached;
-}
-#else
-#  include <unistd.h>
-#  include <sys/syscall.h>
-static inline uint64_t current_thread_id() {
-  static thread_local uint64_t cached = static_cast<uint64_t>(syscall(SYS_gettid));
-  return cached;
-}
-#endif
-
-// ---------------------------------------------------------------------------
 // write_event_raw — unified write path for all events
 //
 // hdr points to the hrr_event_header at the front of an hrr_args_* struct.
@@ -164,15 +154,21 @@ static inline uint64_t current_thread_id() {
 // ---------------------------------------------------------------------------
 
 void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint16_t payload_len) {
+  // Check file open before consuming a sequence ID so post-close writes don't
+  // create invisible gaps in the event stream.
+  {
+    std::lock_guard<std::mutex> lk(g_file_mu);
+    if (!g_events_file) return;
+  }
   hdr->event_type     = api_id;
   hdr->sequence_id    = g_seq_id.fetch_add(1, std::memory_order_relaxed);
-  hdr->timestamp_ns   = now_ns();
+  hdr->timestamp_ns   = amd::Os::timeNanos();
   hdr->thread_id      = current_thread_id();
   hdr->payload_length = payload_len;
   memset(hdr->reserved, 0, sizeof(hdr->reserved));
 
   std::lock_guard<std::mutex> lk(g_file_mu);
-  if (!g_events_file) return;
+  if (!g_events_file) return;  // re-check: file may have closed between the two lock acquisitions
   fwrite(hdr, 1, payload_len, g_events_file);
   g_event_count.fetch_add(1, std::memory_order_relaxed);
 }
@@ -185,14 +181,17 @@ Hash128 write_blob(const void* data, size_t len) {
   Hash128 h = hash_buffer(data, len);
   char hex[33];
   hash_hex(h, hex);
+  std::string key(hex);  // no prefix — plain blobs
+
+  {
+    std::lock_guard<std::mutex> lk(g_blob_mu);
+    if (!g_written_blobs.insert(key).second) return h;  // already written
+  }
 
   // blobs/<2-char-prefix>/<fullhash>.blob
   std::string subdir = g_output_dir + "/blobs/" + std::string(hex, 2);
   ensure_dir(subdir);
-  std::string path = subdir + "/" + hex + ".blob";
-
-  // Skip if already written
-  if (fs::exists(path)) return h;
+  std::string path = subdir + "/" + key + ".blob";
 
   FILE* f = fopen(path.c_str(), "wb");
   if (f) {
@@ -211,10 +210,14 @@ Hash128 write_code_object(const void* image, size_t image_size) {
   Hash128 h = hash_buffer(image, image_size);
   char hex[33];
   hash_hex(h, hex);
+  std::string key = std::string("co:") + hex;  // namespace to match playback load_code_object key
+
+  {
+    std::lock_guard<std::mutex> lk(g_blob_mu);
+    if (!g_written_blobs.insert(key).second) return h;  // already written
+  }
 
   std::string path = g_output_dir + "/code_objects/" + hex + ".hsaco";
-  if (fs::exists(path)) return h;
-
   FILE* f = fopen(path.c_str(), "wb");
   if (f) {
     fwrite(image, 1, image_size, f);
