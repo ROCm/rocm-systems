@@ -1273,12 +1273,15 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   if (header != 0) {
     packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), header, rest);
   }
-  const auto virtual_pipe_prefix = [this]() -> const char* {
-    if (!roc_device_.settings().queue_pipe_dist_) return "";
-    static thread_local char buf[32];
-    snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,", gpu_queue_->id % roc_device_.NumHwPipes());
-    return buf;
-  }();
+  const auto virtual_pipe_prefix = IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
+                                     ? [this]() -> const char* {
+                                         if (!roc_device_.settings().queue_pipe_dist_) return "";
+                                         static thread_local char buf[32];
+                                         snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                                                  gpu_queue_->id % roc_device_.NumHwPipes());
+                                         return buf;
+                                       }()
+                                     : "";
   if (dev().settings().ext_dispatch_packet_) {
     logAqlDispatchPacketExtended(
         gpu_queue_, header, reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(packet),
@@ -1344,8 +1347,18 @@ bool VirtualGPU::dispatchAqlPacket(hsa_kernel_dispatch_packet_t* packet, uint16_
                                    uint16_t rest, bool blocking, bool capturing,
                                    const uint8_t* aqlPacket, bool attach_signal) {
   if (capturing == true) {
-    packet->header = header;
-    packet->setup = rest;
+    if (dev().settings().ext_dispatch_packet_) {
+      // For ext dispatch packets the first 32 bits are {header(16), amd_format(8), setup(8)}.
+      // rest already encodes (amd_format | (setup << 8)).
+      auto* ext_packet = reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(packet);
+      ext_packet->header = header;
+      ext_packet->amd_format =
+          static_cast<hsa_amd_packet_type8_t>(rest & 0xFF);
+      ext_packet->setup = static_cast<uint8_t>((rest >> 8) & 0xFF);
+    } else {
+      packet->header = header;
+      packet->setup = rest;
+    }
     std::memcpy(const_cast<uint8_t*>(aqlPacket), packet, sizeof(hsa_kernel_dispatch_packet_t));
     return true;
   } else {
@@ -1635,13 +1648,15 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
 
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
   logAqlBarrierPacket(gpu_queue_, packetHeader, &barrier_packet_, read, index,
-                      [this]() -> const char* {
-                        if (!roc_device_.settings().queue_pipe_dist_) return "";
-                        static thread_local char buf[32];
-                        snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
-                                 gpu_queue_->id % roc_device_.NumHwPipes());
-                        return buf;
-                      }());
+                      IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
+                        ? [this]() -> const char* {
+                            if (!roc_device_.settings().queue_pipe_dist_) return "";
+                            static thread_local char buf[32];
+                            snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                                     gpu_queue_->id % roc_device_.NumHwPipes());
+                            return buf;
+                          }()
+                        : "");
 
   // Clear dependent signals for the next packet
   barrier_packet_.dep_signal[0] = hsa_signal_t{};
@@ -1718,13 +1733,15 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
 
   logAqlBarrierValuePacket(gpu_queue_, packetHeader, &barrier_value_packet_, read, index,
-                           [this]() -> const char* {
-                             if (!roc_device_.settings().queue_pipe_dist_) return "";
-                             static thread_local char buf[32];
-                             snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
-                                      gpu_queue_->id % roc_device_.NumHwPipes());
-                             return buf;
-                           }());
+                           IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
+                             ? [this]() -> const char* {
+                                 if (!roc_device_.settings().queue_pipe_dist_) return "";
+                                 static thread_local char buf[32];
+                                 snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                                          gpu_queue_->id % roc_device_.NumHwPipes());
+                                 return buf;
+                               }()
+                             : "");
   // Clear dependent signals for the next packet
   barrier_value_packet_.signal = hsa_signal_t{};
 }
@@ -4313,8 +4330,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
     if (isGraphCapture) {
       // Dispatch the packet
-      if (!dispatchAqlPacket(&dispatchPacket, aqlHeaderWithOrder,
-                             (sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS),
+      if (!dispatchAqlPacket(&dispatchPacket, aqlHeaderWithOrder, rest,
                              GPU_FLUSH_ON_EXECUTION, command_->getPktCapturingState(),
                              command_->getAqlPacket())) {
         return false;
