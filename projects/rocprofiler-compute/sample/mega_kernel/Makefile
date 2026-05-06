@@ -57,7 +57,7 @@ HOST_SRC = main.cpp
 DEFAULT_TARGET = mega_kernel_test
 
 # Build rules
-.PHONY: all clean run $(ARCHES) all-arch all-arch-full help
+.PHONY: all clean run $(ARCHES) all-arch help
 
 all: $(DEFAULT_TARGET)
 
@@ -79,9 +79,6 @@ gfx%: mega_kernel_test_gfx%
 
 all-arch: $(ARCH_BINS)
 	@echo "Built: $(ARCHES)"
-
-# Alias: no separate experimental arch list in this sample today
-all-arch-full: all-arch
 
 # Run the test
 run: $(DEFAULT_TARGET)
@@ -112,8 +109,8 @@ help:
 	@echo "    gfx1152 - Krackan: same as gfx1150"
 	@echo ""
 	@echo "  RDNA4 (Consumer):"
-	@echo "    gfx1201 - RX 9070 XT/9070: FP8/BF8 OCP, Async LDS, Raytracing"
-	@echo "    gfx1200 - RX 9060 series:  FP8/BF8 OCP, Async LDS, Raytracing"
+	@echo "    gfx1201 - RX 9070 XT/9070: FP8/BF8 OCP, Async LDS, Wave32 WMMA path"
+	@echo "    gfx1200 - RX 9060 series:  FP8/BF8 OCP, Async LDS, Wave32 WMMA path"
 	@echo ""
 	@echo "Usage:"
 	@echo "  make             - Build for gfx1151 (default; set GPU_ARCH to override)"
@@ -126,7 +123,6 @@ help:
 	@echo "  make gfx1201     - Build for RX 9070 XT (gfx1201/RDNA4)"
 	@echo "  make gfx1200     - Build for RX 9060 (gfx1200/RDNA4)"
 	@echo "  make all-arch    - Build one binary per ARCHES"
-	@echo "  make all-arch-full - Same as all-arch (reserved if experimental arches are added)"
 	@echo "  make run         - Build and run the test"
 	@echo "  make clean       - Remove build artifacts"
 	@echo "  make help        - Show this help message"

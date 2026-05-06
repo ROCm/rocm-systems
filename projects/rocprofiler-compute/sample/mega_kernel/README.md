@@ -4,6 +4,8 @@ A comprehensive unit test kernel that exercises most of the instructions and fea
 
 ## Supported GPU Architectures
 
+*GPU/architecture tables below are partly **informational** (what silicon markets); **what this sample runs** is only what the **Feature Compatibility Matrix** and following “Features Tested” sections describe.*
+
 ### CDNA (Compute/Datacenter)
 
 | GPU Series | Architecture | GFXIP | Key Features |
@@ -16,7 +18,7 @@ A comprehensive unit test kernel that exercises most of the instructions and fea
 
 | GPU Series | Architecture | GFXIP | Key Features |
 |------------|--------------|-------|--------------|
-| **RX 9070 XT/9070** | RDNA4 | gfx1201 | FP8/BF8 OCP, Async LDS, Wave32, AI accelerators, RT 2.0 |
+| **RX 9070 XT/9070** | RDNA4 | gfx1201 | FP8/BF8 OCP, Async LDS, Wave32, WMMA (gfx12 path) |
 | **RX 9060 series** | RDNA4 | gfx1200 | Same as gfx1201 with different CU count |
 
 ### RDNA 3.5+ APU iGPU (gfx115x-class)
@@ -30,7 +32,7 @@ A comprehensive unit test kernel that exercises most of the instructions and fea
 
 ## Feature Compatibility Matrix
 
-This table lists **what this sample tries to run** on each GFXIP, plus a few hardware facts that are **not** individually exercised here (no standalone RT or “AI accelerator” microbenchmarks in this kernel). MFMA/WMMA rows use **zero-input / zero-output sanity checks** where builtins run; dual-issue is **BYPASSED** in the report (patterns only). Async LDS follows `__has_builtin(__builtin_amdgcn_global_load_async_to_lds_b32)` in code (gfx942 is treated as unsupported in this sample, matching `mega_kernel_device_arch.h`).
+This table lists **what this sample tries to run** on each GFXIP, plus a few hardware facts that are **not** individually exercised here (no standalone fixed-function graphics or branded accelerator microbenchmarks in this kernel). MFMA/WMMA rows use **zero-input / zero-output sanity checks** where builtins run; dual-issue is **BYPASSED** in the report (patterns only). Async LDS follows `__has_builtin(__builtin_amdgcn_global_load_async_to_lds_b32)` in code (gfx942 is treated as unsupported in this sample, matching `mega_kernel_device_arch.h`).
 
 | Feature | MI250 (gfx90a) | MI300 (gfx942) | MI350 (gfx950) | Strix/Krackan (gfx115x) | RX 9070 XT (gfx1201) |
 |---------|:--------------:|:--------------:|:--------------:|:-----------------------:|:--------------------:|
@@ -52,7 +54,7 @@ This table lists **what this sample tries to run** on each GFXIP, plus a few har
 | Packed BF16 Atomics | ❌ | ✅ | ✅ | ✅ | ✅ |
 | VMEM Inline ASM | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-⚠️ = Limited support / may vary by ROCm version. **BYPASS** = kernel emits instruction patterns but the host report marks the category bypassed (not a correctness proof). Hardware ray-tracing and branded “AI” units are out of scope for this instruction-focused sample.
+⚠️ = Limited support / may vary by ROCm version. **BYPASS** = kernel emits instruction patterns but the host report marks the category bypassed (not a correctness proof). Fixed-function blocks not driven by this VALU/WMMA/TEX-focused kernel are **not exercised here**.
 
 ## Features Tested
 
@@ -302,6 +304,9 @@ MI350 can issue 2 VALU instructions from different waves per cycle under certain
 - Multi-cycle instructions
 
 ### MFMA (Matrix Fused Multiply-Add) Operations (gfx90a+/CDNA)
+
+*This section lists representative MFMA intrinsics; the running kernel uses zero-input/zero-output sanity checks unless noted in the matrix—not full numerical validation.*
+
 Matrix operations using dedicated Matrix Cores. For maintained MFMA / roofline work, see `src/roofline/benchmark/` in rocprofiler-compute (the older rocm-amdgpu-bench repo is deprecated).
 
 **MI250 (gfx90a/CDNA2):**
@@ -322,6 +327,8 @@ Matrix operations using dedicated Matrix Cores. For maintained MFMA / roofline w
 - `__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4` - FP8/BF8/FP6/FP4 (131072 ops/inst)
 
 ### WMMA (Wave Matrix Multiply Accumulate) Operations (RDNA4/gfx12)
+
+*Same scope note as MFMA: builtins exercised with sanity checks per the compatibility matrix, not exhaustive WMMA conformance.*
 
 WMMA instructions are the matrix acceleration approach for RDNA architecture (vs MFMA for CDNA).
 Reference: [AMD GPUOpen - Using Matrix Cores on RDNA4](https://gpuopen.com/learn/using_matrix_core_amd_rdna4/)
@@ -375,6 +382,8 @@ __builtin_amdgcn_wmma_<C,D format>_16x16x16_<A,B format>_w32_gfx12
 
 ## MI350 (CDNA4/gfx950) Specific Features
 
+*ISA/marketing background only—not every bullet is a standalone test in this sample; see the **Feature Compatibility Matrix** for what runs.*
+
 The following features are new or enhanced in MI350 compared to MI300:
 
 1. **New WMMA Instructions**
@@ -405,6 +414,8 @@ The following features are new or enhanced in MI350 compared to MI300:
 
 ### Strix / Strix Halo / Krackan (RDNA 3.5 / gfx1150 / gfx1151 / gfx1152) Specific Features
 
+*Background on RDNA 3.5 APUs; coverage here is limited to paths the matrix marks as tested (e.g. WMMA/TEX), not every fixed-function block.*
+
 RDNA 3.5 is the integrated GPU in Strix Point (gfx1150, 16 CUs), Strix Halo (gfx1151, up to 40 CUs), and Krackan (gfx1152) client APUs:
 
 1. **Wave32 Native**
@@ -430,6 +441,8 @@ RDNA 3.5 is the integrated GPU in Strix Point (gfx1150, 16 CUs), Strix Halo (gfx
 
 ## RDNA4 Consumer (RX 9070 XT/gfx1200/gfx1201) Specific Features
 
+*Consumer RDNA4 background; this kernel focuses on VALU/WMMA/FP8/async-LDS-style paths in the matrix—not a graphics or fixed-function survey.*
+
 The following features are available on RDNA4 consumer GPUs (RX 9000 series):
 
 1. **Wave32 Native Architecture**
@@ -442,18 +455,13 @@ The following features are available on RDNA4 consumer GPUs (RX 9000 series):
    - `__builtin_amdgcn_cvt_pk_bf8_f32`
 
 3. **AI Inference Accelerators**
-   - Hardware acceleration for INT8/FP8 inference
-   - Optimized dot product operations
+   - Hardware acceleration for INT8/FP8 inference *(not separately benchmarked here—WMMA/FP8/dot coverage follows the matrix)*
 
 4. **Async LDS Operations**
    - `global_load_async_to_lds_b*` instructions
    - Similar to CDNA4 but optimized for consumer workloads
 
-5. **Ray Tracing 2.0**
-   - Hardware ray-box and ray-triangle intersection
-   - Improved BVH traversal
-
-6. **WGP (Workgroup Processor) Architecture**
+5. **WGP (Workgroup Processor) Architecture**
    - 2 CUs per WGP
    - Improved SIMD scheduling
 

@@ -3169,15 +3169,12 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
 // - GFX12 architecture (gfx1200/gfx1201)
 // - WGP (Workgroup Processor) based - 2 CUs per WGP
 // - Wave32 native, Wave64 emulated
-// - Improved AI inference accelerators
-// - Enhanced ray tracing hardware (RT 2.0)
 // - FP8/BF8 OCP (Open Compute Platform) format support
 //
 // KEY DIFFERENCES FROM CDNA (MI series):
 // --------------------------------------
 // - No hardware FP64 atomics (limited FP64 in general)
 // - Graphics-focused instruction set (more pixel/vertex ops)
-// - RT cores for hardware ray tracing
 // - Different memory hierarchy (infinity cache)
 // - WGP instead of CU-centric design
 //
@@ -3185,8 +3182,6 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
 // ----------------------------
 // - FP8/BF8 conversions (OCP format)
 // - Async LDS operations
-// - AI inference dot products
-// - Ray-box/ray-triangle intersection instructions
 //
 // This test verifies RDNA4-specific features when running on consumer GPUs.
 

@@ -41,8 +41,6 @@
 #    define HAS_HW_FP64_ATOMICS 0
 #    define HAS_FP8             0
 #    define HAS_ASYNC_LDS       1
-#    define HAS_RAYTRACING      0
-#    define HAS_AI_ACCELERATORS 0
 #endif
 
 // RDNA4 consumer (gfx1200/gfx1201)
@@ -52,8 +50,6 @@
 #    define HAS_HW_FP64_ATOMICS 0
 #    define HAS_FP8             1
 #    define HAS_ASYNC_LDS       1
-#    define HAS_RAYTRACING      1
-#    define HAS_AI_ACCELERATORS 1
 #endif
 
 #ifndef ARCH_NAME

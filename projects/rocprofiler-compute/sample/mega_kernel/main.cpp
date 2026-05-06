@@ -786,7 +786,6 @@ main(int argc, char** argv)
             printf("      - FP16/BF16 → FP32, INT8 → INT32\n");
             printf("      - 2x throughput vs RDNA3 (1024 FLOPS/clock for FP16/BF16)\n");
             printf("  - Async LDS operations\n");
-            printf("  - AI inference accelerators\n");
             printf("  - Wave32 native execution\n");
             printf("  - WGP (Workgroup Processor) architecture\n");
             printf("  - Limited FP64 support (consumer GPU)\n");
