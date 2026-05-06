@@ -37,6 +37,8 @@ struct cache_policy
             trait::name<category::cpu_freq>::value);
     }
 
+    // Required by base::collector contract; per-cpu tracks need monitored_cpus
+    // and are registered in initialize_pmc_metadata instead.
     static void initialize_tracks_metadata() {}
 
     /**
