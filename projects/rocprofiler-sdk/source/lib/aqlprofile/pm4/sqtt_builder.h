@@ -775,7 +775,6 @@ public:
             builder.BuildClockLo32IntoUserdata(cmd_buffer, Primitives::SQ_THREAD_TRACE_USERDATA_3);
         }
 
-        builder.BuildWriteWaitIdlePacket(cmd_buffer);
         builder.BuildCacheFlushPacket(cmd_buffer, size_t(&control), sizeof(TraceControl));
         SetGRBMToBroadcast(cmd_buffer);
     }
@@ -813,10 +812,8 @@ public:
                                : Primitives::SQ_THREAD_TRACE_BUF0_BASE_HI_ADDR;
 
             WriteConfigPacket(cmd_buffer, reg_lo, buff1_lo);
-            builder.BuildWriteWaitIdlePacket(cmd_buffer);
             WriteConfigPacket(cmd_buffer, reg_hi, buff1_hi);
         }
-        builder.BuildCacheFlushPacket(cmd_buffer, size_t(prev), config->data_buffer_size);
 
         SetGRBMToBroadcast(cmd_buffer);
     }
