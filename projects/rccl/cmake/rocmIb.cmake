@@ -266,7 +266,7 @@ execute_process(
 )
 # Rename GIN functions to avoid duplicate symbols with net_ib.cc
 # Note: We rename ncclGinIb* to rocmGinIb*, then restore the struct name
-# since ncclGinIbCollComm is defined in net_ib_gin.h (not renamed)
+# since ncclGinIbCollComm is defined in net_ib/gin.h (not renamed)
 execute_process(
   COMMAND bash -c "sed -i -e 's/ncclGinIb/rocmGinIb/g' -e 's/rocmGinIbCollComm/ncclGinIbCollComm/g' ${ROCM_NETIB_FILE}"
   WORKING_DIRECTORY ${RCCL_SRC_DIR}

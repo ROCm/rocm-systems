@@ -18,13 +18,13 @@ struct RunWorkColl<ncclFuncAlltoAllGda, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIM
         int num_pes = rocshmem::rocshmem_n_pes();
 
         reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T, 0,1, 1, 0, 1, 1, 0>(
-            tid, nThreads, 0, nullptr, false, 1, (void **)&work->sendbuff, 1, (void **)&work->sndbuff, 
+            tid, nThreads, 0, false, 1, (void **)&work->sendbuff, 1, (void **)&work->sndbuff, 
             (work->size*num_pes));
 
         rocshmem::rocshmem_char_alltoall_wg(work->team, ((char*)work->tempbuff), ((char*)work->sndbuff), work->size);
 
         reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T, 0,1, 1, 0, 1, 1, 0>(
-            tid, nThreads, 0, nullptr, false, 1, (void **)&work->tempbuff, 1, (void **)&work->recvbuff, 
+            tid, nThreads, 0, false, 1, (void **)&work->tempbuff, 1, (void **)&work->recvbuff, 
             (work->size*num_pes));
         }
   }
