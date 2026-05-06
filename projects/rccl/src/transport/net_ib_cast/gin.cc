@@ -16,9 +16,13 @@ const int NCCL_GIN_IB_ALLTOALL_TAG = 0xa1;
 // Check GDR support for GIN. This is run at init, so we don't know yet whether the GPU will support DMA-BUF.
 static ncclResult_t ncclGinIbGdrSupport(bool* gdrSupport, bool gdaki) {
   *gdrSupport = true;
+#ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
   bool peerMemSupport =
      gdaki ? IbCastPeerMemSupport() == ncclSuccess : // GDAKI does not support nv_peer_mem.
      IbCastGdrSupport() == ncclSuccess;
+#else
+  bool peerMemSupport = IbCastGdrSupport() == ncclSuccess;
+#endif
   if (peerMemSupport) return ncclSuccess;
 
   if (IbCastDmaBufSupport(0) == ncclSuccess) return ncclSuccess;
@@ -30,9 +34,13 @@ static ncclResult_t ncclGinIbGdrSupport(bool* gdrSupport, bool gdaki) {
 
 // Check the current GPU supports GDR for GIN. This is run during connect().
 static ncclResult_t ncclGinIbGdrGpuSupport(bool gdaki) {
+#ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
   bool peerMemSupport =
      gdaki ? IbCastPeerMemSupport() == ncclSuccess : // GDAKI does not support nv_peer_mem.
      IbCastGdrSupport() == ncclSuccess;
+#else
+  bool peerMemSupport = IbCastGdrSupport() == ncclSuccess;
+#endif
   if (peerMemSupport) return ncclSuccess;
 
   int cudaDev;
@@ -47,6 +55,7 @@ static ncclResult_t ncclGinIbGdrGpuSupport(bool gdaki) {
 
 NCCL_PARAM(GinType, "GIN_TYPE", -1);
 
+#ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
 static std::mutex IbCastGinGdakiLockMutex;
 static int IbCastGinGdakiNDevs = -1;
 int IbCastGinGdakiDevIndexes[MAX_IB_DEVS];
@@ -65,9 +74,12 @@ ncclResult_t ncclGinIbGdakiInit() {
   }
   return ncclSuccess;
 }
+#endif // RCCL_NET_IB_CAST_ENABLE_GDAKI
 
 extern ncclGin_t IbCastGinIb;
+#ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
 extern ncclGin_t IbCastGinIbGdaki;
+#endif
 extern ncclGin_t IbCastGinIbProxy;
 
 // Initlialize GDAKI or PROXY backend. ginType can force a particular backend.
@@ -76,7 +88,9 @@ ncclResult_t ncclGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t lo
   NCCLCHECK(IbCastInitDevices(logFunction, nullptr));
   if (IbCastNDevs == 0) return ncclInternalError; // Caught in plugin init code, not propagated to user.
 
+#ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
   if (ginType == NCCL_GIN_TYPE_GDAKI) goto try_gdaki;
+#endif
   if (ginType == NCCL_GIN_TYPE_PROXY) goto try_proxy;
   if (ginType != -1) {
     INFO(NCCL_INIT|NCCL_NET, "NET_IB: no support for GIN type %ld", ncclParamGinType());
@@ -85,6 +99,7 @@ ncclResult_t ncclGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t lo
 
   bool gdrSupport;
 
+#ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
   // First try GDAKI
 try_gdaki:
   NCCLCHECK(ncclGinIbGdakiInit());
@@ -94,6 +109,7 @@ try_gdaki:
   if (!gdrSupport) return ncclInternalError;
   if (ginIb) memcpy(ginIb, &IbCastGinIbGdaki, sizeof(IbCastGinIb));
   goto end;
+#endif // RCCL_NET_IB_CAST_ENABLE_GDAKI
 
   // Then Proxy
 try_proxy:
@@ -270,6 +286,7 @@ ncclResult_t ncclGinIbCloseColl(void* collComm) {
   return ncclSuccess;
 }
 
+#ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
 #include "gdaki/gin_host_gdaki.h"
 
 ncclResult_t ncclGinIbGdakiInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
@@ -365,6 +382,7 @@ ncclGin_t IbCastGinIbGdaki = {
   ncclGinIbGdakiQueryLastError,
   ncclGinIbFinalize
 };
+#endif // RCCL_NET_IB_CAST_ENABLE_GDAKI
 
 
 struct ncclIbGinProxyMrHandle {
