@@ -1054,4 +1054,163 @@ TEST(MemManagerRealMem, Destroy_FreesPopulatedEntries)
     });
 }
 
+// ---------------------------------------------------------------------------
+// Suspend / Resume - early-return error paths (no HIP, no bootstrap)
+//
+// All of these exercise the validation block at the top of ncclCommMemSuspend /
+// ncclCommMemResume, which returns before touching any HIP API or bootstrap.
+// ---------------------------------------------------------------------------
+
+TEST_F(MemManagerTest, Suspend_NullComm)
+{
+    EXPECT_EQ(ncclCommMemSuspend(nullptr), ncclInvalidArgument);
+}
+
+TEST_F(MemManagerTest, Suspend_NullManager)
+{
+    ASSERT_EQ(comm->memManager, nullptr);
+    EXPECT_EQ(ncclCommMemSuspend(comm), ncclInvalidUsage);
+}
+
+TEST_F(MemManagerTest, Suspend_AlreadyReleased)
+{
+    ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+    comm->memManager->released = 1;
+    EXPECT_EQ(ncclCommMemSuspend(comm), ncclInvalidUsage);
+}
+
+TEST_F(MemManagerTest, Resume_NullComm)
+{
+    EXPECT_EQ(ncclCommMemResume(nullptr), ncclInvalidArgument);
+}
+
+TEST_F(MemManagerTest, Resume_NullManager)
+{
+    ASSERT_EQ(comm->memManager, nullptr);
+    EXPECT_EQ(ncclCommMemResume(comm), ncclInvalidUsage);
+}
+
+TEST_F(MemManagerTest, Resume_NotReleased)
+{
+    ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+    ASSERT_EQ(comm->memManager->released, 0);
+    EXPECT_EQ(ncclCommMemResume(comm), ncclInvalidUsage);
+}
+
+// ---------------------------------------------------------------------------
+// MemStats fixture: ncclCommMemStats calls CommCheck + ncclCommEnsureReady, so
+// the comm needs valid magic markers and a non-null abortFlag. We still avoid
+// any HIP/bootstrap activity - all paths in MemStats are purely manager-state.
+// ---------------------------------------------------------------------------
+
+class MemManagerStatsTest : public ::testing::Test
+{
+protected:
+    ncclComm* comm     = nullptr;
+    uint32_t  abortVal = 0;
+
+    void SetUp() override
+    {
+        comm             = new ncclComm();
+        comm->cudaDev    = 0;
+        comm->startMagic = NCCL_MAGIC;
+        comm->endMagic   = NCCL_MAGIC;
+        comm->abortFlag  = &abortVal;
+    }
+
+    void TearDown() override
+    {
+        if(comm && comm->memManager) {
+            ncclMemManagerDestroy(comm);
+        }
+        delete comm;
+        comm = nullptr;
+    }
+
+    uint64_t readStat(ncclCommMemStat_t s)
+    {
+        uint64_t v = ~0ULL;
+        EXPECT_EQ(ncclCommMemStats(comm, s, &v), ncclSuccess);
+        return v;
+    }
+};
+
+TEST_F(MemManagerStatsTest, Empty)
+{
+    ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+
+    EXPECT_EQ(readStat(ncclStatGpuMemTotal), 0u);
+    EXPECT_EQ(readStat(ncclStatGpuMemPersist), 0u);
+    EXPECT_EQ(readStat(ncclStatGpuMemSuspend), 0u);
+    EXPECT_EQ(readStat(ncclStatGpuMemSuspended), 0u);
+}
+
+TEST_F(MemManagerStatsTest, Counters_PersistScratchOffload)
+{
+    ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+
+    constexpr size_t kPersist = 1024;
+    constexpr size_t kScratch = 4096;
+    constexpr size_t kOffload = 2048;
+
+    ASSERT_EQ(ncclMemTrack(comm->memManager, fakePtr(1), kPersist,
+                           fakeHandle(), kFakeHandleType, ncclMemPersist),
+              ncclSuccess);
+    ASSERT_EQ(ncclMemTrack(comm->memManager, fakePtr(2), kScratch,
+                           fakeHandle(), kFakeHandleType, ncclMemScratch),
+              ncclSuccess);
+    ASSERT_EQ(ncclMemTrack(comm->memManager, fakePtr(3), kOffload,
+                           fakeHandle(), kFakeHandleType, ncclMemOffload),
+              ncclSuccess);
+
+    EXPECT_EQ(readStat(ncclStatGpuMemPersist), kPersist);
+    EXPECT_EQ(readStat(ncclStatGpuMemSuspend), kScratch + kOffload);
+    EXPECT_EQ(readStat(ncclStatGpuMemTotal),   kPersist + kScratch + kOffload);
+    EXPECT_EQ(readStat(ncclStatGpuMemSuspended), 0u);
+
+    ASSERT_EQ(ncclMemUntrack(comm->memManager, fakePtr(2), kScratch), ncclSuccess);
+    ASSERT_EQ(ncclMemUntrack(comm->memManager, fakePtr(3), kOffload), ncclSuccess);
+
+    EXPECT_EQ(readStat(ncclStatGpuMemSuspend), 0u);
+    EXPECT_EQ(readStat(ncclStatGpuMemPersist), kPersist);
+    EXPECT_EQ(readStat(ncclStatGpuMemTotal),   kPersist);
+}
+
+TEST_F(MemManagerStatsTest, NullManager_ReturnsZero)
+{
+    ASSERT_EQ(comm->memManager, nullptr);
+    uint64_t v = ~0ULL;
+    EXPECT_EQ(ncclCommMemStats(comm, ncclStatGpuMemTotal, &v), ncclSuccess);
+    EXPECT_EQ(v, 0u);
+}
+
+TEST_F(MemManagerStatsTest, NullValue_Rejected)
+{
+    ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+    EXPECT_EQ(ncclCommMemStats(comm, ncclStatGpuMemTotal, nullptr),
+              ncclInvalidArgument);
+}
+
+TEST_F(MemManagerStatsTest, InvalidStat_Rejected)
+{
+    ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+    uint64_t v = 0;
+    EXPECT_EQ(ncclCommMemStats(comm, static_cast<ncclCommMemStat_t>(99), &v),
+              ncclInvalidArgument);
+}
+
+TEST_F(MemManagerStatsTest, SuspendedFlag_FlipsWithReleased)
+{
+    ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+    EXPECT_EQ(readStat(ncclStatGpuMemSuspended), 0u);
+
+    // Simulate ncclCommMemSuspend's only externally observable effect on stats
+    // without paying for the bootstrap+VMM round-trip (covered by the MPI suite).
+    comm->memManager->released = 1;
+    EXPECT_EQ(readStat(ncclStatGpuMemSuspended), 1u);
+
+    comm->memManager->released = 0;
+    EXPECT_EQ(readStat(ncclStatGpuMemSuspended), 0u);
+}
+
 } // namespace RcclUnitTesting
