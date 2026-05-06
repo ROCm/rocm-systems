@@ -9,6 +9,7 @@
 #include "top.hpp"
 #include "device/device.hpp"
 #include "device/devhcmessages.hpp"
+#include <atomic>
 #include <cstddef>
 
 #if defined(__clang__)
@@ -25,7 +26,7 @@ namespace amd {
  *  on the device, for some predefined service provided by the
  *  host. The life-cycle of a hostcall is as follows:
  *
- *  1. A workitem in the some kernel dispatch submits a request as a
+ *  1. A workitem in some kernel dispatch submits a request as a
  *     "packet" in a "hostcall buffer". The workitem blocks until it
  *     receives a response from the host.
  *
@@ -58,6 +59,16 @@ namespace amd {
  *  buffers created in the application. The client may also launch
  *  multiple listeners, as long the same hostcall buffer is not
  *  registered with multiple listeners.
+ *
+ *  Packet ownership is determined by two per-packet phase arrays:
+ *  - device_phase[i]: toggled by the device when submitting work.
+ *  - host_phase[i]:   toggled by the host when completing work.
+ *  When both phases match, the device owns the packet. When they differ,
+ *  the host owns it.
+ *
+ *  A separate occupied bitfield in device-local memory tracks which packets
+ *  are currently claimed by a wave. This prevents multiple waves from using
+ *  the same packet.
  */
 
 /** \brief Determine the buffer size to be allocated
@@ -71,7 +82,8 @@ size_t getHostcallBufferSize(uint32_t num_packets);
  */
 uint32_t getHostcallBufferAlignment(void);
 
-bool enableHostcalls(const amd::Device& dev, void* buffer, uint32_t numPackets);
+bool enableHostcalls(const amd::Device& dev, void* buffer, uint32_t numPackets,
+                     amd::Memory* occupiedMem);
 void disableHostcalls(void* buffer);
 
 enum SignalValue { SIGNAL_DONE = 0, SIGNAL_INIT = 1 };
@@ -80,7 +92,7 @@ enum SignalValue { SIGNAL_DONE = 0, SIGNAL_INIT = 1 };
  *
  *  Contains 64 slots of 8 ulongs each, one for each workitem in the
  *  wave. A slot with index \c i contains valid data if the
- *  corresponding bit in PacketHeader::activemask is set.
+ *  corresponding bit in PacketHeader::activemask_ is set.
  */
 struct Payload {
   uint64_t slots[64][8];
@@ -88,69 +100,63 @@ struct Payload {
 
 /** Packet header */
 struct PacketHeader {
-  /** Tagged pointer to the next packet in an intrusive stack */
-  uint64_t next_;
   /** Bitmask that represents payload slots with valid data */
   uint64_t activemask_;
   /** Service ID requested by the wave */
   uint32_t service_;
-  /** Control bits.
-   *  \li 0: \c READY flag. Indicates packet awaiting a host response.
-   */
-  std::atomic<uint32_t> control_;
 };
 
 static_assert(std::is_standard_layout<PacketHeader>::value,
               "the hostcall packet must be useable from other languages");
 
-/** Field offsets in the packet control field */
-enum ControlOffset {
-  CONTROL_OFFSET_READY_FLAG = 0,
-  CONTROL_OFFSET_RESERVED0 = 1,
-};
-
-/** Field widths in the packet control field */
-enum ControlWidth {
-  CONTROL_WIDTH_READY_FLAG = 1,
-  CONTROL_WIDTH_RESERVED0 = 31,
-};
-
-/** \brief Shared buffer submitting hostcall requests.
+/** \brief Shared buffer for submitting hostcall requests.
  *
  *  Holds hostcall packets requested by all kernels executing on the
  *  same device queue. Each hostcall buffer is associated with at most
  *  one device queue.
  *
- *  Packets in the buffer are accessed using 64-bit tagged pointers to mitigate
- *  the ABA problem in lock-free stacks. The index_mask is used to extract the
- *  lower bits of the pointer, which form the index into the packet array. The
- *  remaining higher bits define a tag that is incremented on every pop from a
- *  stack.
+ *  Packet ownership is determined by comparing per-packet phase values. The
+ *  device_phase array is written only by the device; the host_phase array is
+ *  written only by the host. When both match, the device owns the packet. When
+ *  they differ, the host owns it.
+ *
+ *  The occupied bitfield lives in device-local memory and tracks which packets
+ *  are currently in use by a wave. It is referenced by device virtual address
+ *  from this struct.
  */
 class HostcallBuffer {
+  // Shared prefix: must match the device-side hostcall buffer layout.
+  /** Per-packet phase toggled by the device on submission */
+  std::atomic<uint32_t>* device_phase_;
+  /** Per-packet phase toggled by the host on completion */
+  std::atomic<uint32_t>* host_phase_;
+  /** Device virtual address of the occupied bitfield */
+  uint32_t* occupied_;
   /** Array of packet headers */
   PacketHeader* headers_;
   /** Array of packet payloads */
   Payload* payloads_;
   /** Signal used by kernels to indicate new work */
   void* doorbell_;
-  /** Stack of free packets. Uses tagged pointers. */
-  uint64_t free_stack_;
-  /** Stack of ready packets. Uses tagged pointers */
-  std::atomic<uint64_t> ready_stack_;
-  /** Mask for accessing the packet index in the tagged pointer. */
-  uint64_t index_mask_;
-  /** Some services need a device**/
-  const amd::Device* device_;
+  /** Number of packets in the buffer */
+  uint32_t num_packets_;
 
-  PacketHeader* getHeader(uint64_t ptr) const;
-  Payload* getPayload(uint64_t ptr) const;
+  // Host-only fields.
+  /** Some services need a device */
+  const amd::Device* device_;
+  /** Owner of the device-local occupied allocation */
+  amd::Memory* occupied_mem_;
+  /** Adaptive upper bound on packets to scan */
+  uint32_t scan_limit_;
 
  public:
   void processPackets(MessageHandler& messages);
-  void initialize(uint32_t num_packets);
-  void setDoorbell(void* doorbell) { doorbell_ = doorbell; };
-  void setDevice(const amd::Device* dptr) { device_ = dptr; };
+  bool initialize(uint32_t num_packets, amd::Memory* occupied_mem);
+  bool hasWorkPending() const;
+  void resetScanLimit() { scan_limit_ = num_packets_; }
+  void setDoorbell(void* doorbell) { doorbell_ = doorbell; }
+  void setDevice(const amd::Device* dptr) { device_ = dptr; }
+  amd::Memory* getOccupiedMem() const { return occupied_mem_; }
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
@@ -158,12 +164,16 @@ class HostcallBuffer {
   device::UriLocator* uri_locator;
 
  public:
-  void setUriLocator(device::UriLocator* uri_l) { uri_locator = uri_l; };
+  void setUriLocator(device::UriLocator* uri_l) { uri_locator = uri_l; }
 #endif
 #endif
 };
 
 static_assert(std::is_standard_layout<HostcallBuffer>::value,
               "the hostcall buffer must be useable from other languages");
+
+static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t) &&
+                  alignof(std::atomic<uint32_t>) == alignof(uint32_t),
+              "std::atomic<uint32_t> must have the same size and alignment as uint32_t");
 
 }  // namespace amd
