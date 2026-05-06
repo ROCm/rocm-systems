@@ -274,8 +274,8 @@ private:
     bool initialized_;
     std::mutex mutex_;
 
-    // Platform singleton state
-    static std::mutex platform_mutex_;
+    // Platform singleton state (recursive mutex because GetPalDevice calls GetPalPlatform)
+    static std::recursive_mutex platform_mutex_;
     static Pal::IPlatform* platform_;
     static void* platform_mem_;
     static int platform_ref_count_;

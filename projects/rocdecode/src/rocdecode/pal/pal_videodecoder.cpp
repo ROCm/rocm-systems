@@ -38,7 +38,7 @@ THE SOFTWARE.
 namespace rocdec {
 
 // Static members initialization
-std::mutex PalVideoDecoder::platform_mutex_;
+std::recursive_mutex PalVideoDecoder::platform_mutex_;
 Pal::IPlatform* PalVideoDecoder::platform_ = nullptr;
 void* PalVideoDecoder::platform_mem_ = nullptr;
 int PalVideoDecoder::platform_ref_count_ = 0;
@@ -106,12 +106,17 @@ namespace {
 }
 
 Pal::IPlatform* PalVideoDecoder::GetPalPlatform() {
-    std::lock_guard<std::mutex> lock(platform_mutex_);
+    InfoLog(g_rocdec_logger, "PAL: GetPalPlatform - acquiring mutex...");
+    std::lock_guard<std::recursive_mutex> lock(platform_mutex_);
+    InfoLog(g_rocdec_logger, "PAL: GetPalPlatform - mutex acquired");
 
     if (platform_) {
+        InfoLog(g_rocdec_logger, "PAL: GetPalPlatform - returning cached platform");
         platform_ref_count_++;
         return platform_;
     }
+
+    InfoLog(g_rocdec_logger, "PAL: GetPalPlatform - creating new platform");
 
     // Create PAL platform
     Pal::PlatformCreateInfo ci = {};
@@ -125,14 +130,22 @@ Pal::IPlatform* PalVideoDecoder::GetPalPlatform() {
     alloc_cb.pClientData = nullptr;
     ci.pAllocCb = &alloc_cb;
 
+    InfoLog(g_rocdec_logger, "PAL: GetPalPlatform - calling GetPlatformSize...");
     size_t plat_size = Pal::GetPlatformSize();
+    InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: GetPalPlatform - platform size = ") + ROCDEC_TOSTR(plat_size));
+
+    InfoLog(g_rocdec_logger, "PAL: GetPalPlatform - allocating platform memory...");
     platform_mem_ = malloc(plat_size);
     if (!platform_mem_) {
         CriticalLog(g_rocdec_logger, "PAL: Failed to allocate platform memory");
         return nullptr;
     }
+    InfoLog(g_rocdec_logger, "PAL: GetPalPlatform - platform memory allocated");
 
+    InfoLog(g_rocdec_logger, "PAL: GetPalPlatform - calling CreatePlatform...");
     Pal::Result res = Pal::CreatePlatform(ci, platform_mem_, &platform_);
+    InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: GetPalPlatform - CreatePlatform returned result = ") + ROCDEC_TOSTR((int)res));
+
     if (Util::IsErrorResult(res)) {
         CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: CreatePlatform failed with result ") + ROCDEC_TOSTR((int)res));
         free(platform_mem_);
@@ -146,7 +159,7 @@ Pal::IPlatform* PalVideoDecoder::GetPalPlatform() {
 }
 
 void PalVideoDecoder::ReleasePalPlatform() {
-    std::lock_guard<std::mutex> lock(platform_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(platform_mutex_);
 
     if (--platform_ref_count_ == 0) {
         if (platform_) {
@@ -163,14 +176,17 @@ void PalVideoDecoder::ReleasePalPlatform() {
 }
 
 Pal::IDevice* PalVideoDecoder::GetPalDevice() {
-    std::lock_guard<std::mutex> lock(platform_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(platform_mutex_);
 
     if (device_instance_) {
+        InfoLog(g_rocdec_logger, "PAL: Returning cached device instance");
         return device_instance_;
     }
 
+    InfoLog(g_rocdec_logger, "PAL: Getting PAL platform...");
     Pal::IPlatform* platform = GetPalPlatform();
     if (!platform) {
+        CriticalLog(g_rocdec_logger, "PAL: Failed to get platform");
         return nullptr;
     }
 
@@ -178,9 +194,11 @@ Pal::IDevice* PalVideoDecoder::GetPalDevice() {
     uint32_t device_count = 0;
     Pal::IDevice* raw_devices[Pal::MaxDevices] = {};
 
+    InfoLog(g_rocdec_logger, "PAL: Enumerating devices...");
     Pal::Result res = platform->EnumerateDevices(&device_count, raw_devices);
     if (Util::IsErrorResult(res) || device_count == 0) {
-        CriticalLog(g_rocdec_logger, "PAL: No devices found");
+        CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: EnumerateDevices failed - result=") +
+                    ROCDEC_TOSTR((int)res) + " device_count=" + ROCDEC_TOSTR(device_count));
         return nullptr;
     }
 
@@ -189,10 +207,13 @@ Pal::IDevice* PalVideoDecoder::GetPalDevice() {
     // Find first device with VCN decode support
     for (uint32_t i = 0; i < device_count; ++i) {
         Pal::IDevice* dev = raw_devices[i];
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Checking device ") + ROCDEC_TOSTR(i));
 
         // Commit settings
         res = dev->CommitSettingsAndInit();
         if (Util::IsErrorResult(res)) {
+            ErrorLog(g_rocdec_logger, ROCDEC_STR("PAL: Device ") + ROCDEC_TOSTR(i) +
+                     " CommitSettingsAndInit failed with result " + ROCDEC_TOSTR((int)res));
             continue;
         }
 
@@ -200,29 +221,32 @@ Pal::IDevice* PalVideoDecoder::GetPalDevice() {
         Pal::DeviceProperties dev_props = {};
         dev->GetProperties(&dev_props);
 
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Device ") + ROCDEC_TOSTR(i) +
+                " VCN level=" + ROCDEC_TOSTR((int)dev_props.vcnLevel));
+
         if (dev_props.vcnLevel == Pal::VcnIpLevel::None ||
             dev_props.vcnLevel == Pal::VcnIpLevel::_None) {
+            InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Device ") + ROCDEC_TOSTR(i) + " has no VCN support");
             continue;
         }
 
-        // TODO: Check for video decode engines - stubbed for compilation
-        // Pal::EngineType video_engine = Pal::EngineTypeCount;
-        // if (dev_props.engineProperties[Pal::EngineTypeVcnDecode].engineCount > 0) {
-        //     video_engine = Pal::EngineTypeVcnDecode;
-        // } else if (dev_props.engineProperties[Pal::EngineTypeVcnUnified].engineCount > 0) {
-        //     video_engine = Pal::EngineTypeVcnUnified;
-        // }
+        // Check for video decode engines
+        Pal::EngineType video_engine = Pal::EngineTypeCount;
+        if (dev_props.engineProperties[Pal::EngineTypeVcnDecode].engineCount > 0) {
+            video_engine = Pal::EngineTypeVcnDecode;
+        } else if (dev_props.engineProperties[Pal::EngineTypeVcnUnified].engineCount > 0) {
+            video_engine = Pal::EngineTypeVcnUnified;
+        }
 
-        // if (video_engine == Pal::EngineTypeCount) {
-        //     continue;
-        // }
+        if (video_engine == Pal::EngineTypeCount) {
+            continue;
+        }
 
         // Finalize device
         Pal::DeviceFinalizeInfo fi = {};
-        // TODO: Set engine counts - stubbed
-        // fi.requestedEngineCounts[video_engine].engines = 1;
-        // fi.requestedEngineCounts[Pal::EngineTypeUniversal].engines =
-        //     (dev_props.engineProperties[Pal::EngineTypeUniversal].engineCount > 0) ? 1 : 0;
+        fi.requestedEngineCounts[video_engine].engines = 1;
+        fi.requestedEngineCounts[Pal::EngineTypeUniversal].engines =
+            (dev_props.engineProperties[Pal::EngineTypeUniversal].engineCount > 0) ? 1 : 0;
 
         res = dev->Finalize(fi);
         if (Util::IsErrorResult(res)) {
@@ -230,7 +254,7 @@ Pal::IDevice* PalVideoDecoder::GetPalDevice() {
         }
 
         device_instance_ = dev;
-        // video_decode_engine_ = video_engine;
+        video_decode_engine_ = video_engine;
 
         InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Device ") + ROCDEC_TOSTR(i) + " initialized with VCN support");
         return device_instance_;
@@ -264,9 +288,14 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
                                          uint32_t height,
                                          uint32_t bit_depth,
                                          uint32_t max_dpb_slots) {
+    InfoLog(g_rocdec_logger, "PAL: Initialize called - codec=" + ROCDEC_TOSTR((int)codec_type) +
+            " width=" + ROCDEC_TOSTR(width) + " height=" + ROCDEC_TOSTR(height) +
+            " bit_depth=" + ROCDEC_TOSTR(bit_depth) + " max_dpb_slots=" + ROCDEC_TOSTR(max_dpb_slots));
+
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (initialized_) {
+        InfoLog(g_rocdec_logger, "PAL: Already initialized, returning success");
         return ROCDEC_SUCCESS;
     }
 
@@ -278,18 +307,24 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
 
     // Determine format based on bit depth
     pal_format_ = (bit_depth == 10) ? Pal::ChNumFormat::P010 : Pal::ChNumFormat::NV12;
+    InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Using format ") +
+            (pal_format_ == Pal::ChNumFormat::P010 ? "P010" : "NV12"));
 
     // Get PAL device
+    InfoLog(g_rocdec_logger, "PAL: Getting PAL device...");
     device_ = GetPalDevice();
     if (!device_) {
         CriticalLog(g_rocdec_logger, "PAL: Failed to get device");
         return ROCDEC_NOT_INITIALIZED;
     }
+    InfoLog(g_rocdec_logger, "PAL: Device obtained successfully");
 
     Pal::EngineType eng = video_decode_engine_;
+    InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Using engine type ") + ROCDEC_TOSTR((int)eng));
     Pal::Result res;
 
     // Create video queue
+    InfoLog(g_rocdec_logger, "PAL: Creating video queue...");
     {
         Pal::QueueCreateInfo qci = {};
         qci.engineType = eng;
@@ -298,24 +333,27 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
 
         size_t sz = device_->GetQueueSize(qci, &res);
         if (Util::IsErrorResult(res)) {
-            CriticalLog(g_rocdec_logger, "PAL: GetQueueSize failed");
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: GetQueueSize failed with result ") + ROCDEC_TOSTR((int)res));
             return ROCDEC_RUNTIME_ERROR;
         }
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Queue size = ") + ROCDEC_TOSTR(sz));
 
         void* mem = malloc(sz);
         Pal::IQueue* q = nullptr;
         res = device_->CreateQueue(qci, mem, &q);
         if (Util::IsErrorResult(res) || !q) {
             free(mem);
-            CriticalLog(g_rocdec_logger, "PAL: CreateQueue failed");
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: CreateQueue failed with result ") + ROCDEC_TOSTR((int)res));
             return ROCDEC_RUNTIME_ERROR;
         }
 
         *video_queue_.PtrAddr() = q;
         *video_queue_.MemAddr() = mem;
+        InfoLog(g_rocdec_logger, "PAL: Video queue created successfully");
     }
 
     // Create command allocator
+    InfoLog(g_rocdec_logger, "PAL: Creating command allocator...");
     {
         Pal::CmdAllocatorCreateInfo aci = {};
         aci.flags.threadSafe = 1;
@@ -331,7 +369,7 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
 
         size_t sz = device_->GetCmdAllocatorSize(aci, &res);
         if (Util::IsErrorResult(res)) {
-            CriticalLog(g_rocdec_logger, "PAL: GetCmdAllocatorSize failed");
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: GetCmdAllocatorSize failed with result ") + ROCDEC_TOSTR((int)res));
             return ROCDEC_RUNTIME_ERROR;
         }
 

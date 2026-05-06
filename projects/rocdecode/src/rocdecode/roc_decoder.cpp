@@ -28,7 +28,9 @@ RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): va_video_deco
 }
 #elif defined(ROCDECODE_BUILD_WINDOWS)
 RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): decoder_create_info_{decoder_create_info} {
+    InfoLog(g_rocdec_logger, "RocDecoder: Constructor - creating PAL video decoder");
     pal_video_decoder_ = std::make_unique<rocdec::PalVideoDecoder>();
+    InfoLog(g_rocdec_logger, ROCDEC_STR("RocDecoder: Constructor - pal_video_decoder_ created"));
 }
 #else
 RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): decoder_create_info_{decoder_create_info} {
@@ -56,15 +58,21 @@ RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): decoder_creat
 rocDecStatus RocDecoder::InitializeDecoder() {
     FunctionEntryLog(g_rocdec_logger);
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
+
+    InfoLog(g_rocdec_logger, "RocDecoder: num_decode_surfaces = " + ROCDEC_TOSTR(decoder_create_info_.num_decode_surfaces));
     if (decoder_create_info_.num_decode_surfaces < 1) {
         CriticalLog(g_rocdec_logger, "Invalid number of decode surfaces.");
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
     }
+
+    InfoLog(g_rocdec_logger, "RocDecoder: Resizing hip_interop_ to " + ROCDEC_TOSTR(decoder_create_info_.num_decode_surfaces));
     hip_interop_.resize(decoder_create_info_.num_decode_surfaces);
     for (size_t i = 0; i < hip_interop_.size(); i++) {
         memset((void *)&hip_interop_[i], 0, sizeof(hip_interop_[i]));
     }
+    InfoLog(g_rocdec_logger, "RocDecoder: hip_interop_ initialized");
+
 #ifdef ROCDECODE_BUILD_LINUX
     rocdec_status = va_video_decoder_.InitializeDecoder();
     if (rocdec_status != ROCDEC_SUCCESS) {
@@ -73,6 +81,15 @@ rocDecStatus RocDecoder::InitializeDecoder() {
         return rocdec_status;
     }
 #elif defined(ROCDECODE_BUILD_WINDOWS)
+    InfoLog(g_rocdec_logger, ROCDEC_STR("RocDecoder: Checking pal_video_decoder_ pointer"));
+    if (!pal_video_decoder_) {
+        CriticalLog(g_rocdec_logger, "RocDecoder: pal_video_decoder_ is NULL!");
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_NOT_INITIALIZED;
+    }
+    InfoLog(g_rocdec_logger, ROCDEC_STR("RocDecoder: pal_video_decoder_ pointer is valid"));
+
+    InfoLog(g_rocdec_logger, "RocDecoder: Calling pal_video_decoder_->Initialize()...");
     rocdec_status = pal_video_decoder_->Initialize(
         decoder_create_info_.codec_type,
         decoder_create_info_.width,
@@ -80,6 +97,8 @@ rocDecStatus RocDecoder::InitializeDecoder() {
         decoder_create_info_.bit_depth_minus_8 + 8,
         decoder_create_info_.num_decode_surfaces
     );
+    InfoLog(g_rocdec_logger, "RocDecoder: pal_video_decoder_->Initialize() returned " + ROCDEC_TOSTR((int)rocdec_status));
+
     if (rocdec_status != ROCDEC_SUCCESS) {
         CriticalLog(g_rocdec_logger, "Failed to initialize the PAL Video decoder.");
         FunctionExitLog(g_rocdec_logger);
