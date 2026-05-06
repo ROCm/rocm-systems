@@ -78,6 +78,18 @@ if(HIP_FOUND AND rocdecode_FOUND)
 
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 
+    # Apply warning suppressions for MSVC
+    if(MSVC)
+        target_compile_options(${PROJECT_NAME} PRIVATE
+            /wd4018 /wd4061 /wd4100 /wd4101 /wd4146 /wd4189 /wd4242 /wd4244
+            /wd4267 /wd4296 /wd4365 /wd4388 /wd4389 /wd4514 /wd4530 /wd4577
+            /wd4625 /wd4626 /wd4701 /wd4703 /wd4710 /wd4711 /wd4800 /wd4820 /wd4996 /wd5045 /wd5219
+        )
+        # Remove any GCC/Clang flags that may have been added
+        string(REPLACE "-O3" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+        string(REPLACE "-O0" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    endif()
+
     message("-- ${PROJECT_NAME} configured successfully")
 else()
     message("-- ${PROJECT_NAME} excluded due to unmet dependencies:")

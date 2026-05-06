@@ -32,6 +32,11 @@ THE SOFTWARE.
 #define WIN32_LEAN_AND_MEAN
 #endif
 
+// Define PAL_BUILD_VIDEO for video decoder support
+#ifndef PAL_BUILD_VIDEO
+#define PAL_BUILD_VIDEO 1
+#endif
+
 #include <windows.h>
 #include <vector>
 #include <memory>
@@ -48,6 +53,13 @@ THE SOFTWARE.
 #include "palImage.h"
 #include "palFence.h"
 #include "palVideoDecoder.h"
+
+// Include PAL UVD interface for codec structures
+#if PAL_CLOSED_SOURCE
+#include "drv_uvd_if.h"
+#else
+#include "drv_uvd_if_open.h"
+#endif
 
 // rocDecode headers
 #include "rocdecode/rocdecode.h"
@@ -240,7 +252,6 @@ private:
                                      PalDpbSlot& slot);
     rocDecStatus AllocateBitstreamBuffer(size_t capacity);
     rocDecStatus UploadBitstream(const uint8_t* data, size_t size);
-    // rocDecStatus SubmitDecodeCommand(const Pal::VideoDecodeFrameInfo& frame_info);
     rocDecStatus SyncQueue();
 
     // State

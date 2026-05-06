@@ -37,7 +37,7 @@ RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): decoder_creat
 
  RocDecoder::~RocDecoder() {
     // clean up the VA-API/HIP interop memories
-    for(auto i = 0; i < hip_interop_.size(); i++) {
+    for(size_t i = 0; i < hip_interop_.size(); i++) {
         if (hip_interop_[i].hip_mapped_device_mem != nullptr) {
             hipError_t hip_status = hipFree(hip_interop_[i].hip_mapped_device_mem);
             if (hip_status != hipSuccess) {
@@ -62,7 +62,7 @@ rocDecStatus RocDecoder::InitializeDecoder() {
         return ROCDEC_INVALID_PARAMETER;
     }
     hip_interop_.resize(decoder_create_info_.num_decode_surfaces);
-    for (auto i = 0; i < hip_interop_.size(); i++) {
+    for (size_t i = 0; i < hip_interop_.size(); i++) {
         memset((void *)&hip_interop_[i], 0, sizeof(hip_interop_[i]));
     }
 #ifdef ROCDECODE_BUILD_LINUX

@@ -143,20 +143,23 @@ endif()
 if(CMAKE_BUILD_TYPE MATCHES Debug)
   # -O0 -- Don't Optimize output file
   # -g  -- generate debugging information
-  if(IS_LINUX)
+  if(MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Od /Zi")
+  elseif(IS_LINUX)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
   else()
     # Windows with AMD Clang
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g")
   endif()
 else()
-  # -O3       -- Optimize output file
-  # -DNDEBUG  -- turn off asserts
-  if(IS_LINUX)
+  # Release build optimizations
+  if(MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /O2 /DNDEBUG")
+  elseif(IS_LINUX)
     # -fPIC   -- Generate position-independent code (Linux only, not supported on Windows)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
   else()
-    # Windows: Use static runtime to match PAL libraries
+    # Windows with AMD Clang
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG")
   endif()
 endif()
@@ -334,8 +337,25 @@ if(DEPENDENCIES_MET)
     target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_BUILD_LINUX=1)
   endif()
 
-  # --all-warnings/-Wall       -- Enable most warning messages
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
+  # Warning flags
+  if(MSVC)
+    # MSVC: Use /W3 and disable specific noisy warnings
+    target_compile_options(${PROJECT_NAME} PRIVATE /W3)
+    target_compile_options(${PROJECT_NAME} PRIVATE
+      /wd4018  # signed/unsigned mismatch
+      /wd4146  # unary minus operator applied to unsigned type
+      /wd4244  # conversion from type1 to type2, possible loss of data
+      /wd4267  # conversion from size_t to smaller type
+      /wd4365  # signed/unsigned mismatch
+      /wd4996  # deprecated function (getenv)
+    )
+    # Suppress CRT security warnings
+    target_compile_definitions(${PROJECT_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
+  else()
+    # GCC/Clang: Use -Wall
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
+  endif()
+
   target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 
   set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
