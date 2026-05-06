@@ -2256,7 +2256,7 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   if (dev_mem_queue_descriptor) {
     shared_queue = static_cast<core::SharedQueue*>(finegrain_allocator()(
         sizeof(core::SharedQueue),
-        core::MemoryRegion::AllocateUncached | MemoryRegion::AllocateQueueObject));
+        MemoryRegion::AllocateQueueObject));
   } else {
     shared_queue =
         static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(

@@ -595,9 +595,9 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
                                 "Trying to allocate an AQL ring buffer in device memory without "
                                 "large BAR PCIe enabled.");
     }
-    ring_buf_ = agent_->coarsegrain_allocator()(
+    ring_buf_ = agent_->finegrain_allocator()(
         ring_buf_alloc_bytes_ + ring_buf_metadata_alloc_bytes_,
-        core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
+        core::MemoryRegion::AllocateExecutable);
   } else {
     ring_buf_ = agent_->system_allocator()(
         ring_buf_alloc_bytes_ + ring_buf_metadata_alloc_bytes_, 0x1000,
