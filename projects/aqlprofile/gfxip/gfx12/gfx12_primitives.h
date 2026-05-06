@@ -25,9 +25,8 @@
 #define _GFX12_PRIMITIVES_H_
 
 #include <cassert>
-#include <stdint.h>
-#include <cassert>
 #include <cstdint>
+#include <stdint.h>
 
 // taken from gfx12_pm4defs.h
 #define COPY_DATA_SEL_REG 0                   ///< Mem-mapped register

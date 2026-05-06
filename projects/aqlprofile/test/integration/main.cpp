@@ -28,11 +28,10 @@
 #include <csignal>
 #include <cstddef>
 #include <cstdio>
-#include <iostream>
-#include <vector>
-#include <map>
-#include <atomic>
 #include <future>
+#include <iostream>
+#include <map>
+#include <vector>
 #include "counter.hpp"
 #include "workload.hpp"
 #include "hip/hip_runtime.h"

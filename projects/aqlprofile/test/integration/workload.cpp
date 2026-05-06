@@ -24,18 +24,16 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include "counter.hpp"
+#include "workload.hpp"
 #include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstddef>
 #include <cstdio>
-#include <iostream>
-#include <vector>
-#include <map>
-#include <atomic>
 #include <future>
-#include "workload.hpp"
-#include "counter.hpp"
+#include <iostream>
+#include <map>
+#include <vector>
 
 Collection::Collection(AgentInfo& agent, const std::vector<std::string>& counters)
     : packet(std::make_unique<AQLPacket>(agent, counters)) {}

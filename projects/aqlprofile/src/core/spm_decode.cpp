@@ -5,11 +5,10 @@
 #include <csignal>
 #include <cstddef>
 #include <cstdio>
-#include <iostream>
-#include <vector>
-#include <map>
-#include <atomic>
 #include <future>
+#include <iostream>
+#include <map>
+#include <vector>
 #include <fstream>
 #include <cstring>
 #include "src/core/include/spm_common.hpp"
