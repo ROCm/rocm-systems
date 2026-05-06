@@ -187,7 +187,6 @@ query_cpu_agents()
                                 socket_vendor_ids[socket_id],
                                 "",
                                 0,
-                                0,
                                 "" };
         mgr.insert_agent(cur_agent);
     }

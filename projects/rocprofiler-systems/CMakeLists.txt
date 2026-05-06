@@ -31,8 +31,7 @@ endif()
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FULL_VERSION_STRING LIMIT_COUNT 1)
 string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
 string(
-    REGEX REPLACE
-    "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)"
+    REGEX REPLACE "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)"
     "\\1.\\2.\\3"
     ROCPROFSYS_VERSION
     "${FULL_VERSION_STRING}"
@@ -281,10 +280,6 @@ rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_PERFETTO_TOOLS
 
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SPDLOG
     "Enable building spdlog library internally" ON
-)
-
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SQLITE3
-    "Enable building sqlite3 library internally" ON
 )
 
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_GTEST
