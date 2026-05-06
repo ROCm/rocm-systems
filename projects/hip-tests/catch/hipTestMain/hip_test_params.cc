@@ -49,10 +49,13 @@ void TestParameterStore::initialize() {
         defaultBlockSizes = levelBlockSizes["level_0"];
         defaultIterations = levelIterations["level_0"];
         defaultWarmups = levelWarmups["level_0"];
+        defaultCgIterations = levelCgIterations["level_0"];
+        defaultMathAccuracyIterations = levelMathAccuracyIterations["level_0"];
+        defaultMathAccuracyMaxMemoryPercentage = levelMathAccuracyMaxMemoryPercentage["level_0"];
+        defaultMathMaxMemory = levelMathMaxMemory["level_0"];
+        defaultMathReductionFactor = levelMathReductionFactor["level_0"];
     } else {
         // Hardcoded fallback if no levels defined
-        defaultMemorySizes = {1024, 1048576, 10485760};  // 1K, 1M, 10M
-        defaultBlockSizes = {64, 256};
         LogPrintf("[TestParameterStore] Warning: No level_0 defined, using hardcoded defaults\n%s", "");
     }
     

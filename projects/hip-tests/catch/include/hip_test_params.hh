@@ -150,7 +150,7 @@ public:
     std::map<std::string, std::vector<int>> levelBlockSizes;
     std::map<std::string, int> levelIterations;
     std::map<std::string, int> levelWarmups;
-    std::map<std::string, size_t> levelCgIterations;
+    std::map<std::string, int> levelCgIterations;
     std::map<std::string, uint64_t> levelMathAccuracyIterations;
     std::map<std::string, int> levelMathAccuracyMaxMemoryPercentage;
     std::map<std::string, size_t> levelMathMaxMemory;
@@ -165,8 +165,8 @@ private:
     /**
      * @brief Fallback parameters (if no level specified)
      */
-    std::vector<size_t> defaultMemorySizes;
-    std::vector<int> defaultBlockSizes;
+    std::vector<size_t> defaultMemorySizes = {1024, 1048576, 10485760}; // 1K, 1M, 10M
+    std::vector<int> defaultBlockSizes = {64, 256};
     int defaultIterations = 1000;
     int defaultWarmups = 100;
     int defaultCgIterations = 1;
