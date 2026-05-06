@@ -1,11 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import common
 import pandas as pd
 import pytest
-import test_utils
 
-_, soc = test_utils.gpu_soc()
+_, soc = common.gpu_soc()
 
 
 def get_hbm_data_transfer(analysis_workload_dir, data):
@@ -88,10 +88,8 @@ def test_validate_metrics(
             )
             continue
 
-        profile_workload_dir = test_utils.get_output_dir(param_id=f"{workload}_profile")
-        analysis_workload_dir = test_utils.get_output_dir(
-            param_id=f"{workload}_analysis"
-        )
+        profile_workload_dir = common.get_output_dir(param_id=f"{workload}_profile")
+        analysis_workload_dir = common.get_output_dir(param_id=f"{workload}_analysis")
         try:
             # Copy to prevent upstream global mutations
             options = list(VALIDATE_METRICS[workload].get("profile_options", []))
@@ -105,7 +103,7 @@ def test_validate_metrics(
                 app_name=workload,
             )
             # Ensure non zero length of profile df
-            _ = test_utils.check_csv_files(
+            _ = common.check_csv_files(
                 profile_workload_dir, num_devices=1, num_kernels=1
             )
 
@@ -144,5 +142,5 @@ def test_validate_metrics(
                     f"diffs={diffs} (tolerance: {tolerance * 100}%)"
                 )
         finally:
-            test_utils.clean_output_dir(True, analysis_workload_dir)
-            test_utils.clean_output_dir(True, profile_workload_dir)
+            common.clean_output_dir(True, analysis_workload_dir)
+            common.clean_output_dir(True, profile_workload_dir)
