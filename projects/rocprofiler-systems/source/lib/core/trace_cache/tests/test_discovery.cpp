@@ -4,8 +4,15 @@
 #include "core/trace_cache/discovery.hpp"
 
 #include <gtest/gtest.h>
+#include <spdlog/fmt/fmt.h>
 
-#include <filesystem>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -14,37 +21,65 @@ namespace rocprofsys::trace_cache::discovery
 {
 namespace
 {
-namespace fs = std::filesystem;
+std::string
+temp_root()
+{
+    if(const char* env = std::getenv("TMPDIR"); env != nullptr && env[0] != '\0')
+        return env;
+    return "/tmp";
+}
+
+bool
+file_exists(const std::string& path)
+{
+    return ::access(path.c_str(), F_OK) == 0;
+}
+
+void
+remove_dir_recursive(const std::string& dir)
+{
+    DIR* d = ::opendir(dir.c_str());
+    if(d == nullptr) return;
+
+    while(dirent* entry = ::readdir(d))
+    {
+        const std::string name = entry->d_name;
+        if(name == "." || name == "..") continue;
+        ::unlink(fmt::format("{}/{}", dir, name).c_str());  // best effort, files only
+    }
+    ::closedir(d);
+    ::rmdir(dir.c_str());
+}
 
 class temp_dir_fixture : public ::testing::Test
 {
 protected:
     void SetUp() override
     {
-        m_dir = fs::temp_directory_path() /
-                ("rocprofsys_discovery_test_" +
-                 std::to_string(::testing::UnitTest::GetInstance()->random_seed()) + "_" +
-                 ::testing::UnitTest::GetInstance()->current_test_info()->name());
-        fs::create_directories(m_dir);
+        m_dir =
+            fmt::format("{}/rocprofsys_discovery_test_{}_{}", temp_root(),
+                        ::testing::UnitTest::GetInstance()->random_seed(),
+                        ::testing::UnitTest::GetInstance()->current_test_info()->name());
+
+        if(::mkdir(m_dir.c_str(), S_IRWXU) != 0 && errno != EEXIST)
+        {
+            FAIL() << fmt::format("mkdir({}) failed: {}", m_dir, std::strerror(errno));
+        }
     }
 
-    void TearDown() override
-    {
-        std::error_code ec;
-        fs::remove_all(m_dir, ec);  // best effort
-    }
+    void TearDown() override { remove_dir_recursive(m_dir); }
 
     void touch(const std::string& filename)
     {
-        std::ofstream{ (m_dir / filename).string() }.put('x');
+        std::ofstream{ path_of(filename) }.put('x');
     }
 
     [[nodiscard]] std::string path_of(const std::string& filename) const
     {
-        return (m_dir / filename).string();
+        return fmt::format("{}/{}", m_dir, filename);
     }
 
-    fs::path m_dir;
+    std::string m_dir;
 };
 }  // namespace
 
@@ -65,7 +100,7 @@ TEST_F(temp_dir_fixture, list_dir_files_returns_files_excluding_dot_entries)
     touch("b.bin");
     touch("c.json");
 
-    auto files = list_dir_files(m_dir.string());
+    auto files = list_dir_files(m_dir);
 
     EXPECT_EQ(files.size(), 3U);
     EXPECT_NE(std::find(files.begin(), files.end(), "a.txt"), files.end());
@@ -130,8 +165,8 @@ TEST_F(temp_dir_fixture, clear_removes_existing_files)
 
     clear(cache);
 
-    EXPECT_FALSE(fs::exists(path_of("buff.bin")));
-    EXPECT_FALSE(fs::exists(path_of("meta.json")));
+    EXPECT_FALSE(file_exists(path_of("buff.bin")));
+    EXPECT_FALSE(file_exists(path_of("meta.json")));
 }
 
 TEST(discovery_test, clear_does_not_throw_on_missing_files)

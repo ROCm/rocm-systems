@@ -11,14 +11,15 @@
 #include <dirent.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
-#include <filesystem>
+#include <cstring>
 #include <memory>
 #include <regex>
 #include <stdexcept>
 #include <string>
-#include <system_error>
 #include <variant>
 
 namespace rocprofsys::trace_cache::discovery
@@ -101,11 +102,11 @@ clear(const data::mapped_cache_files_t& cache_files)
         {
             if(fname->empty()) continue;
 
-            std::error_code ec;
-            if(std::filesystem::remove(*fname, ec))
+            if(std::remove(fname->c_str()) == 0)
                 LOG_DEBUG("Removed file: {}", *fname);
-            else if(ec)
-                LOG_WARNING("Failed to remove file: {}: {}", *fname, ec.message());
+            else if(errno != ENOENT)
+                LOG_WARNING("Failed to remove file: {}: {}", *fname,
+                            std::strerror(errno));
         }
     }
 }
@@ -116,7 +117,7 @@ merge_perfetto_files()
     // dmp::rank() returns 0 if MPI is not initialized/finalized. During shutdown
     // MPI may already be finalized, so we read the rank captured at init time
     // via settings::default_process_suffix().
-    auto    suffix_variant  = settings::default_process_suffix();
+    auto         suffix_variant  = settings::default_process_suffix();
     std::int32_t cached_mpi_rank = 0;
 
     if(std::holds_alternative<int>(suffix_variant))
