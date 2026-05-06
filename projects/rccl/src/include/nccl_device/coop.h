@@ -37,6 +37,77 @@ NCCL_DEVICE_INLINE int ncclCoopPopc(ncclCoopMask_t x) { return (int)__popc(x); }
 #endif
 #endif
 
+// ----------------------------------------------------------------------------
+// ncclCoopAny: type-erased polymorphic wrapper over the static coop types
+// (ncclCoopThread/Warp/Lanes/WarpSpan/Cta). Required by the LLVM IR / bitcode
+// build (ir/) so that extern "C" wrapper thunks can take a single concrete
+// parameter type and forward it to the templated session classes
+// (e.g. ncclLsaBarrierSession<ncclCoopAny>).
+//
+// Currently disabled (#if 0) because:
+//   - The IR feature (ir/nccl_device_wrapper.h) that consumes this type is
+//     not yet authored in RCCL.
+//   - No regular RCCL kernel uses ncclCoopAny today (they use the static
+//     types directly for performance: indirect device function calls
+//     through the vtable are slower than direct inlined calls).
+//
+// To enable: flip the `#if 0` below to `#if __CUDACC__` (matching the rest
+// of this file). No other code in RCCL needs to change. The static_asserts
+// in get_vtable<Impl>() will fire at compile time if a future RCCL coop
+// type ever outgrows the 16-byte / 8-byte-aligned Storage.
+//
+// Source: NVIDIA NCCL v2.29.2-1 src/include/nccl_device/coop.h.
+// ----------------------------------------------------------------------------
+#if 0  // TODO(rccl-ir): enable when ir/ wrapper headers are added
+struct ncclCoopAny {
+  struct Storage { alignas(alignof(void*)) char space[16]; };
+  struct VTable {
+    int  (*thread_rank)(void const*);
+    int  (*size)(void const*);
+    void (*sync)(void*);
+  };
+
+  template <typename Impl>
+  __device__ static int thread_rank(void const* o) {
+    return static_cast<Impl const*>(o)->thread_rank();
+  }
+  template <typename Impl>
+  __device__ static int size(void const* o) {
+    return static_cast<Impl const*>(o)->size();
+  }
+  template <typename Impl>
+  __device__ static void sync(void* o) {
+    static_cast<Impl*>(o)->sync();
+  }
+
+  template <typename Impl>
+  __device__ static VTable const* get_vtable() {
+    static_assert(sizeof(Impl)  <= sizeof(Storage),  "Incompatible coop type size");
+    static_assert(alignof(Impl) <= alignof(Storage), "Incompatible coop type alignment");
+    static constexpr VTable v = { &thread_rank<Impl>, &size<Impl>, &sync<Impl> };
+    return &v;
+  }
+
+  Storage       storage;
+  VTable const* vtable;
+
+  ncclCoopAny() = default;
+  ncclCoopAny(ncclCoopAny const&) = default;
+  ncclCoopAny(ncclCoopAny&&)      = default;
+
+  template <typename Impl>
+  __device__ ncclCoopAny(Impl impl) {
+    ::new (&this->storage) Impl(impl);
+    this->vtable = get_vtable<Impl>();
+  }
+
+  __device__ int  thread_rank() const { return vtable->thread_rank(&storage); }
+  __device__ int  size()        const { return vtable->size(&storage); }
+  __device__ int  num_threads() const { return vtable->size(&storage); }
+  __device__ void sync()              { vtable->sync(&storage); }
+};
+#endif  // ncclCoopAny (disabled)
+
 #if __CUDACC__
 template<int nThreadsPow2>
 struct ncclCoopTile { // An aligned pow2 set of threads within the warp.
