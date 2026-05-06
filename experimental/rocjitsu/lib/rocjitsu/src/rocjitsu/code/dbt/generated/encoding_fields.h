@@ -10,7 +10,7 @@
 namespace rocjitsu {
 
 inline constexpr uint32_t kEnc_DS = 0x1B0;
-inline constexpr uint32_t kEnc_EXP = 0x1F0;
+inline constexpr uint32_t kEnc_EXP = 0x188;
 inline constexpr uint32_t kEnc_FLAT = 0x1B8;
 inline constexpr uint32_t kEnc_FLAT_GLBL = 0x1B8;
 inline constexpr uint32_t kEnc_FLAT_GLOBAL = 0x1B8;
@@ -33,6 +33,7 @@ inline constexpr uint32_t kEnc_VFLAT = 0x1D8;
 inline constexpr uint32_t kEnc_VGLOBAL = 0x1DC;
 inline constexpr uint32_t kEnc_VIMAGE = 0x1A0;
 inline constexpr uint32_t kEnc_VINTERP = 0x19A;
+inline constexpr uint32_t kEnc_VINTRP = 0x1A8;
 inline constexpr uint32_t kEnc_VOP1 = 0xFC;
 inline constexpr uint32_t kEnc_VOP2 = 0x0;
 inline constexpr uint32_t kEnc_VOP3 = 0x1A0;
@@ -41,6 +42,8 @@ inline constexpr uint32_t kEnc_VOPC = 0xF8;
 inline constexpr uint32_t kEnc_VSAMPLE = 0x1C8;
 inline constexpr uint32_t kEnc_VSCRATCH = 0x1DA;
 inline constexpr uint32_t kEnc_MIMG_NSA1 = 0x1E0;
+inline constexpr uint32_t kEnc_MIMG_NSA2 = 0x1E0;
+inline constexpr uint32_t kEnc_MIMG_NSA3 = 0x1E0;
 inline constexpr uint32_t kEnc_SOP1_INST_LITERAL = 0x17D;
 inline constexpr uint32_t kEnc_SOP2_INST_LITERAL = 0x100;
 inline constexpr uint32_t kEnc_SOPC_INST_LITERAL = 0x17E;
@@ -85,10 +88,12 @@ struct DsFields {
 };
 
 struct ExpFields {
+  uint32_t compr;
   uint32_t done;
   uint32_t en;
   uint32_t row_en;
   uint32_t tgt;
+  uint32_t vm;
   uint32_t vsrc0;
   uint32_t vsrc1;
   uint32_t vsrc2;
@@ -102,10 +107,12 @@ struct FlatFields {
   uint32_t ioffset;
   uint32_t lds;
   uint32_t nt;
+  uint32_t nv;
   uint32_t op;
   uint32_t saddr;
   uint32_t sc0;
   uint32_t sc1;
+  uint32_t scc;
   uint32_t seg;
   uint32_t slc;
   uint32_t sve;
@@ -116,13 +123,19 @@ struct FlatFields {
 
 struct FlatGlblFields {
   uint32_t acc;
+  uint32_t dlc;
+  uint32_t glc;
   uint32_t ioffset;
+  uint32_t lds;
   uint32_t nt;
+  uint32_t nv;
   uint32_t op;
   uint32_t saddr;
   uint32_t sc0;
   uint32_t sc1;
+  uint32_t scc;
   uint32_t seg;
+  uint32_t slc;
   uint32_t sve;
   uint32_t vaddr;
   uint32_t vdst;
@@ -148,11 +161,14 @@ struct FlatScratchFields {
   uint32_t dlc;
   uint32_t glc;
   uint32_t ioffset;
+  uint32_t lds;
   uint32_t nt;
+  uint32_t nv;
   uint32_t op;
   uint32_t saddr;
   uint32_t sc0;
   uint32_t sc1;
+  uint32_t scc;
   uint32_t seg;
   uint32_t slc;
   uint32_t sve;
@@ -171,7 +187,9 @@ struct LdsdirFields {
 
 struct MimgFields {
   uint32_t a16;
+  uint32_t acc;
   uint32_t d16;
+  uint32_t da;
   uint32_t dim;
   uint32_t dlc;
   uint32_t dmask;
@@ -179,8 +197,10 @@ struct MimgFields {
   uint32_t lwe;
   uint32_t nsa;
   uint32_t op;
+  uint32_t opm;
   uint32_t r128;
   uint32_t rsrc;
+  uint32_t scc;
   uint32_t slc;
   uint32_t ssamp;
   uint32_t tfe;
@@ -201,9 +221,11 @@ struct MtbufFields {
   uint32_t nt;
   uint32_t offen;
   uint32_t op;
+  uint32_t opm;
   uint32_t rsrc;
   uint32_t sc0;
   uint32_t sc1;
+  uint32_t scc;
   uint32_t slc;
   uint32_t soffset;
   uint32_t tfe;
@@ -221,9 +243,11 @@ struct MubufFields {
   uint32_t nt;
   uint32_t offen;
   uint32_t op;
+  uint32_t opm;
   uint32_t rsrc;
   uint32_t sc0;
   uint32_t sc1;
+  uint32_t scc;
   uint32_t slc;
   uint32_t soffset;
   uint32_t tfe;
@@ -380,6 +404,14 @@ struct VinterpFields {
   uint32_t wait_exp;
 };
 
+struct VintrpFields {
+  uint32_t attr;
+  uint32_t attrchan;
+  uint32_t op;
+  uint32_t vdst;
+  uint32_t vsrc;
+};
+
 struct Vop1Fields {
   uint32_t op;
   uint32_t src0;
@@ -464,6 +496,7 @@ struct VscratchFields {
 struct MimgNsa1Fields {
   uint32_t a16;
   uint32_t d16;
+  uint32_t da;
   uint32_t dim;
   uint32_t dlc;
   uint32_t dmask;
@@ -471,6 +504,7 @@ struct MimgNsa1Fields {
   uint32_t lwe;
   uint32_t nsa;
   uint32_t op;
+  uint32_t opm;
   uint32_t r128;
   uint32_t rsrc;
   uint32_t slc;
@@ -482,6 +516,70 @@ struct MimgNsa1Fields {
   uint32_t vaddrb;
   uint32_t vaddrc;
   uint32_t vaddrd;
+  uint32_t vdata;
+};
+
+struct MimgNsa2Fields {
+  uint32_t a16;
+  uint32_t d16;
+  uint32_t da;
+  uint32_t dim;
+  uint32_t dlc;
+  uint32_t dmask;
+  uint32_t glc;
+  uint32_t lwe;
+  uint32_t nsa;
+  uint32_t op;
+  uint32_t opm;
+  uint32_t r128;
+  uint32_t rsrc;
+  uint32_t slc;
+  uint32_t ssamp;
+  uint32_t tfe;
+  uint32_t unorm;
+  uint32_t vaddr;
+  uint32_t vaddra;
+  uint32_t vaddrb;
+  uint32_t vaddrc;
+  uint32_t vaddrd;
+  uint32_t vaddre;
+  uint32_t vaddrf;
+  uint32_t vaddrg;
+  uint32_t vaddrh;
+  uint32_t vdata;
+};
+
+struct MimgNsa3Fields {
+  uint32_t a16;
+  uint32_t d16;
+  uint32_t da;
+  uint32_t dim;
+  uint32_t dlc;
+  uint32_t dmask;
+  uint32_t glc;
+  uint32_t lwe;
+  uint32_t nsa;
+  uint32_t op;
+  uint32_t opm;
+  uint32_t r128;
+  uint32_t rsrc;
+  uint32_t slc;
+  uint32_t ssamp;
+  uint32_t tfe;
+  uint32_t unorm;
+  uint32_t vaddr;
+  uint32_t vaddra;
+  uint32_t vaddrb;
+  uint32_t vaddrc;
+  uint32_t vaddrd;
+  uint32_t vaddre;
+  uint32_t vaddrf;
+  uint32_t vaddrg;
+  uint32_t vaddrh;
+  uint32_t vaddri;
+  uint32_t vaddrj;
+  uint32_t vaddrk;
+  uint32_t vaddrl;
   uint32_t vdata;
 };
 

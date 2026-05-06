@@ -7,6 +7,7 @@
 #include "library/pmc/collectors/gpu/collector.hpp"
 #include "library/pmc/collectors/gpu/perfetto_policy.hpp"
 #include "library/pmc/device_providers/amd_smi/provider.hpp"
+#include <cstdint>
 
 #if defined(ROCPROFSYS_BUILD_AINIC)
 #    include "library/pmc/collectors/nic/cache_policy.hpp"
@@ -152,7 +153,8 @@ sample()
         return;
     }
 
-    auto timestamp = static_cast<int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+    auto timestamp =
+        static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
 
     for(auto& slice : g_collector_slices)
     {
@@ -253,7 +255,8 @@ pause()
         return;
     }
 
-    auto timestamp = static_cast<int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+    auto timestamp =
+        static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
 
     for(auto& slice : g_collector_slices)
     {

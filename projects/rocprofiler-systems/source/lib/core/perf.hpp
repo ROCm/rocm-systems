@@ -28,7 +28,7 @@ namespace rocprofsys
 namespace perf
 {
 /// An enum class with all the available sampling data
-enum class sample : uint64_t
+enum class sample : std::uint64_t
 {
     ip        = PERF_SAMPLE_IP,
     pid_tid   = PERF_SAMPLE_TID,

@@ -19,6 +19,7 @@
 #include <mutex>
 #include <iterator>
 #include <algorithm>
+#include <vector>
 #ifdef _WIN32
 #include <process.h>
 #else
@@ -616,6 +617,16 @@ namespace hip {
   extern hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
   extern hipError_t ihipMemGetInfo(size_t* free, size_t* total);
   extern amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size = 0);
+  extern std::vector<amd::Memory*> getMemoryObjectBatch(void* const* ptrs, size_t count,
+                                                         std::vector<size_t>& offsets);
+  extern void getMemoryObjectBatchPairs(void* const* srcs, void* const* dsts, size_t count,
+                                         std::vector<amd::Memory*>& src_memories,
+                                         std::vector<amd::Memory*>& dst_memories,
+                                         std::vector<size_t>& src_offsets,
+                                         std::vector<size_t>& dst_offsets);
+  extern void getMemoryObjectPairs(const void* src, const void* dst,
+                                    amd::Memory*& src_memory, amd::Memory*& dst_memory,
+                                    size_t& src_offset, size_t& dst_offset);
   extern amd::Memory* getMemoryObjectWithOffset(const void* ptr, const size_t size = 0);
   extern void getStreamPerThread(hipStream_t& stream);
   extern hipStream_t getPerThreadDefaultStream();

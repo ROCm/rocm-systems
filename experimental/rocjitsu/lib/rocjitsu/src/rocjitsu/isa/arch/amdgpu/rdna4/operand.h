@@ -19,6 +19,7 @@ class Operand : public IsaOperand<Isa> {
 public:
   Operand(int size_bits, OperandType opr_type, int encoding_value);
   std::string name() const override;
+  std::optional<RegisterRef> to_register_ref() const override;
   uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;
   uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;
   void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;
