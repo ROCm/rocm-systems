@@ -43,7 +43,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
 
   // Check if we should use pod-based detection (for VMM Fabric allocator)
   HIPAllocator *allocator = get_default_allocator();
-  bool use_pod_detection = (allocator->type == AllocatorTypeVMMFabric);
+  bool use_pod_detection = (allocator->get_type() == AllocatorTypeVMMFabric);
 
   if (use_pod_detection) {
     // Use pod-based detection
@@ -189,7 +189,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                      TcpBootstrap *bootstr) {
   // Check if we should use pod-based detection (for VMM Fabric allocator)
   HIPAllocator *allocator = get_default_allocator();
-  bool use_pod_detection = (allocator->type == AllocatorTypeVMMFabric);
+  bool use_pod_detection = (allocator->get_type() == AllocatorTypeVMMFabric);
 
   // For VMM_FABRIC, use pod-based IPC capability detection; otherwise use local ranks
   auto shm_ranks = use_pod_detection ? bootstr->getIpcCapableRanks() : bootstr->getLocalRanks();

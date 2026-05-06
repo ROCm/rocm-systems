@@ -20,15 +20,17 @@
 *.out
 *.app
 
+# Misc local working artifacts
 *.swp
 .vscode
 build
 third_party
 Testing
+tmp
 
 # python
-.venv/
-__pycache__/
+.venv
+__pycache__
 *.pyc
 *.pyo
 *.pyd
@@ -36,3 +38,5 @@ __pycache__/
 
 # agents
 .claude
+
+CMakePresets.json

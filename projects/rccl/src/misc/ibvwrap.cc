@@ -20,6 +20,30 @@ static std::once_flag initOnceFlag;
 static ncclResult_t initResult;
 struct ncclIbvSymbols ibvSymbols;
 
+#ifdef ENABLE_QP_TRACKING
+#include <unordered_map>
+#include <algorithm>
+
+struct ncclIbQpTracker {
+  int total = 0;
+  int active = 0;
+  int peak = 0;
+
+  void trackCreate() {
+    ++total;
+    ++active;
+    peak = std::max(peak, active);
+  }
+
+  void trackDestroy() {
+    --active;
+  }
+};
+
+static std::mutex ncclIbQpMapMutex;
+static std::unordered_map<struct ibv_context*, ncclIbQpTracker> ncclIbQpMap;
+#endif
+
 ncclResult_t wrap_ibv_symbols(void) {
   std::call_once(initOnceFlag,
                [](){ initResult = buildIbvSymbols(&ibvSymbols); });
@@ -216,11 +240,47 @@ ncclResult_t wrap_ibv_destroy_cq(struct ibv_cq *cq) {
 }
 
 ncclResult_t wrap_ibv_destroy_qp(struct ibv_qp *qp) {
-  IBV_INT_CHECK_RET_ERRNO(ibvSymbols, ibv_internal_destroy_qp, ibv_internal_destroy_qp(qp), 0, "ibv_destroy_qp");
+#ifdef ENABLE_QP_TRACKING
+  struct ibv_context* ctx = qp->context;
+  const char* devName = wrap_ibv_get_device_name(ctx->device);
+#endif
+  CHECK_NOT_NULL(ibvSymbols, ibv_internal_destroy_qp);
+  int ret = ibvSymbols.ibv_internal_destroy_qp(qp);
+  if (ret != 0) {
+    WARN("Call to ibv_destroy_qp failed with error %s", strerror(ret));
+    return ncclSystemError;
+  }
+#ifdef ENABLE_QP_TRACKING
+  {
+    std::lock_guard<std::mutex> lock(ncclIbQpMapMutex);
+    auto& t = ncclIbQpMap[ctx];
+    t.trackDestroy();
+    TRACE(NCCL_NET, "NET/IB: QP destroyed on %s ctx=%p total=%d active=%d peak=%d",
+         devName, ctx, t.total, t.active, t.peak);
+  }
+#endif
+  return ncclSuccess;
 }
 
 ncclResult_t wrap_ibv_create_qp(struct ibv_qp **ret, struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr) {
-  IBV_PTR_CHECK_ERRNO(ibvSymbols, ibv_internal_create_qp, ibv_internal_create_qp(pd, qp_init_attr), *ret, NULL, "ibv_create_qp");
+  CHECK_NOT_NULL(ibvSymbols, ibv_internal_create_qp);
+  *ret = ibvSymbols.ibv_internal_create_qp(pd, qp_init_attr);
+  if (*ret == NULL) {
+    WARN("Call to ibv_create_qp failed with error %s", strerror(errno));
+    return ncclSystemError;
+  }
+#ifdef ENABLE_QP_TRACKING
+  {
+    struct ibv_context* ctx = pd->context;
+    const char* devName = wrap_ibv_get_device_name(ctx->device);
+    std::lock_guard<std::mutex> lock(ncclIbQpMapMutex);
+    auto& t = ncclIbQpMap[ctx];
+    t.trackCreate();
+    TRACE(NCCL_NET, "NET/IB: QP created on %s ctx=%p total=%d active=%d peak=%d",
+         devName, ctx, t.total, t.active, t.peak);
+  }
+#endif
+  return ncclSuccess;
 }
 
 static void ibvQpStateName(enum ibv_qp_state state, char* msg, const size_t len) {

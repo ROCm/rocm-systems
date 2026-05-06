@@ -74,27 +74,29 @@ struct PerGpuStatsV1 {
     std::array<StatsHistogram, 2> ioSizeBytes{};
     std::array<StatsHistogram, 2> ioCount{};
     std::array<StatsHistogram, 2> ioTimeUs{};
+    std::array<StatsHistogram, 2> errorCount{};
 
-    using Histograms = std::tuple<StatsHistogram *, StatsHistogram *, StatsHistogram *>;
-    using ConstHistograms =
-        std::tuple<const StatsHistogram *, const StatsHistogram *, const StatsHistogram *>;
+    using Histograms = std::tuple<StatsHistogram *, StatsHistogram *, StatsHistogram *, StatsHistogram *>;
+    using ConstHistograms = std::tuple<const StatsHistogram *, const StatsHistogram *, const StatsHistogram *,
+                                       const StatsHistogram *>;
 
     Histograms getHistograms(IoType ioType) noexcept
     {
         if (ioType != IoType::Read && ioType != IoType::Write) {
-            return Histograms{nullptr, nullptr, nullptr};
+            return Histograms{nullptr, nullptr, nullptr, nullptr};
         }
         return Histograms{&ioSizeBytes[static_cast<size_t>(ioType)], &ioCount[static_cast<size_t>(ioType)],
-                          &ioTimeUs[static_cast<size_t>(ioType)]};
+                          &ioTimeUs[static_cast<size_t>(ioType)], &errorCount[static_cast<size_t>(ioType)]};
     }
 
     ConstHistograms getHistograms(IoType ioType) const noexcept
     {
         if (ioType != IoType::Read && ioType != IoType::Write) {
-            return ConstHistograms{nullptr, nullptr, nullptr};
+            return ConstHistograms{nullptr, nullptr, nullptr, nullptr};
         }
         return ConstHistograms{&ioSizeBytes[static_cast<size_t>(ioType)],
-                               &ioCount[static_cast<size_t>(ioType)], &ioTimeUs[static_cast<size_t>(ioType)]};
+                               &ioCount[static_cast<size_t>(ioType)], &ioTimeUs[static_cast<size_t>(ioType)],
+                               &errorCount[static_cast<size_t>(ioType)]};
     }
 };
 
@@ -263,5 +265,6 @@ class StatsCollection {
 public:
     virtual ~StatsCollection() = default;
     virtual void addIo(IoType ioType, StatsBackend backend, uint64_t bytes, uint64_t timeUs) const noexcept;
+    virtual void error(IoType ioType, StatsBackend backend, uint64_t bytes) const noexcept;
 };
 }

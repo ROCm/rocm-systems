@@ -29,15 +29,14 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string SCHEMA_PATH =
-    std::string(SCHEMA_DIR) + "/simulation_config.fbs";
+const std::string SCHEMA_PATH = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
 
 // SOPP encoding: bits[31:23]=0x17F, bits[22:16]=op, bits[15:0]=simm16.
 constexpr uint32_t sopp(uint32_t op, uint16_t simm16 = 0) {
   return 0xBF800000u | (op << 16) | simm16;
 }
-constexpr uint32_t S_NOP     = sopp(0);
-constexpr uint32_t S_ENDPGM  = sopp(1);
+constexpr uint32_t S_NOP = sopp(0);
+constexpr uint32_t S_ENDPGM = sopp(1);
 constexpr uint32_t S_BARRIER = sopp(10);
 
 /// A plugin that counts how many times each hook is called.
@@ -205,8 +204,7 @@ TEST(ExecutionPluginTest, RiscvInstructionHook) {
 
   // addi x1, x0, 42 then ebreak (halt).
   const uint32_t program[] = {0x02A00093u, 0x00100073u};
-  hart->memory().load_image(reinterpret_cast<const uint8_t *>(program),
-                            sizeof(program), 0);
+  hart->memory().load_image(reinterpret_cast<const uint8_t *>(program), sizeof(program), 0);
   hart->state().pc = 0;
   engine->run();
 
