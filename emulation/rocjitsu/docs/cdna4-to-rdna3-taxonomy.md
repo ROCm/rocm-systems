@@ -102,7 +102,7 @@ SMEM, VOP3, VOP3_SDST_ENC, VOP3P, DS, FLAT, MUBUF, and MTBUF. FLAT is split by
 `seg`: flat, scratch, and global forms are re-encoded through the matching RDNA3
 structure.
 
-## Memory-family Memory-Family Audit Notes
+## Memory-Family Audit Notes
 
 The supported same-size CDNA4-to-RDNA3 memory path is the generated field
 transfer for ordinary SMEM, MUBUF, FLAT, FLAT_GLBL-to-FLAT_GLOBAL,

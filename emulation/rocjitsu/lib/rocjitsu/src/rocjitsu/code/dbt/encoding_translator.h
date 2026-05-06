@@ -34,9 +34,9 @@ struct CoherencyGfx9 {
 
 /// @brief GFX11 (RDNA3/3.5) coherency bits: glc, dlc, slc.
 struct CoherencyGfx11 {
-  uint8_t glc; ///< Scope bit 0.
-  uint8_t dlc; ///< Non-temporal hint.
-  uint8_t slc; ///< Scope bit 1.
+  uint8_t glc; ///< Globally coherent; bypass L1.
+  uint8_t dlc; ///< Device-level coherent.
+  uint8_t slc; ///< System-level coherent; bypass L2.
 };
 
 /// @brief GFX12 (RDNA4) coherency bits: scope, th.

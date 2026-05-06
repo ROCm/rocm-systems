@@ -149,19 +149,19 @@ if(HSA_RUNTIME64)
         TIMEOUT 30)
     message(STATUS "HSA init test enabled (found ${HSA_RUNTIME64})")
 
-    # --- HSA translate test: CDNA4→RDNA3 on-device verification ---
-    # Requires both compiled device kernels AND a gfx1100 GPU on the host.
+    # --- HSA translate test: CDNA4→RDNA on-device verification ---
+    # Requires both compiled device kernels AND a supported RDNA3/RDNA4 GPU on the host.
     if(HAS_DEVICE_KERNELS)
-        # Detect RDNA3/gfx1100 GPU at configure time via rocm_agent_enumerator.
+        # Detect a supported host GPU at configure time via rocm_agent_enumerator.
         find_program(ROCM_AGENT_ENUM rocm_agent_enumerator
             HINTS /opt/rocm/bin ENV ROCM_PATH)
-        set(HAS_GFX1100_GPU FALSE)
+        set(HSA_TRANSLATE_GPU_ISA "")
         if(ROCM_AGENT_ENUM)
             execute_process(COMMAND ${ROCM_AGENT_ENUM}
                 OUTPUT_VARIABLE _agents OUTPUT_STRIP_TRAILING_WHITESPACE
                 ERROR_QUIET RESULT_VARIABLE _agent_rc)
-            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx1100")
-                set(HAS_GFX1100_GPU TRUE)
+            if(_agent_rc EQUAL 0)
+                string(REGEX MATCH "gfx1100|gfx120[01]" HSA_TRANSLATE_GPU_ISA "${_agents}")
             endif()
         endif()
 
@@ -176,11 +176,12 @@ if(HSA_RUNTIME64)
         target_link_options(hsa_translate_test PRIVATE -Wl,-rpath,/opt/rocm/lib)
         target_compile_definitions(hsa_translate_test PRIVATE
             HAS_HOST_AMDGPU=1
-            KERNEL_DIR="${KERNEL_OUTPUT_DIR}")
+            KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
+            HSA_TRANSLATE_GPU_ISA="${HSA_TRANSLATE_GPU_ISA}")
         add_dependencies(hsa_translate_test device_kernels)
         rj_configure_target(hsa_translate_test TEST)
 
-        if(HAS_GFX1100_GPU)
+        if(HSA_TRANSLATE_GPU_ISA)
             add_test(NAME "HsaTranslateTest.TranslateAndDispatchVectorAdd"
                 COMMAND hsa_translate_test --gtest_filter=*VectorAdd*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
@@ -191,9 +192,9 @@ if(HSA_RUNTIME64)
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
             set_tests_properties("HsaTranslateTest.TranslateAndDispatchMemoryStream" PROPERTIES
                 TIMEOUT 60)
-            message(STATUS "HSA translate test enabled (gfx1100 GPU detected)")
+            message(STATUS "HSA translate test enabled (${HSA_TRANSLATE_GPU_ISA} GPU detected)")
         else()
-            message(STATUS "HSA translate test built but NOT registered with CTest (no gfx1100 GPU)")
+            message(STATUS "HSA translate test built but NOT registered with CTest (no supported RDNA3/RDNA4 GPU)")
         endif()
     endif()
 else()

@@ -31,6 +31,11 @@ namespace rocjitsu {
 
 class Instruction;
 class LivenessAnalysis;
+struct InstructionLegalization;
+
+/// @brief Per-pair legalization lookup selected by BinaryTranslator.
+using LegalizationLookupFn = const InstructionLegalization *(*)(uint16_t encoding_id,
+                                                                uint16_t opcode);
 
 // ---------------------------------------------------------------------------
 // Tier 1: Instruction Descriptor

@@ -22,10 +22,10 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <format>
 #include <limits>
 #include <memory>
 #include <span>
-#include <sstream>
 #include <string_view>
 #include <unordered_set>
 #include <vector>
@@ -147,15 +147,7 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
   return scopes;
 }
 
-std::string hex_u64(uint64_t value) {
-  std::ostringstream out;
-  out << "0x" << std::hex << value;
-  return out.str();
-}
-
-bool starts_with(std::string_view text, std::string_view prefix) {
-  return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
-}
+std::string hex_u64(uint64_t value) { return std::format("0x{:x}", value); }
 
 std::string_view action_name(Action action) {
   switch (action) {
@@ -174,13 +166,16 @@ std::string_view action_name(Action action) {
 }
 
 std::string unsupported_expansion_category(std::string_view mnemonic) {
-  if (starts_with(mnemonic, "v_mfma_"))
-    return " (unsupported category: dense MFMA requires proven RDNA3 WMMA lowering or software fallback)";
-  if (starts_with(mnemonic, "v_smfmac_"))
-    return " (unsupported category: sparse SMFMAC requires proven sparse metadata semantics and RDNA3 fallback analysis)";
-  if (starts_with(mnemonic, "v_accvgpr_"))
-    return " (unsupported category: AccVGPR operand remapping requires supported standalone transfer or matrix-idiom lowering)";
-  if (starts_with(mnemonic, "tbuffer_"))
+  if (mnemonic.starts_with("v_mfma_"))
+    return " (unsupported category: dense MFMA requires proven RDNA3 WMMA lowering or software "
+           "fallback)";
+  if (mnemonic.starts_with("v_smfmac_"))
+    return " (unsupported category: sparse SMFMAC requires proven sparse metadata semantics and "
+           "RDNA3 fallback analysis)";
+  if (mnemonic.starts_with("v_accvgpr_"))
+    return " (unsupported category: AccVGPR operand remapping requires supported standalone "
+           "transfer or matrix-idiom lowering)";
+  if (mnemonic.starts_with("tbuffer_"))
     return " (unsupported category: MTBUF format-buffer encoding translation)";
   return " (unsupported category: residual non-matrix expansion)";
 }
@@ -194,7 +189,7 @@ std::string unsupported_expansion_warning(const Instruction &inst, uint64_t offs
 
 bool is_mtbuf_instruction(const Instruction &inst) {
   return (inst.encoding_id() >= kEnc_MTBUF && inst.encoding_id() < kEnc_MTBUF + 8) ||
-         starts_with(inst.mnemonic(), "tbuffer_");
+         std::string_view(inst.mnemonic()).starts_with("tbuffer_");
 }
 
 bool mtbuf_uses_accvgpr(const Instruction &inst) {
@@ -215,7 +210,8 @@ std::string missing_encoding_warning(const Instruction &inst, uint64_t offset,
   message += ")";
   if (is_mtbuf_instruction(inst)) {
     if (mtbuf_uses_accvgpr(inst))
-      message += " (unsupported category: AccVGPR operand remapping requires supported standalone transfer or matrix-idiom lowering) (MTBUF acc=1 requires AccVGPR virtualization)";
+      message += " (unsupported category: AccVGPR operand remapping requires supported standalone "
+                 "transfer or matrix-idiom lowering) (MTBUF acc=1 requires AccVGPR virtualization)";
     else
       message += " (unsupported category: MTBUF format-buffer encoding translation)";
   }
@@ -274,19 +270,13 @@ BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t hos
       target_mach_(target_mach ? target_mach : elf_mach_for_arch(host_arch)),
       encoding_translate_(select_encoding_translator(guest_arch, host_arch)),
       legalization_lookup_(select_legalization(guest_arch, host_arch)),
-      semantic_translator_(std::make_unique<SemanticTranslator>(guest_arch, host_arch)) {}
+      semantic_translator_(
+          std::make_unique<SemanticTranslator>(guest_arch, host_arch, legalization_lookup_)) {}
 
 TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   TranslatedCodeObject result;
   result.host_arch = host_arch_;
   warnings_ = &result.warnings;
-
-  auto leave_unchanged = [&]() {
-    const auto *image = reinterpret_cast<const uint8_t *>(obj.image_data());
-    result.elf_bytes.assign(image, image + obj.image_size());
-    warnings_ = nullptr;
-    return result;
-  };
 
   // Expansion failures must not emit a partially patched ELF: a branch stub
   // without a valid cave body is worse than a clear diagnostic.

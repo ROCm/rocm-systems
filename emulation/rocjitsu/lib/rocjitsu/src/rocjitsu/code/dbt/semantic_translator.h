@@ -76,7 +76,8 @@ struct SemanticReplacement {
 /// mnemonic-level lowering.
 class SemanticTranslator {
 public:
-  SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch);
+  SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
+                     LegalizationLookupFn legalization_lookup = nullptr);
 
   /// @brief Try to expand/lower an instruction via the expand rules table.
   /// @param inst      The decoded instruction.
@@ -100,6 +101,7 @@ private:
   std::span<const TranslationRule> expand_rules_; ///< Sorted by src_opcode.
   rj_code_arch_t guest_arch_;
   rj_code_arch_t host_arch_;
+  LegalizationLookupFn legalization_lookup_ = nullptr;
 };
 
 } // namespace rocjitsu

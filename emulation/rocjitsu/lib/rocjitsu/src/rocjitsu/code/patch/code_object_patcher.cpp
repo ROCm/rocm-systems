@@ -122,7 +122,7 @@ bool CodeObjectPatcher::text_range_has_relocation(uint64_t start, uint64_t end) 
     return false;
   };
 
-  for (int i = 0; i < ehdr->e_shnum; ++i) {
+  for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
     if (shdr[i].sh_type != SHT_REL && shdr[i].sh_type != SHT_RELA)
       continue;
     if (shdr[i].sh_info != text_section_index_)

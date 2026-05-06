@@ -7,7 +7,7 @@
 #include "rocjitsu/code/dbt/semantic_translator.h"
 
 #include "rocjitsu/code/basic_block.h"
-#include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna3.h"
+#include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
@@ -158,30 +158,34 @@ constexpr uint16_t kInlineConst0 = 128;
   return (0x3Fu << 25) | (static_cast<uint32_t>(vdst) << 17) | (1u << 9) | (src0 & 0x1FF);
 }
 
-[[nodiscard]] bool starts_with(std::string_view text, std::string_view prefix) {
-  return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
+enum class RemovedComparePredicate {
+  None,
+  AlwaysFalse,
+  AlwaysTrue,
+};
+
+enum class CompareMaskUpdate {
+  VccOnly,
+  ExecAndVcc,
+};
+
+[[nodiscard]] RemovedComparePredicate removed_compare_predicate(std::string_view mnemonic) {
+  if (mnemonic.starts_with("v_cmp_f_") || mnemonic.starts_with("v_cmpx_f_"))
+    return RemovedComparePredicate::AlwaysFalse;
+  if (mnemonic.starts_with("v_cmp_t_") || mnemonic.starts_with("v_cmp_tru_") ||
+      mnemonic.starts_with("v_cmpx_t_") || mnemonic.starts_with("v_cmpx_tru_"))
+    return RemovedComparePredicate::AlwaysTrue;
+  return RemovedComparePredicate::None;
 }
 
-[[nodiscard]] bool ends_with(std::string_view text, std::string_view suffix) {
-  return text.size() >= suffix.size() && text.substr(text.size() - suffix.size()) == suffix;
-}
-
-[[nodiscard]] bool is_removed_compare_false(std::string_view mnemonic) {
-  return starts_with(mnemonic, "v_cmp_f_") || starts_with(mnemonic, "v_cmpx_f_");
-}
-
-[[nodiscard]] bool is_removed_compare_true(std::string_view mnemonic) {
-  return starts_with(mnemonic, "v_cmp_t_") || starts_with(mnemonic, "v_cmp_tru_") ||
-         starts_with(mnemonic, "v_cmpx_t_") || starts_with(mnemonic, "v_cmpx_tru_");
-}
-
-[[nodiscard]] bool is_cmpx_compare(std::string_view mnemonic) {
-  return starts_with(mnemonic, "v_cmpx_");
+[[nodiscard]] CompareMaskUpdate compare_mask_update(std::string_view mnemonic) {
+  return mnemonic.starts_with("v_cmpx_") ? CompareMaskUpdate::ExecAndVcc
+                                         : CompareMaskUpdate::VccOnly;
 }
 
 [[nodiscard]] bool is_cdna4_matrix_or_accvgpr(std::string_view mnemonic) {
-  return starts_with(mnemonic, "v_mfma_") || starts_with(mnemonic, "v_smfmac_") ||
-         starts_with(mnemonic, "v_accvgpr_");
+  return mnemonic.starts_with("v_mfma_") || mnemonic.starts_with("v_smfmac_") ||
+         mnemonic.starts_with("v_accvgpr_");
 }
 
 // ---------------------------------------------------------------------------
@@ -235,16 +239,17 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch
   return words;
 }
 
-std::vector<uint32_t> lower_removed_compare_predicate(const Instruction &inst) {
-  const auto *legalization =
-      lookup(kLegalization_cdna4_to_rdna3, inst.encoding_id(), inst.opcode());
+std::vector<uint32_t> lower_removed_compare_predicate(const Instruction &inst,
+                                                      LegalizationLookupFn legalization_lookup) {
+  if (!legalization_lookup)
+    return {};
+  const auto *legalization = legalization_lookup(inst.encoding_id(), inst.opcode());
   if (!legalization || legalization->action != Action::Expand)
     return {};
 
   const std::string_view mnemonic(inst.mnemonic());
-  const bool false_predicate = is_removed_compare_false(mnemonic);
-  const bool true_predicate = is_removed_compare_true(mnemonic);
-  if (!false_predicate && !true_predicate)
+  const auto predicate = removed_compare_predicate(mnemonic);
+  if (predicate == RemovedComparePredicate::None)
     return {};
 
   const auto *raw = inst.raw_encoding();
@@ -252,7 +257,7 @@ std::vector<uint32_t> lower_removed_compare_predicate(const Instruction &inst) {
     return {};
 
   uint8_t dest = kVccLo;
-  if (!ends_with(mnemonic, "_e32")) {
+  if (!mnemonic.ends_with("_e32")) {
     if (inst.size() < 8)
       return {};
     cdna4::Vop3MachineInst src{};
@@ -261,12 +266,17 @@ std::vector<uint32_t> lower_removed_compare_predicate(const Instruction &inst) {
   }
 
   std::vector<uint32_t> words;
-  if (false_predicate) {
+  switch (predicate) {
+  case RemovedComparePredicate::AlwaysFalse:
     words.push_back(build_s_mov_b64(dest, kInlineConst0));
-    if (is_cmpx_compare(mnemonic) && dest != kExecLo)
+    if (compare_mask_update(mnemonic) == CompareMaskUpdate::ExecAndVcc && dest != kExecLo)
       words.push_back(build_s_mov_b64(kExecLo, kInlineConst0));
-  } else {
+    break;
+  case RemovedComparePredicate::AlwaysTrue:
     words.push_back(build_s_mov_b64(dest, kExecLo));
+    break;
+  case RemovedComparePredicate::None:
+    return {};
   }
   return words;
 }
@@ -551,8 +561,9 @@ const TranslationRule kExpandRules_cdna4_to_rdna3[] = {
 // SemanticTranslator implementation
 // ---------------------------------------------------------------------------
 
-SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host)
-    : guest_arch_(guest), host_arch_(host) {
+SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host,
+                                       LegalizationLookupFn legalization_lookup)
+    : guest_arch_(guest), host_arch_(host), legalization_lookup_(legalization_lookup) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
     expand_rules_ = kExpandRules_cdna4_to_rdna4;
   else if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
@@ -570,7 +581,7 @@ std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &in
     return it->expand_fn(inst, static_cast<uint32_t>(host_arch_), offset, liveness,
                          it->guest_layout, it->host_layout);
   if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA4 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA3)
-    return lower_removed_compare_predicate(inst);
+    return lower_removed_compare_predicate(inst, legalization_lookup_);
   return {};
 }
 

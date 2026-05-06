@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "rocjitsu/code/dbt/encoding_translator.h"
+#include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/rj_code.h"
 
 namespace rocjitsu {
@@ -55,18 +56,6 @@ struct InstructionLegalization;
 /// @returns TranslationResult with the encoded host instruction words.
 using EncodingTranslateFn = TranslationResult (*)(uint32_t encoding_id, uint32_t w0, uint32_t w1,
                                                   uint32_t w2, uint16_t dst_op);
-
-/// @brief Legalization lookup function type.
-///
-/// @details Queries the generated per-pair legalization table for a
-/// (encoding_id, opcode) pair. Returns the InstructionLegalization entry
-/// describing the action (Identity/Substitute/Lower/Expand) and target opcode.
-///
-/// @param encoding_id  Guest encoding format ID.
-/// @param opcode       Guest opcode within the encoding format.
-/// @returns Pointer to the legalization entry, or nullptr if not found.
-using LegalizationLookupFn = const InstructionLegalization *(*)(uint16_t encoding_id,
-                                                                uint16_t opcode);
 
 /// @brief Result of translating a code object.
 struct TranslatedCodeObject {

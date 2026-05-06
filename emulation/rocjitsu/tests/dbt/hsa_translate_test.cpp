@@ -23,20 +23,47 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef HAS_HOST_AMDGPU
+#ifndef HSA_TRANSLATE_GPU_ISA
+#define HSA_TRANSLATE_GPU_ISA ""
+#endif
+
 using namespace rocjitsu;
 
 namespace {
 
 std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
 
-hsa_agent_t find_gpu_agent(const char *required_isa_substring = nullptr) {
+std::string isa_name_for_agent(hsa_agent_t agent) {
+  hsa_isa_t isa{};
+  if (hsa_agent_get_info(agent, HSA_AGENT_INFO_ISA, &isa) != HSA_STATUS_SUCCESS)
+    return {};
+
+  uint32_t name_length = 0;
+  if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &name_length) != HSA_STATUS_SUCCESS ||
+      name_length == 0)
+    return {};
+
+  std::string isa_name(name_length, '\0');
+  if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, isa_name.data()) != HSA_STATUS_SUCCESS)
+    return {};
+  return isa_name;
+}
+
+bool is_supported_translate_gpu(std::string_view isa_name) {
+  return isa_name.find("gfx1100") != std::string_view::npos ||
+         isa_name.find("gfx1200") != std::string_view::npos ||
+         isa_name.find("gfx1201") != std::string_view::npos;
+}
+
+hsa_agent_t find_translate_gpu_agent() {
   struct Ctx {
-    const char *required_isa;
+    std::string_view preferred_isa;
     hsa_agent_t gpu;
-  } ctx{required_isa_substring, {}};
+  } ctx{HSA_TRANSLATE_GPU_ISA, {}};
 
   hsa_iterate_agents(
       [](hsa_agent_t agent, void *data) -> hsa_status_t {
@@ -44,16 +71,16 @@ hsa_agent_t find_gpu_agent(const char *required_isa_substring = nullptr) {
         hsa_device_type_t type;
         hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
         if (type == HSA_DEVICE_TYPE_GPU) {
-          if (ctx->required_isa) {
-            hsa_isa_t isa{};
-            char isa_name[128]{};
-            hsa_agent_get_info(agent, HSA_AGENT_INFO_ISA, &isa);
-            hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, isa_name);
-            if (!std::strstr(isa_name, ctx->required_isa))
-              return HSA_STATUS_SUCCESS;
+          const auto isa_name = isa_name_for_agent(agent);
+          if (!is_supported_translate_gpu(isa_name))
+            return HSA_STATUS_SUCCESS;
+          if (ctx->gpu.handle == 0)
+            ctx->gpu = agent;
+          if (ctx->preferred_isa.empty() ||
+              isa_name.find(ctx->preferred_isa) != std::string::npos) {
+            ctx->gpu = agent;
+            return HSA_STATUS_INFO_BREAK;
           }
-          ctx->gpu = agent;
-          return HSA_STATUS_INFO_BREAK;
         }
         return HSA_STATUS_SUCCESS;
       },
@@ -107,9 +134,9 @@ hsa_amd_memory_pool_t find_pool(hsa_agent_t agent, hsa_amd_segment_t segment,
 }
 
 struct HostTarget {
-  rj_code_arch_t arch;
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
   uint32_t mach;
-  char isa_name[128];
+  std::string isa_name;
 };
 
 // Inspect the running GPU's ISA name and pick the matching translator target
@@ -117,16 +144,14 @@ struct HostTarget {
 // callers should ASSERT_NE(target.mach, 0u).
 HostTarget select_host_target(hsa_agent_t gpu) {
   HostTarget t{};
-  hsa_isa_t isa{};
-  hsa_agent_get_info(gpu, HSA_AGENT_INFO_ISA, &isa);
-  hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, t.isa_name);
-  if (std::strstr(t.isa_name, "gfx1100")) {
+  t.isa_name = isa_name_for_agent(gpu);
+  if (t.isa_name.find("gfx1100") != std::string::npos) {
     t.arch = ROCJITSU_CODE_ARCH_RDNA3;
     t.mach = 0x41;
-  } else if (std::strstr(t.isa_name, "gfx1201")) {
+  } else if (t.isa_name.find("gfx1201") != std::string::npos) {
     t.arch = ROCJITSU_CODE_ARCH_RDNA4;
     t.mach = 0x4E;
-  } else if (std::strstr(t.isa_name, "gfx1200")) {
+  } else if (t.isa_name.find("gfx1200") != std::string::npos) {
     t.arch = ROCJITSU_CODE_ARCH_RDNA4;
     t.mach = 0x48;
   }
@@ -145,8 +170,8 @@ TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
 
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
 
-  hsa_agent_t gpu = find_gpu_agent("gfx1100");
-  ASSERT_NE(gpu.handle, 0u) << "No gfx1100 GPU agent found";
+  hsa_agent_t gpu = find_translate_gpu_agent();
+  ASSERT_NE(gpu.handle, 0u) << "No supported RDNA3/RDNA4 GPU agent found";
 
   auto target = select_host_target(gpu);
   ASSERT_NE(target.mach, 0u) << "Test requires RDNA3 (gfx1100) or RDNA4 (gfx1200/1201) GPU, found: "
@@ -308,8 +333,8 @@ TEST(HsaTranslateTest, TranslateAndDispatchMemoryStream) {
 
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
 
-  hsa_agent_t gpu = find_gpu_agent("gfx1100");
-  ASSERT_NE(gpu.handle, 0u) << "No gfx1100 GPU agent found";
+  hsa_agent_t gpu = find_translate_gpu_agent();
+  ASSERT_NE(gpu.handle, 0u) << "No supported RDNA3/RDNA4 GPU agent found";
 
   auto target = select_host_target(gpu);
   ASSERT_NE(target.mach, 0u) << "Test requires RDNA3 (gfx1100) or RDNA4 (gfx1200/1201) GPU, found: "
@@ -490,8 +515,8 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
 
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
 
-  hsa_agent_t gpu = find_gpu_agent();
-  ASSERT_NE(gpu.handle, 0u);
+  hsa_agent_t gpu = find_translate_gpu_agent();
+  ASSERT_NE(gpu.handle, 0u) << "No supported RDNA3/RDNA4 GPU agent found";
 
   auto target = select_host_target(gpu);
   ASSERT_NE(target.mach, 0u) << "Test requires RDNA3 (gfx1100) or RDNA4 (gfx1200/1201) GPU, found: "

@@ -17,8 +17,10 @@
 /// These tests complement the hardware tests in hsa_translate_test.cpp which
 /// verify correctness on real RDNA3/gfx1100 GPUs.
 
+#include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/encoding_translator.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna3.h"
@@ -52,8 +54,6 @@
 #include "rocjitsu/code/dbt/generated/legalization_rdna3_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_rdna4_to_cdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
-#include "rocjitsu/analysis/liveness.h"
-#include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/machine_insts.h"
@@ -784,8 +784,7 @@ std::vector<uint8_t> make_minimal_amdgpu_elf(std::span<const uint32_t> text_word
   }
 
   KernelDescriptor kd{};
-  kd.kernel_code_entry_byte_offset =
-      static_cast<int64_t>(kTextVaddr - kKernelDescriptorVaddr);
+  kd.kernel_code_entry_byte_offset = static_cast<int64_t>(kTextVaddr - kKernelDescriptorVaddr);
   std::memcpy(image.data() + rodata_off, &kd, sizeof(kd));
 
   std::array<rocjitsu::Elf64_Sym, 2> symtab{};
@@ -877,8 +876,7 @@ struct SemanticInstructionContext {
     }
 
     if (!scope.empty())
-      liveness =
-          std::make_unique<rocjitsu::LivenessAnalysis>(rocjitsu::KernelBlockScope(scope));
+      liveness = std::make_unique<rocjitsu::LivenessAnalysis>(rocjitsu::KernelBlockScope(scope));
   }
 
   [[nodiscard]] bool is_valid() const { return code_object.is_valid() && liveness != nullptr; }
@@ -1520,7 +1518,8 @@ TEST(Cdna4ToRdna3SemanticTranslator, SWaitcntConvertsGfx9ToConservativeGfx11Layo
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "s_waitcnt");
 
-  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
+  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                                lookup_cdna4_to_rdna3);
   auto replacement = translator.try_lower_expand(*inst, 0, context.live());
 
   ASSERT_EQ(replacement.size(), 1u);
@@ -1565,7 +1564,8 @@ TEST(Cdna4ToRdna3SemanticTranslator, RemovedVopcConstantComparisonsLowerToScalar
   constexpr uint8_t kExecLo = 126;
   constexpr uint16_t kInlineConst0 = 128;
 
-  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
+  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                                lookup_cdna4_to_rdna3);
 
   const std::array<uint32_t, 1> false_source{make_cdna4_vopc_cmp(32)};
   SemanticInstructionContext false_context(false_source);
@@ -1613,7 +1613,8 @@ TEST(Cdna4ToRdna3SemanticTranslator, RemovedVop3ConstantComparisonsUseExplicitSd
   constexpr uint8_t kExecLo = 126;
   constexpr uint16_t kInlineConst0 = 128;
 
-  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
+  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                                lookup_cdna4_to_rdna3);
 
   const auto false_source = make_cdna4_vop3_cmp(32, 18);
   SemanticInstructionContext false_context(false_source);
@@ -1833,8 +1834,7 @@ TEST(BinaryTranslatorExpansion, MtbufEncodingTranslatesAndDecodesAsRdna3) {
 
 TEST(BinaryTranslatorExpansion, MtbufAccvgprEncodingFailsClosed) {
   const auto unsupported_source = make_cdna4_tbuffer_load_format_x(true);
-  expect_unsupported_encoding_fails_closed(unsupported_source, "tbuffer_load_format_x",
-                                           "AccVGPR");
+  expect_unsupported_encoding_fails_closed(unsupported_source, "tbuffer_load_format_x", "AccVGPR");
 }
 
 TEST(BinaryTranslatorExpansion, RelocatedCavePaddingFailsClosed) {
@@ -2159,11 +2159,11 @@ TEST(BinaryTranslatorE2E, MatrixMfma16x16FailsClosedWithUnsupportedCategory) {
   EXPECT_TRUE(warnings_contain(result.warnings, "unsupported expansion"))
       << format_warnings(result.warnings);
   const bool categorized = warnings_contain(result.warnings, "dense MFMA") ||
-                       warnings_contain(result.warnings, "AccVGPR") ||
-                       warnings_contain(result.warnings, "sparse SMFMAC") ||
-                       warnings_contain(result.warnings, "software fallback");
+                           warnings_contain(result.warnings, "AccVGPR") ||
+                           warnings_contain(result.warnings, "sparse SMFMAC") ||
+                           warnings_contain(result.warnings, "software fallback");
   EXPECT_TRUE(categorized) << "MFMA failure should point to a matrix unsupported category"
-                       << format_warnings(result.warnings);
+                           << format_warnings(result.warnings);
 }
 
 #endif // HAS_DEVICE_KERNELS
