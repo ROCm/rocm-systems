@@ -25,7 +25,9 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     NCCLCHECK(ncclDevrFindWindow(comm, task->sendbuff, &task->sendWin));
     NCCLCHECK(ncclDevrFindWindow(comm, task->recvbuff, &task->recvWin));
     bool symAvailable = ncclSymkAvailable(comm, task->func, task->opDev.op, task->datatype, task->count);
-
+  #ifndef GENERATE_SYM_KERNELS
+    symAvailable = false;
+  #endif
     if (task->sendWin && task->recvWin && (task->sendWin->winFlags & task->recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) && symAvailable) {
       if (tasksSymByFnOpTy[index] == nullptr) fnOpTySymIndices[fnOpTySymCount++] = index;
       task->next = tasksSymByFnOpTy[index];
