@@ -179,49 +179,9 @@ static void ncclIbDevFatalError(struct ncclIbDev* dev) {
   ncclIbStatsFatalError(&dev->stats);
 }
 
-// Helper function to convert IB work completion status to string
-static const char* ibvWcStatusStr(enum ibv_wc_status status) {
-  switch (status) {
-    case IBV_WC_SUCCESS:            return "IBV_WC_SUCCESS";
-    case IBV_WC_LOC_LEN_ERR:        return "IBV_WC_LOC_LEN_ERR";
-    case IBV_WC_LOC_QP_OP_ERR:      return "IBV_WC_LOC_QP_OP_ERR";
-    case IBV_WC_LOC_EEC_OP_ERR:     return "IBV_WC_LOC_EEC_OP_ERR";
-    case IBV_WC_LOC_PROT_ERR:       return "IBV_WC_LOC_PROT_ERR";
-    case IBV_WC_WR_FLUSH_ERR:       return "IBV_WC_WR_FLUSH_ERR";
-    case IBV_WC_MW_BIND_ERR:        return "IBV_WC_MW_BIND_ERR";
-    case IBV_WC_BAD_RESP_ERR:       return "IBV_WC_BAD_RESP_ERR";
-    case IBV_WC_LOC_ACCESS_ERR:     return "IBV_WC_LOC_ACCESS_ERR";
-    case IBV_WC_REM_INV_REQ_ERR:    return "IBV_WC_REM_INV_REQ_ERR";
-    case IBV_WC_REM_ACCESS_ERR:     return "IBV_WC_REM_ACCESS_ERR";
-    case IBV_WC_REM_OP_ERR:         return "IBV_WC_REM_OP_ERR";
-    case IBV_WC_RETRY_EXC_ERR:      return "IBV_WC_RETRY_EXC_ERR";
-    case IBV_WC_RNR_RETRY_EXC_ERR:  return "IBV_WC_RNR_RETRY_EXC_ERR";
-    case IBV_WC_LOC_RDD_VIOL_ERR:   return "IBV_WC_LOC_RDD_VIOL_ERR";
-    case IBV_WC_REM_INV_RD_REQ_ERR: return "IBV_WC_REM_INV_RD_REQ_ERR";
-    case IBV_WC_REM_ABORT_ERR:      return "IBV_WC_REM_ABORT_ERR";
-    case IBV_WC_INV_EECN_ERR:       return "IBV_WC_INV_EECN_ERR";
-    case IBV_WC_INV_EEC_STATE_ERR:  return "IBV_WC_INV_EEC_STATE_ERR";
-    case IBV_WC_FATAL_ERR:          return "IBV_WC_FATAL_ERR";
-    case IBV_WC_RESP_TIMEOUT_ERR:   return "IBV_WC_RESP_TIMEOUT_ERR";
-    case IBV_WC_GENERAL_ERR:        return "IBV_WC_GENERAL_ERR";
-    default:                        return "UNKNOWN_STATUS";
-  }
-}
-
-// Helper function to convert IB work completion opcode to string
-static const char* ibvWcOpcodeStr(enum ibv_wc_opcode opcode) {
-  switch (opcode) {
-    case IBV_WC_SEND:               return "IBV_WC_SEND";
-    case IBV_WC_RDMA_WRITE:         return "IBV_WC_RDMA_WRITE";
-    case IBV_WC_RDMA_READ:          return "IBV_WC_RDMA_READ";
-    case IBV_WC_COMP_SWAP:          return "IBV_WC_COMP_SWAP";
-    case IBV_WC_FETCH_ADD:          return "IBV_WC_FETCH_ADD";
-    case IBV_WC_BIND_MW:            return "IBV_WC_BIND_MW";
-    case IBV_WC_RECV:               return "IBV_WC_RECV";
-    case IBV_WC_RECV_RDMA_WITH_IMM: return "IBV_WC_RECV_RDMA_WITH_IMM";
-    default:                        return "UNKNOWN_OPCODE";
-  }
-}
+// [RCCL] NCCL 2.29.7 promoted ibvWcStatusStr / ibvWcOpcodeStr to public
+// helpers in ibvwrap.{h,cc}. The local static definitions that used to live
+// here would otherwise collide with the new ibvwrap.h declarations.
 pthread_t ncclIbAsyncThread;
 static void* ncclIbAsyncThreadMain(void* args) {
   struct ncclIbDev* dev = (struct ncclIbDev*)args;
@@ -3339,7 +3299,12 @@ ncclResult_t ncclGinIbP2PBarrier(struct ncclGinIbCollComm *cComm) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclGinIbConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm, void** collComm) {
+// [RCCL] NCCL 2.29.7 added nConnections + queueDepth args to ncclGin_t::connect.
+// We don't yet thread connection multiplexing through this transport so we
+// accept the new args and ignore them; behaviour matches the prior
+// nConnections == 1 single-QP setup.
+ncclResult_t ncclGinIbConnect(void* ctx, void* handles[], int nranks, int rank, int nConnections, int queueDepth, void* listenComm, void** collComm) {
+  (void)nConnections; (void)queueDepth;
   struct ncclIbListenComm *lComm = (struct ncclIbListenComm *)listenComm;
   struct ncclGinIbCollComm *cComm = nullptr;
   int next;
@@ -3461,16 +3426,17 @@ ncclResult_t ncclGinIbGdakiListen(void* ctx, int dev, void* opaqueHandle, void**
   return ncclNetIb.listen(ctx, ncclGinIbGdakiDevIndexes[dev], opaqueHandle, listenComm);
 }
 
-ncclResult_t ncclGinIbGdakiCreateContext(void* collComm, int nSignals, int nCounters, void **ginCtx, ncclNetDeviceHandle_v11_t** devHandle) {
+// [RCCL] 2.29.7: createContext gained nContexts; regMrSym gained mr_flags.
+ncclResult_t ncclGinIbGdakiCreateContext(void* collComm, int nSignals, int nCounters, int nContexts, void **ginCtx, ncclNetDeviceHandle_v11_t** devHandle) {
   struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
 
-  NCCLCHECK(ncclGinGdakiCreateContext(cComm, nSignals, nCounters, ginCtx, devHandle));
+  NCCLCHECK(ncclGinGdakiCreateContext(cComm, nSignals, nCounters, nContexts, ginCtx, devHandle));
 
   return ncclSuccess;
 }
 
 ncclResult_t ncclGinIbGdakiRegMrSym(void* collComm, void* data, size_t size, int type, uint64_t mr_flags, void** mhandle, void **ginHandle) {
-  return ncclGinGdakiRegMrSym((struct ncclGinIbCollComm *)collComm, data, size, type, mhandle, ginHandle);
+  return ncclGinGdakiRegMrSym((struct ncclGinIbCollComm *)collComm, data, size, type, mr_flags, mhandle, ginHandle);
 }
 
 ncclResult_t ncclGinIbGdakiDeregMrSym(void* collComm, void* mhandle) {
@@ -3564,9 +3530,12 @@ ncclResult_t ncclGinIbProxyCloseColl(void* collComm) {
   return ncclSuccess;
 }
 
+// [RCCL] 2.29.7 added an int connectionId parameter -- we don't yet model
+// per-connection multiplexing here, so just ignore it (matches connectionId==0).
 ncclResult_t ncclGinIbProxyIPut(void *collComm, uint64_t srcOff, void *srcMhandle, size_t size,
-                                uint64_t dstOff, void *dstMhandle, uint32_t rank, void **request)
+                                uint64_t dstOff, void *dstMhandle, uint32_t rank, int connectionId, void **request)
 {
+  (void)connectionId;
   struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
 
   struct ncclIbGinProxyMrHandle *srcMrHandle = (struct ncclIbGinProxyMrHandle *)srcMhandle;
@@ -3615,11 +3584,13 @@ ncclResult_t ncclGinIbProxyIPut(void *collComm, uint64_t srcOff, void *srcMhandl
   return ncclSuccess;
 }
 
+// [RCCL] 2.29.7 added an int connectionId parameter -- ignored as above.
 ncclResult_t ncclGinIbProxyIPutSignal(void *collComm, uint64_t srcOff, void *srcMhandle,
                                       size_t size, uint64_t dstOff, void *dstMhandle,
                                       uint32_t rank, uint64_t signalOff, void *signalMhandle,
-                                      uint64_t signalValue, uint32_t signalOp, void **request)
+                                      uint64_t signalValue, uint32_t signalOp, int connectionId, void **request)
 {
+  (void)connectionId;
   if (signalOp != NCCL_NET_SIGNAL_OP_INC && signalOp != NCCL_NET_SIGNAL_OP_ADD) {
     WARN("ncclGinIbProxyIPutSignal: Unsupported signalOp %u", signalOp);
     return ncclInvalidArgument;
@@ -3747,6 +3718,34 @@ ncclResult_t ncclGinIbProxyTest(void *collComm, void *request, int *done) {
 // No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
 ncclGin_t ncclGinIbProxy = {
   "GIN_IB_PROXY",
+  ncclGinIbInit,
+  ncclIbDevices,
+  ncclGinIbProxyGetProperties,
+  ncclIbListen,
+  ncclGinIbConnect,
+  NULL,
+  ncclGinIbProxyRegMrSym,
+  ncclGinIbProxyRegMrSymDmaBuf,
+  ncclGinIbProxyDeregMrSym,
+  NULL,
+  ncclGinIbCloseColl,
+  ncclIbCloseListen,
+  ncclGinIbProxyIPut,
+  ncclGinIbProxyIPutSignal,
+  ncclGinIbProxyTest,
+  NULL,
+  NULL,
+  ncclGinIbFinalize
+};
+
+// [RCCL] NCCL 2.29.7 introduced a top-level "ncclGinIb" dispatcher that
+// picks between GDAKI and Proxy at runtime. AMD doesn't ship the GDAKI
+// driver-mode kernels yet, so we point ncclGinIb at the Proxy
+// implementation -- this is a strict subset that always works on ROCm
+// HCAs and matches the existing behaviour. Whoever wires up GDAKI in
+// the future can replace this with a real dispatcher.
+ncclGin_t ncclGinIb = {
+  "GIN_IB",
   ncclGinIbInit,
   ncclIbDevices,
   ncclGinIbProxyGetProperties,

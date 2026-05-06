@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2015-2020, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include <stdlib.h>
 
@@ -13,22 +14,16 @@
 #include <cuda_runtime.h>
 
 #include "core.h"
+#include "mem_manager.h"
 
-
-// #define HIP_FABRIC_API
+// [RCCL] Preserve AMD's HIP_FABRIC_API hook in case it ever gets enabled;
+// the upstream NCCL CUmemFabricHandle compatibility shim has moved to mem_manager.h.
 #ifdef HIP_FABRIC_API // enable based on the HIP version that adds support for fabric handles
+#undef CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED
+#undef CU_MEM_HANDLE_TYPE_FABRIC
 #define CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED hipDeviceAttributeHandleTypeFabricSupported
 #define CU_MEM_HANDLE_TYPE_FABRIC hipMemHandleTypeFabric
 typedef hipMemFabricHandle_t CUmemFabricHandle;
-#elif CUDART_VERSION < 12030
-// MNNVL: FABRIC handle support lifted from CUDA 12.3
-#define CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED ((CUdevice_attribute)128)
-#define CU_MEM_HANDLE_TYPE_FABRIC ((CUmemAllocationHandleType)0x8ULL)
-#define CU_IPC_HANDLE_SIZE 64
-typedef struct CUmemFabricHandle_st {
-    unsigned char data[CU_IPC_HANDLE_SIZE];
-} CUmemFabricHandle_v1;
-typedef CUmemFabricHandle_v1 CUmemFabricHandle;
 #endif
 
 typedef union {
@@ -65,9 +60,9 @@ struct ncclIpcRegInfo {
   struct ncclIpcImpInfo impInfo;
 };
 
-ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int directMap, ncclIpcDesc *ipcDesc, void **ptr);
+ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int directMap, ncclIpcDesc *ipcDesc, void **ptr, int peerRank = -1, struct ncclMemManager* manager = nullptr, ncclMemType_t memtype = ncclMemPersist);
 ncclResult_t ncclP2pFreeShareableBuffer(ncclIpcDesc *ipcDesc);
-ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_t size, ncclIpcDesc *ipcDesc, void **devMemPtr);
+ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_t size, ncclIpcDesc *ipcDesc, void **devMemPtr, void* ownerPtr = nullptr, ncclMemType_t memType = ncclMemPersist);
 ncclResult_t ncclIpcLocalRegisterBuffer(ncclComm* comm, const void* userbuff, size_t buffSize, int* peerRanks, int nPeers, ncclIpcRegType type, int* regBufFlag, uintptr_t* offsetOut, uintptr_t** peerRmtAddrsOut);
 ncclResult_t ncclIpcGraphRegisterBuffer(ncclComm* comm, const void* userbuff, size_t buffSize, int* peerRanks, int nPeers, ncclIpcRegType type, int* regBufFlag, uintptr_t* offsetOut, uintptr_t** peerRmtAddrsOut, void* cleanupQueuePtr, int* nCleanupQueueElts);
 

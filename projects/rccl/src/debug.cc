@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "core.h"
 #include "nccl_net.h"
@@ -239,7 +240,7 @@ static void ncclDebugInit() {
 
   // Cache pid and hostname
   getHostNameForLog(hostname, 1024, '.');
-  pid = ncclOsGetpid();
+  pid = ncclOsGetPid();
 
   /* Parse and expand the NCCL_DEBUG_FILE path and
    * then create the debug file. But don't bother unless the
@@ -333,7 +334,7 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
   }
 
   if (tid == -1) {
-    tid = syscall(SYS_gettid);
+    tid = ncclOsGetTid();
   }
 
   char buffer[1024];
@@ -348,9 +349,11 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
   if (ncclDebugTimestampLevels & (1<<level)) {
     if (ncclDebugTimestampFormat[0] != '\0') {
       struct timespec ts;
-      clock_gettime(CLOCK_REALTIME, &ts);   // clock_gettime failure should never happen
+      clockRealtime(&ts);
+      time_t nowTimeT = ts.tv_sec;
+      long nowNs = ts.tv_nsec;
       std::tm nowTm;
-      localtime_r(&ts.tv_sec, &nowTm);
+      ncclOsLocaltime(&nowTimeT, &nowTm);
 
       // Add the subseconds portion if it is part of the format.
       char localTimestampFormat[sizeof(ncclDebugTimestampFormat)];
@@ -361,7 +364,7 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
         snprintf(localTimestampFormat + ncclDebugTimestampSubsecondsStart,
                  ncclDebugTimestampSubsecondDigits+1,
                  "%0*ld", ncclDebugTimestampSubsecondDigits,
-                 ts.tv_nsec / (1000000000UL/ncclDebugTimestampMaxSubseconds));
+                 nowNs / (1000000000L/ncclDebugTimestampMaxSubseconds));
         strcpy(    localTimestampFormat+ncclDebugTimestampSubsecondsStart+ncclDebugTimestampSubsecondDigits,
                ncclDebugTimestampFormat+ncclDebugTimestampSubsecondsStart+ncclDebugTimestampSubsecondDigits);
       }
