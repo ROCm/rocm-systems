@@ -257,8 +257,8 @@ the correct instruction syntax:
     // CDNA syntax: dword suffix, glc for return
     asm volatile("global_atomic_add %0, %1, %2, off glc" : "=v"(old) : "v"(addr), "v"(val) : "memory");
     
-#elif defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1200__) || defined(__gfx1201__)
-    // RDNA4 syntax: explicit type suffix, TH_ATOMIC_RETURN for return
+#elif defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1200__) || defined(__gfx1201__)
+    // RDNA 3.5 APU / RDNA4 (GFX12-style): explicit type suffix, TH_ATOMIC_RETURN for return
     asm volatile("global_atomic_add_u32 %0, %1, %2, off th:TH_ATOMIC_RETURN" : "=v"(old) : "v"(addr), "v"(val) : "memory");
 #endif
 ```
@@ -271,6 +271,7 @@ the correct instruction syntax:
 | `__gfx950__` | CDNA4 | MI350X/MI355X |
 | `__gfx1150__` | RDNA 3.5 | Strix Point |
 | `__gfx1151__` | RDNA 3.5 | Strix Halo |
+| `__gfx1152__` | RDNA 3.5 | Krackan |
 | `__gfx1200__` | RDNA4 | RX 9060 series |
 | `__gfx1201__` | RDNA4 | RX 9070 XT/9070 |
 
