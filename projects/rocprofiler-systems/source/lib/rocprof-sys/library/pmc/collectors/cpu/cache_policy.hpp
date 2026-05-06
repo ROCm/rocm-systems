@@ -54,16 +54,16 @@ struct cache_policy
                                         const std::set<size_t>& monitored_cpus,
                                         bool                    is_first_socket)
     {
-        constexpr size_t      event_code       = 0;
-        constexpr size_t      instance_id      = 0;
-        constexpr const char* long_description = "";
-        constexpr const char* component        = "";
-        constexpr const char* block            = "";
-        constexpr const char* expression       = "";
-        constexpr const char* target_arch      = "CPU";
-        constexpr uint32_t    is_constant      = 0;
-        constexpr uint32_t    is_derived       = 0;
-        constexpr const char* extdata          = "{}";
+        constexpr size_t        event_code       = 0;
+        constexpr size_t        instance_id      = 0;
+        constexpr const char*   long_description = "";
+        constexpr const char*   component        = "";
+        constexpr const char*   block            = "";
+        constexpr const char*   expression       = "";
+        constexpr const char*   target_arch      = "CPU";
+        constexpr std::uint32_t is_constant      = 0;
+        constexpr std::uint32_t is_derived       = 0;
+        constexpr const char*   extdata          = "{}";
 
         using ::tim::trait::name;
         auto& registry = trace_cache::get_metadata_registry();
@@ -194,10 +194,10 @@ struct cache_policy
 
         const auto& cpu_data = get_effective_cpu_data(metric_values);
 
-        assert(device_id <= std::numeric_limits<uint32_t>::max() &&
+        assert(device_id <= std::numeric_limits<std::uint32_t>::max() &&
                "socket id exceeds cpu_pmc_sample::device_id width");
         trace_cache::get_buffer_storage().store(trace_cache::cpu_pmc_sample{
-            effective, static_cast<uint32_t>(device_id), timestamp,
+            effective, static_cast<std::uint32_t>(device_id), timestamp,
             metric_values.process_data, serialize_frequencies(cpu_data),
             serialize_loads(cpu_data) });
     }
