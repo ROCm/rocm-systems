@@ -51,10 +51,39 @@
 namespace nccl {
 namespace utility {
 
+#if NCCL_CHECK_CUDACC
+// cuda/atomic header file is included so we can use atomic_ref to load the abortFlag
+static NCCL_DEVICE_INLINE bool testAbort(uint32_t* abortFlag, uint32_t& steps) {
+  const uint32_t maxSteps = 10000;
+  if (++steps < maxSteps) {
+    return false;
+  } else {
+    steps = 0;
+    return abortFlag != nullptr && cuda::atomic_ref<uint32_t>{*abortFlag}.load(cuda::memory_order_relaxed) != 0;
+  }
+}
+#else
+static NCCL_DEVICE_INLINE bool testAbort(uint32_t* abortFlag, uint32_t& steps) {
+  const uint32_t maxSteps = 10000;
+  if (++steps < maxSteps) {
+    return false;
+  } else {
+    volatile uint32_t *ptr = (volatile uint32_t*)abortFlag;
+    steps = 0;
+    return ptr != nullptr && *ptr != 0;
+  }
+}
+#endif
+
 template<typename T>
 NCCL_HOST_DEVICE_INLINE T&& declval() noexcept {
   static_assert(sizeof(T)!=sizeof(T), "You can't evaluate declval.");
 }
+
+template <typename>
+struct always_false {
+  static constexpr bool value = false;
+};
 
 template<typename T, T value_>
 struct ValueAsType { static constexpr T value = value_; };
@@ -431,6 +460,9 @@ struct Present<H, T...> {
   H h;
   Present<T...> t;
 
+  NCCL_HOST_DEVICE_INLINE Present(H h, Present<T...> t): h(static_cast<H>(h)), t(t) {}
+  NCCL_HOST_DEVICE_INLINE Present(Present const& that): h(static_cast<H>(that.h)), t(that.t) {}
+
   NCCL_HOST_DEVICE_INLINE H get(IntSeq<0>) {
     return static_cast<H>(h);
   }
@@ -460,7 +492,7 @@ struct Optional {
   NCCL_HOST_DEVICE_INLINE constexpr Optional(Absent): present(false) {}
 
   // Helper constructor
-  template<int ...i, typename ...Arg>
+  template<typename ...Arg, int ...i>
   NCCL_HOST_DEVICE_INLINE Optional(Present<Arg...> args, IntSeq<i...>):
     present(true),
     thing{args.get(IntSeq<i>())...} {

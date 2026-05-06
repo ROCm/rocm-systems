@@ -36,7 +36,7 @@ std::mutex& getGdrMutex();
 // This is required as the GDR memory is mapped WC
 #if !defined(__NVCC__)
 #if defined(__PPC__)
-static inline void wc_store_fence(void) { asm volatile("sync") ; }
+static inline void wc_store_fence(void) { asm volatile("sync" : : : "memory"); }
 #elif defined(__x86_64__)
 #include <immintrin.h>
 static inline void wc_store_fence(void) { _mm_sfence(); }
@@ -228,6 +228,13 @@ static ncclResult_t ncclGdrCudaFree(void* gdrHandle, struct ncclMemManager* mana
 
   return ncclSuccess;
 }
+
+// [RCCL] Manager-aware overload mirroring upstream NCCL 2.29 -- the AMD
+// branch ignores the manager pointer.
+template <typename T>
+static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** gdrHandle, struct ncclMemManager* /*manager*/) {
+  return ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle);
+}
 #else
 static gdr_t ncclGdrInit() {
   int libMajor, libMinor, drvMajor, drvMinor;
@@ -324,5 +331,9 @@ static ncclResult_t ncclGdrCudaFree(void* gdrHandle, struct ncclMemManager* mana
   return ncclSuccess;
 }
 #endif
+
+static inline ncclResult_t ncclGdrCudaFree(void* gdrHandle, struct ncclMemManager* /*manager*/) {
+  return ncclGdrCudaFree(gdrHandle);
+}
 
 #endif // End include guard
