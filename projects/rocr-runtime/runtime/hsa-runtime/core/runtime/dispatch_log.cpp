@@ -388,11 +388,32 @@ void for_each_known_queue_locked(F&& fn) {
 // `count * 16` after the upstream fix lands).
 constexpr size_t kSlotStride = 16;
 
+// Per-pass batch size: drainer accumulates up to this many records per
+// LTTng tracepoint call. 256 records × 16 bytes = 4 KiB stack-allocated
+// buffer per drain pass. Batching is the primary mechanism for keeping
+// up with peak FW write rates of ~1M records/sec on busy queues; per-record
+// LTTng tracepoint emit cost (~1-2 us) was the host-side bottleneck before
+// batching.
+constexpr uint32_t kBatchMax = 256;
+
 bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   std::lock_guard<std::mutex> lk(qs.drain_mu);
 
   // Poisoned (disable in flight) or never-populated.
   if (qs.ring_base == nullptr || qs.ring_records == 0) return false;
+
+  // Shared batch buffer for both Path A (signal-bound) and Path B
+  // (sentinel-scan). Stack-allocated; per-pass scope.
+  alignas(16) uint8_t batch_buf[kBatchMax * kSlotStride];
+  uint32_t batch_count = 0;
+  auto flush_batch = [&]() {
+    if (batch_count == 0) return;
+    rocm_trace_emit_hsa_kernel_dispatch_record(
+        queue_id_to_wire(qs.queue_id),
+        batch_count, batch_buf,
+        (size_t)batch_count * kSlotStride, force_emit);
+    batch_count = 0;
+  };
 
   // ============================================================================
   // PATH A: SIGNAL-BOUND SCAN (preferred, KFD MINOR>=20 + new FW)
@@ -437,6 +458,35 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     // qs.next_idx is our monotonic floor.
     if (observed <= qs.next_idx) return false;
 
+    // Initial-state sync. The FW maintains its dispatch-log wptr counter
+    // in per-pipe scratch RAM (LdMecAqlProfBufWptr in f32_mec.uc:29579),
+    // and that counter PERSISTS across queue lifecycles. When KFD
+    // destroys a queue and creates a new one on the same pipe, the new
+    // queue inherits the previous queue's wptr value. At
+    // enable_dispatch_log_for_queue time we initialize qs.next_idx from
+    // the current FW signal value, but the host signal_addr is still 0
+    // at that moment (FW hasn't published since enable). Once FW writes
+    // its first record post-enable, signal jumps from 0 to whatever the
+    // pipe scratch wptr was + 1, which can be huge (millions).
+    //
+    // Without this sync the overrun handler below would interpret the
+    // huge gap as "we fell behind by ring_records or more" and emit a
+    // drop event followed by reads of stale ring storage (most slots
+    // empty / pre-zero, only the freshly-written slot has real data).
+    // Net effect: hundreds of zero-record batched events per queue
+    // immediately after enable.
+    //
+    // Heuristic: if next_idx is 0 (never advanced past initial enable)
+    // AND observed > ring_records (impossibly far ahead for a fresh
+    // queue), treat as initial-state sync. Set next_idx = observed - 1
+    // so we drain ONE record (the actual fresh dispatch FW just wrote)
+    // and start tracking from there. The single record at slot
+    // (observed - 1) & ring_mask is the real one FW just wrote at the
+    // pre-increment scratch wptr position.
+    if (qs.next_idx == 0 && observed > qs.ring_records) {
+      qs.next_idx = observed - 1;
+    }
+
     // Overrun detection. If FW lapped us, log a drop event and skip
     // the unrecoverable region. The records we DO read after the skip
     // are still valid (they're the most recent observed - ring_records
@@ -450,13 +500,19 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
       start = end - qs.ring_records;
     }
 
+    // Batched LTTng emit (see batch_buf / flush_batch declared above the
+    // path branch). Records accumulate as we walk [start, end); when the
+    // batch fills (kBatchMax records) we flush mid-loop, and after the
+    // loop we flush whatever's left.
     bool any = false;
     for (uint64_t i = start; i < end; ++i) {
       // Kill-switch pre-check: bail before reading any record. Safe to
       // bail here because qs.next_idx still points at the unread head
       // and the next pass will pick up where we stopped (FW state
-      // unchanged — the wptr-bound scan never mutates the slot).
+      // unchanged — the wptr-bound scan never mutates the slot). Flush
+      // any pending batch first so we don't lose records already read.
       if (!force_emit && rocm_trace_disabled()) {
+        flush_batch();
         qs.next_idx = i;  // record progress so far
         if (qs.rptr_ptr) __atomic_store_n(qs.rptr_ptr, i, __ATOMIC_RELEASE);
         return any;
@@ -468,26 +524,23 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
 
       // FW publish-ordering contract (per f32_mec.uc Q6): record body
       // is host-visible BEFORE the wptr update we acquire-loaded above.
-      // So all four DWs of this record are coherent. Use relaxed atomics
-      // to suppress UB from non-atomic reads on FW-written memory; the
-      // wptr acquire load above provides the ordering.
-      const uint32_t ts_lo        = __atomic_load_n(&rec->ts_lo,        __ATOMIC_RELAXED);
-      const uint32_t ts_hi        = __atomic_load_n(&rec->ts_hi,        __ATOMIC_RELAXED);
-      const uint32_t rt           = __atomic_load_n(&rec->record_type,  __ATOMIC_RELAXED);
-      const uint32_t dispatch_idx = __atomic_load_n(&rec->dispatch_idx, __ATOMIC_RELAXED);
-      const uint64_t gpu_ts       = (static_cast<uint64_t>(ts_hi) << 32) | ts_lo;
-
-      // No slot mutation in the wptr-bound path: FW will overwrite this
-      // slot when wptr next reaches the same physical slot, and our
-      // wptr-based iteration will read it as a new record at that time.
-      // No sentinel needed because we never re-read the same wptr index.
-
-      rocm_trace_emit_hsa_kernel_dispatch_record(
-          queue_id_to_wire(qs.queue_id), dispatch_idx, gpu_ts,
-          static_cast<uint8_t>(rt), force_emit);
-
+      // So all four DWs of this record are coherent. We copy the entire
+      // 16-byte record into the batch buffer in one shot via memcpy
+      // (the source is host-coherent FW-written memory at this point).
+      std::memcpy(batch_buf + (size_t)batch_count * kSlotStride,
+                  rec, kSlotStride);
+      batch_count++;
       any = true;
+
+      // No slot mutation: FW will overwrite this slot when wptr next
+      // reaches the same physical slot, and our wptr-based iteration
+      // will read it as a new record at that time.
+
+      if (batch_count == kBatchMax) {
+        flush_batch();
+      }
     }
+    flush_batch();
 
     qs.next_idx = end;
     // Publish our consumer position back to FW (informational; FW does
@@ -561,13 +614,12 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     uint32_t rt = __atomic_load_n(&rec->record_type, __ATOMIC_ACQUIRE);
     if (rt == 0) break;
 
-    // Snapshot the rest of the record locally before clearing the sentinel.
-    // Relaxed atomic loads suffice (see comment above) — the acquire on
-    // record_type above already orders these.
-    const uint32_t ts_lo        = __atomic_load_n(&rec->ts_lo, __ATOMIC_RELAXED);
-    const uint32_t ts_hi        = __atomic_load_n(&rec->ts_hi, __ATOMIC_RELAXED);
-    const uint32_t dispatch_idx = __atomic_load_n(&rec->dispatch_idx, __ATOMIC_RELAXED);
-    const uint64_t gpu_ts       = (static_cast<uint64_t>(ts_hi) << 32) | ts_lo;
+    // Sentinel-scan path also batches: copy the FW record (16 bytes,
+    // exactly the mec_dispatch_record_16 layout the new tracepoint
+    // expects) into the batch buffer, then clear the sentinel.
+    std::memcpy(batch_buf + (size_t)batch_count * kSlotStride,
+                rec, kSlotStride);
+    batch_count++;
 
     // Zero the record_type field so a wraparound rewrite by FW (next time
     // the ring loops past this position) is re-detected as a fresh
@@ -576,40 +628,15 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     // 16 bytes atomically.
     __atomic_store_n(&rec->record_type, 0, __ATOMIC_RELEASE);
 
-    // Emit one event per FW-written record. No host-side START/END
-    // pairing — consumer joins on (queue_id, dispatch_idx) and uses
-    // gpu_ts ordering or record_type semantics as it sees fit.
-    //
-    // Empirically on the gfx950 MEC firmware (gc_9_5_0_mec.bin):
-    // record_type==2 carries the earlier ts (dispatch start),
-    // record_type==1 carries the later ts (EOP / dispatch end). HSA
-    // emits both records as-is without taking a position on which is
-    // which — the FW contract is not formally versioned, and a
-    // consumer-side polarity decision is cheaper to update than a
-    // host-runtime release.
-    //
-    // record_type narrowing uint32 -> uint8: current FW values are
-    // 1 and 2 and the on-the-wire schema field is uint8_t. The
-    // sentinel-zero check above (rt == 0 immediately after the acquire load)
-    // already filters
-    // empty slots before this point, so rt is known non-zero at the
-    // cast site — the truncation hazard is NOT sentinel collision
-    // (no on-the-wire 0 can be produced here). The only hazard is two
-    // distinct future FW values that collide modulo 256 (e.g. 1 and
-    // 257); we accept this risk for the smaller payload and will
-    // widen the schema (and the cast) when (and only when) such a FW
-    // revision exists.
-    //
-    // Narrow internal 64-bit queue_id at the tracepoint boundary
-    // (spec §6 / §14, C5 fix). dispatch_idx is 32-bit per FW contract.
-    rocm_trace_emit_hsa_kernel_dispatch_record(
-        queue_id_to_wire(qs.queue_id), dispatch_idx, gpu_ts,
-        static_cast<uint8_t>(rt), force_emit);
-
     qs.next_idx += 1;
     pass_consumed += 1;
     any = true;
+
+    if (batch_count == kBatchMax) {
+      flush_batch();
+    }
   }
+  flush_batch();
   return any;
 }
 
@@ -647,10 +674,60 @@ void per_queue_drain_loop(std::shared_ptr<queue_drain_state> qs) {
     return;
   }
 
+  // Signal-poll loop with adaptive backoff.
+  //
+  // The previous implementation busy-spun calling drain_one_queue() and
+  // yielding only when it had work, which kept a CPU core saturated even
+  // when the queue was idle. With many queues running concurrently this
+  // multiplied: N queues × N busy-spin workers = N cores at 100%.
+  //
+  // New strategy: read the FW signal value cheaply (one acquire load),
+  // compare to last_observed. If unchanged, sleep with adaptive backoff;
+  // if changed, drain immediately. Backoff schedule:
+  //   - 0 idle iterations: drain back-to-back (no sleep)
+  //   - 1-3 idle:           yield only
+  //   - 4-15 idle:           sleep 10 us
+  //   - 16-63 idle:          sleep 100 us
+  //   - 64+ idle:            sleep 1 ms (steady-state idle)
+  // First sign of work resets the counter to 0 and resumes hot-loop.
+  //
+  // Path B (sentinel-scan, no signal_ptr): falls back to the old yield-
+  // only loop because we have no cheap "no work" probe — we have to
+  // actually read the slot's record_type to know.
+  uint64_t last_signal = 0;
+  uint32_t idle_count = 0;
   while (!qs->should_stop.load(std::memory_order_acquire)) {
+    // Path A fast-path: if signal_ptr is registered, read it cheaply and
+    // skip the drain call entirely when no new records exist.
+    if (qs->signal_ptr != nullptr) {
+      const uint64_t cur = __atomic_load_n(qs->signal_ptr, __ATOMIC_ACQUIRE);
+      if (cur == last_signal) {
+        // No new records — adaptive backoff
+        ++idle_count;
+        if (idle_count <= 3) {
+          std::this_thread::yield();
+        } else if (idle_count <= 15) {
+          std::this_thread::sleep_for(std::chrono::microseconds(10));
+        } else if (idle_count <= 63) {
+          std::this_thread::sleep_for(std::chrono::microseconds(100));
+        } else {
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        continue;
+      }
+      last_signal = cur;
+      idle_count = 0;
+    }
+
     const bool any = drain_one_queue(*qs, /* force_emit = */ false);
-    if (any) {
-      std::this_thread::yield();
+    if (!any) {
+      // Path B (sentinel-scan) fallback or spurious wakeup: yield.
+      ++idle_count;
+      if (idle_count > 3) {
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
+      } else {
+        std::this_thread::yield();
+      }
     }
   }
   // Final drain after the stop signal so any FW records written between
@@ -919,33 +996,14 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
     // else: legacy sentinel-scan mode; null pointers tell drain_one_queue
     // to use the fallback scan path.
 
-    // Initialize next_idx from the CURRENT FW signal value at enable time,
-    // not from 0. The MEC firmware maintains its per-pipe scratch wptr
-    // counter (LdMecAqlProfBufWptr in f32_mec.uc, line 29579) across queue
-    // lifecycles — when KFD destroys a queue and creates a new one on the
-    // same pipe, the new queue's FW state inherits the previous queue's
-    // wptr. Verified empirically with the standalone hsa_dlog_test_mq
-    // multi-queue test: queue Q0's signal value started at 2,069,683 (with
-    // expected 200) reflecting cumulative FW writes from prior queue
-    // instances on the same pipe. Each successive test run grew Q0's
-    // signal by exactly 2*N, confirming the pipe scratch persistence.
-    //
-    // If we left next_idx=0, the drain pass would observe a huge initial
-    // signal value, treat it as overrun (signal - 0 > ring_records), emit
-    // a fake drop event for ~2M phantom records, and start draining from
-    // [signal - ring_records, signal) — most of those slots are pre-zero
-    // ring storage, not actual records. By initializing next_idx to the
-    // current signal we treat the FW's reported state as our starting
-    // point and only emit records FW writes from this point forward.
-    //
-    // Falls back to 0 if signal_ptr is null (legacy sentinel-scan mode);
-    // sentinel-scan handles wraparound via per-slot record_type=0 reset
-    // and doesn't depend on absolute counter values.
-    if (qs->signal_ptr != nullptr) {
-      qs->next_idx = __atomic_load_n(qs->signal_ptr, __ATOMIC_ACQUIRE);
-    } else {
-      qs->next_idx = 0;
-    }
+    // next_idx starts at 0. The drain loop's initial-state sync (see
+    // drain_one_queue Path A) detects the FW per-pipe scratch wptr
+    // persistence on the FIRST observed signal advance and adjusts
+    // next_idx then. We can't read FW's wptr at enable time because
+    // FW won't publish to signal_addr until the first new record write
+    // POST-enable — at this exact point the host word is still 0
+    // (initialized by SetProfiling).
+    qs->next_idx = 0;
 
     g_active_drainers[qs->queue_id] = qs;
 

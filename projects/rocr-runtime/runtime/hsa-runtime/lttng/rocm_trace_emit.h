@@ -229,18 +229,29 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
  * (real parent is recovered consumer-side via the
  * rocm_hsa:hsa_doorbell_ring join on (queue_id, dispatch_idx)).
  */
+/* Batched form: emit `count` records (each a 16-byte mec_dispatch_record_16
+ * laid out [ts_lo, ts_hi, record_type, dispatch_idx]) under one tracepoint
+ * call. The drainer accumulates records during a drain pass and calls this
+ * once per pass (or once per kBatchMax records, whichever is smaller).
+ *
+ * `records` is a pointer to a contiguous packed array of `count` × 16
+ * bytes; `records_len` is `count * 16` (the byte length the LTTng
+ * sequence field needs).
+ *
+ * Per-record corr_id is no longer emitted: per-batch unique IDs aren't
+ * useful for the (queue_id, dispatch_idx) join most consumers do, and
+ * the per-record corr_id allocation was a meaningful overhead at sustained
+ * rates.
+ */
 static inline void rocm_trace_emit_hsa_kernel_dispatch_record(
-    uint32_t queue_id, uint32_t dispatch_idx,
-    uint64_t gpu_ts, uint8_t record_type,
-    bool     force_emit /* default false at call site via wrapper */) {
+    uint32_t queue_id, uint32_t count,
+    const uint8_t* records, size_t records_len,
+    bool     force_emit /* bypasses the tracepoint-enabled check */) {
     if (rocm_trace_disabled()) return;
     if (force_emit ||
         lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_record)) {
-        const uint64_t self_corr = rocp_reg_next_corr_id();
         lttng_ust_do_tracepoint(rocm_hsa, kernel_dispatch_record,
-                                queue_id, dispatch_idx,
-                                gpu_ts, record_type,
-                                self_corr, /* parent_corr_id */ (uint64_t)0);
+                                queue_id, count, records, records_len);
     }
 }
 
@@ -302,9 +313,8 @@ static inline void rocm_trace_emit_hsa_doorbell_ring(uint32_t a, int64_t b, uint
 static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t a, uint64_t b, uint32_t c, uint8_t d) {
     (void)a; (void)b; (void)c; (void)d;
 }
-static inline void rocm_trace_emit_hsa_kernel_dispatch_record(uint32_t a, uint32_t b,
-                                                               uint64_t c, uint8_t d,
-                                                               bool e) {
+static inline void rocm_trace_emit_hsa_kernel_dispatch_record(
+    uint32_t a, uint32_t b, const uint8_t* c, size_t d, bool e) {
     (void)a; (void)b; (void)c; (void)d; (void)e;
 }
 static inline void rocm_trace_emit_hsa_kernel_dispatch_drop(uint32_t a, uint64_t b) {

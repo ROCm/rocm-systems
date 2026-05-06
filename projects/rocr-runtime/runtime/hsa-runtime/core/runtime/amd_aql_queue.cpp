@@ -1630,7 +1630,16 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
   }
 
   if (enabled && !dispatch_record_buffer_) {
-    constexpr uint32_t num_records = 65536;
+    // Ring size: 256K records (4 MiB at the FW 16-byte stride). Was 64K
+    // previously; bumped to 256K because empirical workloads can sustain
+    // up to ~1M FW writes/sec on a single queue (multi-XCC graph
+    // executors), and the host drainer + LTTng emit cannot maintain that
+    // rate under contention. With 64K slots the drainer had ~65 ms of
+    // headroom before FW would overrun (silently overwriting unread
+    // records). 256K slots gives ~256 ms headroom, comfortably absorbing
+    // host scheduling latencies and tracepoint emit cost. Power-of-2
+    // required for the wraparound mask in drain_one_queue.
+    constexpr uint32_t num_records = 262144;
     // FW writes 16-byte mec_dispatch_record entries at 16-byte stride
     // (see core/inc/mec_dispatch_record.h and the FW f32_mec.uc
     // SubAqlProfBufWriteRecord). The kernel's BO-size validation

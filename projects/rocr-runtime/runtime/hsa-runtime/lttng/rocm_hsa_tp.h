@@ -144,58 +144,52 @@ LTTNG_UST_TRACEPOINT_EVENT(
 /* Curated per-API typed tracepoint events (generated header). */
 #include "rocm_hsa_curated_tp.h"
 
-/* kernel_dispatch_record: emitted by the firmware-dispatch-log drainer
- * thread (NOT the application thread) once per FW-written 16-byte record.
+/* kernel_dispatch_record: BATCHED FORM — emitted by the firmware-dispatch-log
+ * drainer thread once per drain pass with a packed array of all records
+ * read in that pass.
  *
- * The MEC firmware writes two records per kernel dispatch: the two
- * records share the same dispatch_idx and have different record_type
- * values (currently 1 and 2). HSA does NOT interpret which record_type
- * means start vs end; that interpretation is left to the stream
- * consumer, which can:
- *   (a) join records on (queue_id, dispatch_idx) to find pairs, and
- *   (b) infer start vs end from gpu_ts ordering (smaller ts = start)
- *       OR from record_type if the consumer has FW-version-specific
- *       knowledge.
+ * Each event carries:
+ *   - queue_id (one per batch — all records in a batch belong to one queue)
+ *   - count: number of records in `records[]`
+ *   - records: packed array of `count` × 16-byte FW records, exactly the
+ *     mec_dispatch_record_16 struct layout (ts_lo, ts_hi, record_type,
+ *     dispatch_idx). Consumer un-packs this to get per-dispatch
+ *     {gpu_ts, record_type, dispatch_idx} tuples.
  *
- * Empirical observation on the gfx950 MEC firmware (gc_9_5_0_mec.bin)
- * shows record_type==2 carries the EARLIER GPU clock (dispatch start)
- * and record_type==1 carries the LATER GPU clock (EOP / dispatch end).
- * This is OPPOSITE of what cpc_tracing's mec_dispatch_record.h comment
- * claims. Rather than baking a host-side polarity decision against a
- * non-versioned FW contract, HSA emits both records and lets the
- * consumer decide. Future FW revisions that change the polarity (or add
- * a third record_type) cost only a consumer change.
+ * Batching motivation: per-record tracepoint calls were the host-side
+ * bottleneck under sustained FW write rates (~1M records/sec on busy
+ * queues during graph workloads). Each LTTng tracepoint call costs ~1-2
+ * us; at 1M/sec that fills a CPU core entirely. Batching N records per
+ * call reduces the per-record cost to ~1/N microseconds plus the constant
+ * memcpy of N*16 bytes into the LTTng UST buffer. The drainer's typical
+ * batch size is bounded by either the per-pass record count or the
+ * configured kBatchMax (see drain_one_queue).
  *
- * gpu_ts is the raw hardware clock counter written by the FW. It is NOT
+ * Per-record `corr_id` field is removed in the batched form: the drainer
+ * has no API context to attach (it runs on its own thread), and per-record
+ * unique IDs aren't needed for the (queue_id, dispatch_idx) join most
+ * stream consumers do. Consumers that need a per-record monotonic ID can
+ * derive one from (queue_id, batch_seq, record_index_within_batch).
+ *
+ * record_type interpretation: the MEC firmware writes one record at
+ * dispatch start (rt=2 on gfx950) and one at dispatch end (rt=1 on
+ * gfx950). HSA does NOT interpret record_type — the stream consumer
+ * joins records on (queue_id, dispatch_idx) and either orders by gpu_ts
+ * or applies its own FW-version-specific record_type interpretation.
+ *
+ * gpu_ts is the raw hardware clock counter written by FW. It is NOT
  * translated to the host system clock domain. The consumer must use the
- * rocm_hsa:clock_sync tracepoint to correlate this raw GPU timestamp with
- * the system clock.
- *
- * record_type is the raw value FW wrote (uint8_t — the FW field is
- * 32 bits but the values seen so far fit in uint8_t and the on-the-wire
- * payload size matters; see drain_one_queue for the narrowing).
- *
- * dispatch_idx is the low 32 bits of the AQL read_dispatch_id at the
- * FW's moment of dispatch processing; stream-side joiners against
- * rocm_hsa:hsa_doorbell_ring MUST mask the doorbell write_idx to 32
- * bits before comparing.
- *
- * self_corr is freshly minted per emission so this event has its own
- * identity; parent_corr_id is always 0 (the drainer thread has no API
- * context — real parent recovery is consumer-side via the doorbell
- * join). See Phase A spec §6 for full rationale. */
+ * rocm_hsa:clock_sync tracepoint to correlate raw GPU timestamps with
+ * the host system clock. */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, kernel_dispatch_record,
-    LTTNG_UST_TP_ARGS(uint32_t, queue_id, uint32_t, dispatch_idx,
-                      uint64_t, gpu_ts, uint8_t, record_type,
-                      uint64_t, self_corr, uint64_t, parent_corr_id),
+    LTTNG_UST_TP_ARGS(uint32_t, queue_id, uint32_t, count,
+                      const uint8_t*, records, size_t, records_len),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_integer(uint32_t, queue_id, queue_id)
-        lttng_ust_field_integer(uint32_t, dispatch_idx, dispatch_idx)
-        lttng_ust_field_integer(uint64_t, gpu_ts, gpu_ts)
-        lttng_ust_field_integer(uint8_t, record_type, record_type)
-        lttng_ust_field_integer(uint64_t, corr_id, self_corr)
-        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
+        lttng_ust_field_integer(uint32_t, count, count)
+        lttng_ust_field_sequence(uint8_t, records, records,
+                                 size_t, records_len)
     )
 )
 
