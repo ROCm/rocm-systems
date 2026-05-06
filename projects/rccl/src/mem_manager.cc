@@ -1026,6 +1026,59 @@ fail:
   return ret;
 }
 
+/*
+ * Public Communicator Suspend/Resume APIs
+ */
+
+NCCL_API(ncclResult_t, ncclCommSuspend, ncclComm_t comm, int flags);
+ncclResult_t ncclCommSuspend(ncclComm_t comm, int flags) {
+  NCCL_NVTX3_FUNC_RANGE;
+
+  NCCLCHECK(CommCheck(comm, "ncclCommSuspend", "comm"));
+  NCCLCHECK(ncclCommEnsureReady(comm));
+
+  if (flags & NCCL_SUSPEND_MEM) {
+    if (ncclParamMemManagerDisable())
+    {
+      WARN("MemManager: Suspend not supported, memory manager is disabled");
+      return ncclInvalidUsage;
+    }
+    // Check if manager is shared
+    if (comm->memManager && comm->memManager->refCount > 1) {
+      WARN("Memory suspend not supported with split_share communicators (refCount=%d)",
+           comm->memManager->refCount);
+      return ncclInvalidUsage;
+    }
+    INFO(NCCL_INIT, "ncclCommSuspend: rank %d suspending memory", comm->rank);
+    NCCLCHECK(ncclCommMemSuspend(comm));
+  }
+  return ncclSuccess;
+}
+
+NCCL_API(ncclResult_t, ncclCommResume, ncclComm_t comm);
+ncclResult_t ncclCommResume(ncclComm_t comm) {
+  NCCL_NVTX3_FUNC_RANGE;
+
+  NCCLCHECK(CommCheck(comm, "ncclCommResume", "comm"));
+  NCCLCHECK(ncclCommEnsureReady(comm));
+
+  if (ncclParamMemManagerDisable())
+  {
+    WARN("MemManager: Resume not supported, memory manager is disabled");
+    return ncclInvalidUsage;
+  }
+  // Check if manager is shared
+  if (comm->memManager && comm->memManager->refCount > 1) {
+    WARN("Memory resume not supported with split_share communicators (refCount=%d)",
+         comm->memManager->refCount);
+    return ncclInvalidUsage;
+  }
+  INFO(NCCL_INIT, "ncclCommResume: rank %d resuming all resources", comm->rank);
+  NCCLCHECK(ncclCommMemResume(comm));
+  return ncclSuccess;
+}
+
+NCCL_API(ncclResult_t, ncclCommMemStats, ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
 ncclResult_t ncclCommMemStats(struct ncclComm* comm, ncclCommMemStat_t stat, uint64_t* value) {
   NCCL_NVTX3_FUNC_RANGE;
 

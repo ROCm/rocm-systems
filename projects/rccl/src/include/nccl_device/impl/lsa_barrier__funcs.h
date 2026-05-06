@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef _NCCL_DEVICE_MEM_BARRIER__FUNCS_H_
 #define _NCCL_DEVICE_MEM_BARRIER__FUNCS_H_
@@ -88,12 +89,14 @@ NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::arrive(Coop, cuda::memory_o
 #if NCCL_CHECK_CUDACC
 template<typename Coop>
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::wait(Coop, cuda::memory_order order) {
+  using nccl::utility::testAbort;
+  uint32_t steps = 0;
   if (this->multimem) {
   #if NCCL_ARCH_HAS_MULTIMEM
     if (this->coop.thread_rank() == 0) {
       cuda::atomic_ref<uint32_t> inbox(*this->mcInbox(/*multimem=*/false));
       #pragma unroll 1
-      while (true) {
+      while (!testAbort(this->comm.abortFlag, steps)) {
         uint32_t got = inbox.load(nccl::utility::acquireOrderOf(order));
         if (got - (this->epoch + this->team.nRanks) <= uint32_t(-1)>>1) break;
       }
@@ -106,7 +109,7 @@ NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::wait(Coop, cuda::memory_ord
       int peer = i + (this->team.rank <= i ? 1 : 0);
       cuda::atomic_ref<uint32_t> inbox(*this->ucInbox(this->team.rank, peer));
       #pragma unroll 1
-      while (true) {
+      while (!testAbort(this->comm.abortFlag, steps)) {
         uint32_t got = inbox.load(nccl::utility::acquireOrderOf(order));
         if (got - (this->epoch + 1) <= uint32_t(-1)>>1) break;
       }

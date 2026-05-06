@@ -721,6 +721,23 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
   return ncclSuccess;
 }
 
+// Restored from upstream NCCL 2.29.7 (src/enqueue.cc): the definition was
+// dropped from the RCCL tree at some point but the declaration in
+// include/enqueue.h and several call sites (enqueue.cc, scheduler/*) were
+// kept, leaving librccl.so with an unresolved symbol that only triggered at
+// the first multi-rank ncclAllReduce. Reinstating the upstream body verbatim
+// (it has no AMD divergence).
+ncclResult_t ncclAddProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclProxyOp* op) {
+  bool needed = true;
+  NCCLCHECK(ncclProxySaveOp(comm, op, &needed));
+  if (needed) {
+    struct ncclProxyOp* q = ncclMemoryPoolAlloc<struct ncclProxyOp>(&comm->memPool_ncclProxyOp, &comm->memPermanent);
+    *q = *op; // C++ struct assignment
+    ncclIntruQueueEnqueue(&comm->planner.wipPlan.channels[op->channelId].proxyOpQueue, q);
+  }
+  return ncclSuccess;
+}
+
 static ncclResult_t addProfilerProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclProxyOp* op) {
   int tmp = op->pattern;
   op->pattern = ncclPatternProfiler;
@@ -1383,7 +1400,7 @@ static int calcP2pChannelCount(size_t totalSize, int minChannels, int maxChannel
 }
 
 static ncclResult_t scheduleP2pTasksToPlan(
-    struct ncclComm* comm, int* p2pEpoch, struct ncclKernelPlan* plan, struct ncclKernelPlanBudget* budget
+    struct ncclComm* comm, int* p2pEpoch, int* p2pRound, struct ncclKernelPlan* plan, struct ncclKernelPlanBudget* budget
   ) {
   int nRanks = comm->nRanks;
   struct ncclKernelPlanner::Peer* peers = comm->planner.peers;
@@ -1407,11 +1424,9 @@ static ncclResult_t scheduleP2pTasksToPlan(
   // Save the total count of send/recv tasks in the plan
   int planTotalTasks[2] = {comm->planner.nTasksP2pRecv, comm->planner.nTasksP2pSend};
   while (comm->planner.nTasksP2p != 0) {
-    // increment before to avoid issue when the budget is too small and we exit early
-    (*p2pEpoch)++;
-    for (int round=0; round < nRanks; round++) {
-      int sendRank = comm->p2pSchedule[round].sendRank;
-      int recvRank = comm->p2pSchedule[round].recvRank;
+    for (; *p2pRound < nRanks; (*p2pRound)++) {
+      int sendRank = comm->p2pSchedule[*p2pRound].sendRank;
+      int recvRank = comm->p2pSchedule[*p2pRound].recvRank;
       struct ncclTaskP2p* send = ncclIntruQueueHead(&peers[sendRank].sendQueue);
       struct ncclTaskP2p* recv = ncclIntruQueueHead(&peers[recvRank].recvQueue);
       if (send == nullptr && recv == nullptr) continue;
@@ -1447,7 +1462,7 @@ static ncclResult_t scheduleP2pTasksToPlan(
           return ncclSuccess;
         }
         struct ncclTaskP2p* p2pTasks[2] = { recv, send };
-        NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, round, sendRank, sendBuff, sendBytes, recvRank, recvBuff, recvBytes, send ? send->opCount : 0, recv ? recv->opCount : 0, planTotalTasks, p2pTasks));
+        NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendRank, sendBuff, sendBytes, recvRank, recvBuff, recvBytes, send ? send->opCount : 0, recv ? recv->opCount : 0, planTotalTasks, p2pTasks));
         if (send != nullptr) {
           ncclIntruQueueDequeue(&peers[sendRank].sendQueue);
           // Profiler - We can overwrite groupAPI event handles here since all operations here belong to the same group
@@ -1466,6 +1481,8 @@ static ncclResult_t scheduleP2pTasksToPlan(
         }
       }
     }
+    *p2pRound=0;
+    (*p2pEpoch)++;
   }
   return ncclSuccess;
 }
@@ -1505,7 +1522,7 @@ namespace {
       struct ncclComm* comm, struct ncclCommEventCallback* cb
     ) {
     struct uploadWork_cleanup_t* me = (struct uploadWork_cleanup_t*)cb;
-    free(me->hostBuf);
+    ncclOsAlignedFree(me->hostBuf);
     CUDACHECK(cudaEventDestroy(me->base.event));
     free(me);
     return ncclSuccess;
@@ -1537,7 +1554,7 @@ static ncclResult_t uploadWork(struct ncclComm* comm, struct ncclKernelPlan* pla
   case ncclDevWorkStorageTypePersistent:
     // We rely on 16-byte alignment
     #if __cplusplus >= 201103L
-    fifoBufHost = aligned_alloc(16, ROUNDUP(workBytes, 16));
+    fifoBufHost = ncclOsAlignedAlloc(16, ROUNDUP(workBytes, 16));
     #else
     static_assert(16 <= alignof(max_align_t), "We rely on 16-byte alignment.");
     fifoBufHost = malloc(workBytes);
@@ -1622,7 +1639,7 @@ static ncclResult_t uploadWork(struct ncclComm* comm, struct ncclKernelPlan* pla
       if (mode != cudaStreamCaptureModeRelaxed) (void)cudaThreadExchangeStreamCaptureMode(&mode);
       return result;
     fail:
-      if (!cleanup) free(fifoBufHost);
+      if (!cleanup) ncclOsAlignedFree(fifoBufHost);
       goto finish_scope;
     } break;
   default: break;
@@ -1821,7 +1838,7 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
   // Operations from different plans will not be batched together. A new batch will be created for each new plan that is used to schedule the ops (see ncclAddWorkBatchToPlan).
   // For p2p ops, we further guarantee that ops from different epochs will not be batched together (to avoid hangs).
   // The p2pEpoch value is incremented in scheduleP2pTasksToPlan and its value is carried over from one plan to another (even if not strictly required)
-  int nPlans = 0, p2pEpoch=0;
+  int nPlans = 0, p2pEpoch=0, p2pRound=0;
 
   if (planner->nTasksColl + planner->nTasksP2p + planner->nTasksBcast != 0 ||
       !ncclIntruQueueEmpty(&planner->collSymTaskQueue) ||
@@ -1891,7 +1908,7 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
           }
           // And only drain p2p tasks once colls are depleted.
           if (planner->nTasksColl == 0 && planner->nTasksBcast == 0 && planner->nTasksP2p != 0) {
-            NCCLCHECKGOTO(scheduleP2pTasksToPlan(comm, &p2pEpoch, plan, &budget), result, failure);
+            NCCLCHECKGOTO(scheduleP2pTasksToPlan(comm, &p2pEpoch, &p2pRound, plan, &budget), result, failure);
           }
         }
 
@@ -3227,13 +3244,8 @@ static ncclResult_t rmaTaskAppend(
 
   void const* srcBuff = info->sendbuff;
 
-  if (!comm->symmetricSupport){
-    WARN("One sided RMA: symmetric registration is not supported in this communicator.");
-    return ncclInvalidArgument;
-  }
-
-  if (!comm->rmaProxySupport && comm->nNodes > 1) {
-    WARN("One sided RMA: RMA proxy is not supported in this communicator.");
+  if (!comm->hostRmaSupport) {
+    WARN("One sided RMA: host RMA is not supported in this communicator.");
     return ncclInvalidArgument;
   }
 
@@ -3559,7 +3571,7 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
     goto fail;
   }
 
-  if (info->comm->checkPointers) {
+  if (info->comm->checkMode != ncclCheckModeDefault) {
     CUDACHECKGOTO(cudaGetDevice(&devOld), ret, fail);
     CUDACHECKGOTO(cudaSetDevice(info->comm->cudaDev), ret, fail);
   }

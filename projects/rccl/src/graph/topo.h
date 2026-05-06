@@ -44,13 +44,14 @@
 // to GPU traffic consumes more PCI bandwidth.
 #define INTEL_P2P_OVERHEAD(bw) (bw*6/5)
 
-#define NCCL_TOPO_NODE_TYPES 6
+#define NCCL_TOPO_NODE_TYPES 7
 #define GPU 0
 #define PCI 1
 #define NVS 2
 #define CPU 3 // Actually NUMA domains
 #define NIC 4
 #define NET 5
+#define GIN 6
 extern const char* topoNodeTypeStr[];
 
 // We want link types and path types to match as much as possible
@@ -244,6 +245,8 @@ ncclResult_t ncclTopoSplitNvLink(struct ncclTopoSystem* system, int* splitNvLink
 
 struct ncclTopoNetInfo {
   bool coll;
+  bool gin;
+  bool net;
   // communicator-specific information
   int netPluginIndex;
   bool dmaBufSupport;
