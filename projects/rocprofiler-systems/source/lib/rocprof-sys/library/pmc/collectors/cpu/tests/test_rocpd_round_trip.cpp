@@ -9,8 +9,6 @@
 
 #include <gtest/gtest.h>
 
-#include <cstring>
-
 namespace rocprofsys::pmc::collectors::cpu::testing
 {
 

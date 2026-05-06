@@ -11,7 +11,7 @@ add_library(
 
 target_link_libraries(
     pmc-cpu-collector-tests
-    PUBLIC
+    PRIVATE
         rocprofiler-systems-pmc-library
         rocprofiler-systems-googletest-library
         rocprofiler-systems-logger
