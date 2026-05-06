@@ -8,36 +8,38 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 **API:**
 
-- Late-start profiling support: Automatic profiling activation when rocprofiler-sdk loads after runtime initialization
-  - `rocprofiler_force_configure()` now automatically detects and profiles runtimes that initialized before SDK load
-  - Integrates with rocprofiler-register to retrieve already-registered API tables
-  - Supports all runtime types (HSA, HIP, ROCTX, RCCL, ROCDecode, ROCJpeg, etc.) automatically
-  - No explicit late-start API calls required - works transparently
+- Late-start profiling support: Added automatic late‑start profiling support, enabling profiling when `rocprofiler-sdk` is loaded after HSA/HIP runtimes have already initialized.
+  - `rocprofiler_force_configure()` now automatically detects and profiles runtimes initialized before the SDK loads.
+  - Integrates with `rocprofiler-register` to retrieve the registered API tables.
+  - Supports all runtime types (HSA, HIP, ROCTX, RCCL, ROCDecode, ROCJpeg, and more) automatically.
+  - No explicit late-start API calls required; works transparently.
 
-**rocprofv3:**
+**rocprofv3 (CLI):**
 
-- `--att --selected-regions` now enables marker-controlled device thread trace
-  - Uses `roctxProfilerResume(0)` / `roctxProfilerPause(0)` to start and stop ATT collection at runtime
-  - Supports multiple resume/pause cycles, each producing separate trace output files
-  - Incompatible with `--att-consecutive-kernels`
+- ROCTx Support for ATT: Added ROCtx support to device thread trace when using `--att --selected-regions`.
+  - Allows `roctxProfilerPause` and `roctxProfilerResume` to explicitly control when ATT data collection starts and stops.
+  - Enables more precise, region-focused ATT tracing with reduced overhead and noise.
+  - Supports multiple resume/pause cycles, each producing separate trace output files.
+  - Incompatible with `--att-consecutive-kernels`.
+
+- PC Sampling Support for Dynamic Attach: Added PC Sampling support for Dynamic Attach feature, allowing users to attach to a running application and collect PC samples without restarting the workload.
+  - Enables profiling long-running or production-style jobs at the point of interest.
+  - Results integrate with the existing PC sampling analysis flow.
 
 **Documentation:**
 
-- Added "Using Late-Loading" how-to guide with code examples
-- Documented late-loading workflow and integration with rocprofiler-register
-- Added marker-controlled thread tracing section to the thread trace how-to guide
-- Added cross-reference from ROCTx documentation to ATT with selected-regions
+- Added marker-controlled thread tracing section to the thread trace how-to guide.
+- Added cross-reference from ROCTx documentation to ATT with `selected-regions`.
 
 ### Changed
 
 **Implementation:**
 
-- **Late-start architecture redesign**: Removed direct runtime symbol access in favor of proper rocprofiler-register integration
-  - Removed ~600 lines of dlopen/dlsym bypass logic
-  - Replaced with ~80 lines calling `rocprofiler_register_invoke_all_registrations()`
-  - Late-start now works by requesting rocprofiler-register to re-propagate stored API tables
-  - Extensible design: automatically supports new runtimes without SDK code changes
-  - Proper separation of concerns: rocprofiler-register manages table storage, SDK manages table wrapping
+- Late-start architecture redesign: Removed direct runtime symbol access in favor of proper rocprofiler-register integration.
+  - Replaced ~600 lines of `dlopen`/`dlsym` bypass logic with ~80 lines by using `rocprofiler_register_invoke_all_registrations()`.
+  - Late-start now works by requesting `rocprofiler-register` to repropagate stored API tables.
+  - Extensible design. Automatically supports new runtimes without SDK code changes.
+  - Provides a proper separation of concerns. `rocprofiler-register` manages the table storage while SDK manages the table wrapping.
 
 **Internal APIs (non-public):**
 
