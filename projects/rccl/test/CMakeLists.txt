@@ -275,6 +275,7 @@ if(BUILD_TESTS)
       transport/NetIbMPI/NicFusionTests.cpp
       ImplicitLaunchOrderMPITests.cpp
       RegistrationMPITests.cpp
+      mem_manager/SuspendResumeMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
