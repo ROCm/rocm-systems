@@ -594,6 +594,16 @@ def _apply_domain_rules(
     src_has_split_barrier = src_isa in _SPLIT_BARRIER_ISAS
     dst_has_mfma = dst_isa in _MFMA_ISAS
     dst_has_accvgpr = dst_isa in _ACCVGPR_ISAS
+    # These CDNA4 VOP2 rows are same-width opcode substitutions on RDNA3, but
+    # they are not global mnemonic aliases: keep the rule scoped to this pair.
+    cdna4_rdna3_vop2_substitutes = {
+        'V_ADDC_CO_U32': 32,
+        'V_SUBB_CO_U32': 33,
+        'V_SUBBREV_CO_U32': 34,
+        'V_ADD_U32': 37,
+        'V_SUB_U32': 38,
+        'V_SUBREV_U32': 39,
+    } if src_isa == 'cdna4' and dst_isa == 'rdna3' else {}
 
     for entry in entries:
         name = entry.src_mnemonic
@@ -602,6 +612,12 @@ def _apply_domain_rules(
         # downstream encoding/semantic translators have the right dst_op even
         # when the action is overridden to flag a domain-specific lowering.
         prev_op = entry.action.target_opcode
+
+        if entry.src_encoding in ('ENC_VOP2', 'VOP2_INST_LITERAL'):
+            target_op = cdna4_rdna3_vop2_substitutes.get(name)
+            if target_op is not None:
+                entry.action = LegalizationAction.substitute(target_op)
+                continue
 
         if name in ('S_WAITCNT', 'S_WAITCNT_VSCNT',
                      'S_WAITCNT_VMCNT', 'S_WAITCNT_LGKMCNT',

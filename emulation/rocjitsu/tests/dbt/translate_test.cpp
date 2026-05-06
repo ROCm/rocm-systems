@@ -1655,7 +1655,8 @@ TEST(Cdna4ToRdna3SemanticTranslator, VLshlAddU64ZeroShiftOmitsRdna4WaitAlu) {
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_lshl_add_u64");
 
-  SemanticTranslator rdna3(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
+  SemanticTranslator rdna3(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                           lookup_cdna4_to_rdna3);
   auto rdna3_replacement = rdna3.try_lower_expand(*inst, 0, context.live());
 
   constexpr uint32_t kRdna4WaitAlu = rocjitsu::pack_sopp(8, 0xFFFD);
@@ -1774,7 +1775,7 @@ TEST(Cdna4ToRdna3SemanticTranslator, RemovedVop3ConstantComparisonsUseExplicitSd
       translator.try_lower_expand(*substituted_inst, 0, substituted_context.live()).empty());
 }
 
-TEST(Cdna4ToRdna3SemanticTranslator, ResidualVop2CarryAndU32RowsRenameToRdna3E32Forms) {
+TEST(Cdna4ToRdna3Legalization, Vop2CarryAndU32RowsSubstituteToRdna3E32Forms) {
   struct Case {
     uint8_t source_op;
     std::string_view source_mnemonic;
@@ -1791,8 +1792,6 @@ TEST(Cdna4ToRdna3SemanticTranslator, ResidualVop2CarryAndU32RowsRenameToRdna3E32
       {54, "v_subrev_u32_e32", 39, "v_subrev_nc_u32_e32"},
   }};
 
-  rocjitsu::RegisterLiveness liveness;
-  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
   for (const auto &c : cases) {
     const std::array<uint32_t, 1> source{make_cdna4_vop2(c.source_op, 7, 9, 256 + 10)};
     auto inst = decode_cdna4(source);
@@ -1801,11 +1800,15 @@ TEST(Cdna4ToRdna3SemanticTranslator, ResidualVop2CarryAndU32RowsRenameToRdna3E32
     const auto *leg = rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3, inst->encoding_id(),
                                        inst->opcode());
     ASSERT_NE(leg, nullptr);
-    ASSERT_EQ(leg->action, rocjitsu::Action::Expand);
+    ASSERT_EQ(leg->action, rocjitsu::Action::Substitute);
+    ASSERT_EQ(leg->target_opcode, c.target_op);
 
-    const auto replacement = translator.try_lower_expand(*inst, 0, liveness);
-    ASSERT_EQ(replacement.size(), 1u) << c.source_mnemonic;
-    expect_rdna3_vop2(replacement[0], c.target_op, 7, 256 + 10, 9, c.target_mnemonic);
+    // These same-width VOP2 rows should flow through generated encoding
+    // translation, not the semantic expansion fallback.
+    const auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+        inst->encoding_id(), source[0], 0, 0, leg->target_opcode);
+    ASSERT_EQ(translated.word_count, 1u) << c.source_mnemonic;
+    expect_rdna3_vop2(translated.words[0], c.target_op, 7, 256 + 10, 9, c.target_mnemonic);
   }
 }
 
@@ -1825,15 +1828,17 @@ TEST(Cdna4ToRdna3SemanticTranslator, ResidualVop2U16RowsExpandToRdna3Vop3) {
       {40, "v_subrev_u16_e32", 772, "v_sub_nc_u16", 265, 266},
   }};
 
-  rocjitsu::RegisterLiveness liveness;
-  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
+  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                                lookup_cdna4_to_rdna3);
   for (const auto &c : cases) {
     const std::array<uint32_t, 1> source{make_cdna4_vop2(c.source_op, 6, 9, 256 + 10)};
-    auto inst = decode_cdna4(source);
+    SemanticInstructionContext context(source);
+    ASSERT_TRUE(context.is_valid());
+    const auto *inst = context.first_instruction();
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), c.source_mnemonic);
 
-    const auto replacement = translator.try_lower_expand(*inst, 0, liveness);
+    const auto replacement = translator.try_lower_expand(*inst, 0, context.live());
     ASSERT_EQ(replacement.size(), 2u) << c.source_mnemonic;
     expect_rdna3_vop3(replacement, c.target_op, 6, c.expected_src0, c.expected_src1,
                       c.target_mnemonic);
@@ -1863,15 +1868,17 @@ TEST(Cdna4ToRdna3SemanticTranslator, ResidualVop3IntegerRowsRenameToRdna3NcForms
       {671, "v_sub_i16", 782, "v_sub_nc_i16", 266, 267},
   }};
 
-  rocjitsu::RegisterLiveness liveness;
-  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
+  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                                lookup_cdna4_to_rdna3);
   for (const auto &c : cases) {
     const auto source = make_cdna4_vop3(c.source_op, 12, 266, 267);
-    auto inst = decode_cdna4(source);
+    SemanticInstructionContext context(source);
+    ASSERT_TRUE(context.is_valid());
+    const auto *inst = context.first_instruction();
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), c.source_mnemonic);
 
-    const auto replacement = translator.try_lower_expand(*inst, 0, liveness);
+    const auto replacement = translator.try_lower_expand(*inst, 0, context.live());
     ASSERT_EQ(replacement.size(), 2u) << c.source_mnemonic;
     expect_rdna3_vop3(replacement, c.target_op, 12, c.expected_src0, c.expected_src1,
                       c.target_mnemonic);
@@ -1892,38 +1899,45 @@ TEST(Cdna4ToRdna3SemanticTranslator, ResidualVop3SdstCarryRowsRenameToRdna3CoCiF
       {286, "v_subbrev_co_u32", 290, "v_subrev_co_ci_u32"},
   }};
 
-  rocjitsu::RegisterLiveness liveness;
-  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
+  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                                lookup_cdna4_to_rdna3);
   for (const auto &c : cases) {
     const auto source = make_cdna4_vop3_sdst(c.source_op, 13, 106, 266, 267, 106);
-    auto inst = decode_cdna4(source);
+    SemanticInstructionContext context(source);
+    ASSERT_TRUE(context.is_valid());
+    const auto *inst = context.first_instruction();
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), c.source_mnemonic);
 
-    const auto replacement = translator.try_lower_expand(*inst, 0, liveness);
+    const auto replacement = translator.try_lower_expand(*inst, 0, context.live());
     ASSERT_EQ(replacement.size(), 2u) << c.source_mnemonic;
     expect_rdna3_vop3_sdst(replacement, c.target_op, 13, 106, 266, 267, 106, c.target_mnemonic);
   }
 }
 
 TEST(Cdna4ToRdna3SemanticTranslator, ResidualVMovB64LowersToOrderedB32Moves) {
-  rocjitsu::RegisterLiveness liveness;
-  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
+  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                                lookup_cdna4_to_rdna3);
 
   const std::array<uint32_t, 1> e32_source{make_cdna4_v_mov_b64_e32(12, 10)};
-  auto e32_inst = decode_cdna4(e32_source);
+  SemanticInstructionContext e32_context(e32_source);
+  ASSERT_TRUE(e32_context.is_valid());
+  const auto *e32_inst = e32_context.first_instruction();
   ASSERT_NE(e32_inst, nullptr);
   ASSERT_EQ(std::string_view(e32_inst->mnemonic()), "v_mov_b64_e32");
-  const auto e32_replacement = translator.try_lower_expand(*e32_inst, 0, liveness);
+  const auto e32_replacement = translator.try_lower_expand(*e32_inst, 0, e32_context.live());
   ASSERT_EQ(e32_replacement.size(), 2u);
   expect_rdna3_v_mov_b32(e32_replacement[0], 12, 266);
   expect_rdna3_v_mov_b32(e32_replacement[1], 13, 267);
 
   const auto overlap_source = make_cdna4_vop3(376, 11, 266, 0);
-  auto overlap_inst = decode_cdna4(overlap_source);
+  SemanticInstructionContext overlap_context(overlap_source);
+  ASSERT_TRUE(overlap_context.is_valid());
+  const auto *overlap_inst = overlap_context.first_instruction();
   ASSERT_NE(overlap_inst, nullptr);
   ASSERT_EQ(std::string_view(overlap_inst->mnemonic()), "v_mov_b64");
-  const auto overlap_replacement = translator.try_lower_expand(*overlap_inst, 0, liveness);
+  const auto overlap_replacement =
+      translator.try_lower_expand(*overlap_inst, 0, overlap_context.live());
   ASSERT_EQ(overlap_replacement.size(), 2u);
   expect_rdna3_v_mov_b32(overlap_replacement[0], 12, 267);
   expect_rdna3_v_mov_b32(overlap_replacement[1], 11, 266);
@@ -1936,14 +1950,17 @@ TEST(Cdna4ToRdna3SemanticTranslator, ResidualVop3ModifiedRowsRemainFailClosed) {
   src.clamp = 1;
   std::memcpy(source.data(), &src, sizeof(src));
 
-  auto inst = decode_cdna4(source);
+  SemanticInstructionContext context(source);
+  ASSERT_TRUE(context.is_valid());
+  const auto *inst = context.first_instruction();
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_u32");
 
-  rocjitsu::RegisterLiveness liveness;
-  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
-  EXPECT_TRUE(translator.try_lower_expand(*inst, 0, liveness).empty());
-  expect_unsupported_expansion_fails_closed(source, "v_add_u32", 308, "residual non-matrix expansion");
+  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                                lookup_cdna4_to_rdna3);
+  EXPECT_TRUE(translator.try_lower_expand(*inst, 0, context.live()).empty());
+  expect_unsupported_expansion_fails_closed(source, "v_add_u32", 308,
+                                            "residual non-matrix expansion");
 }
 
 TEST(BinaryTranslatorExpansion, ResidualVop2U16ExpansionUsesTrailingNopCaveAndBranchStub) {
@@ -1971,11 +1988,13 @@ TEST(BinaryTranslatorExpansion, ResidualVop2U16ExpansionUsesTrailingNopCaveAndBr
   const auto words = first_text_words(translated);
   ASSERT_GE(words.size(), 5u);
 
-  auto inst = decode_cdna4(expansion_source);
+  SemanticInstructionContext expansion_context(expansion_source);
+  ASSERT_TRUE(expansion_context.is_valid());
+  const auto *inst = expansion_context.first_instruction();
   ASSERT_NE(inst, nullptr);
-  rocjitsu::RegisterLiveness liveness;
-  SemanticTranslator semantic(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
-  const auto expected_expansion = semantic.try_lower_expand(*inst, 0, liveness);
+  SemanticTranslator semantic(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                              lookup_cdna4_to_rdna3);
+  const auto expected_expansion = semantic.try_lower_expand(*inst, 0, expansion_context.live());
   ASSERT_EQ(expected_expansion.size(), 2u);
 
   EXPECT_EQ(words[0], rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_RDNA3));
@@ -2020,7 +2039,8 @@ TEST(BinaryTranslatorExpansion, Rdna3ExpansionUsesTrailingNopCaveAndBranchStub) 
   ASSERT_TRUE(expected_context.is_valid());
   const auto *inst = expected_context.first_instruction();
   ASSERT_NE(inst, nullptr);
-  SemanticTranslator semantic(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
+  SemanticTranslator semantic(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
+                              lookup_cdna4_to_rdna3);
   const auto expected_expansion = semantic.try_lower_expand(*inst, 0, expected_context.live());
   ASSERT_EQ(expected_expansion.size(), 4u);
 

@@ -275,7 +275,7 @@ std::vector<uint32_t> lower_vop1_v_mov_b64(const Instruction &inst) {
   return words;
 }
 
-std::vector<uint32_t> lower_vop2_integer_renames(const Instruction &inst) {
+std::vector<uint32_t> lower_vop2_u16_integer_expansions(const Instruction &inst) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() != 4)
     return {};
@@ -285,13 +285,9 @@ std::vector<uint32_t> lower_vop2_integer_renames(const Instruction &inst) {
   if (!is_plain_src(src.src0))
     return {};
 
+  // The u16 E32 opcodes have no same-width RDNA3 VOP2 encoding, so they stay
+  // semantic expansions even though the u32/carry VOP2 rows are substitutions.
   switch (inst.opcode()) {
-  case 28: // v_addc_co_u32_e32 -> v_add_co_ci_u32_e32
-    return {build_vop2(32, static_cast<uint8_t>(src.vdst), src.src0, src.vsrc1)};
-  case 29: // v_subb_co_u32_e32 -> v_sub_co_ci_u32_e32
-    return {build_vop2(33, static_cast<uint8_t>(src.vdst), src.src0, src.vsrc1)};
-  case 30: // v_subbrev_co_u32_e32 -> v_subrev_co_ci_u32_e32
-    return {build_vop2(34, static_cast<uint8_t>(src.vdst), src.src0, src.vsrc1)};
   case 38: { // v_add_u16_e32 -> v_add_nc_u16
     auto [w0, w1] = build_rdna3_vop3(771, static_cast<uint8_t>(src.vdst), src.src0,
                                      static_cast<uint16_t>(256 + src.vsrc1));
@@ -307,12 +303,6 @@ std::vector<uint32_t> lower_vop2_integer_renames(const Instruction &inst) {
                                      static_cast<uint16_t>(256 + src.vsrc1), src.src0);
     return {w0, w1};
   }
-  case 52: // v_add_u32_e32 -> v_add_nc_u32_e32
-    return {build_vop2(37, static_cast<uint8_t>(src.vdst), src.src0, src.vsrc1)};
-  case 53: // v_sub_u32_e32 -> v_sub_nc_u32_e32
-    return {build_vop2(38, static_cast<uint8_t>(src.vdst), src.src0, src.vsrc1)};
-  case 54: // v_subrev_u32_e32 -> v_subrev_nc_u32_e32
-    return {build_vop2(39, static_cast<uint8_t>(src.vdst), src.src0, src.vsrc1)};
   default:
     return {};
   }
@@ -409,11 +399,8 @@ std::vector<uint32_t> lower_rdna3_residual_valu_expand(const Instruction &inst,
 
   const std::string_view mnemonic(inst.mnemonic());
 
-  if (mnemonic == "v_addc_co_u32_e32" || mnemonic == "v_subb_co_u32_e32" ||
-      mnemonic == "v_subbrev_co_u32_e32" || mnemonic == "v_add_u16_e32" ||
-      mnemonic == "v_sub_u16_e32" || mnemonic == "v_subrev_u16_e32" ||
-      mnemonic == "v_add_u32_e32" || mnemonic == "v_sub_u32_e32" || mnemonic == "v_subrev_u32_e32")
-    return lower_vop2_integer_renames(inst);
+  if (mnemonic == "v_add_u16_e32" || mnemonic == "v_sub_u16_e32" || mnemonic == "v_subrev_u16_e32")
+    return lower_vop2_u16_integer_expansions(inst);
 
   if (mnemonic == "v_mov_b64_e32")
     return lower_vop1_v_mov_b64(inst);
