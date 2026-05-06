@@ -95,7 +95,7 @@ struct cpu_info
     }
 };
 
-struct pcie_bdf_info
+struct bdf_info
 {
     uint32_t domain{};
     uint8_t  bus{};
@@ -1040,8 +1040,8 @@ get_agent_mapping()
     return *CHECK_NOTNULL(_v);
 }
 
-pcie_bdf_info
-get_pcie_bdf(const rocprofiler_agent_t* agent)
+bdf_info
+get_bdf_info(const rocprofiler_agent_t* agent)
 {
     return {.domain   = agent->domain,
             .bus      = static_cast<uint8_t>((agent->location_id >> 8) & 0xFF),
@@ -1060,7 +1060,7 @@ get_aql_handles()
             {
                 aqlprofile_agent_handle_t handle = {.handle = 0};
 
-                const auto bdf = get_pcie_bdf(agent);
+                const auto bdf = get_bdf_info(agent);
                 common::consume_args(bdf);
 
 #if ROCPROFILER_EXTERNAL_AQLPROFILE
