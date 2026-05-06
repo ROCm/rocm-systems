@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
@@ -135,12 +136,11 @@ bool SimulatedDriver::in_construction() { return g_in_construction; }
 
 std::unique_ptr<SimulatedDriver> SimulatedDriver::create_default() {
   const char *config_path = getenv("RJ_CONFIG");
-  const char *schema_path = getenv("RJ_SCHEMA");
-  if (!config_path || !schema_path)
-    throw util::ConfigError("RJ_CONFIG and RJ_SCHEMA env vars required");
+  if (!config_path)
+    throw util::ConfigError("RJ_CONFIG env var required");
 
   auto state = std::make_unique<DefaultDriverState>();
-  state->loaded = config::load_config(config_path, schema_path);
+  state->loaded = config::load_config(config_path, kEmbeddedSchema);
   auto *soc = state->loaded.soc();
   // Override max_ticks: the KFD driver runs the engine indefinitely, waiting for
   // doorbell events from ROCR. Termination is controlled by open()/close().

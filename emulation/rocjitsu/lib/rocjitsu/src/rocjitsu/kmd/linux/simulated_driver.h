@@ -72,7 +72,7 @@ public:
 
   // -- Instance interface --
 
-  /// @brief Create a default driver from RJ_CONFIG/RJ_SCHEMA env vars.
+  /// @brief Create a default driver from the RJ_CONFIG env var.
   static std::unique_ptr<SimulatedDriver> create_default();
 
   /// @brief Construct with a simulation engine and SoC.

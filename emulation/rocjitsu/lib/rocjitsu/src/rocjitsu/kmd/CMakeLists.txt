@@ -7,6 +7,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         linux/simulated_driver.cpp
         linux/sysfs.cpp
     )
+    target_include_directories(rocjitsu_kmd PRIVATE ${GENERATED_DIR})
 
     add_library(rocjitsu_kmd_shim SHARED linux/interposer.cpp)
     target_include_directories(
