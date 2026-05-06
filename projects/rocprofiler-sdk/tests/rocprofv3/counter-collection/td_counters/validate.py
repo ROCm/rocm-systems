@@ -129,17 +129,17 @@ def _validate_pass_csv(df: pd.DataFrame, pmc_idx: int):
         for x in df["Kernel_Name"].unique().tolist()
         if not re.search(r"__amd_rocclr_.*", x)
     )
-    assert observed_kernels == KERNEL_LIST, (
-        f"pmc_{pmc_idx} kernel list mismatch: got {observed_kernels}"
-    )
+    assert (
+        observed_kernels == KERNEL_LIST
+    ), f"pmc_{pmc_idx} kernel list mismatch: got {observed_kernels}"
 
     observed_counters = set(df["Counter_Name"].unique().tolist())
-    assert observed_counters.issubset(expected_counters), (
-        f"pmc_{pmc_idx} unexpected counters: {observed_counters - expected_counters}"
-    )
-    assert observed_counters == expected_counters, (
-        f"pmc_{pmc_idx} missing counters: {expected_counters - observed_counters}"
-    )
+    assert observed_counters.issubset(
+        expected_counters
+    ), f"pmc_{pmc_idx} unexpected counters: {observed_counters - expected_counters}"
+    assert (
+        observed_counters == expected_counters
+    ), f"pmc_{pmc_idx} missing counters: {expected_counters - observed_counters}"
 
     for _, row in df.iterrows():
         name = row["Counter_Name"]
@@ -152,15 +152,13 @@ def _validate_pass_csv(df: pd.DataFrame, pmc_idx: int):
         else:
             # Sampler / ray-tracing BUSY counters and all *_STALL counters
             # may legitimately be 0 for vector-ops workloads.
-            assert value >= 0, (
-                f"pmc_{pmc_idx} counter {name} expected >= 0, got {value}"
-            )
+            assert value >= 0, f"pmc_{pmc_idx} counter {name} expected >= 0, got {value}"
 
     di_uniq = sorted(df["Dispatch_Id"].unique().tolist())
     di_expect = [idx + 1 for idx in range(len(di_uniq))]
-    assert di_expect == di_uniq, (
-        f"pmc_{pmc_idx} dispatch ids not unique/ordered: {di_uniq}"
-    )
+    assert (
+        di_expect == di_uniq
+    ), f"pmc_{pmc_idx} dispatch ids not unique/ordered: {di_uniq}"
 
 
 def _validate_pass_json(json_data, pmc_idx: int):
@@ -218,9 +216,9 @@ def _validate_pass_json(json_data, pmc_idx: int):
         for record in itr["records"]:
             counter = get_counter(record["counter_id"])
             assert counter is not None, f"record:\n\t{record}"
-            assert counter["name"] in expected_counters, (
-                f"pmc_{pmc_idx} unexpected counter {counter['name']}"
-            )
+            assert (
+                counter["name"] in expected_counters
+            ), f"pmc_{pmc_idx} unexpected counter {counter['name']}"
             seen_counter_names.add(counter["name"])
 
             if not is_td_target:
@@ -246,9 +244,9 @@ def _validate_pass_json(json_data, pmc_idx: int):
 
     di_uniq = sorted(set(dispatch_ids))
     di_expect = [idx + 1 for idx in range(len(di_uniq))]
-    assert di_expect == di_uniq, (
-        f"pmc_{pmc_idx} dispatch ids not unique/ordered: {di_uniq}"
-    )
+    assert (
+        di_expect == di_uniq
+    ), f"pmc_{pmc_idx} dispatch ids not unique/ordered: {di_uniq}"
 
     # If this run was on a gfx11 target we must have observed at least one
     # TD-counter record.

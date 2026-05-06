@@ -29,7 +29,6 @@ import pandas as pd
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
 
-
 # Each --input-csv-pmcN/--input-json-pmcN pair maps to one `pmc:` line in
 # input.txt (rocprofv3 emits a separate pmc_N/ output directory per pass).
 NUM_PASSES = 5
