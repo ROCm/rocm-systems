@@ -2435,22 +2435,6 @@ static inline void tilePatternBytes(unsigned char* dst, size_t dstSize, const vo
   }
 }
 
-static inline uint32_t getBodyElementSize(size_t patternSize) {
-  if (patternSize <= sizeof(uint32_t)) {
-    return sizeof(uint32_t);
-  } else if (patternSize <= sizeof(uint64_t)) {
-    return sizeof(uint64_t);
-  }
-  return 2 * sizeof(uint64_t);
-}
-
-static inline FillPatternPayload buildBodyPattern(const void* pattern, size_t patternSize,
-                                                  uint32_t bodyElemSize) {
-  FillPatternPayload payload = {};
-  tilePatternBytes(reinterpret_cast<unsigned char*>(&payload), bodyElemSize, pattern, patternSize);
-  return payload;
-}
-
 static inline FillPatternPayload buildTilePattern(const void* pattern, size_t patternSize) {
   FillPatternPayload payload = {};
   tilePatternBytes(reinterpret_cast<unsigned char*>(&payload), sizeof(payload), pattern, patternSize);
@@ -2487,10 +2471,12 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
   assert((patternSize == 1 || patternSize == 2 || patternSize == 4 || patternSize == 8 ||
           patternSize == 16) &&
          "fillBuffer1D supports pattern sizes of 1/2/4/8/16 bytes");
-  const uint32_t bodyElemSize = getBodyElementSize(patternSize);
-  const FillPatternPayload body_pattern = buildBodyPattern(pattern, patternSize, bodyElemSize);
 
-  // Construct tiled body
+  // Body region uses uint64 stores unconditionally. Tile region uses ulong2
+  // stores; head/body/body_tail uint64 patterns are derived from the tile
+  // pattern's low half (no rotation needed under invariant
+  // addr % patternSize == 0).
+  constexpr size_t bodyElemSize = sizeof(uint64_t);
   const FillPatternPayload tiled_pattern = buildTilePattern(pattern, patternSize);
 
   // Calculate head, body, body-tail, tail, and tiled body counts
@@ -2498,8 +2484,8 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
   constexpr size_t tile_size = sizeof(ulong) * 2;
   uintptr_t end_addr = fill_buf_addr + size[0];
 
-  uintptr_t body_aligned_start = alignUp(fill_buf_addr, static_cast<size_t>(bodyElemSize));
-  uintptr_t body_aligned_end = alignDown(end_addr, static_cast<size_t>(bodyElemSize));
+  uintptr_t body_aligned_start = alignUp(fill_buf_addr, bodyElemSize);
+  uintptr_t body_aligned_end = alignDown(end_addr, bodyElemSize);
 
   size_t head_count = 0;
   size_t body_count = 0;
@@ -2509,11 +2495,10 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
   uintptr_t tile_start = fill_buf_addr;  // unused when body_tile_count == 0
 
   if (body_aligned_end <= body_aligned_start) {
-    // Tiny or sufficiently misaligned buffer: no room for a body element.
+    // Tiny or sufficiently misaligned buffer: no room for a body uint64 element.
     // Route every byte through the head cleanup region. Head count is
-    // bounded by 2*bodyElemSize - 2 (e.g. patternSize=1, bodyElemSize=4,
-    // addr=1, size=6 → head_count=6); the cleanup-fits-in-warp assert
-    // below still holds.
+    // bounded by 2*bodyElemSize - 2 = 14 (e.g. patternSize=1, addr=1,
+    // size=14); still fits within the 16-lane cleanup region.
     head_count = size[0];
   } else {
     tile_start = alignUp(body_aligned_start, tile_size);
@@ -2539,16 +2524,14 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
   assert(body_tail_count <= (tile_size / bodyElemSize) &&
          "body_tail_count should fit after last 16-byte tile");
   assert(tail_count < bodyElemSize && "tail_count should be less than body element size");
-  assert((head_count + body_count + body_tail_count + tail_count) < 32 &&
-         "first-warp cleanup should fit in 32 lanes");
+  assert((head_count + body_count + body_tail_count + tail_count) < 16 &&
+         "cleanup region must fit in the kernel's 16-lane cleanup gate");
 
   const size_t tail_offset =
       head_count + body_count * bodyElemSize + body_tile_count * tile_size + body_tail_count * bodyElemSize;
   const size_t body_offset = head_count;
   const size_t body_tail_offset = head_count + body_count * bodyElemSize + body_tile_count * tile_size;
   const size_t tile_offset = static_cast<size_t>(tile_start - fill_buf_addr);
-  const int isAligned =
-      (head_count == 0 && body_count == 0 && body_tail_count == 0 && tail_count == 0) ? 1 : 0;
 
   constexpr size_t localWorkSize = 256;
   const size_t work_items = std::max(alignUp(body_tile_count, localWorkSize), localWorkSize);
@@ -2563,20 +2546,17 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
               static_cast<uint16_t>(body_tail_count), static_cast<uint16_t>(tail_count)};
   setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, origin[0]);
   setArgument(kernels_[kFillType], 1, sizeof(cl_mem), kernArgBase, 0, nullptr, kDirectVa);
-  setArgument(kernels_[kFillType], 2, sizeof(body_pattern), &body_pattern);
-  setArgument(kernels_[kFillType], 3, sizeof(tiled_pattern), &tiled_pattern);
-  setArgument(kernels_[kFillType], 4, sizeof(body_tile_count), &body_tile_count);
-  setArgument(kernels_[kFillType], 5, sizeof(body_tile_passes), &body_tile_passes);
-  setArgument(kernels_[kFillType], 6, sizeof(globalWorkSize), &globalWorkSize /* stride */);
-  setArgument(kernels_[kFillType], 7, sizeof(patternSize), &patternSize);
-  setArgument(kernels_[kFillType], 8, sizeof(tail_offset), &tail_offset);
-  setArgument(kernels_[kFillType], 9, sizeof(cl_mem), &mem, origin[0] + body_offset);
-  setArgument(kernels_[kFillType], 10, sizeof(cl_mem), &mem, origin[0] + body_tail_offset);
-  setArgument(kernels_[kFillType], 11, sizeof(cl_mem), &mem, origin[0] + tail_offset);
-  setArgument(kernels_[kFillType], 12, sizeof(cl_mem), &mem, origin[0] + tile_offset);
-  setArgument(kernels_[kFillType], 13, sizeof(counts), &counts);
-  setArgument(kernels_[kFillType], 14, sizeof(bodyElemSize), &bodyElemSize);
-  setArgument(kernels_[kFillType], 15, sizeof(isAligned), &isAligned);
+  setArgument(kernels_[kFillType], 2, sizeof(tiled_pattern), &tiled_pattern);
+  setArgument(kernels_[kFillType], 3, sizeof(body_tile_count), &body_tile_count);
+  setArgument(kernels_[kFillType], 4, sizeof(body_tile_passes), &body_tile_passes);
+  setArgument(kernels_[kFillType], 5, sizeof(globalWorkSize), &globalWorkSize /* stride */);
+  setArgument(kernels_[kFillType], 6, sizeof(patternSize), &patternSize);
+  setArgument(kernels_[kFillType], 7, sizeof(tail_offset), &tail_offset);
+  setArgument(kernels_[kFillType], 8, sizeof(cl_mem), &mem, origin[0] + body_offset);
+  setArgument(kernels_[kFillType], 9, sizeof(cl_mem), &mem, origin[0] + body_tail_offset);
+  setArgument(kernels_[kFillType], 10, sizeof(cl_mem), &mem, origin[0] + tail_offset);
+  setArgument(kernels_[kFillType], 11, sizeof(cl_mem), &mem, origin[0] + tile_offset);
+  setArgument(kernels_[kFillType], 12, sizeof(counts), &counts);
 
   size_t globalWorkOffset[3] = {0, 0, 0};
   amd::NDRangeContainer ndrange(1, globalWorkOffset, &globalWorkSize, &localWorkSize);
