@@ -117,6 +117,8 @@ ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_link_speed, ROCPROFSYS_CATEGOR
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_bandwidth_acc, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_BANDWIDTH_ACC, "device_pcie_bandwidth_acc", "PCIe Bandwidth Accumulated")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_bandwidth_inst, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_BANDWIDTH_INST, "device_pcie_bandwidth_inst", "PCIe Bandwidth Instantaneous")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_sdma_usage, ROCPROFSYS_CATEGORY_AMD_SMI_SDMA_USAGE, "device_sdma_usage", "SDMA Utilization percentage of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_gfx_clock, ROCPROFSYS_CATEGORY_AMD_SMI_GFX_CLOCK, "device_gfx_clock", "GFX clock frequency of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_mem_clock, ROCPROFSYS_CATEGORY_AMD_SMI_MEM_CLOCK, "device_mem_clock", "Memory clock frequency of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl, ROCPROFSYS_CATEGORY_ROCM_RCCL, "rccl", "ROCm Communication Collectives Library (RCCL) regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, pthread, ROCPROFSYS_CATEGORY_PTHREAD, "pthread", "POSIX threading functions")
 ROCPROFSYS_DEFINE_CATEGORY(category, kokkos, ROCPROFSYS_CATEGORY_KOKKOS, "kokkos", "KokkosTools regions")
@@ -214,6 +216,8 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_bandwidth_acc),              \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_bandwidth_inst),             \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_sdma_usage),                      \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_gfx_clock),                       \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_mem_clock),                       \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl),                               \
         ROCPROFSYS_PERFETTO_CATEGORY(category::pthread),                                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::kokkos),                                  \

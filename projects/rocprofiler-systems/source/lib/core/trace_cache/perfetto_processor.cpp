@@ -96,7 +96,9 @@ using amd_smi_pcie_bandwidth_acc_track =
     perfetto_counter_track<category::amd_smi_pcie_bandwidth_acc>;
 using amd_smi_pcie_bandwidth_inst_track =
     perfetto_counter_track<category::amd_smi_pcie_bandwidth_inst>;
-using amd_smi_sdma_track = perfetto_counter_track<category::amd_smi_sdma_usage>;
+using amd_smi_sdma_track      = perfetto_counter_track<category::amd_smi_sdma_usage>;
+using amd_smi_gfx_clock_track = perfetto_counter_track<category::amd_smi_gfx_clock>;
+using amd_smi_mem_clock_track = perfetto_counter_track<category::amd_smi_mem_clock>;
 using amd_smi_nic_rx_cnp_pkts_track =
     perfetto_counter_track<category::amd_smi_nic_rx_cnp_pkts>;
 using amd_smi_nic_tx_cnp_pkts_track =
@@ -1193,6 +1195,11 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 
     emit_gpu_scalar<amd_smi_sdma_track>(_device_id, _ts, _em.bits.sdma_usage,
                                         "SDMA Usage", "%", _m.sdma_usage);
+
+    emit_gpu_scalar<amd_smi_gfx_clock_track>(_device_id, _ts, _em.bits.gfx_clock,
+                                             "GFX Clock", "MHz", _m.gfx_clock_mhz);
+    emit_gpu_scalar<amd_smi_mem_clock_track>(_device_id, _ts, _em.bits.mem_clock,
+                                             "Memory Clock", "MHz", _m.mem_clock_mhz);
 
     // Per-XCP VCN busy metrics (MI300)
     if(_em.bits.vcn_busy)

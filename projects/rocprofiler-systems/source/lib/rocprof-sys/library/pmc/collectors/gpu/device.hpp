@@ -131,6 +131,15 @@ public:
                 populate_if_supported(gpu_metrics.pcie.bandwidth.inst,
                                       raw.pcie.bandwidth.inst);
             }
+
+            if(m_supported_metrics.bits.gfx_clock)
+            {
+                gpu_metrics.gfx_clock_mhz = raw.gfx_clock_mhz;
+            }
+            if(m_supported_metrics.bits.mem_clock)
+            {
+                gpu_metrics.mem_clock_mhz = raw.mem_clock_mhz;
+            }
         } catch(const std::runtime_error& e)
         {
             LOG_DEBUG("GPU device [{}] metrics query failed: {}", m_index, e.what());
@@ -246,6 +255,11 @@ private:
                                         is_metric_supported(raw.pcie.bandwidth.acc) ||
                                         is_metric_supported(raw.pcie.bandwidth.inst);
 
+        m_supported_metrics.bits.gfx_clock =
+            is_metric_supported(raw.gfx_clock_mhz, METRIC_VALUE_NOT_SUPPORTED_16);
+        m_supported_metrics.bits.mem_clock =
+            is_metric_supported(raw.mem_clock_mhz, METRIC_VALUE_NOT_SUPPORTED_16);
+
         initialize_sdma_support();
 
         LOG_DEBUG("Device [{}] supported metrics: {}", m_index,
@@ -299,14 +313,15 @@ private:
             "Current power: {}, Average power: {}, Memory usage: {}, Hotspot temp: {}, "
             "Edge temp: {}, GFX activity: {}, UMC activity: {}, MM activity: {}, "
             "VCN activity: {}, JPEG activity: {}, VCN busy: {}, JPEG busy: {}, "
-            "XGMI: {}, PCIe: {}, SDMA: {}",
+            "XGMI: {}, PCIe: {}, SDMA: {}, GFX clock: {}, Mem clock: {}",
             bstr(met.bits.current_socket_power), bstr(met.bits.average_socket_power),
             bstr(met.bits.memory_usage), bstr(met.bits.hotspot_temperature),
             bstr(met.bits.edge_temperature), bstr(met.bits.gfx_activity),
             bstr(met.bits.umc_activity), bstr(met.bits.mm_activity),
             bstr(met.bits.vcn_activity), bstr(met.bits.jpeg_activity),
             bstr(met.bits.vcn_busy), bstr(met.bits.jpeg_busy), bstr(met.bits.xgmi),
-            bstr(met.bits.pcie), bstr(met.bits.sdma_usage));
+            bstr(met.bits.pcie), bstr(met.bits.sdma_usage), bstr(met.bits.gfx_clock),
+            bstr(met.bits.mem_clock));
     }
 
     struct sdma_state

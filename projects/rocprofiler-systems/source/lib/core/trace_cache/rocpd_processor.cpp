@@ -377,6 +377,12 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     insert_scalar(trait::name<category::amd_smi_sdma_usage>::value,
                   info::format_track_name<category::amd_smi_sdma_usage>(),
                   enabled.bits.sdma_usage, m.sdma_usage);
+    insert_scalar(trait::name<category::amd_smi_gfx_clock>::value,
+                  info::format_track_name<category::amd_smi_gfx_clock>(),
+                  enabled.bits.gfx_clock, m.gfx_clock_mhz);
+    insert_scalar(trait::name<category::amd_smi_mem_clock>::value,
+                  info::format_track_name<category::amd_smi_mem_clock>(),
+                  enabled.bits.mem_clock, m.mem_clock_mhz);
 
     auto insert_xcp_metrics = [&](bool is_enabled, const auto& get_array,
                                   const auto& format_name) {

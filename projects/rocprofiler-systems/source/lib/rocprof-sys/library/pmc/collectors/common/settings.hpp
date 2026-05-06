@@ -44,8 +44,8 @@ using ::rocprofsys::pmc::device_selection_mode;
 using ::rocprofsys::pmc::collectors::cpu::enabled_metrics;
 }  // namespace cpu
 
-// GPU metric bitfield: 0x7FFF sets bits 0-14 (all 15 GPU metrics enabled)
-inline constexpr std::uint32_t ENABLE_ALL_METRICS  = 0x7FFF;
+// GPU metric bitfield: 0x1FFFF sets bits 0-16 (all 17 GPU metrics enabled)
+inline constexpr std::uint32_t ENABLE_ALL_METRICS  = 0x1FFFF;
 inline constexpr std::uint32_t DISABLE_ALL_METRICS = 0x0000;
 
 struct settings_policy
@@ -245,8 +245,8 @@ private:
         }
 
         std::regex validator{
-            R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage)"
-            R"()(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage))*$)"
+            R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock)"
+            R"()(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock))*$)"
         };
 
         if(!std::regex_match(settings_trimmed, validator))
@@ -269,7 +269,7 @@ private:
         };
 
         // See enabled_metrics definition in common.hpp for bit position documentation
-        const std::unordered_map<std::string, std::uint16_t> mapper{
+        const std::unordered_map<std::string, std::uint32_t> mapper{
             { "power", make_metric({ 0, 1 }) },           // current, average
             { "mem_usage", make_metric({ 2 }) },          // memory_usage
             { "temp", make_metric({ 3, 4 }) },            // hotspot, edge
@@ -279,6 +279,8 @@ private:
             { "xgmi", make_metric({ 12 }) },              // xgmi
             { "pcie", make_metric({ 13 }) },              // pcie
             { "sdma_usage", make_metric({ 14 }) },        // sdma_usage
+            { "gfx_clock", make_metric({ 15 }) },         // gfx_clock
+            { "mem_clock", make_metric({ 16 }) },         // mem_clock
         };
 
         gpu::enabled_metrics metrics;

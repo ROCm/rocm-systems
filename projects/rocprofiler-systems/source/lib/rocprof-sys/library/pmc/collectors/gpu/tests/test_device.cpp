@@ -173,6 +173,9 @@ protected:
         met.pcie.bandwidth.acc  = 500000000ULL;
         met.pcie.bandwidth.inst = 10000000ULL;
 
+        met.gfx_clock_mhz = 1500;
+        met.mem_clock_mhz = 1200;
+
         return met;
     }
 
@@ -225,6 +228,9 @@ protected:
         met.pcie.link.speed     = 0xFFFF;
         met.pcie.bandwidth.acc  = 0xFFFFFFFFFFFFFFFFULL;
         met.pcie.bandwidth.inst = 0xFFFFFFFFFFFFFFFFULL;
+
+        met.gfx_clock_mhz = 0xFFFF;
+        met.mem_clock_mhz = 0xFFFF;
 
         return met;
     }
