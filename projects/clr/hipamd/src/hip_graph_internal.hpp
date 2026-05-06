@@ -877,7 +877,8 @@ class Graph {
   // Segment dependency structures
   struct Segment {
     int id = -1;
-    int stream_id = -1;                         // Assigned stream for this segment
+    int dev_id = -1;                            // Device this segment runs on (derived from first node)
+    int stream_id = -1;                         // Assigned stream index within this device's stream pool
     int dependency_level = -1;                  // Topological level (0 = root, 1 = depends on root, etc.)
     std::vector<Node> nodes;
     std::vector<int> segment_ids_dependencies;  // Segments this segment depends on (within same graph)
@@ -888,7 +889,7 @@ class Graph {
     // Hierarchical child graph information
     Graph* child_graph_ptr = nullptr;           // Direct pointer to child graph for quick access
 
-    bool needs_completion_signal = false;        // True if any downstream segment is on a different stream
+    bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
   };
 
   //! Segment information for batch scheduling
@@ -1041,13 +1042,6 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   }
 
  protected:
-  //! Assign streams to segments at a given dependency level
-  void AssignStreamsToSegments(
-      const std::vector<int>& segments_at_level,
-      hip::Stream* launch_stream,
-      const std::vector<hip::Stream*>& streams,
-      std::unordered_map<int, hip::Stream*>& segment_to_stream);
-
   //! parallel streams per device
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
   uint64_t flags_ = 0;
@@ -1116,20 +1110,11 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   //! Map from segment ID to SegmentBatch for O(1) lookup
   std::unordered_map<int, SegmentBatch> segmentBatches_;
 
-  struct SegmentSyncInfo {
-    int segment_id;
-    std::vector<int> barrier_dep_indices;
-  };
-
   struct SyncPlan {
-    int num_segments = 0;
-    std::vector<SegmentSyncInfo> segment_sync;
+    int num_segments = 0;  // one HW signal slot per segment (sparse, indexed by seg_id)
 
     std::vector<amd::Device::HwEventPatch> patch_list;
     std::vector<uint8_t*> barrier_packets;
-
-    // Leaf segment IDs (segments with no outgoing edges) that are NOT on the
-    // launch stream — these need their completion signals waited on.
     std::vector<int> leaf_segment_ids;
 
     ~SyncPlan() {
