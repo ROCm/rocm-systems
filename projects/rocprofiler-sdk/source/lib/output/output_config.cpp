@@ -61,6 +61,7 @@ output_config::parse_env()
     output_path    = common::get_env("ROCPROF_OUTPUT_PATH", output_path);
     output_file    = common::get_env("ROCPROF_OUTPUT_FILE_NAME", output_file);
     tmp_directory  = common::get_env("ROCPROF_TMPDIR", tmp_directory);
+    rocpd_lz4      = common::get_env("ROCPROF_ROCPD_LZ4", rocpd_lz4);
     kernel_rename  = common::get_env("ROCPROF_KERNEL_RENAME", false);
     group_by_queue = common::get_env("ROCPROF_GROUP_BY_QUEUE", false);
     annotate_args  = common::get_env("ROCPROF_ANNOTATE_ARGS", false);

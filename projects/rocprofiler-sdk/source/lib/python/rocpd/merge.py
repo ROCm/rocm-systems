@@ -25,10 +25,11 @@
 
 import argparse
 import os
-import sqlite3
 import time
 
 from typing import List, Dict, Iterable, Optional, Callable, Any
+
+from . import _lz4
 
 
 def merge_sqlite_dbs(
@@ -70,7 +71,7 @@ def merge_sqlite_dbs(
     data_views = []
     schema_versions = []
 
-    with sqlite3.connect(str(dest_path)) as conn:
+    with _lz4.connect(str(dest_path)) as conn:
         conn.execute("PRAGMA journal_mode = WAL;")
         conn.execute("PRAGMA synchronous = NORMAL;")
         conn.execute("PRAGMA foreign_keys = OFF;")  # defer FK checks until end

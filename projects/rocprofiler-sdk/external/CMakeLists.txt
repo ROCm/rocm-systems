@@ -291,6 +291,48 @@ else()
 endif()
 
 #
+# LZ4
+#
+if(ROCPROFILER_BUILD_LZ4)
+    rocprofiler_checkout_git_submodule(
+        RECURSIVE
+        RELATIVE_PATH external/lz4
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        TEST_FILE build/cmake/CMakeLists.txt
+        REPO_URL https://github.com/lz4/lz4.git
+        REPO_BRANCH "v1.10.0")
+
+    set(LZ4_BUILD_CLI OFF)
+    set(LZ4_BUILD_LEGACY_LZ4C OFF)
+    add_subdirectory(lz4/build/cmake EXCLUDE_FROM_ALL)
+
+    if(TARGET lz4_static)
+        target_link_libraries(rocprofiler-sdk-lz4 INTERFACE $<BUILD_INTERFACE:lz4_static>)
+    elseif(TARGET LZ4::lz4_static)
+        target_link_libraries(rocprofiler-sdk-lz4 INTERFACE $<BUILD_INTERFACE:LZ4::lz4_static>)
+    else()
+        message(FATAL_ERROR "Could not find lz4 static CMake target")
+    endif()
+
+    target_include_directories(
+        rocprofiler-sdk-lz4 SYSTEM
+        INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/lz4/lib>)
+else()
+    find_package(lz4 QUIET)
+    if(TARGET LZ4::lz4)
+        target_link_libraries(rocprofiler-sdk-lz4 INTERFACE LZ4::lz4)
+    elseif(TARGET lz4::lz4)
+        target_link_libraries(rocprofiler-sdk-lz4 INTERFACE lz4::lz4)
+    elseif(TARGET lz4)
+        target_link_libraries(rocprofiler-sdk-lz4 INTERFACE lz4)
+    else()
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(LZ4 REQUIRED IMPORTED_TARGET liblz4)
+        target_link_libraries(rocprofiler-sdk-lz4 INTERFACE PkgConfig::LZ4)
+    endif()
+endif()
+
+#
 # PyBind11
 #
 if(ROCPROFILER_BUILD_PYBIND11)

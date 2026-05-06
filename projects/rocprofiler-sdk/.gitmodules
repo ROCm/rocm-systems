@@ -34,6 +34,9 @@
 [submodule "external/sqlite"]
 	path = external/sqlite
 	url = https://github.com/sqlite/sqlite
+[submodule "external/lz4"]
+	path = external/lz4
+	url = https://github.com/lz4/lz4.git
 [submodule "external/pybind11"]
 	path = external/pybind11
 	url = https://github.com/pybind/pybind11.git

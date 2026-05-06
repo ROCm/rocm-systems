@@ -62,6 +62,8 @@ rocprofiler_add_option(
     "Enable building abseil-cpp (Abseil logging) library internally" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_SQLITE3
                        "Enable building sqlite3 library internally" OFF)
+rocprofiler_add_option(ROCPROFILER_BUILD_LZ4 "Enable building lz4 library internally"
+                       OFF)
 rocprofiler_add_option(ROCPROFILER_BUILD_PYBIND11
                        "Enable building pybind11 library internally" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_GOTCHA

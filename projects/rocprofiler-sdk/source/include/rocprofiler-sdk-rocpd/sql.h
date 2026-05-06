@@ -69,6 +69,7 @@ typedef enum ROCPD_EXPERIMENTAL rocpd_sql_options_t
     ROCPD_SQL_OPTIONS_NONE                        = 0,
     ROCPD_SQL_OPTIONS_PERSIST_STRINGS             = 0x01,  ///< do not delete strings
     ROCPD_SQL_OPTIONS_SQLITE3_PRAGMA_FOREIGN_KEYS = 0x02,  ///< enable SQLite3 foreign keys
+    ROCPD_SQL_OPTIONS_SQLITE3_LZ4_COMPRESSION     = 0x04,  ///< use LZ4 schema variants
     ROCPD_SQL_OPTIONS_LAST                        = 0xFFFFFFFF,
 } rocpd_sql_options_t;
 

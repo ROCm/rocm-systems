@@ -30,6 +30,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+**rocpd:**
+
+- rocpd schema version 4 stores `extdata`, `call_stack`, and `line_info` payloads as LZ4-compressed BLOBs by default. Use bundled rocpd views/tools or register the `lz4_decompress` SQLite UDF when reading raw UUID-suffixed tables. Set `ROCPROF_ROCPD_LZ4=false` or pass `rocprofv3 --no-rocpd-lz4` to emit the legacy schema version 3 layout.
+
 **Implementation:**
 
 - **Late-start architecture redesign**: Removed direct runtime symbol access in favor of proper rocprofiler-register integration

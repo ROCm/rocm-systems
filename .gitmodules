@@ -113,3 +113,6 @@
 [submodule "projects/rocprofiler-sdk/external/abseil-cpp"]
 	path = projects/rocprofiler-sdk/external/abseil-cpp
 	url = https://github.com/abseil/abseil-cpp.git
+[submodule "projects/rocprofiler-sdk/external/lz4"]
+	path = projects/rocprofiler-sdk/external/lz4
+	url = https://github.com/lz4/lz4.git

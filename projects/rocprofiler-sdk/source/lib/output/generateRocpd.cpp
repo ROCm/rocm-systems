@@ -40,6 +40,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/output/sql/common.hpp"
 #include "lib/output/sql/deferred_transaction.hpp"
+#include "lib/output/sql/lz4_extension.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -136,10 +137,10 @@ struct rocpd_db
 
     rocpd_db() = default;
     ~rocpd_db();
-    rocpd_db(const rocpd_db&) = delete;
+    rocpd_db(const rocpd_db&)            = delete;
     rocpd_db& operator=(const rocpd_db&) = delete;
     rocpd_db(rocpd_db&&)                 = delete;
-    rocpd_db& operator=(rocpd_db&&) = delete;
+    rocpd_db& operator=(rocpd_db&&)      = delete;
 
     sqlite3*            conn                = nullptr;
     std::string         uuid                = {};
@@ -153,6 +154,7 @@ struct rocpd_db
     flushing_set_t      flushing_tables     = {};
     uint64_t            pending_touch_count = 0;
     batch_stats_map_t   batch_stats         = {};
+    bool                rocpd_lz4           = true;
 
     size_t get_event_id() { return ++event_id_counter; }
 };
@@ -255,7 +257,8 @@ std::string
 read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
-    auto _options   = ROCPD_SQL_OPTIONS_NONE;
+    auto _options =
+        (db.rocpd_lz4) ? ROCPD_SQL_OPTIONS_SQLITE3_LZ4_COMPRESSION : ROCPD_SQL_OPTIONS_NONE;
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
@@ -499,6 +502,13 @@ log_batch_flush_stats(const rocpd_db& db)
     }
 }
 
+bool
+should_lz4_compress_column(const rocpd_db& db, std::string_view field)
+{
+    if(!db.rocpd_lz4) return false;
+    return (field == "extdata" || field == "call_stack" || field == "line_info");
+}
+
 sqlite3_stmt*&
 get_or_prepare_batch_statement(rocpd_db&                   db,
                                const pending_insert_batch& pending,
@@ -510,7 +520,10 @@ get_or_prepare_batch_statement(rocpd_db&                   db,
     auto& stmt = db.statements[batch_key];
     if(stmt) return stmt;
 
-    const auto placeholders     = std::vector(pending.fields.size(), std::string{"?"});
+    auto placeholders = std::vector<std::string>{};
+    placeholders.reserve(pending.fields.size());
+    for(const auto& field : pending.fields)
+        placeholders.emplace_back(should_lz4_compress_column(db, field) ? "lz4_compress(?)" : "?");
     const auto row_placeholder  = fmt::format("({})", fmt::join(placeholders, ", "));
     const auto row_placeholders = std::vector(rows_per_exec, row_placeholder);
     const auto values_clause    = fmt::format("{}", fmt::join(row_placeholders, ", "));
@@ -884,7 +897,7 @@ extract_flags_field(const Tp& _data)
 
 #define GENERATE_FIELD_ACCESSOR(FUNC_NAME, FIELD_NAME, DATA_TYPE, ...)                             \
     template <typename Tp, typename Up = Tp>                                                       \
-    auto FUNC_NAME(const Tp& _data, int)->decltype(std::declval<Up>().FIELD_NAME, DATA_TYPE{})     \
+    auto FUNC_NAME(const Tp& _data, int) -> decltype(std::declval<Up>().FIELD_NAME, DATA_TYPE{})   \
     {                                                                                              \
         return _data.FIELD_NAME;                                                                   \
     }                                                                                              \
@@ -1044,6 +1057,7 @@ write_rocpd(
 
     auto      db   = rocpd_db{};
     sqlite3*& conn = db.conn;
+    db.rocpd_lz4   = cfg.rocpd_lz4;
 
     {
         const auto& mach_id = tool_metadata.node_data.machine_id;
@@ -1062,6 +1076,7 @@ write_rocpd(
         SQLITE3_CHECK(sqlite3_open_v2(
             output_file.c_str(), &conn, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr));
         SQLITE3_CHECK(sqlite3_busy_handler(conn, &sql::busy_handler, nullptr));
+        if(db.rocpd_lz4) sql::register_lz4_functions(conn);
 
         ROCP_ERROR << fmt::format("Opened result file: {} (UUID={})", output_file, uuid_v7);
 

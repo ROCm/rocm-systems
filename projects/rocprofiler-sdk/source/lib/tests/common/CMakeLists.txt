@@ -8,6 +8,7 @@ set(common_sources
     demangling.cpp
     dl.cpp
     environment.cpp
+    lz4_extension.cpp
     md5sum.cpp
     mpl.cpp
     parse.cpp

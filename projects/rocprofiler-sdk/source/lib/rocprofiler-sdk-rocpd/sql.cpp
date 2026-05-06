@@ -133,6 +133,10 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
         }
     }
 
+    const auto lz4_enabled =
+        ((options & ROCPD_SQL_OPTIONS_SQLITE3_LZ4_COMPRESSION) ==
+         ROCPD_SQL_OPTIONS_SQLITE3_LZ4_COMPRESSION);
+
     const auto kind_file_names = std::unordered_map<rocpd_sql_schema_kind_t, std::string_view>{
         {ROCPD_SQL_SCHEMA_ROCPD_TABLES, "rocpd_tables.sql"},
         {ROCPD_SQL_SCHEMA_ROCPD_INDEXES, "rocpd_indexes.sql"},
@@ -141,6 +145,15 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
         {ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS, "summary_views.sql"},
         {ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS, "marker_views.sql"},
     };
+
+    const auto kind_lz4_file_names =
+        std::unordered_map<rocpd_sql_schema_kind_t, std::string_view>{
+            {ROCPD_SQL_SCHEMA_ROCPD_TABLES, "rocpd_tables_lz4.sql"},
+            {ROCPD_SQL_SCHEMA_ROCPD_VIEWS, "rocpd_views_lz4.sql"},
+            {ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS, "data_views_lz4.sql"},
+            {ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS, "summary_views_lz4.sql"},
+            {ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS, "marker_views_lz4.sql"},
+        };
 
     const auto _lib_schema_path = rocpd::sql::get_install_path();
     const auto _env_schema_path = rocprofiler::common::get_env("ROCPD_SCHEMA_PATH", "");
@@ -155,10 +168,14 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
 
     if(kind_file_names.count(kind) == 0) return ROCPD_STATUS_ERROR_SQL_INVALID_SCHEMA_KIND;
 
+    const auto schema_file_name =
+        (lz4_enabled && kind_lz4_file_names.count(kind) > 0) ? kind_lz4_file_names.at(kind)
+                                                             : kind_file_names.at(kind);
+
     auto _schema_file = std::optional<std::string>{};
     for(const auto& itr : rocprofiler::sdk::parse::tokenize(_schema_paths, ":"))
     {
-        auto _fpath = fs::path{itr} / kind_file_names.at(kind);
+        auto _fpath = fs::path{itr} / schema_file_name;
         ROCP_TRACE << fmt::format("[rocprofiler-sdk-rocpd] Searching for schema file: '{}'",
                                   _fpath.string());
         if(fs::exists(_fpath))

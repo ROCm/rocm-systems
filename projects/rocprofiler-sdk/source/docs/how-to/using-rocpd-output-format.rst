@@ -46,6 +46,42 @@ The profiling session generates output files following the naming convention ``%
 
 - ``%pid%``: The process identifier of the profiled application.
 
+Compression
+-----------
+
+By default, ``rocprofv3`` stores high-volume rocpd JSON payload columns using
+LZ4-compressed SQLite BLOBs. This applies to ``extdata`` columns and the
+``rocpd_event`` ``call_stack`` and ``line_info`` columns. The public rocpd views
+decompress these payloads automatically, so bundled conversion and summary tools
+continue to read JSON text through the standard view names.
+
+To explicitly enable or disable compression, use:
+
+.. code-block:: bash
+
+   rocprofv3 --hip-trace --rocpd-lz4 -- <application>
+   rocprofv3 --hip-trace --no-rocpd-lz4 -- <application>
+
+The equivalent environment variable is ``ROCPROF_ROCPD_LZ4``. Set
+``ROCPROF_ROCPD_LZ4=false`` to produce the legacy uncompressed rocpd schema.
+
+Compressed databases report ``schema_version`` ``4`` and include the metadata
+row ``compression = lz4-frame-v1``. The BLOB wire format is:
+
+.. code-block:: text
+
+   [ 4 bytes magic = "LZ4F" ][ 4 bytes uncompressed_size LE ][ LZ4F frame payload ]
+
+When using raw SQLite queries against UUID-suffixed tables, register the
+``lz4_decompress`` SQLite function before reading compressed columns. The
+bundled rocpd Python tools do this automatically. For example:
+
+.. code-block:: sql
+
+   SELECT json(CAST(lz4_decompress(extdata) AS TEXT))
+   FROM rocpd_kernel_dispatch_<uuid>
+   LIMIT 1;
+
 Converting rocpd to alternative formats
 ---------------------------------------
 

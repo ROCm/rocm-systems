@@ -418,6 +418,12 @@ For attachment profiling of running processes:
         choices=("csv", "json", "pftrace", "otf2", "rocpd"),
         type=str.lower,
     )
+    io_options.add_argument(
+        "--rocpd-lz4",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help="Enable LZ4 compression for rocpd JSON payload columns (default: enabled). Use --no-rocpd-lz4 to disable.",
+    )
     add_parser_bool_argument(
         io_options,
         "--output-config",
@@ -1487,6 +1493,8 @@ def run(app_args, args, **kwargs):
 
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
     update_env("ROCPROF_OUTPUT_PATH", _output_path)
+    if args.rocpd_lz4 is not None:
+        update_env("ROCPROF_ROCPD_LZ4", args.rocpd_lz4)
     update_env("ROCPROF_OUTPUT_CONFIG_FILE", args.output_config, overwrite_if_true=True)
     update_env("ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC", args.attach_sync_output)
     if app_pass is not None and args.sub_directory is not None:

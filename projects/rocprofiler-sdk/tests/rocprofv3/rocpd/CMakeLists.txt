@@ -72,14 +72,36 @@ rocprofiler_add_integration_execute_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data -o out2 --output-format rocpd
-        --runtime-trace --kernel-rename --pmc SQ_WAVES --
+        --no-rocpd-lz4 --runtime-trace --kernel-rename --pmc SQ_WAVES --
         $<TARGET_FILE:reproducible-dispatch-count> 500 2
     DEPENDS reproducible-dispatch-count
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-    FIXTURES_SETUP rocprofv3-test-rocpd)
+    FIXTURES_SETUP rocprofv3-test-rocpd-no-lz4)
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-lz4-schema
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate_lz4_schema.py
+            ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db --expect-lz4
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-legacy-schema
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate_lz4_schema.py
+            ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out2_results.db --expect-legacy
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-no-lz4)
 
 #########################################################################################
 #

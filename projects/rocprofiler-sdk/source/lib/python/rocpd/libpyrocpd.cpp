@@ -135,9 +135,9 @@ struct RocpdImportData
     RocpdImportData()  = default;
     ~RocpdImportData() = default;
 
-    RocpdImportData(const RocpdImportData&)     = default;
-    RocpdImportData(RocpdImportData&&) noexcept = default;
-    RocpdImportData& operator=(const RocpdImportData&) = default;
+    RocpdImportData(const RocpdImportData&)                = default;
+    RocpdImportData(RocpdImportData&&) noexcept            = default;
+    RocpdImportData& operator=(const RocpdImportData&)     = default;
     RocpdImportData& operator=(RocpdImportData&&) noexcept = default;
 
     RocpdImportData(const py::object& _obj, const std::vector<std::string>& _dbs)
@@ -216,7 +216,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
     py::enum_<rocpd_sql_options_t>(pyrocpd, "sql_option", "Load schema options")
         .value("none", ROCPD_SQL_OPTIONS_NONE)
-        .value("sqlite3_pragma_foreign_keys", ROCPD_SQL_OPTIONS_SQLITE3_PRAGMA_FOREIGN_KEYS);
+        .value("sqlite3_pragma_foreign_keys", ROCPD_SQL_OPTIONS_SQLITE3_PRAGMA_FOREIGN_KEYS)
+        .value("sqlite3_lz4_compression", ROCPD_SQL_OPTIONS_SQLITE3_LZ4_COMPRESSION);
 
     py::enum_<tool::agent_indexing>(pyrocpd, "agent_indexing", "enum.Enum")
         .value("node", tool::agent_indexing::node)

@@ -6,6 +6,7 @@ cmake-format
 dataclasses
 flake8
 jinja2
+lz4>=4.0
 numpy
 otf2
 pandas

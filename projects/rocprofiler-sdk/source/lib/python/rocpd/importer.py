@@ -33,6 +33,7 @@ import sqlite3
 
 from .schema import RocpdSchema
 from . import libpyrocpd
+from . import _lz4
 
 __all__ = ["RocpdImportData", "execute_statement"]
 
@@ -48,6 +49,7 @@ def internal_init(_input, _output, skip_auto_merge, automerge_limit):
         _input
     ), "RocpdImportData error, invalid SQLite3 database provided"
     _connection = libpyrocpd.connect(_output)
+    _lz4.register(_connection)
     _connection.execute("PRAGMA foreign_keys = ON")
     _table_info = _create_temp_views(_connection, _input)
     _create_meta_views(_connection)
