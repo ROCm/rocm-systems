@@ -1496,6 +1496,12 @@ static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct
   }
 
   if (connection->state == connConnected) {
+    while (!ncclIntruQueueEmpty(&connection->proxyMemHandleQueue)) {
+      struct proxyMemHandle* memHandle = ncclIntruQueueDequeue(&connection->proxyMemHandleQueue);
+      NCCLCHECK(proxyState->ncclNet->deregMr(resources->netSendComm, memHandle->handle));
+      free(memHandle);
+    }
+
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
       if (resources->buffers[p]) {
         NCCLCHECK(proxyState->ncclNet->deregMr(resources->netSendComm, resources->mhandles[p]));
@@ -1546,6 +1552,12 @@ static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct
   }
 
   if (connection->state == connConnected) {
+    while (!ncclIntruQueueEmpty(&connection->proxyMemHandleQueue)) {
+      struct proxyMemHandle* memHandle = ncclIntruQueueDequeue(&connection->proxyMemHandleQueue);
+      NCCLCHECK(proxyState->ncclNet->deregMr(resources->netRecvComm, memHandle->handle));
+      free(memHandle);
+    }
+
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
       if (resources->buffers[p]) {
         NCCLCHECK(proxyState->ncclNet->deregMr(resources->netRecvComm, resources->mhandles[p]));
@@ -2365,7 +2377,7 @@ fail:
 }
 
 static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
-  void* handle;
+  void* handle = NULL;
   struct netRegInfo* info = (struct netRegInfo*)reqBuff;
   int numSegments = info->numSegments;
   struct sendNetResources* resources = (struct sendNetResources*)(connection->transportResources);
@@ -2408,6 +2420,12 @@ peermem:
   }
 
 exit:
+  if (handle) {
+    struct proxyMemHandle* memHandle;
+    NCCLCHECK(ncclCalloc(&memHandle, 1));
+    memHandle->handle = handle;
+    ncclIntruQueueEnqueue(&connection->proxyMemHandleQueue, memHandle);
+  }
   memcpy(respBuff, (void*)&handle, sizeof(void*));
   *done = 1;
   return ncclSuccess;
@@ -2417,7 +2435,7 @@ fail:
 }
 
 static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
-  void* handle;
+  void* handle = NULL;
   struct netRegInfo* info = (struct netRegInfo*)reqBuff;
   int numSegments = info->numSegments;
   struct recvNetResources* resources = (struct recvNetResources*)(connection->transportResources);
@@ -2460,6 +2478,12 @@ peermem:
   }
 
 exit:
+  if (handle) {
+    struct proxyMemHandle* memHandle;
+    NCCLCHECK(ncclCalloc(&memHandle, 1));
+    memHandle->handle = handle;
+    ncclIntruQueueEnqueue(&connection->proxyMemHandleQueue, memHandle);
+  }
   memcpy(respBuff, (void*)&handle, sizeof(void*));
   *done = 1;
   return ncclSuccess;
@@ -2468,12 +2492,23 @@ fail:
   goto exit;
 }
 
+static bool netHandleCmp(struct proxyMemHandle* a, struct proxyMemHandle* b) {
+  return a->handle == b->handle;
+}
+
 static ncclResult_t sendProxyDeregBuffer(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, int* done) {
   void* handle;
   struct sendNetResources* resources = (struct sendNetResources*)(connection->transportResources);
 
   assert(reqSize == sizeof(void*));
   memcpy(&handle, reqBuff, sizeof(void*));
+  if (handle) {
+    struct proxyMemHandle memHandle = {};
+    struct proxyMemHandle* deletedHandle;
+    memHandle.handle = handle;
+    deletedHandle = ncclIntruQueueDelete(&connection->proxyMemHandleQueue, &memHandle, netHandleCmp);
+    free(deletedHandle);
+  }
   NCCLCHECK(proxyState->ncclNet->deregMr(resources->netSendComm, handle));
   *done = 1;
   return ncclSuccess;
@@ -2485,6 +2520,13 @@ static ncclResult_t recvProxyDeregBuffer(struct ncclProxyConnection* connection,
 
   assert(reqSize == sizeof(void*));
   memcpy(&handle, reqBuff, sizeof(void*));
+  if (handle) {
+    struct proxyMemHandle memHandle = {};
+    struct proxyMemHandle* deletedHandle;
+    memHandle.handle = handle;
+    deletedHandle = ncclIntruQueueDelete(&connection->proxyMemHandleQueue, &memHandle, netHandleCmp);
+    free(deletedHandle);
+  }
   NCCLCHECK(proxyState->ncclNet->deregMr(resources->netRecvComm, handle));
   *done = 1;
   return ncclSuccess;

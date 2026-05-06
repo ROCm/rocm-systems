@@ -16,6 +16,7 @@
 #include "group.h"
 #include "net.h"
 #include "coll_net.h"
+#include "gin.h"
 #include "enqueue.h"
 #include "graph.h"
 #include "argcheck.h"
@@ -202,12 +203,11 @@ ncclResult_t initGdrCopy() {
 }
 
 
+// [RCCL] Upstream NCCL 2.29 moved the CPU stack-size handling into
+// ncclOsInitialize() (see src/os/linux.cc); we delegate to that here so the
+// rest of init.cc can keep calling setCpuStackSize() unchanged.
 static ncclResult_t setCpuStackSize() {
-  if (ncclParamSetCpuStackSize() != 0) {
-    return ncclOsSetCpuStackSize();
-  }
-
-  return ncclSuccess;
+  return ncclOsInitialize();
 }
 
 static ncclResult_t initResult = ncclSuccess;
@@ -647,7 +647,7 @@ skip_profiling:
     CUDACHECK(hipEventDestroy(comm->doneEvent));
 
   // GIN may use proxy. We need to finalize it before destroying the proxy.
-  NCCLCHECK(ncclGinFinalize(comm));
+  NCCLCHECK(ncclGinHostFinalize(comm));
   NCCLCHECK(ncclRmaProxyFinalize(comm));
 
   int sharedResRefCount = 0;
@@ -814,10 +814,12 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
     comm->sharedRes = sharedRes;
     sharedRes->refCount = 1;
     NCCLCHECK(ncclNetInit(comm));
+    NCCLCHECK(ncclGinInit(comm));
   } else {
     comm->sharedRes = parent->sharedRes;
     ncclAtomicRefCountIncrement(&parent->sharedRes->refCount);
     NCCLCHECK(ncclNetInitFromParent(comm, parent));
+    NCCLCHECK(ncclGinInitFromParent(comm, parent));
   }
 
   INFO(NCCL_INIT, "Using network %s", comm->ncclNet->name);
@@ -860,7 +862,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->compCap = ncclCudaCompCap();
   TRACE(NCCL_INIT,"comm %p rank %d nranks %d cudaDev %d busId %lx compCap %d", comm, rank, ndev, comm->cudaDev, comm->busId, comm->compCap);
 
-  comm->checkPointers = ncclParamCheckPointers() == 1 ? true : false;
+  comm->checkMode = ncclParamCheckPointers() == 1 ? ncclCheckModeDebugLocal : ncclCheckModeDefault;
   comm->dmaBufSupport = (dmaBufSupported(comm) == ncclSuccess) ? true : false;
 
   // Initialize memory manager
@@ -934,7 +936,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   ncclIntruQueueConstruct(&comm->suspendTaskQueue);
   ncclIntruQueueConstruct(&comm->resumeTaskQueue);
 
-  comm->regCache.pageSize = sysconf(_SC_PAGESIZE);
+  comm->regCache.pageSize = ncclOsGetPageSize();
 
   do {
     cudaMemPoolProps props = {};
@@ -1140,7 +1142,7 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   info->pidHash=getPidHash()+commHash;
   info->cuMemSupport = ncclCuMemEnable();
   CUDACHECK(cudaGetDeviceProperties(&prop, comm->cudaDev));
-  info->totalGlobalMem = ROUNDUP(prop.totalGlobalMem, (1L << 32));
+  info->totalGlobalMem = ROUNDUP(prop.totalGlobalMem, (1ULL << 32));
 
   // Get the device MAJOR:MINOR of /dev/shm so we can use that
   // information to decide whether we can use SHM for inter-process
@@ -1487,6 +1489,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   int *topParentLocalRanks = NULL;
   int p2pLevel = -1;
   bool globalNicFused = false;
+  bool globalGinSupport = comm->sharedRes->ginState.ginType != NCCL_GIN_TYPE_NONE;
+  bool globalCrossNicSupport = true;
+  bool globalRmaPluginSupport = true;
+  bool globalCuMemGdrSupport = true;
 
   timers[TIMER_INIT_ALLGATHER] = clockNano();
   // AllGather1 - begin
@@ -2205,15 +2211,18 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 
-  bool crossNicSupported;
   NCCLCHECKGOTO(ncclTopoPathAllDirectNVLink(comm->topo, &comm->isAllDirectNvlink), ret, fail);
-  NCCLCHECKGOTO(ncclTopoCheckCrossNicSupport(&crossNicSupported), ret, fail);
-  comm->ginSupport = comm->sharedRes->ginState.ncclGin != nullptr && crossNicSupported && !globalNicFused;
-  comm->rmaProxySupport = comm->rmaState.rmaProxyState.ncclGin != nullptr && crossNicSupported && !globalNicFused;
-  comm->symmetricSupport = comm->isAllCudaP2p && ncclParamWinEnable() && ncclCuMemEnable() && (comm->ginSupport || comm->nNodes == 1);
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
+  if (globalGinSupport && !globalNicFused && globalCuMemGdrSupport) {
+    comm->globalGinSupport = globalCrossNicSupport ? NCCL_GIN_CONNECTION_FULL : NCCL_GIN_CONNECTION_RAIL;
+  }
+  comm->globalRmaProxySupport = globalRmaPluginSupport && globalCrossNicSupport && !globalNicFused && globalCuMemGdrSupport;
+  comm->symmetricSupport = comm->isAllCudaP2p && ncclParamWinEnable() && ncclCuMemEnable() &&
+    (comm->globalGinSupport != NCCL_GIN_CONNECTION_NONE || (ncclTeamLsa(comm).nRanks == comm->nRanks));
+  comm->hostRmaSupport = comm->symmetricSupport && ((ncclTeamLsa(comm).nRanks == comm->nRanks) || comm->globalRmaProxySupport);
   if (!comm->symmetricSupport) {
     INFO(NCCL_INIT, "Symmetric memory is not supported. cuMemEnable %d, "
-      "ginSupport %d, globalNicFused %d", ncclCuMemEnable(), comm->ginSupport, globalNicFused);
+      "globalGinSupport %d, globalNicFused %d cuMemGdrSupport %d", ncclCuMemEnable(), comm->globalGinSupport, globalNicFused, globalCuMemGdrSupport);
   }
   comm->devrState.bigSize = 0;
 
@@ -2666,6 +2675,7 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
   int nvlinkUtilCentricSchedEnableEnv;
   int graphMixingSupportEnv;
   int numRmaCtxEnv;
+  const char* checkModeEnv;
 
   /* override configuration with env variable. */
   blockingEnv = ncclParamCommBlocking();
@@ -2848,6 +2858,22 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
     comm->config.CTAPolicy &= ~NCCL_CTA_POLICY_EFFICIENCY;
   }
 
+
+  // read non-config env settings
+  comm->checkMode = ncclCheckModeDefault;
+  if (ncclParamCheckPointers() == 1) { // @deprecated: use NCCL_CHECK_MODE instead
+    comm->checkMode = ncclCheckModeDebugLocal;
+  }
+
+  checkModeEnv = ncclGetEnv("NCCL_CHECK_MODE");
+  if (checkModeEnv) {
+    INFO(NCCL_ENV, "NCCL_CHECK_MODE set by environment to %s", checkModeEnv);
+    if (strcasecmp(checkModeEnv, "DEBUG_GLOBAL") == 0) {
+      comm->checkMode = ncclCheckModeDebugGlobal;
+    } else if (strcasecmp(checkModeEnv, "DEBUG_LOCAL") == 0) {
+      comm->checkMode = ncclCheckModeDebugLocal;
+    }
+  }
   return ret;
 }
 
@@ -3305,10 +3331,10 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
 
   if (comm->initState == ncclSuccess) {
     if ((ret = ncclStrongStreamSynchronize(&comm->sharedRes->hostStream)) != ncclSuccess) {
-      WARN("commDestroySync: comm %p rank %d sync hostStream error %d\n", comm, comm->rank, ret);
+      WARN("commDestroySync: comm %p rank %d sync hostStream error %d", comm, comm->rank, ret);
     }
     if ((ret = ncclStrongStreamSynchronize(&comm->sharedRes->deviceStream)) != ncclSuccess) {
-      WARN("commDestroySync: comm %p rank %d sync deviceStream error %d\n", comm, comm->rank, ret);
+      WARN("commDestroySync: comm %p rank %d sync deviceStream error %d", comm, comm->rank, ret);
     }
 
     NCCLCHECKGOTO(ncclCommPollEventCallbacks(comm, true), ret, fail);
@@ -3476,6 +3502,10 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
     }
   }
 
+  // [RCCL] NCCL 2.29.7 added per-peer crossNic / cuMemGdr / GIN / RMA fields
+  // to ncclPeerInfo and populates them in initTransportsRank during AllGather1.
+  // The hunk that landed in this slot was orphaned inside commReclaim() during
+  // the patch apply; the AllGather1 wiring (init.cc:~975) still needs porting.
   return ncclSuccess;
 }
 
@@ -4034,20 +4064,17 @@ ncclResult_t ncclCommGetAsyncError_impl(ncclComm_t comm, ncclResult_t *asyncErro
   if (*asyncError == ncclSuccess && comm->proxyState) *asyncError = COMPILER_ATOMIC_LOAD(&comm->proxyState->asyncResult, std::memory_order_acquire);
 
   /* Check gin status */
-  if (*asyncError == ncclSuccess && comm->sharedRes && comm->sharedRes->ginState.ncclGin) {
+  if (*asyncError == ncclSuccess && comm->sharedRes && comm->sharedRes->ginState.connected) {
     struct ncclGinState* ginState = &comm->sharedRes->ginState;
     // Gin progress thread status
     if (ginState->needsProxyProgress) *asyncError = COMPILER_ATOMIC_LOAD(&comm->sharedRes->ginState.asyncResult, std::memory_order_acquire);
     // Gin side errors, also works when we have no GIN progress thread.
     if (*asyncError == ncclSuccess) {
       bool ginError;
-      for (int c=0; c<comm->sharedRes->ginState.ginCommCount; c++) {
-        NCCLCHECK(ncclGinQueryLastError(&comm->sharedRes->ginState, &ginError));
-        if (ginError) {
-          WARN("GIN Error on gin context %d\n", c);
-          *asyncError = ncclRemoteError;
-          break;
-        }
+      NCCLCHECK(ncclGinQueryLastError(&comm->sharedRes->ginState, &ginError));
+      if (ginError) {
+        WARN("GIN Error detected");
+        *asyncError = ncclRemoteError;
       }
     }
   }
@@ -4102,3 +4129,4 @@ ncclResult_t ncclCommUserRank_impl(const ncclComm_t comm, int* rank) {
   *rank = comm->rank;
   return ncclSuccess;
 }
+

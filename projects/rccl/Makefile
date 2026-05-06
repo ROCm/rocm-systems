@@ -1,7 +1,8 @@
 #
-# Copyright (c) 2015-2025, NVIDIA CORPORATION. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 #
-# See LICENSE.txt for license information
+# See LICENSE.txt for more license information
 #
 .PHONY: all clean
 
@@ -28,7 +29,7 @@ src.%:
 	${MAKE} -C src $* BUILDDIR=${ABSBUILDDIR}
 
 examples: src.build
-	${MAKE} -C examples NCCL_HOME=${ABSBUILDDIR}
+	${MAKE} -C docs/examples NCCL_HOME=${ABSBUILDDIR}
 
 pkg.%:
 	${MAKE} -C pkg $* BUILDDIR=${ABSBUILDDIR}
@@ -38,7 +39,7 @@ nccl4py.%:
 
 # IR generation requires src.build first
 ir.%:
-	${MAKE} -C ir $* BUILDDIR=${ABSBUILDDIR}
+	${MAKE} -C bindings/ir $* BUILDDIR=${ABSBUILDDIR}
 
 pkg.debian.prep: lic
 pkg.txz.prep: lic

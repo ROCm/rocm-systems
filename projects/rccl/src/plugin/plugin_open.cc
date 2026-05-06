@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2022-2023, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include <stdlib.h>
 #include <string.h>
@@ -114,6 +115,10 @@ static void* openPluginLib(enum ncclPluginType type, const char* libName) {
 
 void* ncclOpenNetPluginLib(const char* name) {
   return openPluginLib(ncclPluginTypeNet, name);
+}
+
+void* ncclOpenGinPluginLib(const char* name) {
+  return openPluginLib(ncclPluginTypeGin, name);
 }
 
 void* ncclOpenTunerPluginLib(const char* name) {
