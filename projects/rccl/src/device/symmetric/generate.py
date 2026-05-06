@@ -32,7 +32,8 @@ def emitln(f, lines):
     f.write('  '*indents + ln + '\n')
 
 def indent(s):
-  return '\n'.join('  '+l for l in s.splitlines())
+  endl = '\n' if s.endswith('\n') else ''
+  return '\n'.join('  '+l for l in s.splitlines()) + endl
 
 class Rec(object):
   def __init__(me, **kw):
@@ -55,6 +56,7 @@ class Rec(object):
 reductions = ["AllReduce","ReduceScatter"]
 all_reds = ["sum"]
 all_tys = ["f32","f16","bf16","f8e4m3","f8e5m2"]
+gin_algos = ["GinHier_MCRing"]
 
 nvls_algos_by_coll = {
   "AllReduce": ["AGxLLMC_R","RSxLDMC_AGxSTMC"],

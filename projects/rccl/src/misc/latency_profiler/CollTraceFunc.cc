@@ -97,7 +97,7 @@ std::unique_ptr<CollTraceEvent> collTraceAquireEventCommon(
     return nullptr;
   }
   struct ncclCudaGraph graph;
-  auto res = ncclCudaGetCapturingGraph(&graph, stream);
+  auto res = ncclCudaGetCapturingGraph(&graph, stream, comm->config.graphUsageMode);
   if (res != ncclSuccess) {
     WARN("Internal error: ncclCudaGetCapturingGraph failed by %d", res);
     return nullptr;

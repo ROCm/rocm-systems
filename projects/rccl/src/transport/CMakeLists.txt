@@ -12,7 +12,7 @@ set(TRANSPORT_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/generic.cc
 )
 
-add_subdirectory(gdaki)
+add_subdirectory(net_ib/gdaki)
 
 # Add transport sources to parent scope
 set(TRANSPORT_SOURCES ${TRANSPORT_SOURCES} PARENT_SCOPE)

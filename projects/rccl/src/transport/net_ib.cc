@@ -3230,7 +3230,9 @@ ncclNet_t ncclNetIb = {
 /// GIN IB Plugin
 
 #include "gin/gin_host.h"
-#include "net_ib_gin.h"
+// [RCCL] hipify add_file_unique() renames net_ib/gin.h to net_ib/gin_tmp.h
+// to avoid a basename collision with include/nccl_device/gin.h.
+#include "net_ib/gin_tmp.h"
 
 const int NCCL_GIN_IB_ALLGATHER_TAG = 0xa0;
 const int NCCL_GIN_IB_ALLTOALL_TAG = 0xa1;
@@ -3419,7 +3421,7 @@ ncclResult_t ncclGinIbCloseColl(void* collComm) {
   return ncclSuccess;
 }
 
-#include "gdaki/gin_host_gdaki.h"
+#include "net_ib/gdaki/gin_host_gdaki.h"
 
 static std::mutex ncclGinIbGdakiLockMutex;
 static int ncclGinIbGdakiNDevs = -1;

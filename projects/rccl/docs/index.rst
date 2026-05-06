@@ -34,8 +34,8 @@ The RCCL public repository is located at `<https://github.com/ROCm/rccl>`_.
 
   .. grid-item-card:: Examples
 
-    * `RCCL Tuner plugin examples <https://github.com/ROCm/rccl/tree/develop/ext-tuner/example>`_
-    * `NCCL Net plugin examples <https://github.com/ROCm/rccl/tree/develop/ext-net/example>`_
+    * `RCCL Tuner plugin examples <https://github.com/ROCm/rccl/tree/develop/plugins/tuner/example>`_
+    * `NCCL Net plugin examples <https://github.com/ROCm/rccl/tree/develop/plugins/net/example>`_
 
   .. grid-item-card:: API reference
 
