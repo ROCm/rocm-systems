@@ -405,31 +405,29 @@ T calculateExpected(T* output,
                     AggregationType aggType)
 {
   T result;
-  int wavefrontSize = getWarpSize();
   bool inclusive = aggType != AggregationType::ExclusiveScan;
+  int lastLane = 64 - __builtin_clzll(mask) - 1;
 
   std::memset(output, 0, 64 * sizeof(T));
 
   if constexpr (std::is_same<Op, std::plus<T>>::value || std::is_same<Op, cooperative_groups::plus<T>>::value) {
-    for (int i = 0; i < wavefrontSize; i++) {
+    for (int i = 0; i < lastLane + 1; i++) {
        if (inclusive && mask & (1ul << i)) {
          output[i] = input[i];
        }
     }
 
+    for (int modulo = 2; modulo <= lastLane + 1; modulo *= 2) {
+      for (int i = 0; i < lastLane + 1; i += 1) {
+        int j = i - modulo / 2;
 
-    for (int modulo = 2; modulo <= wavefrontSize; modulo *= 2) {
-      for (int i = 0; i < wavefrontSize; i += 1) {
-        if (i % modulo == modulo -1) {
-          int j = i - modulo / 2;
-
-          if (j >= 0) {
-            output[i] += output[j];
-          }
+        if (j >= 0 && i % modulo == modulo - 1) {
+          output[i] += output[j];
         }
       }
     }
-    result = output[wavefrontSize - 1];
+
+    result = output[lastLane];
   } else if constexpr (std::is_same<Op, cooperative_groups::less<T>>::value) {
     MinOp<T> minOp;
     return calculateExpected(output, input, minOp, mask, aggType);
@@ -450,7 +448,7 @@ T calculateExpected(T* output,
 
     std::memset(&result, 0, sizeof(T));
 
-    for (int i = 0; i < wavefrontSize; i++) {
+    for (int i = 0; i < lastLane + 1; i++) {
       if (mask & (1ul << i)) {
         T arg;
 
