@@ -115,10 +115,10 @@ class CpuTimer : public Timer {
 template <typename Derived> class Benchmark {
  public:
   Benchmark()
-      : display_output_(!cmd_options.no_display),
+      : iterations_(TestParameterStore::instance().getIterationsForCurrentLevel()),
+        warmups_(TestParameterStore::instance().getWarmupsForCurrentLevel()),
+        display_output_(!cmd_options.no_display),
         progress_bar_(cmd_options.progress) {
-    iterations_ = TestParameterStore::instance().getIterationsForCurrentLevel();
-    warmups_ = TestParameterStore::instance().getWarmupsForCurrentLevel();
     benchmark_name_ = Catch::getResultCapture().getCurrentTestName();
   }
 

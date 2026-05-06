@@ -153,7 +153,7 @@ public:
     std::map<std::string, std::vector<int>> levelBlockSizes;
     std::map<std::string, int> levelIterations;
     std::map<std::string, int> levelWarmups;
-    std::map<std::string, size_t> levelCgIterations;
+    std::map<std::string, int> levelCgIterations;
     std::map<std::string, uint64_t> levelMathAccuracyIterations;
     std::map<std::string, int> levelMathAccuracyMaxMemoryPercentage;
     std::map<std::string, size_t> levelMathMaxMemory;
