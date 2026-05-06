@@ -29,7 +29,11 @@ namespace amd::roc {
 PrintfDbg::PrintfDbg(Device& device, FILE* file)
     : dbgBuffer_(nullptr), dbgBuffer_size_(0), dbgFile_(file), gpuDevice_(device) {}
 
-PrintfDbg::~PrintfDbg() { dev().hostFree(dbgBuffer_, dbgBuffer_size_); }
+PrintfDbg::~PrintfDbg() {
+  if (dbgBuffer_ != nullptr) {
+    dev().hostFree(dbgBuffer_, dbgBuffer_size_);
+  }
+}
 
 bool PrintfDbg::allocate(bool realloc) {
   if (nullptr == dbgBuffer_) {
