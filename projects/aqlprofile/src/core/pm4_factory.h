@@ -162,6 +162,17 @@ class __attribute__((visibility("default"))) Pm4Factory {
   // SPM specific
   virtual uint32_t GetSpmSampleDelayMax() { return 0; }
 
+  // Capability flags (legacy defaults derived from gpu_id_; overridden by Pm4FactoryAdapter)
+  virtual bool HasSpmCore1() const {
+    return gpu_id_ == MI100_GPU_ID || gpu_id_ == MI200_GPU_ID;
+  }
+  virtual bool HasSqttStatus2Register() const { return gpu_id_ >= GFX12_GPU_ID; }
+  virtual bool HasWptrRelativeAddressing() const { return gpu_id_ == GFX11_GPU_ID; }
+  virtual bool NeedsSqttHeaderPacket() const { return gpu_id_ < GFX10_GPU_ID; }
+  virtual bool SupportsSpmV2() const {
+    return gpu_id_ >= MI200_GPU_ID && gpu_id_ <= MI350_GPU_ID;
+  }
+
   virtual const GpuBlockInfo* GetBlockInfo(const aqlprofile_pmc_event_t* event) const {
     const GpuBlockInfo* info = block_map_.Get(event->block_name);
     if (info == NULL) throw std::runtime_error("Bad Block");

@@ -85,7 +85,7 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
       ERR_LOGGING << "SQTT memory error received, SE(" << se_index << ")";
       status = HSA_STATUS_ERROR_EXCEPTION;
     }
-    auto status2_value = (pm4_factory->GetGpuId() >= aql_profile::GFX12_GPU_ID) ? control_ptr[se_index].status2 : control_ptr[se_index].status;
+    auto status2_value = pm4_factory->HasSqttStatus2Register() ? control_ptr[se_index].status2 : control_ptr[se_index].status;
     if (status2_value & sqttbuilder->GetBufferFullMask()) {
       ERR2_LOGGING << "SQTT data buffer full, SE(" << se_index << ")";
       if (status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -99,7 +99,7 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     size_t wptr_mask = sqttbuilder->GetWritePtrMask();
     size_t sample_size = (control_ptr[se_index].wptr & wptr_mask) * sqttbuilder->GetWritePtrBlk();
 
-    if (pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID) {
+    if (pm4_factory->HasWptrRelativeAddressing()) {
       sample_size = sample_size - reinterpret_cast<uint64_t>(sample_ptr);
       sample_size &= (1ull << 29) - 1;
     }
@@ -138,7 +138,7 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     size_t sample_size_plus_header = sample_size;
 
     char* sample_data_ptr = (char*)cpu_sample.data();
-    if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID) {
+    if (pm4_factory->NeedsSqttHeaderPacket()) {
       auto* header = reinterpret_cast<rocprof_trace_decoder_gfx9_header_t*>(cpu_sample.data());
       *header = getHeaderPacket(se_index, target_cu, memorymgr->GetSimdMask(), pm4_factory->GetGpuId(), false);
       sample_data_ptr += gfx9_header_size;
@@ -251,7 +251,7 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
       // First == Last buf for ring
       buffer_data.emplace_back(memorymgr->GetOutputBuf());
 
-      if ((pm4_factory->GetGpuId() != aql_profile::GFX9_GPU_ID) && (buffer_num%2))
+      if (!pm4_factory->NeedsSqttHeaderPacket() && (buffer_num%2))
       {
         // For gfxip != 9, an odd number of buffers in the ring causes buf0 and buf1 to have swapped
         // pointers after a round trip. We need two turns around the ring to restore the state.
@@ -418,7 +418,7 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
   if (buffers.size() > *num_buffer_packets) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   *num_buffer_packets = buffers.size();
 
-  if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID)
+  if (pm4_factory->NeedsSqttHeaderPacket())
     *header = getHeaderPacket(shader_engine_id, manager->config.GetTargetCU(shader_engine_id), manager->GetSimdMask(), pm4_factory->GetGpuId(), true).raw;
   else
     *header = 0;

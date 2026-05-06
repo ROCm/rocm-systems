@@ -259,14 +259,13 @@ PUBLIC_API hsa_status_t hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_prof
       const uint64_t se_number_total = pm4_factory->GetShaderEnginesNumber();
 
       trace_config.spm_sq_32bit_mode = true;
-      trace_config.spm_has_core1 = (pm4_factory->GetGpuId() == aql_profile::MI100_GPU_ID) ||
-                                   (pm4_factory->GetGpuId() == aql_profile::MI200_GPU_ID);
+      trace_config.spm_has_core1 = pm4_factory->HasSpmCore1();
       trace_config.spm_sample_delay_max = pm4_factory->GetSpmSampleDelayMax();
       trace_config.sampleRate = 1600;
 
       trace_config.xcc_number = pm4_factory->GetXccNumber();
       trace_config.se_number = se_number_total / trace_config.xcc_number;
-      trace_config.sa_number = pm4_factory->GetGpuId() >= aql_profile::GFX10_GPU_ID ? 2 : 0;
+      trace_config.sa_number = pm4_factory->GetShaderArraysNumber();
 
       if (profile->parameters) {
         for (const hsa_ven_amd_aqlprofile_parameter_t* p = profile->parameters;
@@ -755,7 +754,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
           size_t sample_size = (control_ptr[se_index].wptr & sqttbuilder->GetWritePtrMask()) *
                                sqttbuilder->GetWritePtrBlk();
 
-          if (pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID) {
+          if (pm4_factory->HasWptrRelativeAddressing()) {
             sample_size = sample_size - reinterpret_cast<uint64_t>(sample_ptr);
             sample_size &= (1ull << 29) - 1;
           }

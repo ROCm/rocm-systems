@@ -58,6 +58,10 @@ void Gfx12Architecture::InitializeConfig(const AgentInfo* agent_info) {
   config_.has_aid_aware_counters = false;
   config_.has_spm_core1 = false;
   config_.spm_sq_32bit_mode = false;
+  config_.supports_spm_v2 = false;
+  config_.has_sqtt_status2_register = true;
+  config_.has_wptr_relative_addressing = false;
+  config_.needs_sqtt_header_packet = false;
   config_.spm_sample_delay_max = 0;
   config_.sqtt_buffer_alignment = 0x1000;
 }

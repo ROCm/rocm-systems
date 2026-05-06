@@ -36,6 +36,7 @@ void Mi200Architecture::InitializeConfig(const AgentInfo* agent_info) {
 
   config_.name = "MI200";
   config_.has_spm_core1 = true;
+  config_.supports_spm_v2 = true;
   config_.spm_sample_delay_max = 0x3e;
 }
 

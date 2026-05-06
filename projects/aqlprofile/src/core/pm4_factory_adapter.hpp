@@ -60,6 +60,12 @@ class Pm4FactoryAdapter : public Pm4Factory {
   bool IsGFX11() const override { return architecture_->IsGFX11(); }
   bool IsGFX12() const override { return architecture_->IsGFX12(); }
 
+  bool HasSpmCore1() const override { return architecture_->GetConfig().has_spm_core1; }
+  bool HasSqttStatus2Register() const override { return architecture_->GetConfig().has_sqtt_status2_register; }
+  bool HasWptrRelativeAddressing() const override { return architecture_->GetConfig().has_wptr_relative_addressing; }
+  bool NeedsSqttHeaderPacket() const override { return architecture_->GetConfig().needs_sqtt_header_packet; }
+  bool SupportsSpmV2() const override { return architecture_->GetConfig().supports_spm_v2; }
+
   uint32_t GetXccNumber() const;
   uint32_t GetSpmSampleDelayMax() override;
 

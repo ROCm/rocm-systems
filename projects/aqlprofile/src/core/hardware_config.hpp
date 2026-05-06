@@ -57,10 +57,14 @@ struct HardwareConfig {
   bool supports_concurrent;    // Concurrent profiling mode
 
   // Architecture flags
-  bool has_grbm_perfcounter;   // GRBM perfcounter support
-  bool has_aid_aware_counters; // AID-aware counter routing (MI300+)
-  bool has_spm_core1;          // SPM dual-core support (MI100/MI200)
-  bool spm_sq_32bit_mode;      // SPM SQ 32-bit mode
+  bool has_grbm_perfcounter;          // GRBM perfcounter support
+  bool has_aid_aware_counters;        // AID-aware counter routing (MI300+)
+  bool has_spm_core1;                 // SPM dual-core support (MI100/MI200)
+  bool spm_sq_32bit_mode;             // SPM SQ 32-bit mode
+  bool supports_spm_v2;               // SPM v2 support (MI200/MI300/MI350)
+  bool has_sqtt_status2_register;     // SQTT uses STATUS2 register (GFX12+)
+  bool has_wptr_relative_addressing;  // SQTT wptr is relative to buffer base (GFX11)
+  bool needs_sqtt_header_packet;      // SQTT data needs a header packet prepended (GFX9)
 
   // SPM configuration
   uint32_t spm_sample_delay_max;  // Maximum SPM sample delay
@@ -88,6 +92,10 @@ struct HardwareConfig {
         has_aid_aware_counters(false),
         has_spm_core1(false),
         spm_sq_32bit_mode(true),
+        supports_spm_v2(false),
+        has_sqtt_status2_register(false),
+        has_wptr_relative_addressing(false),
+        needs_sqtt_header_packet(false),
         spm_sample_delay_max(0),
         sqtt_buffer_alignment(0x1000) {}
 

@@ -302,8 +302,7 @@ hsa_status_t _internal_aqlprofile_spm_create_packets(
         pm4_builder::TraceConfig& trace_config = memory->config;
 
         trace_config.spm_sq_32bit_mode = true;
-        trace_config.spm_has_core1 = (pm4_factory->GetGpuId() == aql_profile::MI100_GPU_ID) ||
-                                    (pm4_factory->GetGpuId() == aql_profile::MI200_GPU_ID);
+        trace_config.spm_has_core1 = pm4_factory->HasSpmCore1();
         trace_config.spm_sample_delay_max = pm4_factory->GetSpmSampleDelayMax();
         trace_config.sampleRate = (s->parameters.at(AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL) + 16) & ~31ul;
         if (trace_config.sampleRate == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -313,7 +312,7 @@ hsa_status_t _internal_aqlprofile_spm_create_packets(
 
         trace_config.xcc_number = pm4_factory->GetXccNumber();
         trace_config.se_number = pm4_factory->GetShaderEnginesNumber() / trace_config.xcc_number;
-        trace_config.sa_number = pm4_factory->GetGpuId() >= aql_profile::GFX10_GPU_ID ? 2 : 0;
+        trace_config.sa_number = pm4_factory->GetShaderArraysNumber();
 
         trace_config.data_buffer_ptr = memory->GetOutputBuf();
         trace_config.data_buffer_size = memory->GetOutputBufSize();
@@ -550,7 +549,7 @@ aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pm
     }
     catch(...) { return false; }
 
-    if (pm4_factory->GetGpuId() < aql_profile::MI200_GPU_ID || pm4_factory->GetGpuId() > aql_profile::MI350_GPU_ID)
+    if (!pm4_factory->SupportsSpmV2())
         return false;
 
     static auto blocks = []()
