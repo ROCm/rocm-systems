@@ -268,6 +268,7 @@ private:
     PalObject<Pal::ICmdAllocator> cmd_allocator_;
     PalObject<Pal::ICmdBuffer> cmd_buffer_;
     PalObject<Pal::IFence> fence_;
+    PalObject<Pal::IVideoDecoder> video_decoder_;
 
     rocDecVideoCodec codec_;
     Pal::ChNumFormat pal_format_;
