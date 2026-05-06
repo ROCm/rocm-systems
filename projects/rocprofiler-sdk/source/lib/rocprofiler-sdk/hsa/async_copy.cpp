@@ -41,8 +41,8 @@
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 #include <rocprofiler-sdk/cxx/constants.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
-#include <glog/logging.h>
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 
@@ -65,7 +65,7 @@ namespace
 {
 using context_t              = context::context;
 using context_array_t        = common::container::small_vector<const context_t*>;
-using external_corr_id_map_t = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+using external_corr_id_map_t = tracing::external_correlation_id_map_t;
 
 template <size_t OpIdx>
 struct async_copy_info;
@@ -338,7 +338,7 @@ convert_hsa_handle(Up _hsa_object)
 }
 
 bool
-async_copy_handler(hsa_signal_value_t signal_value, void* arg)
+async_copy_handler(hsa_signal_value_t, void* arg)
 {
     // if we have fully finalized, delete the data and return
     if(registration::get_fini_status() > 0)
@@ -432,13 +432,9 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
         std::tie(orig_amd_signal->start_ts, orig_amd_signal->end_ts) =
             std::tie(rocp_amd_signal->start_ts, rocp_amd_signal->end_ts);
 
-        const hsa_signal_value_t new_value =
-            get_core_table()->hsa_signal_load_relaxed_fn(_data->orig_signal) - 1;
-
-        ROCP_ERROR_IF(signal_value != new_value) << "bad original signal value in " << __FUNCTION__;
         // Move to ROCP_TRACE when rebasing
         ROCP_INFO << "Decrementing Signal: " << std::hex << _data->orig_signal.handle << std::dec;
-        get_core_table()->hsa_signal_store_screlease_fn(_data->orig_signal, signal_value);
+        get_core_table()->hsa_signal_subtract_screlease_fn(_data->orig_signal, 1);
     }
 
     ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
@@ -581,7 +577,63 @@ async_copy_impl(Args... args)
                 if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
                     _direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST;
                 else if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                    _direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE;
+                {
+                    // When both agents are GPU type, the HSA agent handles alone are not
+                    // sufficient to determine the true transfer direction. OpenMP RTL (libomptarget)
+                    // pins host memory and registers it under a GPU agent, causing HSA to report
+                    // src_agent == dst_agent (both GPU) even for HOST<->DEVICE transfers.
+                    // Use hsa_amd_pointer_info to inspect the actual memory type of each pointer:
+                    //   HSA_EXT_POINTER_TYPE_UNKNOWN (0) = unregistered host memory (e.g. MI300X APU)
+                    //   HSA_EXT_POINTER_TYPE_LOCKED  (2) = pinned host memory (discrete GPU)
+                    //   HSA_EXT_POINTER_TYPE_HSA     (1) = true device (GPU) memory
+                    // This fixes ROCM-9863: OpenMP offload transfers incorrectly reported as
+                    // MEMORY_COPY_DEVICE_TO_DEVICE instead of HOST_TO_DEVICE / DEVICE_TO_HOST.
+                    constexpr auto dst_addr_idx_inner = arg_indices<OpIdx>::dst_address_idx;
+                    constexpr auto src_addr_idx_inner = arg_indices<OpIdx>::src_address_idx;
+                    const void* _src_ptr = compute_address(std::get<src_addr_idx_inner>(_tied_args)).ptr;
+                    const void* _dst_ptr = compute_address(std::get<dst_addr_idx_inner>(_tied_args)).ptr;
+
+                    auto _src_info = hsa_amd_pointer_info_t{};
+                    auto _dst_info = hsa_amd_pointer_info_t{};
+                    _src_info.size = sizeof(hsa_amd_pointer_info_t);
+                    _dst_info.size = sizeof(hsa_amd_pointer_info_t);
+
+                    auto* _ptr_info_fn = get_amd_ext_table()->hsa_amd_pointer_info_fn;
+
+                    // When both HSA agents are GPU type, the agent handles alone are not
+                    // sufficient to determine the true transfer direction. OpenMP RTL (libomptarget)
+                    // allocates a host-accessible staging buffer and registers it under the GPU
+                    // agent, making both src and dst appear as GPU-type agents.
+                    //
+                    // The hsa_amd_pointer_info_t::agentOwner field reveals which HSA agent
+                    // actually owns each allocation. Pinned host buffers created by OpenMP RTL
+                    // have a different agentOwner than the GPU agent used for the copy.
+                    //
+                    // Fix for ROCM-9863: compare agentOwner of src and dst against the GPU
+                    // agent handle to correctly classify HOST_TO_DEVICE and DEVICE_TO_HOST.
+                    bool _src_query_ok = false, _dst_query_ok = false;
+                    if(_ptr_info_fn)
+                    {
+                        _src_query_ok = (_ptr_info_fn(_src_ptr, &_src_info, nullptr, nullptr, nullptr)
+                                         == HSA_STATUS_SUCCESS);
+                        _dst_query_ok = (_ptr_info_fn(_dst_ptr, &_dst_info, nullptr, nullptr, nullptr)
+                                         == HSA_STATUS_SUCCESS);
+                    }
+
+                    // A pointer is considered GPU device memory if its agentOwner matches
+                    // the GPU agent handle passed to the copy operation.
+                    const bool _src_is_device = _src_query_ok &&
+                        (_src_info.agentOwner == _hsa_dst_agent);
+                    const bool _dst_is_device = _dst_query_ok &&
+                        (_dst_info.agentOwner == _hsa_dst_agent);
+
+                    if(!_src_is_device && _dst_is_device)
+                        _direction = ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE;
+                    else if(_src_is_device && !_dst_is_device)
+                        _direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST;
+                    else
+                        _direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE;
+                }
                 else
                 {
                     ROCP_CI_LOG(WARNING)

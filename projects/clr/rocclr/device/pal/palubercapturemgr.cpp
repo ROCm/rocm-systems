@@ -316,11 +316,10 @@ Pal::Result UberTraceCaptureMgr::TimedQueueSubmit(Pal::IQueue* queue, uint64_t c
   timedSubmitInfo.pSqttCmdBufIds = &sqttCmdBufIds;
   timedSubmitInfo.frameIndex = 0;
 
-  // Do a timed submit of all the command buffers
-  Pal::Result result = queue_timings_trace_source_->TimedSubmit(queue, submitInfo, timedSubmitInfo);
-
-  // Punt to non-timed submit if a timed submit fails (or is not supported)
-  if (result != Pal::Result::Success) {
+  Pal::Result result = Pal::Result::Success;
+  if (IsQueueTimingActive()) {
+    result = queue_timings_trace_source_->TimedSubmit(queue, submitInfo, timedSubmitInfo);
+  } else {
     result = queue->Submit(submitInfo);
   }
 

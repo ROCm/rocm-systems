@@ -1,31 +1,13 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "common.hpp"
-#include "defines.hpp"
+#include "common/defines.h"
 #include "state.hpp"
 #include "timemory.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/macros/language.hpp>
@@ -73,7 +55,7 @@ int
 get_sampling_cputime_signal();
 
 std::set<int>
-get_sampling_signals(int64_t _tid = 0);
+get_sampling_signals(std::int64_t _tid = 0);
 
 void
 finalize();
@@ -258,7 +240,7 @@ get_perfetto_shmem_size_hint();
 size_t
 get_perfetto_buffer_size();
 
-uint32_t
+std::uint32_t
 get_perfetto_flush_period();
 
 bool
@@ -276,7 +258,7 @@ get_disabled_categories();
 bool
 get_perfetto_annotations() ROCPROFSYS_HOT;
 
-uint64_t
+std::uint64_t
 get_thread_pool_size();
 
 std::string&
@@ -291,6 +273,9 @@ get_trace_delay();
 
 double
 get_trace_duration();
+
+std::string
+get_trace_region();
 
 double
 get_sampling_freq();
@@ -319,13 +304,16 @@ get_sampling_duration();
 std::string
 get_sampling_cpus();
 
-std::set<int64_t>
+std::string
+get_cpu_metrics();
+
+std::set<std::int64_t>
 get_sampling_cputime_tids();
 
-std::set<int64_t>
+std::set<std::int64_t>
 get_sampling_realtime_tids();
 
-std::set<int64_t>
+std::set<std::int64_t>
 get_sampling_overflow_tids();
 
 bool
@@ -370,11 +358,20 @@ get_use_tmp_files();
 int
 get_kill_delay();
 
+namespace output_filtering
+{
+bool
+is_output_enabled_for_current_mpi_rank();
+}  // namespace output_filtering
+
 std::string
 get_tmpdir();
 
 std::string
 get_database_absolute_path(std::string_view database_name, std::string_view tag);
+
+void
+reset_database_path_memo();
 
 std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix = "");
@@ -426,11 +423,14 @@ get_causal_mode();
 bool
 get_causal_end_to_end();
 
-std::vector<int64_t>
+std::vector<std::int64_t>
 get_causal_fixed_speedup();
 
 std::string
 get_causal_output_filename();
+
+void
+print_output_summary();
 
 std::vector<std::string>
 get_causal_binary_scope();

@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "core/agent_manager.hpp"
@@ -7,6 +7,7 @@
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
+#include <cstdint>
 
 #include <memory>
 #include <timemory/utility/types.hpp>
@@ -47,7 +48,8 @@ metadata_initialize_counters_pmc(size_t dev_id, const std::string& name,
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::GPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, name.c_str(),
           name.c_str(), metric_description.c_str(), LONG_DESCRIPTION, COMPONENT,
-          "Unit Count", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          "Unit Count", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0,
+          "{}" });
 }
 }  // namespace
 namespace
@@ -111,17 +113,17 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
                 category_enum_id<category::rocm_counter_collection>::value),
             track_name.c_str(), _timing.start, event_metadata.c_str(), stack_id,
             parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(),
-            static_cast<uint32_t>(agent.device_type_index),
-            static_cast<uint8_t>(agent.type), track_name.c_str(),
+            static_cast<std::uint32_t>(agent.device_type_index),
+            static_cast<std::uint8_t>(agent.type), track_name.c_str(),
             static_cast<double>(value), std::nullopt });
     }
 }
 
-counter_storage::counter_storage(const client_data* _tool_data, uint64_t _devid,
+counter_storage::counter_storage(const client_data* _tool_data, std::uint64_t _devid,
                                  size_t _idx, std::string_view _name)
 : tool_data{ _tool_data }
 , device_id{ _devid }
-, index{ static_cast<int64_t>(_idx) }
+, index{ static_cast<std::int64_t>(_idx) }
 , metric_name{ _name }
 , metric_description{ get_counter_description(_tool_data, metric_name) }
 {
@@ -129,14 +131,24 @@ counter_storage::counter_storage(const client_data* _tool_data, uint64_t _devid,
     _metric_name =
         std::regex_replace(_metric_name, std::regex{ "(.*)\\[([0-9]+)\\]" }, "$1_$2");
     storage_name = fmt::format("rocprof-device-{}-{}", device_id, _metric_name);
+    manager      = tim::manager::instance();
     storage = std::make_unique<counter_storage_type>(tim::standalone_storage{}, index,
                                                      storage_name);
-    tim::manager::instance()->add_cleanup(
-        storage_name + "cleanup", [storage_ptr = storage.get(), metric_name = metric_name,
-                                   metric_description = metric_description]() {
-            if(storage_ptr)
-                counter_storage::write(storage_ptr, metric_name, metric_description);
-        });
+    if(manager)
+    {
+        manager->add_cleanup(storage_name + "cleanup",
+                             [storage_ptr = storage.get(), metric_name = metric_name,
+                              metric_description = metric_description]() {
+                                 if(storage_ptr)
+                                     counter_storage::write(storage_ptr, metric_name,
+                                                            metric_description);
+                             });
+    }
+    else
+    {
+        LOG_WARNING("{} counter_data_tracker is disabled. Can't add cleanup.",
+                    metric_name);
+    }
 
     {
         constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_COUNT;
@@ -160,6 +172,23 @@ counter_storage::operator()(const counter_event& _event, timing_interval _timing
 {
     operation::set_storage<counter_data_tracker>{}(storage.get());
     _event(tool_data, track.get(), track_name, _timing, _scope);
+}
+
+void
+counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
+{
+    if(!track || timestamp == 0) return;
+
+    // Write zero to Perfetto trace (for legacy Perfetto)
+    TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *track,
+                  timestamp, 0);
+
+    // Write zero to cache (for rocpd database)
+    trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
+        static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value),
+        track_name.c_str(), timestamp, "{}", 0, 0, 0, "{}", "{}",
+        static_cast<std::uint32_t>(device_id), static_cast<std::uint8_t>(agent_type::GPU),
+        track_name.c_str(), 0.0, std::nullopt });
 }
 
 void

@@ -30,7 +30,11 @@ concurrency:
 env:
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.2.0"
+  ENABLE_ROCR_BUILD: "true"
+  ENABLE_HIP_CLR_BUILD: "true"
+  ENABLE_ROCPROFILER_REGISTER_BUILD: "false"
+  ENABLE_AQLPROFILE_BUILD: "false"
+  INSTALL_NIGHTLY_ROCM: "true"
 
 jobs:
   build-docs:
@@ -42,7 +46,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-sdk
           submodules: true
@@ -87,14 +91,6 @@ jobs:
       CORE_EXT_RUNNER: mi325
       GPU_RUNNER: mi325
     steps:
-      - name: Install Latest Nightly ROCm
-        shell: bash
-        working-directory: /tmp
-        run: |
-          tar -xf ${{ env.ROCM_PATH }}-gfx94X.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
-          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
-          echo "ROCm installed to: ${{ env.ROCM_PATH }}"
-
       - name: Install os essentials
         timeout-minutes: 10
         shell: bash
@@ -106,12 +102,24 @@ jobs:
           apt-get install -y git
           echo "PATH=/usr/bin:$PATH" >> "$GITHUB_ENV"
 
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Clone ROCProfiler SDK & HIP/CLR & ROCR-Runtime
+        uses: actions/checkout@v6
         with:
-          sparse-checkout: projects/rocprofiler-sdk
-          submodules: true
+          sparse-checkout: |
+            .github/actions/rocprofiler-sdk-util
+            projects/rocprofiler-sdk
+            projects/rocr-runtime
+            projects/clr
+            projects/hip
+          submodules: false
           set-safe-directory: true
+
+      - name: Configure safe directory
+        run: |
+          git config --system --add safe.directory '*'
+
+      - name: Init/Update submodules
+        run: git submodule update --init --recursive --jobs 16
 
       - name: Setup
         shell: bash
@@ -138,6 +146,20 @@ jobs:
           apt-get update
           apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev rpm
           python3 -m pip install -r requirements.txt
+
+      - name: Build ROCProfiler SDK Dependencies
+        uses: ./.github/actions/rocprofiler-sdk-util
+        with:
+          rocm-path: ${{ env.ROCM_PATH }}
+          gpu-target: 'gfx94X'
+          compiler-launcher: /usr/bin/ccache
+          enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
+          enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
+          enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
+          enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
+          install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
+          ccache-key: ccache-docs-ubuntu-22.04-gfx94X
+          ccache-variant: ccache
 
       - name: Configure, Build, Install, and Package
         timeout-minutes: 60

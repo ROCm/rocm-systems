@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 """
 Tests for the videodecode example.
@@ -13,7 +13,8 @@ pytestmark = [
     pytest.mark.gpu,
     pytest.mark.decode,
     pytest.mark.videodecode,
-    pytest.mark.ci_enable,
+    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
+    pytest.mark.rocm,
 ]
 
 from pathlib import Path
@@ -63,14 +64,15 @@ def get_run_args(rocprof_config) -> list[str]:
         "sys_run",
     ],
 )
+@pytest.mark.class_name("video-decode")
 class TestVideoDecode(RocprofsysTest):
+    @pytest.mark.timeout(120)
     def test(self, mode, video_decode_env, gpu_info, video_decode_rules, get_run_args):
         result = self.run_test(
             mode,
             "videodecode",
             env=video_decode_env,
             run_args=get_run_args,
-            timeout=120,
         )
         self.assert_regex(result)
 
@@ -82,7 +84,7 @@ class TestVideoDecode(RocprofsysTest):
                 counts=[2],
                 depths=[1],
                 counter_names=(
-                    ["VCN Activity"] if "instinct" in gpu_info.categories else None
+                    ["VCN Busy"] if "instinct" in gpu_info.categories else None
                 ),
             )
             self.assert_rocpd(result, rules_files=video_decode_rules)

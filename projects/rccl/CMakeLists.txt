@@ -40,6 +40,7 @@ else()
 endif()
 
 add_compile_definitions(
+  NCCL_USE_CMAKE
   NCCL_MAJOR=${NCCL_MAJOR}
   NCCL_MINOR=${NCCL_MINOR}
   NCCL_PATCH=${NCCL_PATCH}
@@ -56,10 +57,14 @@ endif()
 # RCCL project
 #==================================================================================================
 project(rccl CXX)
+set(ENV{NCCL_USE_CMAKE} "1")
 
 # Build options
 #==================================================================================================
-option(BUILD_ADDRESS_SANITIZER                 "Enable address sanitizer"                      OFF)
+include(cmake/NcclCompat.cmake)
+rccl_define_nccl_compat_options()
+
+option(BUILD_ADDRESS_SANITIZER                 "Enable address sanitizer"                      ${RCCL_DEFAULT_BUILD_ADDRESS_SANITIZER})
 option(BUILD_BFD                               "Enable custom backtrace (if bfd.h exists)"     OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
@@ -68,26 +73,22 @@ option(BUILD_EXT_EXAMPLES                      "Build ext-{net,tuner,profiler} e
 option(COLLTRACE                               "Collective Trace Option"                       ON)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
-option(ENABLE_MSCCL_KERNEL                     "Enable MSCCL while compiling"                  OFF)
-option(ENABLE_MSCCLPP                          "Enable MSCCL++"                                OFF)
-option(ENABLE_MSCCLPP_CLIP                     "Enable MSCCL++ CLIP"                           OFF)
-option(ENABLE_MSCCLPP_EXECUTOR                 "Enable MSCCL++ Executor"                       OFF)
-option(ENABLE_MSCCLPP_FORMAT_CHECKS            "Enable formatting checks in MSCCL++"           OFF)
-option(MSCCLPP_APPLY_PATCHES                   "Apply source code patches to MSCCL++"          ON)
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
+option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
-option(ROCTX                                   "Enable ROCTX"                                  ON)
+option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
 option(PROFILE                                 "Enable profiling"                              OFF)
 option(TIMETRACE                               "Enable time-trace during compilation"          OFF)
 option(TRACE                                   "Enable additional tracing"                     OFF)
+option(QP_TRACKING                             "Enable per-device QP tracking"                 OFF)
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
-option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
+option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 
 # Default GPU architectures to build
 #==================================================================================================
@@ -103,22 +104,28 @@ set(DEFAULT_GPUS
       gfx1102
       gfx1151
       gfx1200
-      gfx1201)
+      gfx1201
+      gfx1250)
 
 # Load CMake modules
 #==================================================================================================
 include(CheckIncludeFiles)
+include(CheckIncludeFileCXX)
 include(CheckSymbolExists)
+include(CheckCXXCompilerFlag)
+include(CheckCXXSourceCompiles)
+include(GNUInstallDirs)
 include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
-include(cmake/MSCCLPP.cmake)
-
 # Include rocSHMEM build module only if enabled
 if(ENABLE_ROCSHMEM)
   include(cmake/ROCSHMEM.cmake)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
+rccl_apply_nccl_compat_translations()
 
 # Build only for local GPU architecture
 if (BUILD_LOCAL_GPU_TARGET_ONLY)
@@ -133,38 +140,17 @@ endif()
 # Determine which GPU architectures to build for
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
-# For ASAN builds, only one GPU target is supported to avoid clang-offload-bundler
-# v2 size limits. ASAN-instrumented device code is 2-3x larger, and even with
-# compression, multiple architectures exceed bundler limits.
-if (BUILD_ADDRESS_SANITIZER)
-  list(LENGTH GPU_TARGETS num_gpu_targets)
-  if (GPU_TARGETS STREQUAL DEFAULT_GPUS)
-    # User didn't specify GPU_TARGETS, default to local GPU
-    if (COMMAND rocm_local_targets)
-      rocm_local_targets(GPU_TARGETS)
-      list(GET GPU_TARGETS 0 GPU_TARGETS)  # Use only first local GPU target
-      message(STATUS "ASAN build: GPU_TARGETS not specified, defaulting to local GPU: ${GPU_TARGETS}")
-    else()
-	 message(FATAL_ERROR "ASAN builds only support a single GPU_TARGET, rocm_local_targets failed."
-				 "Please specify -DGPU_TARGETS=<single_target>. "
-							 "Currently specified: ${GPU_TARGETS}")
-    endif()
-  elseif (num_gpu_targets GREATER 1)
-    # User specified multiple targets - not supported for ASAN
-    message(FATAL_ERROR "ASAN builds only support a single GPU_TARGET to avoid bundler size limits. "
-			 "Please specify -DGPU_TARGETS=<single_target>. "
-			 "Currently specified: ${GPU_TARGETS}")
-  else()
-    # User specified exactly one target - use it
-    message(STATUS "ASAN build: using specified GPU target: ${GPU_TARGETS}")
-  endif()
-endif()
-
 # ROCM NetIB patch
 include(cmake/rocmIb.cmake)
 
 # Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
 if (BUILD_ADDRESS_SANITIZER)
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
+    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
+  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
+  message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
+
   SET(amdgpu_targets "")
   foreach(amdgpu_target IN LISTS GPU_TARGETS)
     if(NOT amdgpu_target STREQUAL "")
@@ -228,7 +214,7 @@ endif()
 #==================================================================================================
 set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "")
 set(CMAKE_CXX_STANDARD   17)   # We use C++17 features, this will add compile option: -std=c++17
-set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++17 instead, which has some issues.
+set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++20 instead, which has some issues.
 if(ROCM_PATH)
   list(APPEND CMAKE_PREFIX_PATH  # Add ROCM_PATH to CMake search paths (for finding HIP / HSA
               ${ROCM_PATH}
@@ -465,33 +451,6 @@ if (HAVE_PARALLEL_JOBS)
   message(STATUS "Parallel jobs enabled")
 endif()
 
-## Disable building MSCCL++ if the build environment is invalid
-## Currently MSCCL++ is supported only on gfx942 and gfx950, and only on Ubuntu and CentOS
-set(MSCCLPP_SUPPORTED_ARCHS "gfx942" "gfx942:xnack-" "gfx942:xnack+" "gfx950" "gfx950:xnack-" "gfx950:xnack+")
-
-
-# Check if any of the supported architectures are in GPU_TARGETS
-set(ARCH_MATCH_FOUND OFF)
-set(MSCCLPP_GPU_TARGETS "")
-foreach(ARCH IN LISTS GPU_TARGETS)
-  if(ARCH IN_LIST MSCCLPP_SUPPORTED_ARCHS)
-    set(ARCH_MATCH_FOUND ON)
-    list(APPEND MSCCLPP_GPU_TARGETS "${ARCH}")
-  endif()
-endforeach()
-set(MSCCLPP_GPU_TARGETS "${MSCCLPP_GPU_TARGETS}" CACHE STRING "GPU Targets supported by MSCCL++" FORCE)
-
-if (ENABLE_MSCCLPP AND NOT ARCH_MATCH_FOUND)
-  set(ENABLE_MSCCLPP OFF)
-  message(WARNING "Can only build MSCCL++ for supported GPU_TARGETS: ${MSCCLPP_SUPPORTED_ARCHS}; current GPU_TARGETS: ${GPU_TARGETS}; so disabling MSCCL++ build")
-endif()
-
-# MSCCL++ is only supported on ROCm 6.2.0 or newer
-if (ENABLE_MSCCLPP AND ROCM_VERSION VERSION_LESS "60200")
-  set(ENABLE_MSCCLPP OFF)
-  message(WARNING "MSCCL++ integration only supported on ROCm 6.2.0 or greater; disabling MSCCL++ build")
-endif()
-
 ## Disable WARP_SPEED if the build environment is invalid
 set(WARP_SPEED_SUPPORTED_ARCHS "gfx950" "gfx950:xnack-" "gfx950:xnack+")
 set(ARCH_MATCH_FOUND OFF)
@@ -518,11 +477,6 @@ execute_process(
   OUTPUT_VARIABLE HOST_OS_FAMILY
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
-
-if (ENABLE_MSCCLPP AND NOT(${HOST_OS_ID} STREQUAL "ubuntu" OR ${HOST_OS_ID} STREQUAL "centos"))
-  set(ENABLE_MSCCLPP OFF)
-  message(WARNING "MSCCL++ integration not supported on this OS (${HOST_OS_ID}); disabling MSCCL++ build")
-endif()
 
 # Check for ROCTX
 if(ROCTX)
@@ -559,11 +513,16 @@ if("${version_mk_text}" MATCHES "NCCL_PATCH *:= *([0-9]*)")
 else()
   message(FATAL_ERROR "Failed to parse NCCL_PATCH")
 endif()
-if("${version_mk_text}" MATCHES "NCCL_SUFFIX *:= *([0-9]*)")
-  set(NCCL_SUFFIX ${CMAKE_MATCH_1})
-else()
-  set(NCCL_SUFFIX)
-endif()
+# Parse NCCL_SUFFIX line-by-line to avoid multiline regex pitfalls.
+set(NCCL_SUFFIX "")
+string(REPLACE "\n" ";" _version_mk_lines "${version_mk_text}")
+foreach(_line IN LISTS _version_mk_lines)
+  if("${_line}" MATCHES "^NCCL_SUFFIX[ \t]*:=[ \t]*(.*)$")
+    set(NCCL_SUFFIX "${CMAKE_MATCH_1}")
+    string(STRIP "${NCCL_SUFFIX}" NCCL_SUFFIX)
+    break()
+  endif()
+endforeach()
 if("${version_mk_text}" MATCHES "PKG_REVISION *:= *([0-9]*)")
   set(PKG_REVISION ${CMAKE_MATCH_1})
 else()
@@ -581,50 +540,15 @@ set(VERSION_STRING "${NCCL_MAJOR}.${NCCL_MINOR}.${NCCL_PATCH}")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 ## Fill in version information for main header file
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include")
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rccl")
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 
-## RCCL library
+# Add subdirectories
 #==================================================================================================
+# Source directory contains library creation
 add_subdirectory(src)
-
-## Setup librccl.so version
-rocm_set_soversion(rccl "1.0")
-
-# Used by the static-library link path below (expects a list).
-set(_rccl_cxxflags "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}")
-separate_arguments(CXXFLAGS NATIVE_COMMAND "${_rccl_cxxflags}")
-
-if(NOT BUILD_SHARED_LIBS)
-  # To create a static lib with `-fgpu-rdc`, you need `--emit-static-lib` and `--hip-link`.
-  # You also need to invoke amdclang++ again to trigger GPU code generation.
-  set(static_link_flags
-    ${CXXFLAGS}
-    --hip-link
-    -fgpu-rdc
-    --emit-static-lib
-  )
-
-  # Find all the libraries we need to link at link time to include them in the clang link
-  # command line.
-  get_target_property(rccl_libs rccl LINK_LIBRARIES)
-  foreach(target ${rccl_libs})
-    if(TARGET ${target})
-      get_target_property(location ${target} LOCATION)
-      if(location)
-        LIST(APPEND static_link_flags -l${location})
-      endif()
-    endif()
-  endforeach()
-
-  foreach(target ${GPU_TARGETS})
-    list(APPEND static_link_flags --offload-arch=${target})
-  endforeach()
-  list(JOIN static_link_flags " " flags_str)
-
-  # Invoking amdclang++ this way will produce a static archive, so just override ARCHIVE_CREATE.
-  set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_CXX_COMPILER> ${flags_str} -o <TARGET> <OBJECTS>")
-endif()
 
 # Install settings
 #==================================================================================================
@@ -634,12 +558,9 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/rccl/rccl.h src/include/p
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 rocm_install(FILES       src/include/api_trace.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl/amd_detail)
-file(COPY tools/msccl-algorithms DESTINATION ${PROJECT_BINARY_DIR})
-file(COPY tools/msccl-unit-test-algorithms DESTINATION ${PROJECT_BINARY_DIR})
-## Install Algorithm files under share folder
-rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/msccl-algorithms DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
-rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/msccl-unit-test-algorithms DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
-
+## Install tuner config directory for CSV-based tuner
+file(COPY tuner DESTINATION ${PROJECT_BINARY_DIR})
+rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/tuner DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
 rocm_export_targets(
   NAMESPACE roc::
   TARGETS   rccl
@@ -655,6 +576,7 @@ endif()
 rocm_package_add_dependencies(DEPENDS "${DEPENDS_HIP_RUNTIME} >= 4.5.0" "${SMI_LIB_NAME}")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS "${ROCM_PATH}/lib")
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/opt" "${ROCM_PATH}")
 
@@ -689,12 +611,8 @@ License: See LICENSE.txt for license information\n")
   Optimized primitives for collective multi-GPU communication")
 endif()
 
-## Building RCCL RAS
-include(cmake/rcclRAS.cmake)
-
-if(BUILD_EXT_EXAMPLES AND NOT BUILD_TESTS)
-  message(STATUS "BUILD_EXT_EXAMPLES is ON but BUILD_TESTS is OFF; skipping ext example builds.")
-endif()
+## Install RCCL RAS client (built in src/CMakeLists.txt)
+rocm_install(TARGETS rcclras)
 
 if(BUILD_TESTS)
   rocm_package_setup_component(clients)
@@ -707,16 +625,20 @@ if(BUILD_TESTS)
   add_subdirectory(test)
 
   if(BUILD_SHARED_LIBS)
+    # rccl is defined in src/, so avoid TARGET-signature command here.
+    # Use an output-stamp command plus a local custom target dependency.
     set(extract_metadata_stamp "${CMAKE_BINARY_DIR}/extract_metadata.stamp")
     add_custom_command(
-      OUTPUT  "${extract_metadata_stamp}"
+      OUTPUT "${extract_metadata_stamp}"
+      COMMENT "Extracting metadata from librccl.so"
       COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
-      COMMAND ${CMAKE_COMMAND} -E touch ${extract_metadata_stamp}
+      COMMAND ${CMAKE_COMMAND} -E touch "${extract_metadata_stamp}"
       DEPENDS rccl
       VERBATIM
-      COMMENT "Extracting metadata from librccl.so"
     )
+    add_custom_target(extract_rccl_metadata ALL DEPENDS "${extract_metadata_stamp}")
   endif()
+
 endif()
 
 rocm_create_package(
@@ -724,3 +646,15 @@ rocm_create_package(
   DESCRIPTION "ROCm Communication Collectives Library"
   MAINTAINER  "RCCL Maintainer <rccl-maintainer@amd.com>"
   LDCONFIG)
+
+rccl_add_nccl_compat_package_targets()
+
+if(GENERATE_SYM_KERNELS)
+  target_compile_definitions(rccl PRIVATE GENERATE_SYM_KERNELS)
+endif()
+
+# Keep librccl outputs in the top-level build dir for existing scripts.
+set_target_properties(rccl PROPERTIES
+  ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+  LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")

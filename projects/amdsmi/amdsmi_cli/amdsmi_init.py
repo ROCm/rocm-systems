@@ -44,7 +44,7 @@ except ImportError as e:
 
 # Using basic python logging for user errors and development
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.ERROR)  # User level logging
-# This traceback limit only affects this file, once the code hit's the cli portion it get's reset to the user's preference
+# This traceback limit only affects this file, once the code hit's the cli portion it gets reset to the user's preference
 sys.tracebacklimit = -1  # Disable traceback when raising errors
 
 # On initial import set initialized variable
@@ -108,7 +108,9 @@ def amdsmi_cli_init():
     if check_amdgpu_driver():
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_GPUS
         logging.debug("amdgpu driver's initstate is live")
-    if check_amd_hsmp_driver():
+    if check_amd_hsmp_driver() and hasattr(
+        amdsmi_interface.amdsmi_wrapper, "amdsmi_get_cpu_handles"
+    ):
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_CPUS
         logging.debug("hsmp driver's initstate is live")
     if check_amd_ionic_driver():
@@ -138,7 +140,7 @@ def amdsmi_cli_init():
             raise e
 
     logging.debug(
-        f"AMDSMI initialized with atleast one driver successfully | init flag: {init_flag}"
+        f"AMDSMI initialized with at least one driver successfully | init flag: {init_flag}"
     )
 
     return init_flag

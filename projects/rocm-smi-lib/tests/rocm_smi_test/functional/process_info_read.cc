@@ -192,7 +192,7 @@ void TestProcInfoRead::Run(void) {
                   << " SDMA Usage: " << proc_info.sdma_usage
                   << " Compute Unit Usage: " << proc_info.cu_occupancy << std::endl;
       }
-      // Reset amt_allocd back to the amount acutally allocated
+      // Reset amt_allocd back to the amount actually allocated
       amt_allocd = num_devices;
     }
 

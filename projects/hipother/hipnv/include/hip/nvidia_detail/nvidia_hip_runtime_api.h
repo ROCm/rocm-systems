@@ -27,6 +27,7 @@
 #define CUDA_12000 12000
 #define CUDA_12020 12020
 #define CUDA_12030 12030
+#define CUDA_13000 13000
 
 #ifdef __cplusplus
 extern "C" {
@@ -1931,6 +1932,7 @@ typedef enum cudaMemLocationType hipMemLocationType;
 #define hipMemLocationTypeDevice cudaMemLocationTypeDevice
 #define hipMemLocationTypeHost cudaMemLocationTypeHost
 #define hipMemLocationTypeHostNuma cudaMemLocationTypeHostNuma
+#define hipMemLocationTypeHostNumaCurrent cudaMemLocationTypeHostNumaCurrent
 #define hipMemHandleTypeNone cudaMemHandleTypeNone
 #define hipMemHandleTypePosixFileDescriptor cudaMemHandleTypePosixFileDescriptor
 #define hipMemHandleTypeWin32 cudaMemHandleTypeWin32
@@ -1951,7 +1953,7 @@ typedef CUmemOperationType hipMemOperationType;
 #define hipMemOperationTypeUnmap CU_MEM_OPERATION_TYPE_UNMAP
 typedef CUmemHandleType hipMemHandleType;
 #define hipMemHandleTypeGeneric CU_MEM_HANDLE_TYPE_GENERIC
-// Explicitely declaring hipMemAllocationProp based on CUmemAllocationProp but
+// Explicitly declaring hipMemAllocationProp based on CUmemAllocationProp but
 // using CUDA runtime members instead Because hipMemAllocationType,
 // hipMemAllocationHandleType & hipMemLocation are defined using CUDA runtime
 // data types & also used by hipMemPoolProps Currently there doesn't exist CUDA
@@ -1966,9 +1968,9 @@ typedef struct hipMemAllocationProp {
   hipMemLocation location;
   /**
    * Windows-specific POBJECT_ATTRIBUTES required when
-   * ::CU_MEM_HANDLE_TYPE_WIN32 is specified.  This object atributes structure
+   * ::CU_MEM_HANDLE_TYPE_WIN32 is specified.  This object attribute's structure
    * includes security attributes that define
-   * the scope of which exported allocations may be tranferred to other
+   * the scope of which exported allocations may be transferred to other
    * processes.  In all other cases, this field is required to be zero.
    */
   void* win32HandleMetaData;
@@ -2086,6 +2088,16 @@ inline static hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t coun
   return hipCUDAErrorTohipError(cudaMemPrefetchAsync_v2(dev_ptr, count, location, flags, stream));
 #endif
 }
+
+#if CUDA_VERSION >= CUDA_13000
+inline static hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                                  hipMemLocation* locations,
+                                                  size_t* location_indices, size_t num_locations,
+                                                  unsigned long long flags, hipStream_t stream) {
+  return hipCUDAErrorTohipError(cudaMemPrefetchBatchAsync(
+      dev_ptrs, sizes, count, locations, location_indices, num_locations, flags, stream));
+}
+#endif
 
 inline static hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                                          hipMemLocation location) {
@@ -3000,6 +3012,9 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeDmaBufSupported:
       return hipCUResultTohipError(
           cuDeviceGetAttribute(pi, CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED, device));
+    case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
+      return hipCUResultTohipError(cuDeviceGetAttribute(
+          pi, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, device));
     case hipDeviceAttributeAccessPolicyMaxWindowSize:
       cdattr = cudaDevAttrMaxAccessPolicyWindowSize;
       break;
@@ -3274,7 +3289,7 @@ inline static hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attribut
 #if (CUDART_VERSION >= 11000)
     auto memType = cPA.type;
 #else
-    unsigned memType = cPA.memoryType;  // No auto because cuda 10.2 doesnt force c++11
+    unsigned memType = cPA.memoryType;  // No auto because CUDA 10.2 doesn't force C++11
 #endif
     switch (memType) {
       case cudaMemoryTypeDevice:

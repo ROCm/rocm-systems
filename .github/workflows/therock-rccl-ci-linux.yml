@@ -20,7 +20,7 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:1f1ce0ab151146c7f86ee4345be74c42d8ca83200d9d26843e8a71df01ecad4e
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2 # 2026-04-16
       options: -v /runner/config:/home/awsconfig/
     env:
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
@@ -38,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 9a38f01d34a90ecabd87d6cdf197466eab4e84ab # 2026-03-20
+          ref: 903ee444eb935adf456bf5df724e1b6f5c2ce962 # 2026-05-03 commit
 
       - name: Install python deps
         run: |
@@ -53,7 +53,7 @@ jobs:
       - name: Setup ccache
         run: |
           ./TheRock/build_tools/setup_ccache.py \
-            --config-preset "github-oss-presubmit" \
+            --config-preset "github-oss-dev" \
             --dir "$(dirname $CCACHE_CONFIGPATH)" \
             --local-path "$CACHE_DIR/ccache"
 
@@ -68,7 +68,7 @@ jobs:
       - name: Patch rocm-systems
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
-          rm ./TheRock/patches/amd-mainline/rocm-systems/0003-Use-is_versioned-true-consistently-in-both-Comgr-Loa.patch
+          # rm ./TheRock/patches/amd-mainline/rocm-systems/0003-Use-is_versioned-true-consistently-in-both-Comgr-Loa.patch
 
       - name: Configure Projects
         env:
@@ -120,7 +120,7 @@ jobs:
 
   therock-test-linux-multi-node:
     name: "Test multi-node"
-    if: ${{ inputs.amdgpu_families == 'gfx950-dcgpu' }}
+    if: ${{ inputs.amdgpu_families == 'gfx94X-dcgpu' }}
     permissions:
       contents: read
       id-token: write
@@ -129,7 +129,7 @@ jobs:
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
-      test_runs_on: nova-linux-slurm-scale-runner
+      test_runs_on: linux-vultr-mi325-scale-runner # Disabling gfx950 runner till lab move completes
       artifact_run_id: ${{ github.run_id }}
 
   therock-test-linux-single-node:

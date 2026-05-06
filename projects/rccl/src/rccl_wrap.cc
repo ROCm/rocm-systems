@@ -26,8 +26,10 @@ THE SOFTWARE.
 #include "enqueue.h"
 #include <algorithm>
 #include "debug.h"
+#include "net.h"
 #include "amdsmi_wrap.h"
 #include "include/graph.h"
+#include "register.h"
 
 
 // Use this param to experiment pipelining new data types besides bfloat16
@@ -40,6 +42,7 @@ RCCL_PARAM(disableReduceCopyPipelining, "DISABLE_REDUCE_COPY_PIPELINING", 0);
 RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
+RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 #ifdef ENABLE_WARP_SPEED
@@ -168,7 +171,7 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
     return ncclSuccess;
   }
 
-  if (comm->nRanks == comm->nNodes) {
+  if ((comm->nRanks == comm->nNodes) && !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151")) {
     INFO(NCCL_TUNING, "RCCL tuning model channel thresholds not applied for single GPU per node case");
     return ncclSuccess;
   }
@@ -368,12 +371,6 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
       case rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER:
         *algoName = "Direct";
         break;
-      case rcclAddonAlgos_t::RCCL_MSCCL:
-        *algoName = "MSCCL";
-        break;
-      case rcclAddonAlgos_t::RCCL_MSCCLPP:
-        *algoName = "MSCCLPP";
-        break;
 #ifdef ENABLE_WARP_SPEED
       case rcclAddonAlgos_t::RCCL_WARP_SPEED:
         *algoName = "RING*"; // WarpSpeed (*) uses RING algorithm
@@ -411,13 +408,30 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm) {
 
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   // Check if user explicitly disabled direct AllGather
-  static int userDirectAllGatherInput = -2;
-  if (userDirectAllGatherInput == -2) {
-    const char *inputStr = getenv("RCCL_DIRECT_ALLGATHER_DISABLE");
-    userDirectAllGatherInput = !inputStr ? 0 : 1;
+  static int userDirectAllGatherInput = rcclParamDirectAllGatherDisable();
+  if (userDirectAllGatherInput != 0) {
+    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER has been disabled by environment variable.");
+    return false;
   }
-  if (userDirectAllGatherInput == 1) {
-    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER has been disabled.");
+
+  // Direct AllGather incompatible with UBR
+  if (ncclParamLocalRegister()) {
+    return false;
+  }
+
+  // Multi-node Direct AllGather requires PXN
+  if (comm->nNodes > 1 && ncclPxnDisable(comm) != 0) {
+    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on multi-node due to PXN being disabled.");
+    return false;
+  }
+
+  if (rcclUseAinic()) {
+    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on AINIC. ");
+    return false;
+  }
+
+  if (comm->nNodes > 32) {
+    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled when using more than 32 nodes.");
     return false;
   }
 
@@ -433,6 +447,11 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   // Only perform auto-selection if user didn't explicitly set the threshold and threshold is not -1
   if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && threshold != -1) {
     if (comm->nNodes == 1) {
+      // Disable Direct AllGather on single-node when CE-based AllGather is enabled
+      if (comm->symmetricSupport && comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO){
+        INFO(NCCL_INIT, "RCCL Direct AllGather disabled: CTA policy ZERO, using CE-based AllGather.");
+        return false;
+      }
       threshold = 8388608;
     } else if (comm->nNodes < 64) {
       threshold = comm->nNodes * 2097152;
@@ -566,7 +585,7 @@ void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, i
 }
 
 bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) {
-  if (!comm->topo->warpSpeedEnabled) {
+  if (!comm->topo->warpSpeedEnabled || plan->isSymColl) {
     return false;
   }
 

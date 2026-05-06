@@ -50,6 +50,19 @@ endif()
 # Build steps
 #############
 
+if(NOT DEFINED ROCM_PATH)
+  if(DEFINED ENV{ROCM_PATH})
+    set(ROCM_PATH "$ENV{ROCM_PATH}" CACHE STRING "ROCm installation directory.")
+  elseif(CMAKE_PREFIX_PATH)
+    list(GET CMAKE_PREFIX_PATH 0 _first_prefix_path)
+    set(ROCM_PATH "${_first_prefix_path}" CACHE STRING "ROCm installation directory.")
+    unset(_first_prefix_path)
+  else()
+    set(ROCM_PATH "${CMAKE_INSTALL_PREFIX}" CACHE STRING "ROCm installation directory.")
+  endif()
+endif()
+message(STATUS "ROCM_PATH: ${ROCM_PATH}")
+
 # Attempt to auto-detect HIP_PLATFORM by interrogating hipconfig. This is kept
 # for compatibility: users are advised to pass HIP_PLATFORM explicitly.
 # Sets the HIP_PLATFORM variable in the parent scope.
@@ -62,9 +75,9 @@ function(_hip_clr_auto_detect_hip_platform)
       set(HIPCONFIG_EXECUTABLE "hipconfig.exe")
     endif()
 
-    # Set default HIPCC_BIN_DIR to /opt/rocm/bin
+    # Set default HIPCC_BIN_DIR to ${ROCM_PATH}/bin
     if(NOT DEFINED HIPCC_BIN_DIR AND UNIX)
-        set(HIPCC_BIN_DIR "/opt/rocm/bin")
+        set(HIPCC_BIN_DIR "${ROCM_PATH}/bin")
     endif()
     message(STATUS "Auto-detect HIP_PLATFORM from HIPCC Binary Directory: ${HIPCC_BIN_DIR}")
 
@@ -122,7 +135,7 @@ endif()
 # Code formatting
 #############################
 # Target: clangformat
-find_program(CLANGFORMAT_EXE clang-format PATHS "/opt/rocm/lib/llvm/bin")
+find_program(CLANGFORMAT_EXE clang-format PATHS "${ROCM_PATH}/lib/llvm/bin")
 if(CLANGFORMAT_EXE)
     file(GLOB_RECURSE FORMAT_SOURCE_FILE_LIST *.cpp *.hpp *.hh *.h *.cc *.c)
     add_custom_target(clangformat COMMAND ${CLANGFORMAT_EXE} -style=file -i ${FORMAT_SOURCE_FILE_LIST}

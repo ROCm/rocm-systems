@@ -1,32 +1,18 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "cpu.hpp"
 #include "agent_manager.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdint>
+#include <fcntl.h>
 #include <fstream>
 #include <functional>
+#include <map>
+#include <set>
+#include <unistd.h>
 #include <unordered_map>
 
 namespace rocprofsys
@@ -105,7 +91,8 @@ process_cpu_info_data()
             if(has_processor_entry)
             {
                 cpu_data.push_back(current_cpu);
-                return cpu_data;  // Return immediately after first core
+                current_cpu         = cpu_info{};
+                has_processor_entry = false;
             }
             continue;
         }
@@ -150,41 +137,59 @@ get_cpu_info()
 size_t
 device_count()
 {
-    auto cpu_data = get_cpu_info();
-    return cpu_data.size();
+    // Return unique socket count from parsed CPU info
+    auto           cpu_data = get_cpu_info();
+    std::set<long> sockets;
+    for(const auto& cpu : cpu_data)
+    {
+        sockets.insert(std::max(0L, cpu.physical_id));
+    }
+    return sockets.empty() ? (cpu_data.empty() ? 0 : 1) : sockets.size();
 }
 
 void
 query_cpu_agents()
 {
-    int32_t  id_count   = 0;
-    uint32_t node_count = 0;
-    uint32_t cpu_count  = 0;
+    auto cpu_data = get_cpu_info();
+    if(cpu_data.empty()) return;
 
-    if(device_count() == 0)
+    // Group CPUs by socket (physical_id), collect model_name per socket
+    std::map<size_t, std::string> socket_model_names;
+    std::map<size_t, std::string> socket_vendor_ids;
+
+    for(const auto& cpu : cpu_data)
     {
-        return;
+        const auto socket_id = static_cast<size_t>(std::max(0L, cpu.physical_id));
+        if(socket_model_names.find(socket_id) == socket_model_names.end())
+        {
+            socket_model_names[socket_id] = cpu.model_name;
+            socket_vendor_ids[socket_id]  = cpu.vendor_id;
+        }
     }
 
-    auto& _agent_manager = get_agent_manager_instance();
-    auto  cpu_data       = get_cpu_info();
+    // Insert one agent per socket in ascending socket_id order
+    // so that device_type_index == socket_id
+    auto&         mgr        = get_agent_manager_instance();
+    std::uint32_t node_count = 0;
 
-    for(auto& cpu : cpu_data)
+    for(const auto& [socket_id, model_name] : socket_model_names)
     {
-        auto node_id    = node_count++;
-        auto logical_id = id_count++;
-        auto id         = cpu_count++;
-        auto cur_agent  = agent{ agent_type::CPU,
+        const auto node_id     = node_count++;
+        const auto device_name = "CPU" + std::to_string(socket_id);
+        auto       cur_agent   = agent{ agent_type::CPU,
                                 0,
-                                id,
+                                static_cast<std::uint32_t>(socket_id),
                                 node_id,
-                                logical_id,
-                                static_cast<int32_t>(id),
-                                cpu.model_name,
-                                cpu.model_name,
-                                cpu.vendor_id,
+                                static_cast<std::int32_t>(socket_id),
+                                static_cast<std::int32_t>(socket_id),
+                                device_name,
+                                model_name,
+                                socket_vendor_ids[socket_id],
+                                "",
+                                0,
+                                0,
                                 "" };
-        _agent_manager.insert_agent(cur_agent);
+        mgr.insert_agent(cur_agent);
     }
 }
 }  // namespace cpu

@@ -15,11 +15,13 @@ Command line profiler
 
 Launch and profile the target application using the command line profiler.
 
-The command line profiler launches the target application, calls the
-ROCProfiler API via the ``rocprof`` binary, and collects profile results for
-the specified kernels, dispatches, and hardware components. If not
-specified, ROCm Compute Profiler defaults to collecting all available counters for all
-kernels and dispatches launched by the your executable.
+The command line profiler launches the target application and collects
+hardware performance counter data for the specified kernels, dispatches, and
+hardware components. By default, ROCm Compute Profiler collects all available
+counters for all kernels and dispatches launched by the executable. Profiling
+is performed using :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`; see
+:ref:`core-install-rocprof-var` for details on backend selection and the
+native counter collection tool.
 
 To collect the default set of data for all kernels in the target
 application, launch, for example:
@@ -123,7 +125,7 @@ Profile mode
 
 ``profile``
    Launches the target application on the local system using
-   :doc:`ROCProfiler <rocprofiler:index>`. Depending on the profiling options
+   :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`. Depending on the profiling options
    chosen, selected kernels, dispatches, and or hardware components used by the
    application are profiled. It stores results locally in an output folder:
    ``./workloads/\<name>`` (or rank-specific subdirectories when using MPI).

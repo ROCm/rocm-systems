@@ -484,7 +484,7 @@ For attachment profiling of running processes:
     add_parser_bool_argument(
         basic_tracing_options,
         "--kfd-trace",
-        help="For collecting --kfd-page-migration-trace, --kfd-page-mapping-trace, and --kfd-queue-trace. KFD (Kernel Fusion Driver) traces capture low level driver routines involved in mapping, unmapping, and migration of data between GPU and system memories, as well as eviction/restoration of GPU queues to facilitate such routines.",
+        help="For collecting --kfd-page-migration-trace, --kfd-page-mapping-trace, --kfd-queue-trace, and --kfd-dropped-events-trace. KFD (Kernel Fusion Driver) traces capture low level driver routines involved in mapping, unmapping, and migration of data between GPU and system memories, as well as eviction/restoration of GPU queues to facilitate such routines.",
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -750,7 +750,7 @@ For attachment profiling of running processes:
     add_parser_bool_argument(
         filter_options,
         "--selected-regions",
-        help="If set, rocprofv3 will only profile regions of code surrounded by roctxProfilerResume(0) and roctxProfilerPause(0)",
+        help="If set, rocprofv3 will only profile regions of code surrounded by roctxProfilerResume(0) and roctxProfilerPause(0).",
     )
     add_parser_bool_argument(
         filter_options,
@@ -929,6 +929,19 @@ For attachment profiling of running processes:
         help="""When --pid is used, sets the amount of time in milliseconds the profiler will be attached before detaching. When unset, the profiler will wait until Enter is pressed to detach.""",
         type=int,
         default=None,
+    )
+
+    add_parser_bool_argument(
+        advanced_options,
+        "--attach-children",
+        help="""When --pid is used, attach to the target process and all of its descendant processes. Enabled by default; use --attach-children=false to attach only to the specified PID.""",
+        default=True,
+    )
+
+    add_parser_bool_argument(
+        advanced_options,
+        "--attach-sync-output",
+        help="[Attach mode only] Generate output files synchronously during detachment (default: async). Use this option when scripts need to access output files immediately after rocprofv3 exits",
     )
 
     if args is None:
@@ -1475,6 +1488,7 @@ def run(app_args, args, **kwargs):
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
     update_env("ROCPROF_OUTPUT_PATH", _output_path)
     update_env("ROCPROF_OUTPUT_CONFIG_FILE", args.output_config, overwrite_if_true=True)
+    update_env("ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC", args.attach_sync_output)
     if app_pass is not None and args.sub_directory is not None:
         app_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
             f"{_output_path}", f"{args.sub_directory}{app_pass}"
@@ -1819,6 +1833,7 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_ATTACH_PID", args.pid)
         if args.attach_duration_msec is not None:
             update_env("ROCPROF_ATTACH_DURATION", f"{args.attach_duration_msec}")
+        update_env("ROCPROF_ATTACH_CHILDREN", "1" if args.attach_children else "0")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprof-attach")
         if app_args:
             exit_code = subprocess.check_call([sys.executable, path], env=app_env)

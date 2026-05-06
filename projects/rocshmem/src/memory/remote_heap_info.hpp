@@ -261,7 +261,7 @@ class RemoteHeapInfo {
   /**
    ** @brief common initialization code
    */
-  void init(char* heap_ptr, size_t heap_size)  {
+  void init(char* heap_ptr, [[maybe_unused]] size_t heap_size)  {
     heap_bases_.resize(communicator_.num_pes());
     for (auto& base : heap_bases_) {
       base = nullptr;

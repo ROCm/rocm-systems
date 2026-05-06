@@ -1,0 +1,19 @@
+diff --git a/packages/opencode/src/cli/logo.ts b/packages/opencode/src/cli/logo.ts
+index a58a8cf99..73b84ce93 100644
+--- a/packages/opencode/src/cli/logo.ts
++++ b/packages/opencode/src/cli/logo.ts
+@@ -1,8 +1,14 @@
++// AMD ROCm PerfXpert — GPU Profiling + Optimization Assistant
++// Built on opencode v1.4.11 (MIT). See NOTICE for third-party attribution.
+ export const logo = {
+   left: ["                   ", "█▀▀█ █▀▀█ █▀▀█ █▀▀▄", "█__█ █__█ █^^^ █__█", "▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀"],
+   right: ["             ▄     ", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█", "█___ █__█ █__█ █^^^", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"],
+ }
+ 
++// AMD ROCm PerfXpert banner — displayed by perfxpert-code wrapper; kept here
++// so the opencode binary can surface a consistent product name when embedded.
++export const perfxpertBanner = "AMD ROCm PerfXpert — GPU Profiling + Optimization Assistant"
++
+ export const go = {
+   left: ["    ", "█▀▀▀", "█_^█", "▀▀▀▀"],
+   right: ["    ", "█▀▀█", "█__█", "▀▀▀▀"],

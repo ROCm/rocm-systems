@@ -27,6 +27,7 @@
 
 #include <dlfcn.h>
 #include "ibv_core.hpp"
+#include "gda/nic_policy.hpp"
 
 #include "backend_bc.hpp"
 #include "containers/free_list_impl.hpp"
@@ -36,7 +37,6 @@
 #include "gda_context_proxy.hpp"
 #include "queue_pair.hpp"
 #include "bootstrap/bootstrap.hpp"
-#include "debug_gda.hpp"
 #include "gda/ionic/provider_gda_ionic.hpp"
 #include "gda/bnxt/provider_gda_bnxt.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
@@ -59,6 +59,26 @@ inline constexpr uint32_t GDA_IONIC_VENDOR_ID = 0x1DD8;
 inline constexpr uint32_t GDA_MLX5_VENDOR_ID  = 0x02c9; //PCI-ID is 15b3
 inline constexpr uint32_t GDA_BNXT_VENDOR_ID  = 0x14E4;
 
+struct NicDevice {
+  std::string nic_name;
+  struct ibv_device *device = nullptr;
+  struct ibv_context *context = nullptr;
+  struct ibv_device_attr device_attr {};
+  struct ibv_pd *pd_orig = nullptr;
+  struct ibv_port_attr portinfo {};
+  union ibv_gid gid {};
+  int port = 1;
+  int gid_index = 0;
+  uint32_t gid_type = 0;
+  struct ibv_mr *heap_mr = nullptr;
+
+  /* GDA_IONIC & GDA_MLX5*/
+  struct ibv_pd *pd_parent = nullptr;
+
+  /* GDA_IONIC */
+  struct ibv_pd *pd_uxdma[2] = {nullptr, nullptr};
+};
+
 class GDABackend : public Backend {
  private:
   typedef struct dest_info {
@@ -68,23 +88,12 @@ class GDABackend : public Backend {
     union ibv_gid gid;
   } dest_info_t;
 
-  const char *requested_nic = nullptr;
-  struct ibv_device *device = nullptr;
-  struct ibv_context *context = nullptr;;
-  struct ibv_device_attr device_attr;
-  struct ibv_pd *pd_orig = nullptr;
   enum GDAProvider gda_provider = GDAProvider::UNSET;
 
-  struct ibv_port_attr portinfo;
-  union ibv_gid gid;
-  int port = 1;
-  int gid_index = 0;
-  uint32_t gid_type;
-
   uint32_t *heap_rkey = nullptr;
-  struct ibv_mr *heap_mr = nullptr;
 
-  std::string debug_str;
+  std::vector<NicDevice> nic_devices_;
+  int num_nics_{0};
 
   uint32_t inline_threshold = 8;
   QueuePair *host_qps = nullptr;
@@ -100,12 +109,7 @@ class GDABackend : public Backend {
   HIPAllocator *qp_allocator_{nullptr};
   /* GDA_BNXT END */
 
-  /* GDA_IONIC & GDA_MLX5 START */
-  struct ibv_pd *pd_parent = nullptr;
-  /* GDA_IONIC & GDA_MLX5 END */
-
   /* GDA_IONIC START */
-  struct ibv_pd *pd_uxdma[2];
   void *gpu_db_page = nullptr;
   uint64_t *gpu_db_cq = nullptr;
   uint64_t *gpu_db_sq = nullptr;
@@ -115,10 +119,48 @@ class GDABackend : public Backend {
   std::vector<mlx5_devx_qp> mlx5_qps;
   /* GDA_MLX5 END */
 
- /**
-   * @brief Choose nic device according to locality/user preferences
+  NicPolicy nic_policy_ {NicPolicy::ROUND_ROBIN};
+
+  /**
+   * Effective QPs per PE per context type.
+   * Exposed so GDAContext can read them.
    */
-  void select_nic();
+  size_t qps_per_pe_default_ctx_ {1};
+  size_t qps_per_pe_usr_ctx_ {1};
+
+  /**
+   * Determine number of QPs to create per PE =
+   * qps_per_pe_default_ctx_ +
+   * qps_per_pe_usr_ctx_ * ROCSHMEM_MAX_NUM_CONTEXTS
+   */
+  size_t num_qps_per_pe {1};
+
+  /**
+   * Total number of QPs created =
+   * num_qps_per_pe * num_pes;
+   */
+  uint32_t num_qps {1};
+
+  /**
+   * @brief Select one or more NICs based on topology/env vars.
+   *        Populates nic_devices_ (always at least 1 entry).
+   */
+  void select_nics();
+  
+  void configure_nic_policy();
+  void log_ctx_nics(unsigned int ctx_id, size_t qps_per_pe, int qp_offset);
+
+  int nic_idx_for_qp(int qp_idx) const {
+    return ComputeNicIdxForQp(
+        qp_idx, num_pes, num_nics_,
+        static_cast<int>(qps_per_pe_default_ctx_),
+        static_cast<int>(qps_per_pe_usr_ctx_),
+        nic_policy_);
+  }
+
+  NicDevice& nic_for_qp(int qp_idx) {
+    return nic_devices_[nic_idx_for_qp(qp_idx)];
+  }
 
   /**
    * @brief return user-preferred GDA provider (or NONE if not specified)
@@ -191,6 +233,16 @@ class GDABackend : public Backend {
   void ctx_destroy(Context *ctx) override;
 
   /**
+   * @brief Register a user buffer.
+   */
+  int buffer_register(void *addr, size_t length) override;
+
+  /**
+   * @brief Unregister a user buffer.
+   */
+  int buffer_unregister(void *addr) override;
+
+  /**
    * @brief Abort the application.
    *
    * @param[in] status Exit code.
@@ -204,8 +256,9 @@ class GDABackend : public Backend {
   /**
    * @copydoc Backend::create_new_team
    */
-  void create_new_team(Team *parent_team, TeamInfo *team_info_wrt_parent,
-                       TeamInfo *team_info_wrt_world, int num_pes,
+  void create_new_team(Team *parent_team,
+                       const TeamInfo& team_info_wrt_parent,
+                       const TeamInfo& team_info_wrt_world, int num_pes,
                        int my_pe_in_new_team, MPI_Comm team_comm,
                        rocshmem_team_t *new_team) override;
 
@@ -296,6 +349,18 @@ class GDABackend : public Backend {
   void setup_team_world();
 
   /**
+   * @brief Allocate and initialize team shared.
+   *
+   * TEAM_SHARED contains the PEs that share a common memory domain
+   * (same node). Must be called after setup_ipc() since membership
+   * is determined from ipcImpl.pes_with_ipc_avail. Computes real
+   * pe_start/stride from the PE list; set to ROCSHMEM_TEAM_INVALID
+   * when IPC is disabled or when node-local ranks are not uniformly
+   * strided.
+   */
+  void setup_team_shared();
+
+  /**
    * @brief Initialize the resources required to support teams
    */
   void setup_teams();
@@ -369,14 +434,14 @@ class GDABackend : public Backend {
   void open_ib_device();
 
   /**
-   * @brief Validated the rocSHMEM will run with the currently open InfiniBand Device
+   * @brief Validated the rocSHMEM will run with the InfiniBand Device
    */
-  void validate_ib_device();
+  void validate_ib_device(NicDevice &nic);
 
   /**
    * @brief Selects the best GID index
    */
-  void select_gid_index();
+  void select_gid_index(NicDevice &nic);
 
   /**
    * @brief Create all CQs and QPs
@@ -432,8 +497,8 @@ class GDABackend : public Backend {
 
   static void pd_release(ibv_pd* pd, void* pd_context, void* ptr, uint64_t resource_type);
 
-  void create_parent_domain();
-  void ionic_setup_parent_domain(struct ibv_parent_domain_init_attr* pattr);
+  void create_parent_domain(NicDevice &nic);
+  void ionic_setup_parent_domain(NicDevice &nic, struct ibv_parent_domain_init_attr* pattr);
 
   void setup_gpu_qps();
   void cleanup_gpu_qps();
@@ -449,7 +514,7 @@ class GDABackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  GDADefaultContextProxyT default_context_proxy_;  // init handled in constructor
+  GDADefaultContextProxy default_context_proxy_;  // init handled in constructor
 
   /**
    * @brief An array of @ref ROContexts that backs the context FreeList.
@@ -459,7 +524,7 @@ class GDABackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<HIPAllocator, GDAContext *> ctx_free_list{};
+  FreeListProxy<GDAContext *> ctx_free_list{};
 
   /**
    * @brief The bitmask representing the availability of teams in the pool
@@ -467,7 +532,7 @@ class GDABackend : public Backend {
   char *team_pool_bitmask_{nullptr};
 
   /**
-   * @brief Bitmask to store the reduced result of bitmasks on pariticipating
+   * @brief Bitmask to store the reduced result of bitmasks on participating
    * PEs
    *
    * With no thread-safety for this bitmask, multithreaded creation of teams is

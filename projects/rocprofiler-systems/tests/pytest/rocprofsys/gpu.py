@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 from __future__ import annotations
 import re
@@ -39,16 +39,27 @@ class GPUInfo:
         return False
 
     @property
+    def _is_gfx1250(self) -> bool:
+        """Check if any detected GPU uses the gfx1250 architecture."""
+        return "gfx1250" in self.architectures
+
+    @property
     def rocm_events_for_test(self) -> str:
         """Get appropriate ROCm events for testing based on architecture."""
+        if self._is_gfx1250:
+            return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TX_VCA_VCA_BUSY"
+
         mi300_or_later = self._is_mi300_or_later
         if mi300_or_later:
-            return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0"
+            return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY"
         return "SQ_WAVES"
 
     @property
     def counter_names(self) -> list[str]:
         """Get counter names for validation based on architecture"""
+        if self._is_gfx1250:
+            return ["GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU", "TX_VCA_VCA_BUSY"]
+
         mi300_or_later = self._is_mi300_or_later
         if mi300_or_later:
             return ["GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU", "TA_TA_BUSY"]
@@ -56,8 +67,13 @@ class GPUInfo:
 
     @property
     def expected_counter_files(self) -> list[str]:
-        """Get expected counter output files based on architecture."""
-        return [f"rocprof-device-0-{name}.txt" for name in self.counter_names]
+        """Get expected counter output file patterns based on architecture.
+
+        Returns glob patterns that match any device ID (0-9), since the device
+        number in the filename depends on device_type_index which varies by
+        GPU topology.
+        """
+        return [f"rocprof-device-[0-9]-{name}.txt" for name in self.counter_names]
 
 
 def get_rocminfo(rocm_path: Optional[Path] = None) -> Optional[Path]:

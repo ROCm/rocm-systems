@@ -118,9 +118,8 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
 
     HIP_CHECK(hipGetDeviceCount(&NumDevs));
     if (NumDevs < 2) {
-      SUCCEED(
-          "Test TestSetAccessedByPeer() need atleast two Gpus to test"
-          " the scenario. This system has GPUs less than 2");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+      return;
     }
     HIP_CHECK(hipMallocManaged(&Hmm, MEM_SIZE, hipMemAttachGlobal));
     for (int i = 0; i < NumDevs; ++i) {
@@ -155,9 +154,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
     HIP_CHECK(hipFree(Hmm));
     REQUIRE(IfTestPassed);
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 #endif
@@ -187,9 +184,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
       HIP_CHECK(hipFree(Hmm));
     }
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -228,9 +223,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
       HIP_CHECK(hipFree(Hmm));
     }
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -275,9 +268,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
     HIP_CHECK(hipFree(Hmm));
     HIP_CHECK(hipStreamDestroy(strm));
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -327,13 +318,13 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
       HIP_CHECK(hipStreamDestroy(strm));
     }
   } else {
-    HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }
 
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
   if (setenv("HSA_XNACK", "1", 1) != 0) {
-    HipTest::HIP_SKIP_TEST("Unable to set xnack on environment variable.");
+    HipTest::HIP_SKIP_TEST("cannot set XNACK via environment.");
     return;
   }
 
@@ -347,7 +338,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
     hip::SpawnProc proc("hipMemAdviseTstAlignedAllocMem", true);
     REQUIRE(proc.run() == 0);
   } else {
-    HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }
 #endif
@@ -364,9 +355,8 @@ HIP_TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
     int Ngpus = 0;
     HIP_CHECK(hipGetDeviceCount(&Ngpus));
     if (Ngpus < 2) {
-      SUCCEED(
-          "This test needs atleast two gpus to run."
-          "Hence skipping the test.\n");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+      return;
     }
     int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123;
     int *Hmm1 = NULL, DataMismatch = 0;
@@ -428,8 +418,6 @@ HIP_TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
     HIP_CHECK(hipFree(Hmm));
 
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }

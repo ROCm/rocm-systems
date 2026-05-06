@@ -21,10 +21,11 @@ hipError_t ihipModuleLoadData(hipModule_t* module, const void* mmap_ptr, size_t 
 
 extern hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim,
                                    void** args, size_t sharedMemBytes, hipStream_t stream,
-                                   hipEvent_t startEvent, hipEvent_t stopEvent, int flags);
+                                   hipEvent_t startEvent, hipEvent_t stopEvent, int flags,
+                                   dim3 clusterDim = {1, 1, 1});
 
 const std::string& FunctionName(const hipFunction_t f) {
-  return hip::DeviceFunc::asFunction(f)->kernel()->name();
+  return hip::asKernel(f)->name();
 }
 
 hipError_t hipModuleUnload(hipModule_t hmod) {
@@ -117,14 +118,9 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  hip::DeviceFunc* function = hip::DeviceFunc::asFunction(hfunc);
-  if (function == nullptr) {
-    HIP_RETURN(hipErrorInvalidHandle);
-  }
-
-  amd::Kernel* kernel = function->kernel();
+  amd::Kernel* kernel = hip::asKernel(hfunc);
   if (kernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
+    HIP_RETURN(hipErrorInvalidResourceHandle);
   }
 
   const device::Kernel::WorkGroupInfo* wrkGrpInfo =
@@ -161,7 +157,7 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
       *value = static_cast<int>(wrkGrpInfo->availableLDSSize_ - wrkGrpInfo->localMemSize_);
       break;
     case HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
-      *value = 0;
+      *value = wrkGrpInfo->groupMemCarveout_;
       break;
     default:
       HIP_RETURN(hipErrorInvalidValue);
@@ -185,6 +181,28 @@ hipError_t hipFuncGetAttributes(hipFuncAttributes* attr, const void* func) {
   HIP_RETURN(hipSuccess);
 }
 
+inline hipError_t GetDeviceKernel(const void* func, device::Kernel** d_kernel) {
+  hipFunction_t h_func = nullptr;
+
+  hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
+  if (h_func == nullptr) {
+    if (PlatformState::Instance().IsValidDynFunc(func)) {
+      h_func = reinterpret_cast<hipFunction_t>(const_cast<void*>(func));
+    } else {
+      return hipErrorInvalidDeviceFunction;
+    }
+  }
+
+  amd::Kernel* kernel = hip::asKernel(h_func);
+
+  if (kernel == nullptr) {
+    return hipErrorInvalidDeviceFunction;
+  }
+  *(d_kernel) = const_cast<device::Kernel*>(
+      kernel->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0])));
+  return hipSuccess;
+}
+
 hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value) {
   HIP_INIT_API(hipFuncSetAttribute, func, attr, value);
 
@@ -196,20 +214,17 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
   }
 
   hipFunction_t h_func = nullptr;
-  const hip::DeviceFunc* function = nullptr;
 
   hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
   if (h_func == nullptr) {
     if (PlatformState::Instance().IsValidDynFunc((func))) {
-      function = reinterpret_cast<const hip::DeviceFunc*>(func);
+      h_func = reinterpret_cast<hipFunction_t>(const_cast<void*>(func));
     } else {
       HIP_RETURN(hipErrorInvalidDeviceFunction);
     }
-  } else {
-    function = reinterpret_cast<const hip::DeviceFunc*>(h_func);
   }
 
-  amd::Kernel* kernel = function->kernel();
+  amd::Kernel* kernel = hip::asKernel(h_func);
 
   if (kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
@@ -218,8 +233,9 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
       (device::Kernel*)(kernel->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0])));
 
   if (attr == hipFuncAttributeMaxDynamicSharedMemorySize) {
-    if ((value < 0) || (value > (d_kernel->workGroupInfo()->availableLDSSize_ -
-                                 d_kernel->workGroupInfo()->localMemSize_))) {
+    if ((value < 0) ||
+        (value > (d_kernel->workGroupInfo()->availableLDSSize_ -
+                  d_kernel->workGroupInfo()->localMemSize_))) {
       HIP_RETURN(hipErrorInvalidValue);
     }
     d_kernel->workGroupInfo()->maxDynamicSharedSizeBytes_ = value;
@@ -229,8 +245,8 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
     if (value < -1 || value > 100) {
       HIP_RETURN(hipErrorInvalidValue);
     }
+    d_kernel->workGroupInfo()->groupMemCarveout_ = value;
   }
-
   HIP_RETURN(hipSuccess);
 }
 
@@ -244,7 +260,15 @@ hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t cacheConfig) {
       cacheConfig != hipFuncCachePreferL1 && cacheConfig != hipFuncCachePreferEqual) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  // No way to set cache config yet
+
+  device::Kernel* d_kernel;
+  hipError_t status = GetDeviceKernel(func, &d_kernel);
+
+  if (hipSuccess != status) {
+    HIP_RETURN(status);
+  }
+  d_kernel->workGroupInfo()->groupMemCarveout_ =
+      d_kernel->device().GetGroupMemCarveout(static_cast<amd::FuncCache>(cacheConfig));
 
   HIP_RETURN(hipSuccess);
 }
@@ -293,12 +317,12 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
   if (launch_params.sharedMemBytes_ > info.localMemSizePerCU_) {  // sharedMemPerBlock
     return hipErrorInvalidValue;
   }
+
   // Make sure dispatch doesn't exceed max workgroup size limit
   if (launch_params.local_.product() > info.maxWorkGroupSize_) {
     return hipErrorInvalidConfiguration;
   }
-  hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
-  amd::Kernel* kernel = function->kernel();
+  amd::Kernel* kernel = hip::asKernel(f);
   if (!kernel) {
     LogPrintfError("%s", "Kernel object is invalid or null, possibly due to architecture mismatch.");
     return hipErrorInvalidValue;
@@ -317,7 +341,7 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     LogPrintfError("Launch params (%u, %u, %u) are larger than launch bounds (%lu) for kernel %s",
                    launch_params.local_[0], launch_params.local_[1], launch_params.local_[2],
                    kernel->getDeviceKernel(*device)->workGroupInfo()->size_,
-                   function->name().c_str());
+                   kernel->name().c_str());
     return hipErrorLaunchFailure;
   }
 
@@ -347,6 +371,33 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
   return hipSuccess;
 }
 
+// =================================================================================================
+bool UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Kernel* kernel,
+                                 amd::LaunchParams& launch_params) {
+
+  const amd::Device& device = stream->vdev()->device();
+  amd::device::Kernel* devKernel = const_cast<device::Kernel*>(kernel->getDeviceKernel(device));
+  // If cluster size from device kernel is > 1, then we need to update the cluster params.
+  if (devKernel->getClusterSize(0) > 1 || devKernel->getClusterSize(1) > 1 ||
+      devKernel->getClusterSize(2) > 1) {
+    if (!launch_params.UpdateClusterLaunchParams(devKernel->getClusterSize(0),
+                                                 devKernel->getClusterSize(1),
+                                                 devKernel->getClusterSize(2))) {
+      LogPrintfError("This is not a valid Cluster Launch, please recheck parameters"
+                     "global[0]: %d, global[1]: %d, global[2]: %d, local[0]: %d, local[1]: %d,"
+                     "local[2] :%d, numClusters[0]: %d, numClusters[1]: %d, numClusters[2]: %d",
+                      launch_params.global_[0], launch_params.grid_[1],
+                      launch_params.global_[2], launch_params.local_[0],
+                      launch_params.local_[1], launch_params.local_[2],
+                      devKernel->getClusterSize(0), devKernel->getClusterSize(1),
+                      devKernel->getClusterSize(2));
+      return false;
+    }
+  }
+  return true;
+}
+
+// =================================================================================================
 hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
                                    amd::LaunchParams& launch_params, hip::Stream* stream,
                                    void** kernelParams, void** extra,
@@ -354,12 +405,16 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
                                    uint32_t flags = 0, uint32_t params = 0, uint32_t gridId = 0,
                                    uint32_t numGrids = 0, uint64_t prevGridSum = 0,
                                    uint64_t allGridSum = 0, uint32_t firstDevice = 0) {
-  hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
-  amd::Kernel* kernel = function->kernel();
+  amd::Kernel* kernel = hip::asKernel(f);
+
+  // Check if the kernel metadata has cluster info we need to act on.
+  if (!UpdateNumClustersFromKernel(stream, kernel, launch_params)) {
+    return hipErrorInvalidValue;
+  }
 
   size_t globalWorkOffset[3] = {0};
   amd::NDRangeContainer ndrange(3, globalWorkOffset, launch_params.global_.Data(),
-                                launch_params.local_.Data());
+                                launch_params.local_.Data(), launch_params.cluster_.Data());
   amd::Command::EventWaitList waitList;
 
   bool profileNDRange = (startEvent != nullptr || stopEvent != nullptr);
@@ -429,7 +484,7 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
     LogPrintfError("%s", "Function passed is null");
     return hipErrorInvalidResourceHandle;
   }
-  amd::Kernel* kernel = hip::DeviceFunc::asFunction(f)->kernel();
+  amd::Kernel* kernel = hip::asKernel(f);
 
   hipError_t status =
       ihipLaunchKernel_validate(f, launch_params, kernelParams, extra, deviceId, params);
@@ -524,7 +579,7 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   amd::HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
                                      sharedMemBytes);
   if (!launch_params.IsValidConfig() ||
-      launch_params.local_.product() > device->info().maxWorkGroupSize_) {
+       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -532,18 +587,18 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0 ||
-      launch_params.global_[2] == 0) {
+  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0
+      || launch_params.global_[2] == 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0 ||
-      launch_params.local_[2] == 0) {
+  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0
+                                    || launch_params.local_[2] == 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  HIP_RETURN(
-      ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra, nullptr, nullptr));
+  HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra, nullptr,
+                                    nullptr));
 }
 
 hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
@@ -560,12 +615,34 @@ hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
     HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
+  int deviceId = hip::Stream::DeviceId(hStream);
+  const amd::Device* device = g_devices[deviceId]->devices()[0];
+
   STREAM_CAPTURE(hipExtModuleLaunchKernel, hStream, f, globalWorkSizeX, globalWorkSizeY,
                  globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes,
                  kernelParams, extra, startEvent, stopEvent, flags);
 
   amd::LaunchParams launch_params(globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX,
                                   localWorkSizeY, localWorkSizeZ, sharedMemBytes);
+
+  if (!launch_params.IsValidConfig() ||
+       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
+    HIP_RETURN(hipErrorInvalidConfiguration);
+  }
+
+  if (sharedMemBytes > device->info().localMemSizePerCU_) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0
+      || launch_params.global_[2] == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0
+                                    || launch_params.local_[2] == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
 
   HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra, startEvent,
                                     stopEvent, flags));
@@ -781,17 +858,11 @@ hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr)
 }
 
 hipError_t hipLaunchKernel_common(const void* hostFunction, dim3 gridDim, dim3 blockDim,
-                                  void** args, size_t sharedMemBytes, hipStream_t stream) {
-  // TODO: @cjatin refactor the isValid check in hot path
-  // We do this check in `ihipLaunchKernel` as well, but the macro STREAM_CAPTURE dereferences the stream first.
-  // So this shows up in the ASAN run.
-  // I will raise a follow up PR to fix this.
-  if (!hip::isValid(stream)) {
-    return hipErrorInvalidValue;
-  }
+                                  void** args, size_t sharedMemBytes, hipStream_t stream,
+                                  dim3 clusterDim = {1, 1, 1}) {
   STREAM_CAPTURE(hipLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes);
   return ihipLaunchKernel(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream, nullptr,
-                          nullptr, 0);
+                          nullptr, 0, clusterDim);
 }
 
 hipError_t hipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args,
@@ -859,13 +930,8 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
     return hipErrorCooperativeLaunchTooLarge;
   }
 
-  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0 ||
-      launch_params.global_[2] == 0) {
-    return hipErrorInvalidConfiguration;
-  }
-
-  return ihipModuleLaunchKernel(func, launch_params, hStream, kernelParams, nullptr, nullptr,
-                                nullptr, 0, amd::NDRangeKernelCommand::CooperativeGroups);
+  return ihipModuleLaunchKernel(func, launch_params, hStream, kernelParams, nullptr,
+                                nullptr, nullptr, 0, amd::NDRangeKernelCommand::CooperativeGroups);
 }
 
 hipError_t hipLaunchCooperativeKernel(const void* f, dim3 gridDim, dim3 blockDim,
@@ -1187,6 +1253,7 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
                                                config->dynamicSmemBytes, config->stream));
   }
 
+  dim3 clusterDims = {0, 0, 0};
   for (size_t attr_idx = 0; attr_idx < config->numAttrs; ++attr_idx) {
     hipLaunchAttribute& attr = config->attrs[attr_idx];
     switch (attr.id) {
@@ -1197,12 +1264,24 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
                                                 config->dynamicSmemBytes, config->stream));
         }
         break;
+      case hipLaunchAttributeClusterDimension :
+        clusterDims.x = attr.val.clusterDim.x;
+        clusterDims.y = attr.val.clusterDim.y;
+        clusterDims.z = attr.val.clusterDim.z;
+        break;
       default:
         LogPrintfError("Attribute %u not supported", attr.id);
         break;
     }
   }
-  HIP_RETURN(hipErrorInvalidConfiguration);
+  // All dimensions have to be atleast 1.
+  if (clusterDims.x == 0 || clusterDims.y == 0 || clusterDims.z == 0) {
+    HIP_RETURN (hipErrorInvalidConfiguration);
+  }
+
+  HIP_RETURN_DURATION(hipLaunchKernel_common(fPtr, config->gridDim, config->blockDim, args,
+    config->dynamicSmemBytes, config->stream,
+    clusterDims));
 }
 
 hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f,

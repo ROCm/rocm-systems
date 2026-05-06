@@ -57,7 +57,7 @@ __device__ static inline int __clz(int input) {
 }
 
 __device__ static inline int __clzll(long long int input) {
-  return input == 0u ? 64 : __builtin_clzl((__hip_uint64_t)input);
+  return input == 0u ? 64 : __builtin_clzll((__hip_uint64_t)input);
 }
 
 __device__ static inline int __ffs(unsigned int input) {
@@ -661,20 +661,6 @@ __device__ inline __hip_uint64_t __lanemask_eq() {
   __hip_int64_t mask = ((__hip_uint64_t)1 << lane);
   return mask;
 }
-
-
-__device__ inline void* __local_to_generic(void* p) { return p; }
-
-#ifdef __HIP_DEVICE_COMPILE__
-__device__ inline void* __get_dynamicgroupbaseptr() {
-  // Get group segment base pointer.
-  return (char*)__local_to_generic((void*)__to_local(__builtin_amdgcn_groupstaticsize()));
-}
-#else
-__device__ void* __get_dynamicgroupbaseptr();
-#endif  // __HIP_DEVICE_COMPILE__
-
-__device__ inline void* __amdgcn_get_dynamicgroupbaseptr() { return __get_dynamicgroupbaseptr(); }
 
 // Memory Fence Functions
 __device__ inline static void __threadfence() { __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "agent"); }

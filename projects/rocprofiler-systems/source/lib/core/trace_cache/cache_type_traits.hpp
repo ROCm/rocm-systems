@@ -1,27 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 #include "common/span.hpp"
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -46,14 +28,14 @@ struct always_false : std::false_type
 
 template <typename T>
 void
-serialize(uint8_t*, const T&)
+serialize(std::uint8_t*, const T&)
 {
     static_assert(type_traits::always_false<T>::value, "serialize<T> not specialized");
 }
 
 template <typename T>
 T
-deserialize(uint8_t*&)
+deserialize(std::uint8_t*&)
 {
     static_assert(type_traits::always_false<T>::value, "deserialize<T> not specialized");
     return T{};
@@ -105,6 +87,17 @@ template <typename T>
 inline constexpr bool is_vector_v = is_vector<T>::value;
 
 template <typename T>
+struct is_array : std::false_type
+{};
+
+template <typename T, size_t N>
+struct is_array<std::array<T, N>> : std::true_type
+{};
+
+template <typename T>
+inline constexpr bool is_array_v = is_array<T>::value;
+
+template <typename T>
 static constexpr bool is_string_view_v =
     std::is_same_v<std::decay_t<T>, std::string_view>;
 
@@ -122,7 +115,7 @@ inline constexpr bool is_optional_v = is_optional<T>::value;
 template <typename T>
 inline constexpr bool is_supported_type_v =
     is_span_v<T> || std::is_integral_v<T> || std::is_floating_point_v<T> ||
-    is_string_view_v<T> || is_vector_v<T> || is_optional_v<T>;
+    is_string_view_v<T> || is_vector_v<T> || is_optional_v<T> || is_array_v<T>;
 
 template <typename T>
 struct is_enum_class
@@ -149,7 +142,7 @@ struct has_serialize : std::false_type
 {};
 
 template <typename T>
-struct has_serialize<T, std::void_t<decltype(serialize(std::declval<uint8_t*>(),
+struct has_serialize<T, std::void_t<decltype(serialize(std::declval<std::uint8_t*>(),
                                                        std::declval<const T&>()))>>
 : std::true_type
 {};
@@ -160,7 +153,7 @@ struct has_deserialize : std::false_type
 
 template <typename T>
 struct has_deserialize<
-    T, void_t<std::is_same<decltype(deserialize<T>(std::declval<uint8_t*&>())), T>>>
+    T, void_t<std::is_same<decltype(deserialize<T>(std::declval<std::uint8_t*&>())), T>>>
 : std::true_type
 {};
 

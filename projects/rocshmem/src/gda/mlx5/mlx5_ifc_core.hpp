@@ -45,6 +45,10 @@
 extern "C" {
 
 enum {
+  MLX5_CMD_OP_CREATE_CQ     = 0x400,
+  MLX5_CMD_OP_DESTROY_CQ    = 0x401,
+  MLX5_CMD_OP_QUERY_CQ      = 0x402,
+  MLX5_CMD_OP_MODIFY_CQ     = 0x403,
   MLX5_CMD_OP_CREATE_QP     = 0x500,
   MLX5_CMD_OP_DESTROY_QP    = 0x501,
   MLX5_CMD_OP_RST2INIT_QP   = 0x502,
@@ -410,6 +414,152 @@ struct mlx5_ifc_qpc_bits {
     uint8_t    rdma_key[0x20];
 
     uint8_t    dbr_umem_id[0x20];
+};
+
+enum {
+  MLX5_CQC_STATUS_OK             = 0x0,
+  MLX5_CQC_STATUS_CQ_OVERFLOW    = 0x9,
+  MLX5_CQC_STATUS_CQ_WRITE_FAIL  = 0xa,
+};
+
+enum {
+  MLX5_CQC_CQE_SZ_64_BYTES   = 0x0,
+  MLX5_CQC_CQE_SZ_128_BYTES  = 0x1,
+};
+
+enum {
+  MLX5_CQC_ST_SOLICITED_NOTIFICATION_REQUEST_ARMED  = 0x6,
+  MLX5_CQC_ST_NOTIFICATION_REQUEST_ARMED            = 0x9,
+  MLX5_CQC_ST_FIRED                                 = 0xa,
+};
+
+enum mlx5_cq_period_mode {
+  MLX5_CQ_PERIOD_MODE_START_FROM_EQE = 0x0,
+  MLX5_CQ_PERIOD_MODE_START_FROM_CQE = 0x1,
+  MLX5_CQ_PERIOD_NUM_MODES,
+};
+
+struct mlx5_ifc_cqc_bits {
+    uint8_t    status[0x4];
+    uint8_t    as_notify[0x1];
+    uint8_t    initiator_src_dct[0x1];
+    uint8_t    dbr_umem_valid[0x1];
+    uint8_t    ext_element[0x1];
+    uint8_t    cqe_sz[0x3];
+    uint8_t    cc[0x1];
+    uint8_t    reserved_at_c[0x1];
+    uint8_t    scqe_break_moderation_en[0x1];
+    uint8_t    oi[0x1];
+    uint8_t    cq_period_mode[0x2];
+    uint8_t    cqe_comp_en[0x1];
+    uint8_t    mini_cqe_res_format[0x2];
+    uint8_t    st[0x4];
+    uint8_t    always_armed_cq[0x1];
+    uint8_t    ext_element_type[0x3];
+    uint8_t    reserved_at_1c[0x2];
+    uint8_t    cqe_compression_layout[0x2];
+
+    uint8_t    dbr_umem_id[0x20];
+
+    uint8_t    reserved_at_40[0x14];
+    uint8_t    page_offset[0x6];
+    uint8_t    reserved_at_5a[0x2];
+    uint8_t    mini_cqe_res_format_ext[0x2];
+    uint8_t    cq_timestamp_format[0x2];
+
+    uint8_t    reserved_at_60[0x3];
+    uint8_t    log_cq_size[0x5];
+    uint8_t    uar_page[0x18];
+
+    uint8_t    reserved_at_80[0x4];
+    uint8_t    cq_period[0xc];
+    uint8_t    cq_max_count[0x10];
+
+    uint8_t    c_eqn_or_ext_element[0x20];
+
+    uint8_t    reserved_at_c0[0x3];
+    uint8_t    log_page_size[0x5];
+    uint8_t    reserved_at_c8[0x18];
+
+    uint8_t    reserved_at_e0[0x20];
+
+    uint8_t    reserved_at_100[0x8];
+    uint8_t    last_notified_index[0x18];
+
+    uint8_t    reserved_at_120[0x8];
+    uint8_t    last_solicit_index[0x18];
+
+    uint8_t    reserved_at_140[0x8];
+    uint8_t    consumer_counter[0x18];
+
+    uint8_t    reserved_at_160[0x8];
+    uint8_t    producer_counter[0x18];
+
+    uint8_t    local_partition_id[0xc];
+    uint8_t    process_id[0x14];
+
+    uint8_t    reserved_at_1a0[0x10];
+    uint8_t    thread_id[0x10];
+
+    uint8_t    dbr_addr[0x40];
+};
+
+struct mlx5_ifc_create_cq_out_bits {
+    uint8_t    status[0x8];
+    uint8_t    reserved_at_8[0x18];
+
+    uint8_t    syndrome[0x20];
+
+    uint8_t    reserved_at_40[0x8];
+    uint8_t    cqn[0x18];
+
+    uint8_t    reserved_at_60[0x20];
+};
+
+struct mlx5_ifc_create_cq_in_bits {
+    uint8_t    opcode[0x10];
+    uint8_t    uid[0x10];
+
+    uint8_t    reserved_at_20[0x10];
+    uint8_t    op_mod[0x10];
+
+    uint8_t    reserved_at_40[0x8];
+    uint8_t    input_cqn[0x18];
+
+    uint8_t    reserved_at_60[0x20];
+
+    struct mlx5_ifc_cqc_bits cq_context;
+
+    uint8_t    cq_umem_offset[0x40];
+
+    uint8_t    cq_umem_id[0x20];
+
+    uint8_t    cq_umem_valid[0x1];
+    uint8_t    reserved_at_2e1[0x59f];
+
+    uint8_t    pas[][0x40];
+};
+
+struct mlx5_ifc_destroy_cq_out_bits {
+    uint8_t    status[0x8];
+    uint8_t    reserved_at_8[0x18];
+
+    uint8_t    syndrome[0x20];
+
+    uint8_t    reserved_at_40[0x40];
+};
+
+struct mlx5_ifc_destroy_cq_in_bits {
+    uint8_t    opcode[0x10];
+    uint8_t    uid[0x10];
+
+    uint8_t    reserved_at_20[0x10];
+    uint8_t    op_mod[0x10];
+
+    uint8_t    reserved_at_40[0x8];
+    uint8_t    cqn[0x18];
+
+    uint8_t    reserved_at_60[0x20];
 };
 
 enum mlx5_qp_optpar {

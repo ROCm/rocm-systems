@@ -1,0 +1,46 @@
+{
+  "suites": {
+    "tritonbench-rocm": {
+      "suite": "tritonbench-rocm",
+      "version": "0.2.0",
+      "results": [
+        {
+          "kernel": "matmul_f16_256x256",
+          "baseline_ns": 1000000,
+          "optimized_ns": 700000,
+          "perfxpert_recommended": true
+        },
+        {
+          "kernel": "softmax_f32_1024",
+          "baseline_ns": 500000,
+          "optimized_ns": 300000,
+          "perfxpert_recommended": true
+        },
+        {
+          "kernel": "layernorm_f16_4096",
+          "baseline_ns": 800000,
+          "optimized_ns": 800000,
+          "perfxpert_recommended": false
+        }
+      ]
+    },
+    "kernelbench-rocm": {
+      "suite": "kernelbench-rocm",
+      "version": "0.2.0",
+      "results": [
+        {
+          "kernel": "gemm_rocblas",
+          "baseline_ns": 1000000,
+          "optimized_ns": 750000,
+          "perfxpert_recommended": true
+        },
+        {
+          "kernel": "softmax_fused",
+          "baseline_ns": 500000,
+          "optimized_ns": 500000,
+          "perfxpert_recommended": false
+        }
+      ]
+    }
+  }
+}

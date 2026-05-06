@@ -67,7 +67,7 @@ kernel_simple_coarse_copy_warp(IpcImpl *ipc_impl, int *src, int *dest, size_t by
 }
 
 class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int, int>> {
-    using HEAP_T = HeapMemoryType<HIPAllocator>;
+    using HEAP_T = HeapMemoryType;
     using MPI_T = RemoteHeapInfo<CommunicatorMPI>;
     using FN_T = void (*)(IpcImpl*, int*, int*, size_t);
 
@@ -88,6 +88,7 @@ class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int,
             hip_allocator_.deallocate(ipc_impl_dptr_);
         }
         ipc_impl_.ipcHostStop();
+        delete mpi_;
         MPIInstance::mpilib_dl_close();
     }
 
@@ -101,7 +102,7 @@ class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int,
         WRITE = 1
     };
 
-    virtual void copy(TestType test, dim3 grid, dim3 block) {
+    virtual void copy([[maybe_unused]] TestType test, [[maybe_unused]] dim3 grid, [[maybe_unused]] dim3 block) {
         FAIL();
     }
 
@@ -187,13 +188,12 @@ class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int,
   protected:
     std::vector<int> golden_;
 
-    HEAP_T heap_mem_ {};
+    HIPAllocator hip_allocator_ {};
+    HEAP_T heap_mem_ {hip_allocator_};
     MPI_T *mpi_{nullptr};
 
     IpcImpl ipc_impl_ {};
     IpcImpl *ipc_impl_dptr_ {nullptr};
-
-    HIPAllocator hip_allocator_ {};
 };
 
 class DegenerateSimpleCoarse : public IPCImplSimpleCoarse {

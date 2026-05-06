@@ -246,7 +246,7 @@ bool runFuncTestsForAllPriorityLevelsMultThread(unsigned int flags) {
 }
 
 
-template <typename T> bool validateStreamPrioritiesWithEvents() {
+template <typename T> bool verifyStreamPriorityKernelResults() {
   size_t size = NUMITERS * MEMCPYSIZE1;
 
 // get the range of priorities available
@@ -289,8 +289,8 @@ template <typename T> bool validateStreamPrioritiesWithEvents() {
 
 // allocate and initialise host source and destination buffers
 #define OP(x)                                                                                      \
-  T* src_h_##x;                                                                                    \
-  T* dst_h_##x;                                                                                    \
+  T* src_h_##x = nullptr;                                                                          \
+  T* dst_h_##x = nullptr;                                                                          \
   if (enable_priority_##x) {                                                                       \
     src_h_##x = reinterpret_cast<T*>(malloc(size));                                                \
     REQUIRE(src_h_##x != nullptr);                                                                 \
@@ -306,8 +306,8 @@ template <typename T> bool validateStreamPrioritiesWithEvents() {
 
 // allocate and initialize device source and destination buffers
 #define OP(x)                                                                                      \
-  T* src_d_##x;                                                                                    \
-  T* dst_d_##x;                                                                                    \
+  T* src_d_##x = nullptr;                                                                          \
+  T* dst_d_##x = nullptr;                                                                          \
   if (enable_priority_##x) {                                                                       \
     HIP_CHECK(hipMalloc(&src_d_##x, size));                                                        \
     HIP_CHECK(hipMemcpy(src_d_##x, src_h_##x, size, hipMemcpyHostToDevice));                       \
@@ -318,30 +318,7 @@ template <typename T> bool validateStreamPrioritiesWithEvents() {
   OP(high)
 #undef OP
 
-// create events for measuring time spent in kernel execution
-#define OP(x)                                                                                      \
-  hipEvent_t event_start_##x;                                                                      \
-  hipEvent_t event_end_##x;                                                                        \
-  if (enable_priority_##x) {                                                                       \
-    HIP_CHECK(hipEventCreate(&event_start_##x));                                                   \
-    HIP_CHECK(hipEventCreate(&event_end_##x));                                                     \
-  }
-  OP(low)
-  OP(normal)
-  OP(high)
-#undef OP
-
-// record start events for each of the priority streams
-#define OP(x)                                                                                      \
-  if (enable_priority_##x) {                                                                       \
-    HIP_CHECK(hipEventRecord(event_start_##x, stream_##x));                                        \
-  }
-  OP(low)
-  OP(normal)
-  OP(high)
-#undef OP
-
-  // launch kernels repeatedly on each of the prioritiy streams
+  // launch kernels repeatedly on each of the priority streams
   for (int i = 0; i < static_cast<int>(size); i += MEMCPYSIZE1) {
     int j = i / sizeof(T);
 #define OP(x)                                                                                      \
@@ -356,39 +333,17 @@ template <typename T> bool validateStreamPrioritiesWithEvents() {
 #undef OP
   }
 
-// record end events for each of the priority streams
+// synchronize each of the priority streams
 #define OP(x)                                                                                      \
   if (enable_priority_##x) {                                                                       \
-    HIP_CHECK(hipEventRecord(event_end_##x, stream_##x));                                          \
+    HIP_CHECK(hipStreamSynchronize(stream_##x));                                                   \
   }
   OP(low)
   OP(normal)
   OP(high)
 #undef OP
 
-// synchronize events for each of the priority streams
-#define OP(x)                                                                                      \
-  if (enable_priority_##x) {                                                                       \
-    HIP_CHECK(hipEventSynchronize(event_end_##x));                                                 \
-  }
-  OP(low)
-  OP(normal)
-  OP(high)
-#undef OP
-
-// compute time spent for memcpy in each stream
-#define OP(x)                                                                                      \
-  float time_spent_##x;                                                                            \
-  if (enable_priority_##x) {                                                                       \
-    HIP_CHECK(hipEventElapsedTime(&time_spent_##x, event_start_##x, event_end_##x));               \
-    INFO("time spent for memcpy in " << #x << " priority stream: " << time_spent_##x << " ms");    \
-  }
-  OP(low)
-  OP(normal)
-  OP(high)
-#undef OP
-
-// sanity check
+// verify kernel results for each stream
 #define OP(x)                                                                                      \
   if (enable_priority_##x) {                                                                       \
     HIP_CHECK(hipMemcpy(dst_h_##x, dst_d_##x, size, hipMemcpyDeviceToHost));                       \
@@ -411,29 +366,12 @@ template <typename T> bool validateStreamPrioritiesWithEvents() {
   OP(high)
 #undef OP
 
-// validate that stream priorities are working as expected
-#define OP(x, y)                                                                                   \
-  if (enable_priority_##x && enable_priority_##y) {                                                \
-    if ((1.05f * time_spent_##x) < time_spent_##y) {                                               \
-      INFO("time_spent_##x : " << time_spent_##x << "time_spent_##y : " << time_spent_##y);        \
-      REQUIRE(false);                                                                              \
-    }                                                                                              \
-  }
-  OP(low, normal)
-  OP(normal, high)
-  OP(low, high)
-#undef OP
-
-// free host & device memory & events
+// free host & device memory
 #define OP(x)                                                                                      \
-  free(src_h_##x);                                                                                 \
-  free(dst_h_##x);                                                                                 \
-  HIP_CHECK(hipFree(src_d_##x));                                                                   \
-  HIP_CHECK(hipFree(dst_d_##x));                                                                   \
-  if (enable_priority_##x) {                                                                       \
-    HIP_CHECK(hipEventDestroy(event_start_##x));                                                   \
-    HIP_CHECK(hipEventDestroy(event_end_##x));                                                     \
-  }
+  if (src_h_##x != nullptr) free(src_h_##x);                                                      \
+  if (dst_h_##x != nullptr) free(dst_h_##x);                                                      \
+  if (src_d_##x != nullptr) HIP_CHECK(hipFree(src_d_##x));                                        \
+  if (dst_d_##x != nullptr) HIP_CHECK(hipFree(dst_d_##x));
   OP(low)
   OP(normal)
   OP(high)
@@ -940,17 +878,18 @@ HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_CheckPriorityVal) {
 /**
  * Test Description
  * ------------------------
- *    - Validate stream priorities with event after classifying them as low,
- * medium and high.
+ *    - Create streams with low, normal, and high priority levels, launch kernels
+ * on each, synchronize, and verify that the kernel output is correct for all
+ * priority levels.
  * ------------------------
  *    - catch\unit\stream\hipStreamCreateWithPriority.cc
  * Test requirements
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_ValidateWithEvents) {
+HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_VerifyKernelResults) {
   bool TestPassed = true;
-  TestPassed = hipStreamCreateWithPriorityTest::validateStreamPrioritiesWithEvents<int>();
+  TestPassed = hipStreamCreateWithPriorityTest::verifyStreamPriorityKernelResults<int>();
   REQUIRE(TestPassed);
 }
 

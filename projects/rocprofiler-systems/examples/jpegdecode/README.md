@@ -11,7 +11,7 @@ This example benchmarks JPEG image decoding performance using the AMD rocJPEG li
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - HIP runtime
 - rocJPEG library
 - rocprofiler-register

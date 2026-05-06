@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/sampling.hpp"
 #include "core/common.hpp"
@@ -32,17 +13,18 @@
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/utility.hpp"
-#include "library/amd_smi.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
 #include "library/components/backtrace_timestamp.hpp"
 #include "library/components/callchain.hpp"
 #include "library/perf.hpp"
+#include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
+#include <cstdint>
 
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
@@ -76,6 +58,7 @@
 #include "logger/debug.hpp"
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <condition_variable>
@@ -163,7 +146,7 @@ using sampler_allocator_t = typename sampler_t::allocator_t;
 
 template <typename Category>
 inline std::string
-get_category_track_name(uint64_t tid)
+get_category_track_name(std::uint64_t tid)
 {
     return std::string(trait::name<Category>::value) + "_" + std::to_string(tid);
 }
@@ -246,12 +229,12 @@ metadata_initialize_thread_info(size_t tid)
     trace_cache::get_metadata_registry().add_thread_info(
         { getppid(), getpid(),
           static_cast<size_t>(_thread_info->index_data->system_value),
-          static_cast<uint32_t>(_thread_info->get_start()),
-          static_cast<uint32_t>(_thread_info->get_stop()), "{}" });
+          static_cast<std::uint32_t>(_thread_info->get_start()),
+          static_cast<std::uint32_t>(_thread_info->get_stop()), "{}" });
 }
 
 void
-metadata_initialize_track(int64_t tid)
+metadata_initialize_track(std::int64_t tid)
 {
     const auto& _thread_info = thread_info::get(tid, SequentTID);
     if(get_is_continuous_integration() && !_thread_info)
@@ -277,31 +260,33 @@ metadata_initialize_track(int64_t tid)
 
 struct timer_sampling_data
 {
-    int64_t                                   m_tid     = -1;
-    uint64_t                                  m_beg     = 0;
-    uint64_t                                  m_end     = 0;
+    std::int64_t                              m_tid     = -1;
+    std::uint64_t                             m_beg     = 0;
+    std::uint64_t                             m_end     = 0;
     std::vector<tim::unwind::processed_entry> m_stack   = {};
     backtrace_metrics                         m_metrics = {};
 };
 
 struct overflow_sampling_data
 {
-    int64_t                                   m_tid   = -1;
-    uint64_t                                  m_beg   = 0;
-    uint64_t                                  m_end   = 0;
+    std::int64_t                              m_tid   = -1;
+    std::uint64_t                             m_beg   = 0;
+    std::uint64_t                             m_end   = 0;
     std::vector<tim::unwind::processed_entry> m_stack = {};
 };
 
 std::vector<timer_sampling_data>
-parse_timer_data(int64_t _tid, const bundle_t* _init,
+parse_timer_data(std::int64_t _tid, const bundle_t* _init,
                  const std::vector<bundle_t*>& _data);
 
 std::vector<overflow_sampling_data>
-parse_overflow_data(int64_t _tid, const bundle_t*, const std::vector<bundle_t*>& _data);
+parse_overflow_data(std::int64_t                  _tid, const bundle_t*,
+                    const std::vector<bundle_t*>& _data);
 
 // TODO: should we remove _tid? it's inside timer_data and overflow_data
 void
-cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer_data,
+cache_sampling_data(std::int64_t                               _tid,
+                    const std::vector<timer_sampling_data>&    _timer_data,
                     const std::vector<overflow_sampling_data>& _overflow_data)
 {
     if(get_debug_sampling())
@@ -329,8 +314,8 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
             auto _line_info  = generate_line_info_json(iitr);
 
             trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
-                static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING),
-                static_cast<uint64_t>(_thread_info->index_data->system_value),
+                static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING),
+                static_cast<std::uint64_t>(_thread_info->index_data->system_value),
                 _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
                 trait::name<category::timer_sampling>::value, _call_stack.c_str(),
                 _line_info.c_str(), "{}" });
@@ -361,8 +346,8 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
             auto _line_info  = generate_line_info_json(iitr);
 
             trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
-                static_cast<uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING),
-                static_cast<uint64_t>(_thread_info->index_data->system_value),
+                static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING),
+                static_cast<std::uint64_t>(_thread_info->index_data->system_value),
                 _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
                 trait::name<category::overflow_sampling>::value, _call_stack.c_str(),
                 _line_info.c_str(), "{}" });
@@ -378,7 +363,7 @@ get_sampler_allocators()
 }
 
 std::set<int>
-configure(bool _setup, int64_t _tid = threading::get_id());
+configure(bool _setup, std::int64_t _tid = threading::get_id());
 
 void
 configure_sampler_allocator(std::shared_ptr<sampler_allocator_t>& _v)
@@ -470,20 +455,20 @@ get_signal_names(Tp&& _v)
 }
 
 unique_ptr_t<sampler_t>&
-get_sampler(int64_t _tid = threading::get_id())
+get_sampler(std::int64_t _tid = threading::get_id())
 {
     static auto* _v = sampler_instances::get();
     return _v->at(_tid);
 }
 
 unique_ptr_t<bundle_t>&
-get_sampler_init(int64_t _tid = threading::get_id())
+get_sampler_init(std::int64_t _tid = threading::get_id())
 {
     return sampler_init_instances::instance(construct_on_thread{ _tid });
 }
 
 unique_ptr_t<bool>&
-get_sampler_running(int64_t _tid)
+get_sampler_running(std::int64_t _tid)
 {
     return sampler_running_instances::instance(construct_on_thread{ _tid }, false);
 }
@@ -559,7 +544,7 @@ start_duration_thread()
         if(_protect) return;
         _protect   = true;
         auto _now  = std::chrono::steady_clock::now();
-        auto _end  = _now + std::chrono::nanoseconds{ static_cast<uint64_t>(
+        auto _end  = _now + std::chrono::nanoseconds{ static_cast<std::uint64_t>(
                                config::get_sampling_duration() * units::sec) };
         auto _func = [_end]() {
             thread_info::init(true);
@@ -636,10 +621,10 @@ using sampler_bundle_t = typename sampler_t::bundle_type;
 using sampler_buffer_t = tim::data_storage::ring_buffer<sampler_bundle_t>;
 using pos_type         = typename std::fstream::pos_type;
 
-auto offload_seq_data = std::unordered_map<int64_t, std::set<pos_type>>{};
+auto offload_seq_data = std::unordered_map<std::int64_t, std::set<pos_type>>{};
 
 void
-offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
+offload_buffer(std::int64_t _seq, sampler_buffer_t&& _buf)
 {
     if(!get_use_tmp_files())
     {
@@ -685,7 +670,7 @@ offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
 }
 
 auto
-load_offload_buffer(int64_t _thread_idx)
+load_offload_buffer(std::int64_t _thread_idx)
 {
     auto _data = std::vector<sampler_buffer_t>{};
     if(!get_use_tmp_files())
@@ -723,7 +708,7 @@ load_offload_buffer(int64_t _thread_idx)
     {
         _fs.seekg(itr);  // set to the absolute position
 
-        int64_t _seq = 0;
+        std::int64_t _seq = 0;
         _fs.read(reinterpret_cast<char*>(&_seq), sizeof(_seq));
         if(_fs.eof()) break;
 
@@ -749,7 +734,7 @@ load_offload_buffer(int64_t _thread_idx)
 }
 
 std::set<int>
-configure(bool _setup, int64_t _tid)
+configure(bool _setup, std::int64_t _tid)
 {
     const auto& _info         = thread_info::get(_tid, SequentTID);
     auto&       _sampler      = sampling::get_sampler(_tid);
@@ -884,14 +869,14 @@ configure(bool _setup, int64_t _tid)
             _perf_sampler->set_ready_signal(get_sampling_overflow_signal());
             _sampler->configure(overflow{
                 get_sampling_overflow_signal(),
-                [](int _sig, pid_t, long, int64_t _idx) {
+                [](int _sig, pid_t, long, std::int64_t _idx) {
                     perf::get_instance(_idx)->set_ready_signal(_sig);
                     return true;
                 },
-                [](int, pid_t, long, int64_t _idx) {
+                [](int, pid_t, long, std::int64_t _idx) {
                     return perf::get_instance(_idx)->start();
                 },
-                [](int, pid_t, long, int64_t _idx) {
+                [](int, pid_t, long, std::int64_t _idx) {
                     if(!perf::get_instance(_idx) || !perf::get_instance(_idx)->is_open())
                         return true;
                     auto _stopped = perf::get_instance(_idx)->stop();
@@ -992,13 +977,13 @@ configure(bool _setup, int64_t _tid)
 
         if(_tid == 0)
         {
-            for(int64_t i = 1; i < ROCPROFSYS_MAX_THREADS; ++i)
+            for(std::int64_t i = 1; i < ROCPROFSYS_MAX_THREADS; ++i)
             {
                 if(sampling::get_sampler(i)) sampling::get_sampler(i)->stop();
                 if(perf::get_instance(i)) perf::get_instance(i)->stop();
             }
 
-            for(int64_t i = 1; i < ROCPROFSYS_MAX_THREADS; ++i)
+            for(std::int64_t i = 1; i < ROCPROFSYS_MAX_THREADS; ++i)
             {
                 if(sampling::get_sampler(i))
                 {
@@ -1024,30 +1009,54 @@ configure(bool _setup, int64_t _tid)
 }
 
 std::vector<timer_sampling_data>
-parse_timer_data(int64_t, const bundle_t*, const std::vector<bundle_t*>&);
+parse_timer_data(std::int64_t, const bundle_t*, const std::vector<bundle_t*>&);
 
 std::vector<overflow_sampling_data>
-parse_overflow_data(int64_t, const bundle_t*, const std::vector<bundle_t*>&);
+parse_overflow_data(std::int64_t, const bundle_t*, const std::vector<bundle_t*>&);
 
 void
-post_process_perfetto(int64_t, const std::vector<timer_sampling_data>&,
+post_process_perfetto(std::int64_t, const std::vector<timer_sampling_data>&,
                       const std::vector<overflow_sampling_data>&);
 
 void
-post_process_timemory(int64_t, const std::vector<timer_sampling_data>&,
+post_process_timemory(std::int64_t, const std::vector<timer_sampling_data>&,
                       const std::vector<overflow_sampling_data>&);
 
 void
-store_sampling_data_in_cache(int64_t                                    _tid,
+store_sampling_data_in_cache(std::int64_t                               _tid,
                              const std::vector<timer_sampling_data>&    _timer_data,
                              const std::vector<overflow_sampling_data>& _overflow_data);
 
 auto static_strings = std::set<std::string>{};
 
+struct pause_interval_t
+{
+    std::uint64_t pause_ts  = 0;
+    std::uint64_t resume_ts = 0;
+};
+
+auto sampling_paused  = std::atomic<bool>{ false };
+auto pause_mutex      = std::mutex{};
+auto pause_intervals  = std::vector<pause_interval_t>{};
+auto pending_pause_ts = std::atomic<std::uint64_t>{ 0 };
+
+bool
+spans_pause_interval(std::uint64_t _beg, std::uint64_t _end)
+{
+    if(pause_intervals.empty()) return false;
+
+    const auto _it =
+        std::lower_bound(pause_intervals.cbegin(), pause_intervals.cend(), _beg,
+                         [](const auto& _interval, std::uint64_t _val) {
+                             return _interval.resume_ts < _val;
+                         });
+
+    return _it != pause_intervals.cend() && _it->pause_ts <= _end;
+}
 }  // namespace
 
 unique_ptr_t<std::set<int>>&
-get_signal_types(int64_t _tid)
+get_signal_types(std::int64_t _tid)
 {
     return signal_type_instances::instance(construct_on_thread{ _tid },
                                            rocprofsys::get_sampling_signals(_tid));
@@ -1078,12 +1087,14 @@ shutdown()
 void
 block_samples()
 {
+    LOG_DEBUG("Blocking sampling...");
     trait::runtime_enabled<sampler_t>::set(false);
 }
 
 void
 unblock_samples()
 {
+    LOG_DEBUG("Unblocking sampling...");
     trait::runtime_enabled<sampler_t>::set(true);
 }
 
@@ -1276,7 +1287,8 @@ post_process()
 namespace
 {
 std::vector<timer_sampling_data>
-parse_timer_data(int64_t _tid, const bundle_t* _init, const std::vector<bundle_t*>& _data)
+parse_timer_data(std::int64_t _tid, const bundle_t* _init,
+                 const std::vector<bundle_t*>& _data)
 {
     auto _results = std::vector<timer_sampling_data>{};
 
@@ -1291,10 +1303,11 @@ parse_timer_data(int64_t _tid, const bundle_t* _init, const std::vector<bundle_t
         if(!_bt_data || !_bt_time || _bt_data->empty() || _bt_time->get_tid() != _tid)
             continue;
 
-        auto _ret    = timer_sampling_data{};
-        _ret.m_tid   = _bt_time->get_tid();
-        _ret.m_beg   = _last->get<backtrace_timestamp>()->get_timestamp();
-        _ret.m_end   = _bt_time->get_timestamp();
+        auto _ret  = timer_sampling_data{};
+        _ret.m_tid = _bt_time->get_tid();
+        _ret.m_beg = _last->get<backtrace_timestamp>()->get_timestamp();
+        _ret.m_end = _bt_time->get_timestamp();
+
         _ret.m_stack = backtrace::filter_and_patch(_bt_data->get());
         if constexpr(tim::trait::is_available<hw_counters>::value)
         {
@@ -1311,7 +1324,10 @@ parse_timer_data(int64_t _tid, const bundle_t* _init, const std::vector<bundle_t
             }
         }
 
-        _results.emplace_back(std::move(_ret));
+        if(!spans_pause_interval(_ret.m_beg, _ret.m_end))
+        {
+            _results.emplace_back(std::move(_ret));
+        }
         _last = itr;
     }
 
@@ -1322,12 +1338,13 @@ parse_timer_data(int64_t _tid, const bundle_t* _init, const std::vector<bundle_t
 }
 
 std::vector<overflow_sampling_data>
-parse_overflow_data(int64_t _tid, const bundle_t*, const std::vector<bundle_t*>& _data)
+parse_overflow_data(std::int64_t                  _tid, const bundle_t*,
+                    const std::vector<bundle_t*>& _data)
 {
     auto _results = std::vector<overflow_sampling_data>{};
 
-    uint64_t _last_call_ts   = 0;
-    uint64_t _perf_ts_offset = 0;
+    std::uint64_t _last_call_ts   = 0;
+    std::uint64_t _perf_ts_offset = 0;
     for(const auto& itr : _data)
     {
         auto* _bt_call = itr->get<callchain>();
@@ -1345,13 +1362,17 @@ parse_overflow_data(int64_t _tid, const bundle_t*, const std::vector<bundle_t*>&
                 continue;
             }
 
-            auto _ret     = overflow_sampling_data{};
-            _ret.m_tid    = _bt_time->get_tid();
-            _ret.m_beg    = _last_call_ts + _perf_ts_offset;
-            _ret.m_end    = pitr.first + _perf_ts_offset;
+            auto _ret  = overflow_sampling_data{};
+            _ret.m_tid = _bt_time->get_tid();
+            _ret.m_beg = _last_call_ts + _perf_ts_offset;
+            _ret.m_end = pitr.first + _perf_ts_offset;
+
             _ret.m_stack  = pitr.second;
             _last_call_ts = pitr.first;
-            _results.emplace_back(std::move(_ret));
+            if(!spans_pause_interval(_ret.m_beg, _ret.m_end))
+            {
+                _results.emplace_back(std::move(_ret));
+            }
         }
     }
 
@@ -1362,7 +1383,8 @@ parse_overflow_data(int64_t _tid, const bundle_t*, const std::vector<bundle_t*>&
 }
 
 void
-post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _timer_data,
+post_process_perfetto(std::int64_t                               _tid,
+                      const std::vector<timer_sampling_data>&    _timer_data,
                       const std::vector<overflow_sampling_data>& _overflow_data)
 {
     auto _valid_metrics = backtrace_metrics::valid_array_t{};
@@ -1513,9 +1535,9 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
         auto _labels = backtrace_metrics::get_hw_counter_labels(_tid);
         for(const auto& itr : _timer_data)
         {
-            size_t   _ncount = 0;
-            uint64_t _beg    = itr.m_beg;
-            uint64_t _end    = itr.m_end;
+            size_t        _ncount = 0;
+            std::uint64_t _beg    = itr.m_beg;
+            std::uint64_t _end    = itr.m_end;
             if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
 
             for(const auto& iitr : itr.m_stack)
@@ -1634,7 +1656,8 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
 }
 
 void
-post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _timer_data,
+post_process_timemory(std::int64_t                               _tid,
+                      const std::vector<timer_sampling_data>&    _timer_data,
                       const std::vector<overflow_sampling_data>& _overflow_data)
 {
     if(get_debug_sampling())
@@ -1643,7 +1666,7 @@ post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _tim
     }
 
     // compute the total number of entries
-    int64_t _sum = 0;
+    std::int64_t _sum = 0;
     for(const auto& itr : _overflow_data)
         _sum += itr.m_stack.size();
     for(const auto& itr : _timer_data)
@@ -1805,7 +1828,8 @@ post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _tim
 }
 
 void
-cache_backtrace_metrics(int64_t _tid, const std::vector<timer_sampling_data>& _timer_data)
+cache_backtrace_metrics(std::int64_t                            _tid,
+                        const std::vector<timer_sampling_data>& _timer_data)
 {
     auto _valid_metrics = backtrace_metrics::valid_array_t{};
 
@@ -1827,7 +1851,7 @@ cache_backtrace_metrics(int64_t _tid, const std::vector<timer_sampling_data>& _t
 }
 
 void
-store_sampling_data_in_cache(int64_t                                    _tid,
+store_sampling_data_in_cache(std::int64_t                               _tid,
                              const std::vector<timer_sampling_data>&    _timer_data,
                              const std::vector<overflow_sampling_data>& _overflow_data)
 {
@@ -1904,15 +1928,53 @@ void
 postfork_parent_reinit()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
-        amd_smi::postfork_parent_reinit();
+        pmc::postfork_parent_reinit();
 }
 
 void
 postfork_child_cleanup()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
-        amd_smi::postfork_child_cleanup();
+        pmc::postfork_child_cleanup();
 }
+
+void
+pause()
+{
+    bool _expected = false;
+    if(!sampling_paused.compare_exchange_strong(_expected, true))
+    {
+        LOG_WARNING("sampling::pause() called but sampling is already paused");
+        return;
+    }
+
+    LOG_DEBUG("Pausing sampling...");
+    pending_pause_ts.store(tim::get_clock_real_now<std::uint64_t, std::nano>());
+    block_samples();
+}
+
+void
+resume()
+{
+    bool _expected = true;
+    if(!sampling_paused.compare_exchange_strong(_expected, false))
+    {
+        LOG_WARNING("sampling::resume() called but sampling is not paused");
+        return;
+    }
+
+    LOG_DEBUG("Resuming sampling...");
+    auto _pause_ts  = pending_pause_ts.exchange(0);
+    auto _resume_ts = tim::get_clock_real_now<std::uint64_t, std::nano>();
+    if(_pause_ts > 0)
+    {
+        auto _lk = std::lock_guard<std::mutex>{ pause_mutex };
+        pause_intervals.push_back(pause_interval_t{ _pause_ts, _resume_ts });
+    }
+
+    unblock_samples();
+}
+
 }  // namespace sampling
 }  // namespace rocprofsys
 

@@ -10,7 +10,7 @@ This example builds the rccl-tests performance test suite, which benchmarks RCCL
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - HIP runtime and `hipcc` compiler
 - RCCL library
 - Multiple AMD GPUs (tests target supported GPU architectures)

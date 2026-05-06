@@ -1,3 +1,7 @@
+[submodule "experimental/python/perfxpert/opencode"]
+	path = experimental/python/perfxpert/opencode
+	url = https://github.com/sst/opencode.git
+	shallow = true
 [submodule "projects/rccl/ext-src/mscclpp"]
 	path = projects/rccl/ext-src/mscclpp
 	url = https://github.com/microsoft/mscclpp.git
@@ -17,9 +21,6 @@
 	url = https://github.com/google/googletest.git
 [submodule "projects/rocprofiler-register/external/glog"]
 	path = projects/rocprofiler-register/external/glog
-	url = https://github.com/google/glog.git
-[submodule "projects/rocprofiler-sdk/external/glog"]
-	path = projects/rocprofiler-sdk/external/glog
 	url = https://github.com/google/glog.git
 [submodule "projects/rocprofiler-sdk/external/fmt"]
 	path = projects/rocprofiler-sdk/external/fmt
@@ -74,9 +75,6 @@
 	path = projects/rocprofiler-systems/external/dyninst
 	url = https://github.com/ROCm/dyninst.git
 	branch = dyninst_13
-[submodule "projects/rocprofiler-systems/external/PTL"]
-	path = projects/rocprofiler-systems/external/PTL
-	url = https://github.com/jrmadsen/PTL.git
 [submodule "projects/rocprofiler-systems/external/kokkos"]
 	path = projects/rocprofiler-systems/examples/lulesh/external/kokkos
 	url = https://github.com/kokkos/kokkos.git
@@ -105,10 +103,13 @@
 [submodule "projects/rocprofiler-systems/external/json"]
 	path = projects/rocprofiler-systems/external/json
 	url = https://github.com/nlohmann/json.git
-[submodule "projects/rccl/ext-src/rocSHMEM"]
-	path = projects/rccl/ext-src/rocSHMEM
-	url = https://github.com/ROCm/rocSHMEM.git
-	branch = develop
 [submodule "projects/rocprofiler-compute/src/vendored/pyyaml"]
 	path = projects/rocprofiler-compute/src/vendored/pyyaml
 	url = https://github.com/yaml/pyyaml.git
+[submodule "projects/rocprofiler-systems/external/onetbb"]
+	path = projects/rocprofiler-systems/external/onetbb
+	url = https://github.com/uxlfoundation/oneTBB.git
+	tag = v2022.3.0
+[submodule "projects/rocprofiler-sdk/external/abseil-cpp"]
+	path = projects/rocprofiler-sdk/external/abseil-cpp
+	url = https://github.com/abseil/abseil-cpp.git
