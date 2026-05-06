@@ -3561,6 +3561,22 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 19
+    - name: SQG_NONE
+      description: Do not count anything; perf counter is disabled (SQG_PERFCOUNTER0_SELECT 
+        PERF_SEL). SQG_PERF_SEL_NONE.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx11
+            - gfx1100
+            - gfx1101
+            - gfx1102
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 0
     - name: SQG_PS_QUADS
       description: Number of pixel-shader quads processed (per shader engine). 
         SQG_PERF_SEL_PS_QUADS.
