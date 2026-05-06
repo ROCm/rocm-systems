@@ -289,7 +289,7 @@ ncclResult_t ncclCallocDebug(T** ptr, size_t nelem, const char *filefunc, int li
       return ncclSystemError;
     }
     //INFO(NCCL_ALLOC, "%s:%d malloc Size %ld pointer %p", filefunc, line, nelem*ncclSizeOfT<T>(), p);
-    memset(p, 0, nelem*ncclSizeOfT<T>());
+    memset((void*)p, 0, nelem*ncclSizeOfT<T>());
     *ptr = p;
   } else {
     *ptr = NULL;
@@ -425,10 +425,12 @@ static inline ncclResult_t ncclCuMemFreeAddr(void *ptr, struct ncclMemManager* m
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, totalSize));
 
   int dev;
+  size_t trackSize = totalSize;
+  trackSize *= -1;
   CUDACHECK(hipGetDevice(&dev));
   if (dev < MAX_ALLOC_TRACK_NGPU) {
      __atomic_fetch_add(&allocTracker[dev].totalAlloc, -1, __ATOMIC_RELAXED);
-     __atomic_fetch_add(&allocTracker[dev].totalAllocSize, -(int64_t)totalSize, __ATOMIC_RELAXED);
+     __atomic_fetch_add(&allocTracker[dev].totalAllocSize, trackSize, __ATOMIC_RELAXED);
   }
   INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
   return result;
@@ -580,6 +582,31 @@ static inline ncclResult_t ncclCuMemFree(void *ptr, struct ncclMemManager* manag
   return result;
 }
 
+// Get the base and size of all segments that span a given user buffer
+static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t userBuffSize, CUdeviceptr* mappedPtrBase, size_t* totalMappedBufferSize, int* numSegments) {
+  *totalMappedBufferSize = 0;
+  *mappedPtrBase = 0;
+  if (numSegments) *numSegments = 0;
+  CUdeviceptr userBuffStart = userBuff;
+  CUdeviceptr userBuffEnd = (CUdeviceptr)((char*)userBuffStart + userBuffSize);
+  CUdeviceptr mappedPtrEnd = userBuffStart;
+  CUdeviceptr baseSend;
+  size_t baseSendSize;
+
+  while ((char*)mappedPtrEnd < (char*)userBuffEnd) {
+    CUCHECK(cuMemGetAddressRange(&baseSend, &baseSendSize, mappedPtrEnd));
+
+    if (*totalMappedBufferSize == 0) {
+      *mappedPtrBase = baseSend;
+    }
+    *totalMappedBufferSize += baseSendSize;
+    mappedPtrEnd = (CUdeviceptr)((char*)baseSend + baseSendSize);
+
+    if (numSegments) *numSegments = *numSegments + 1;
+  }
+  return ncclSuccess;
+}
+
 #else
 
 extern int ncclCuMemEnable();
@@ -601,6 +628,11 @@ static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocation
 }
 
 static inline ncclResult_t ncclCuMemFreeAddr(void *ptr, struct ncclMemManager* manager, int numSegments = 1) {
+  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
+  return ncclInternalError;
+}
+
+static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t userBuffSize, CUdeviceptr* mappedPtrBase, size_t* totalMappedBufferSize, int* numSegments) {
   WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
@@ -801,7 +833,12 @@ ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegment
   if (ncclCuMemEnable()) {
     NCCLCHECKGOTO(ncclCuMemFree((void *)ptr, manager, numSegments), result, finish);
   } else {
-    CUDACHECKGOTO(cudaFree(ptr), result, finish);
+    if (numSegments > 1) {
+      result = ncclUnhandledCudaError;
+      goto finish;
+    } else {
+      CUDACHECKGOTO(cudaFree(ptr), result, finish);
+    }
   }
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));

@@ -26,9 +26,9 @@ subtrees:
 
 - caption: Examples
   entries:
-  - url: https://github.com/ROCm/rccl/tree/develop/ext-tuner/example
+  - url: https://github.com/ROCm/rccl/tree/develop/plugins/tuner/example
     title: RCCL Tuner plugin examples
-  - url: https://github.com/ROCm/rccl/tree/develop/ext-net/example
+  - url: https://github.com/ROCm/rccl/tree/develop/plugins/net/example
     title: NCCL Net plugin examples
 
 - caption: API reference
