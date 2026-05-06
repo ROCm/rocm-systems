@@ -261,9 +261,37 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
         dev_mem_ptr[i] = hip_interop_[pic_idx].hip_mapped_device_mem + hip_interop_[pic_idx].offset[i];
         horizontal_pitch[i] = hip_interop_[pic_idx].pitch[i];
     }
+#elif defined(ROCDECODE_BUILD_WINDOWS)
+    // Windows/PAL backend: Export PAL image for HIP interop
+
+    // Sync decode to ensure frame is ready
+    RocdecDecodeStatus decode_status = {};
+    rocdec_status = pal_video_decoder_->GetDecodeStatus(pic_idx, &decode_status);
+    if (rocdec_status != ROCDEC_SUCCESS) {
+        ErrorLog(g_rocdec_logger, "Failed to query decode status for picture idx = " + ROCDEC_TOSTR(pic_idx));
+        FunctionExitLog(g_rocdec_logger);
+        return rocdec_status;
+    }
+
+    // Do HIP interop once per surface and reuse
+    if (hip_interop_[pic_idx].hip_mapped_device_mem == nullptr) {
+        // Get PAL image GPU memory for this decoded frame
+        // TODO: This requires exposing GetDpbSlot and image memory from PAL decoder
+        // For now, return NOT_IMPLEMENTED until we add the necessary PAL export API
+        ErrorLog(g_rocdec_logger, "PAL image export for HIP interop not yet implemented.");
+        rocdec_status = ROCDEC_NOT_IMPLEMENTED;
+        FunctionExitLog(g_rocdec_logger);
+        return rocdec_status;
+    }
+
+    // Return device memory pointers (once implemented)
+    for (int i = 0; i < hip_interop_[pic_idx].num_layers; i++) {
+        dev_mem_ptr[i] = hip_interop_[pic_idx].hip_mapped_device_mem + hip_interop_[pic_idx].offset[i];
+        horizontal_pitch[i] = hip_interop_[pic_idx].pitch[i];
+    }
 #else
-    // Windows: Stub implementation - will be replaced with Windows backend
-    ErrorLog(g_rocdec_logger, "Windows decoder backend not yet implemented.");
+    // No decoder backend available
+    ErrorLog(g_rocdec_logger, "No decoder backend available.");
     rocdec_status = ROCDEC_NOT_SUPPORTED;
 #endif
     FunctionExitLog(g_rocdec_logger);

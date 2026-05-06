@@ -235,6 +235,14 @@ public:
      */
     void Destroy();
 
+    /**
+     * @brief Query decoder capabilities
+     *
+     * @param caps Capability query structure (IN/OUT)
+     * @return rocDecStatus
+     */
+    static rocDecStatus QueryDecoderCaps(RocdecDecodeCaps* caps);
+
 private:
     // PAL platform and device (shared across all decoders)
     static Pal::IPlatform* GetPalPlatform();

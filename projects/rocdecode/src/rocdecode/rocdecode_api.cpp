@@ -24,6 +24,9 @@ THE SOFTWARE.
 #ifdef ROCDECODE_BUILD_LINUX
 #include "vaapi_videodecoder.h"
 #endif
+#ifdef ROCDECODE_BUILD_WINDOWS
+#include "pal/pal_videodecoder.h"
+#endif
 #include "../commons.h"
 
 namespace rocdecode {
@@ -94,9 +97,16 @@ rocDecGetDecoderCaps(RocdecDecodeCaps *pdc) {
         FunctionExitLog(g_rocdec_logger);
         return ret;
     }
+#elif defined(ROCDECODE_BUILD_WINDOWS)
+    rocDecStatus ret = rocdec::PalVideoDecoder::QueryDecoderCaps(pdc);
+    if (ret != ROCDEC_SUCCESS) {
+        CriticalLog(g_rocdec_logger, "Error: Failed to obtain decoder capabilities from PAL.");
+        FunctionExitLog(g_rocdec_logger);
+        return ret;
+    }
 #else
-    // Windows: decoder capabilities check not yet implemented
-    CriticalLog(g_rocdec_logger, "Error: rocDecGetDecoderCaps not yet implemented on Windows.");
+    // No decoder backend available
+    CriticalLog(g_rocdec_logger, "Error: No decoder backend available.");
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_NOT_IMPLEMENTED;
 #endif

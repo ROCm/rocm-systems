@@ -827,13 +827,44 @@ rocDecStatus PalVideoDecoder::DecodeVP9(RocdecPicParams* params) {
 }
 
 rocDecStatus PalVideoDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus* dec_pic) {
-    if (!dec_pic) {
+    if (!dec_pic || pic_idx < 0) {
         return ROCDEC_INVALID_PARAMETER;
     }
 
-    // TODO: Implement status query
-    dec_pic->decode_status = static_cast<rocDecDecodeStatus>(0);
-    dec_pic->reserved[0] = 0;
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!initialized_ || !fence_.Get()) {
+        dec_pic->decode_status = static_cast<rocDecDecodeStatus>(0);  // Invalid/not ready
+        dec_pic->reserved[0] = 0;
+        return ROCDEC_NOT_INITIALIZED;
+    }
+
+    // Check if picture index is valid
+    PalDpbSlot* slot = dpb_.GetSlot(pic_idx);
+    if (!slot || !slot->occupied) {
+        dec_pic->decode_status = static_cast<rocDecDecodeStatus>(0);  // Invalid
+        dec_pic->reserved[0] = 0;
+        return ROCDEC_INVALID_PARAMETER;
+    }
+
+    // Query fence status (non-blocking)
+    Pal::Result res = fence_->GetStatus();
+
+    if (res == Pal::Result::Success) {
+        // Fence is signaled - decode complete
+        dec_pic->decode_status = static_cast<rocDecDecodeStatus>(1);  // Success
+        dec_pic->reserved[0] = 0;
+    } else if (res == Pal::Result::NotReady) {
+        // Decode in progress
+        dec_pic->decode_status = static_cast<rocDecDecodeStatus>(2);  // In progress
+        dec_pic->reserved[0] = 0;
+    } else {
+        // Error
+        dec_pic->decode_status = static_cast<rocDecDecodeStatus>(0);  // Invalid/error
+        dec_pic->reserved[0] = 0;
+        ErrorLog(g_rocdec_logger, ROCDEC_STR("PAL: GetStatus failed with result ") + ROCDEC_TOSTR((int)res));
+    }
+
     return ROCDEC_SUCCESS;
 }
 
@@ -881,6 +912,106 @@ void PalVideoDecoder::Destroy() {
     device_ = nullptr;
 
     ReleasePalPlatform();
+}
+
+rocDecStatus PalVideoDecoder::QueryDecoderCaps(RocdecDecodeCaps* caps) {
+    if (!caps) {
+        return ROCDEC_INVALID_PARAMETER;
+    }
+
+    // Initialize output fields to zero
+    caps->is_supported = 0;
+    caps->num_decoders = 0;
+    caps->output_format_mask = 0;
+    caps->max_width = 0;
+    caps->max_height = 0;
+    caps->min_width = 0;
+    caps->min_height = 0;
+
+    // Get PAL device to query capabilities
+    Pal::IDevice* device = GetPalDevice();
+    if (!device) {
+        CriticalLog(g_rocdec_logger, "PAL: Failed to get device for capability query");
+        return ROCDEC_NOT_INITIALIZED;
+    }
+
+    Pal::DeviceProperties dev_props = {};
+    device->GetProperties(&dev_props);
+
+    // Check if VCN is available
+    if (dev_props.vcnLevel == Pal::VcnIpLevel::None ||
+        dev_props.vcnLevel == Pal::VcnIpLevel::_None) {
+        InfoLog(g_rocdec_logger, "PAL: No VCN support, codec not supported");
+        return ROCDEC_SUCCESS;
+    }
+
+    // Check engine availability
+    bool has_vcn_decode = (dev_props.engineProperties[Pal::EngineTypeVcnDecode].engineCount > 0);
+    bool has_vcn_unified = (dev_props.engineProperties[Pal::EngineTypeVcnUnified].engineCount > 0);
+
+    if (!has_vcn_decode && !has_vcn_unified) {
+        InfoLog(g_rocdec_logger, "PAL: No VCN decode engines available");
+        return ROCDEC_SUCCESS;
+    }
+
+    // Map codec type to support (all modern VCN supports H.264, HEVC, VP9, AV1)
+    bool codec_supported = false;
+    if (caps->codec_type == rocDecVideoCodec_AVC ||   // H.264
+        caps->codec_type == rocDecVideoCodec_HEVC ||  // H.265
+        caps->codec_type == rocDecVideoCodec_VP9 ||
+        caps->codec_type == rocDecVideoCodec_AV1) {
+        codec_supported = true;
+    } else {
+        codec_supported = false;  // MPEG1/2/4, VP8, JPEG not supported on modern VCN
+    }
+
+    if (!codec_supported) {
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Codec type ") +
+                ROCDEC_TOSTR((int)caps->codec_type) + " not supported");
+        return ROCDEC_SUCCESS;
+    }
+
+    // Check bit depth support (8-bit and 10-bit supported)
+    if (caps->bit_depth_minus_8 > 2) {
+        InfoLog(g_rocdec_logger, "PAL: Bit depth > 10 not supported");
+        return ROCDEC_SUCCESS;
+    }
+
+    // Check chroma format (4:2:0 is primary, 4:4:4 may be supported)
+    if (caps->chroma_format != rocDecVideoChromaFormat_420 &&
+        caps->chroma_format != rocDecVideoChromaFormat_Monochrome) {
+        InfoLog(g_rocdec_logger, "PAL: Only 4:2:0 chroma format fully supported");
+        // Still mark as supported for 4:2:0
+    }
+
+    // Fill output caps
+    caps->is_supported = 1;
+    caps->num_decoders = has_vcn_decode ?
+        dev_props.engineProperties[Pal::EngineTypeVcnDecode].engineCount :
+        dev_props.engineProperties[Pal::EngineTypeVcnUnified].engineCount;
+
+    // Output format mask (NV12 for 8-bit, P010 for 10-bit)
+    if (caps->bit_depth_minus_8 == 0) {
+        caps->output_format_mask = (1 << rocDecVideoSurfaceFormat_NV12);
+    } else if (caps->bit_depth_minus_8 == 2) {
+        caps->output_format_mask = (1 << rocDecVideoSurfaceFormat_P016);
+    }
+
+    // VCN decode resolution limits (conservative estimates based on VCN IP level)
+    // These are typical limits - actual limits may vary by VCN generation
+    caps->min_width = 64;
+    caps->min_height = 64;
+
+    // Max resolution (conservative 8K limit for all modern VCN)
+    // Actual limits depend on VCN IP level, but 8K is safe for VCN 2.0+
+    caps->max_width = 7680;
+    caps->max_height = 4320;
+
+    InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Codec ") + ROCDEC_TOSTR((int)caps->codec_type) +
+            " supported, max resolution " + ROCDEC_TOSTR(caps->max_width) + "x" +
+            ROCDEC_TOSTR(caps->max_height));
+
+    return ROCDEC_SUCCESS;
 }
 
 } // namespace rocdec
