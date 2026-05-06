@@ -80,7 +80,7 @@ rocprof-sys-causal --mode line -- ./causal-cpu-rocprofsys 70 10 432525 100000000
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_CAUSAL_RANDOM_SEED` | `1342342` | Fixed seed for reproducible causal experiments |
 | `ROCPROFSYS_TIME_OUTPUT` | `OFF` | Disable timestamped output directories |
 | `ROCPROFSYS_FILE_OUTPUT` | `ON` | Enable file output |
@@ -88,7 +88,7 @@ rocprof-sys-causal --mode line -- ./causal-cpu-rocprofsys 70 10 432525 100000000
 **Causal CLI flags:**
 
 | Flag | Description |
-|------|-------------|
+| ------ | ------------- |
 | `-n` | Number of causal experiment iterations |
 | `-w` | Number of warmup iterations |
 | `-d` | Virtual speedup delta (percentage steps) |
