@@ -607,6 +607,10 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     // Trigger the fault (rank 0 posts recv, rank 1 posts send that will fail).
+    // rank 1 forwards its fault result to rank 0 so we can assert the fault
+    // was actually observed before testing recovery in phase 2.
+    static constexpr int kPhase1MpiTag = 9882;
+    FaultInjectResult p1 = {};
     if (rank == 0) {
         void*  bufs[1]    = {buf1};
         size_t sizes[1]   = {kMsgSize};
@@ -628,17 +632,32 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
             if (sendRet != ncclSuccess || sendReq != nullptr) break;
             usleep(kPollIntervalUs);
         }
+        int fatalCount = 0;
         if (sendRet == ncclSuccess && sendReq != nullptr) {
             for (int poll = 0; poll < 200; poll++) {
                 int done = 0, sz = 0;
-                int fc = 0;
                 TestRequest(sendReq, &done, &sz);
-                ncclIbCastFaultGetFatalCount(sendComm1, &fc);
-                if (done || fc > 0) break;
+                ncclIbCastFaultGetFatalCount(sendComm1, &fatalCount);
+                if (done || fatalCount > 0) break;
                 usleep(kPollIntervalUs);
             }
+        } else {
+            ncclIbCastFaultGetFatalCount(sendComm1, &fatalCount);
         }
+        p1.sendRet    = static_cast<int>(sendRet);
+        p1.fatalCount = fatalCount;
         ncclIbCastFaultClear(sendComm1);
+        MPI_Send(&p1, sizeof(p1), MPI_BYTE, 0, kPhase1MpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        MPI_Recv(&p1, sizeof(p1), MPI_BYTE, 1, kPhase1MpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+        bool isendFailed = (p1.sendRet != static_cast<int>(ncclSuccess));
+        EXPECT_TRUE(isendFailed || p1.fatalCount > 0)
+            << "Phase 1: fault injection did not trigger — isend returned "
+            << p1.sendRet << ", fatalCount=" << p1.fatalCount
+            << "; recovery test is meaningless without a confirmed fault";
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
