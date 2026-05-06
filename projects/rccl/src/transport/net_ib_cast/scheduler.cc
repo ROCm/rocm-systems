@@ -282,6 +282,18 @@ void IbCastQpSchedUpdateTx(struct ncclIbNetCommBase *base) {
     tokens->totTokens += temp2;
   }
 
+  // Clamp activeTokens to the new initTokens so activeTotTokens <= initTotTokens
+  // always holds, even when the RTT timer fires mid-round.
+  {
+    struct ncclIbRrTokens *active = &base->rrQpTxSched.activeTokens;
+    active->totTokens = 0;
+    for (qp = 0; qp < base->nqps; qp++) {
+      if (active->qpTokens[qp] > tokens->qpTokens[qp])
+        active->qpTokens[qp] = tokens->qpTokens[qp];
+      active->totTokens += active->qpTokens[qp];
+    }
+  }
+
   base->qpTxSchedInit = true;
 }
 
