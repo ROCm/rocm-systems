@@ -50,7 +50,7 @@ public:
 
     [[nodiscard]] metrics get_gpu_metrics(
         [[maybe_unused]] const enabled_metrics& enabled_cfg,
-        [[maybe_unused]] uint64_t               timestamp)
+        [[maybe_unused]] std::uint64_t          timestamp)
     {
         metrics gpu_metrics{};
 
@@ -207,35 +207,39 @@ private:
         m_supported_metrics.bits.mm_activity =
             is_metric_supported(raw.mm_activity, METRIC_VALUE_NOT_SUPPORTED_16);
 
-        m_supported_metrics.bits.vcn_busy = std::any_of(
-            raw.xcp_stats.begin(), raw.xcp_stats.end(),
-            [](const metrics::xcp_metrics& xcp) {
-                return std::any_of(xcp.vcn_busy.begin(), xcp.vcn_busy.end(),
-                                   [](uint16_t val) { return is_metric_supported(val); });
-            });
+        m_supported_metrics.bits.vcn_busy =
+            std::any_of(raw.xcp_stats.begin(), raw.xcp_stats.end(),
+                        [](const metrics::xcp_metrics& xcp) {
+                            return std::any_of(xcp.vcn_busy.begin(), xcp.vcn_busy.end(),
+                                               [](std::uint16_t val) {
+                                                   return is_metric_supported(val);
+                                               });
+                        });
 
-        m_supported_metrics.bits.jpeg_busy = std::any_of(
-            raw.xcp_stats.begin(), raw.xcp_stats.end(),
-            [](const metrics::xcp_metrics& xcp) {
-                return std::any_of(xcp.jpeg_busy.begin(), xcp.jpeg_busy.end(),
-                                   [](uint16_t val) { return is_metric_supported(val); });
-            });
+        m_supported_metrics.bits.jpeg_busy =
+            std::any_of(raw.xcp_stats.begin(), raw.xcp_stats.end(),
+                        [](const metrics::xcp_metrics& xcp) {
+                            return std::any_of(xcp.jpeg_busy.begin(), xcp.jpeg_busy.end(),
+                                               [](std::uint16_t val) {
+                                                   return is_metric_supported(val);
+                                               });
+                        });
 
         m_supported_metrics.bits.vcn_activity =
             !m_supported_metrics.bits.vcn_busy &&
             std::any_of(raw.vcn_activity.begin(), raw.vcn_activity.end(),
-                        [](uint16_t val) { return is_metric_supported(val); });
+                        [](std::uint16_t val) { return is_metric_supported(val); });
 
         m_supported_metrics.bits.jpeg_activity =
             !m_supported_metrics.bits.jpeg_busy &&
             std::any_of(raw.jpeg_activity.begin(), raw.jpeg_activity.end(),
-                        [](uint16_t val) { return is_metric_supported(val); });
+                        [](std::uint16_t val) { return is_metric_supported(val); });
 
         m_supported_metrics.bits.xgmi =
             is_metric_supported(raw.xgmi.link.width) ||
             is_metric_supported(raw.xgmi.link.speed) ||
             std::any_of(raw.xgmi.data_acc.read.begin(), raw.xgmi.data_acc.read.end(),
-                        [](uint64_t val) { return is_metric_supported(val); });
+                        [](std::uint64_t val) { return is_metric_supported(val); });
 
         m_supported_metrics.bits.pcie = is_metric_supported(raw.pcie.link.width) ||
                                         is_metric_supported(raw.pcie.link.speed) ||
@@ -256,7 +260,7 @@ private:
     }
 
     void collect_sdma_metrics([[maybe_unused]] const enabled_metrics& enabled_cfg,
-                              [[maybe_unused]] uint64_t               timestamp,
+                              [[maybe_unused]] std::uint64_t          timestamp,
                               [[maybe_unused]] metrics&               out)
     {
         if(!enabled_cfg.bits.sdma_usage || !m_supported_metrics.bits.sdma_usage)
@@ -266,14 +270,15 @@ private:
 
         try
         {
-            uint64_t current_cumulative = m_driver->get_raw_sdma_usage();
+            std::uint64_t current_cumulative = m_driver->get_raw_sdma_usage();
 
             if(m_sdma_state.has_prev && timestamp > m_sdma_state.prev_timestamp)
             {
-                uint64_t delta_usage = current_cumulative - m_sdma_state.prev_cumulative;
-                uint64_t delta_time  = timestamp - m_sdma_state.prev_timestamp;
-                uint32_t pct =
-                    static_cast<uint32_t>((delta_usage * 100000ULL) / delta_time);
+                std::uint64_t delta_usage =
+                    current_cumulative - m_sdma_state.prev_cumulative;
+                std::uint64_t delta_time = timestamp - m_sdma_state.prev_timestamp;
+                std::uint32_t pct =
+                    static_cast<std::uint32_t>((delta_usage * 100000ULL) / delta_time);
                 out.sdma_usage = (pct > 100) ? 100 : pct;
             }
 
@@ -306,9 +311,9 @@ private:
 
     struct sdma_state
     {
-        uint64_t prev_cumulative = 0;
-        uint64_t prev_timestamp  = 0;
-        bool     has_prev        = false;
+        std::uint64_t prev_cumulative = 0;
+        std::uint64_t prev_timestamp  = 0;
+        bool          has_prev        = false;
     };
 
     std::shared_ptr<Driver> m_driver;
