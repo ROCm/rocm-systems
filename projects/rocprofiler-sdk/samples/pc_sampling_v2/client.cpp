@@ -31,12 +31,12 @@
  * @brief Example rocprofiler client (tool) demonstrating the v2 PC sampling API.
  *
  * Key differences from the v1 sample:
- * - Uses rocprofiler_query_pc_sampling_agent_configurations_v2 to discover the most
+ * - Uses rocprofiler_pc_sampling_query_agent_configurations_v2 to discover the most
  *   comprehensive record version, iterating from LAST-1 down to V0
  * - Prefers stochastic sampling, falling back to host-trap automatically
- * - Uses rocprofiler_configure_pc_sampling_service_v2 with memoized config
+ * - Uses rocprofiler_pc_sampling_configure_service_v2 with memoized config
  * - Queries snapshot ext_data fields per GPU agent
- * - Decodes ext_data via rocprofiler_pc_sampling_get_snapshot_ext_v0_fields
+ * - Decodes ext_data via rocprofiler_pc_sampling_extract_snapshot_ext_field_values
  */
 
 #include "pcs.hpp"

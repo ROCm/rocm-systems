@@ -63,7 +63,7 @@ query_v2_configs(rocprofiler_agent_id_t                agent_id,
     rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
         record_kind, ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE};
 
-    auto status = rocprofiler_query_pc_sampling_agent_configurations_v2(
+    auto status = rocprofiler_pc_sampling_query_agent_configurations_v2(
         agent_id, record_kinds, 2, flags, cb, &configs);
 
     if(status != ROCPROFILER_STATUS_SUCCESS) configs.clear();
@@ -118,7 +118,7 @@ find_all_gpu_agents_supporting_pc_sampling_impl(rocprofiler_agent_version_t vers
         {
             auto tool_gpu_agent            = std::make_unique<tool_agent_info>();
             tool_gpu_agent->agent_id       = _agents[i]->id;
-            tool_gpu_agent->ext_v0_fields = std::make_unique<ext_v0_fields_vec_t>();
+            tool_gpu_agent->ext_fields = std::make_unique<ext_fields_vec_t>();
             tool_gpu_agent->agent          = _agents[i];
 
             ++gpu_index;
@@ -127,7 +127,7 @@ find_all_gpu_agents_supporting_pc_sampling_impl(rocprofiler_agent_version_t vers
             if(query_most_comprehensive_config_for_agent(tool_gpu_agent.get()))
             {
                 // Query snapshot ext_data fields supported by this agent and store per-agent.
-                query_snapshot_ext_v0_fields_for_agent(tool_gpu_agent.get());
+                query_snapshot_ext_fields_for_agent(tool_gpu_agent.get());
                 _out_agents->push_back(std::move(tool_gpu_agent));
             }
         }
@@ -190,15 +190,15 @@ query_most_comprehensive_config_for_agent(tool_agent_info* agent_info)
 }
 
 void
-query_snapshot_ext_v0_fields_for_agent(tool_agent_info* agent_info)
+query_snapshot_ext_fields_for_agent(tool_agent_info* agent_info)
 {
-    agent_info->ext_v0_fields->clear();
-    agent_info->ext_v0_field_names.clear();
+    agent_info->ext_fields->clear();
+    agent_info->ext_field_names.clear();
 
-    auto cb = [](const rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t* fields,
+    auto cb = [](const rocprofiler_pc_sampling_snapshot_ext_field_id_t* fields,
                  size_t                                                    num_fields,
                  void*                                                     user_data) {
-        auto* out = static_cast<ext_v0_fields_vec_t*>(user_data);
+        auto* out = static_cast<ext_fields_vec_t*>(user_data);
         for(size_t i = 0; i < num_fields; i++)
         {
             out->emplace_back(fields[i]);
@@ -206,8 +206,11 @@ query_snapshot_ext_v0_fields_for_agent(tool_agent_info* agent_info)
         return ROCPROFILER_STATUS_SUCCESS;
     };
 
-    auto status = rocprofiler_query_pc_sampling_snapshot_ext_v0_fields(
-        agent_info->agent_id, cb, agent_info->ext_v0_fields.get());
+    auto status = rocprofiler_pc_sampling_query_snapshot_ext_fields(
+        agent_info->agent_id,
+        agent_info->most_comprehensive_record_kind,
+        cb,
+        agent_info->ext_fields.get());
 
     std::stringstream ss;
 
@@ -222,25 +225,25 @@ query_snapshot_ext_v0_fields_for_agent(tool_agent_info* agent_info)
 
     // Build the field-name LUT once so the buffer callback never has to query names.
     ss << "Agent " << agent_info->agent_id.handle << " supports "
-       << agent_info->ext_v0_fields->size() << " snapshot ext_data field(s):\n";
+       << agent_info->ext_fields->size() << " snapshot ext_data field(s):\n";
     size_t field_index = 0;
-    for(auto field_id : *agent_info->ext_v0_fields)
+    for(auto field_id : *agent_info->ext_fields)
     {
         const char* name     = nullptr;
         uint64_t    name_len = 0;
         auto        name_status =
-            rocprofiler_get_pc_sampling_snapshot_ext_v0_field_name(field_id, &name, &name_len);
+            rocprofiler_pc_sampling_get_snapshot_ext_field_name(field_id, &name, &name_len);
         ++field_index;
         if(name_status == ROCPROFILER_STATUS_SUCCESS && name != nullptr)
         {
             auto name_str = std::string(name, name_len);
-            agent_info->ext_v0_field_names.emplace(field_id, name_str);
+            agent_info->ext_field_names.emplace(field_id, name_str);
             ss << "  " << field_index << ". " << name_str << "\n";
         }
         else
         {
             auto fallback = "field_" + std::to_string(static_cast<int>(field_id));
-            agent_info->ext_v0_field_names.emplace(field_id, fallback);
+            agent_info->ext_field_names.emplace(field_id, fallback);
             ss << "  " << field_index << ". UNKNOWN(" << static_cast<int>(field_id) << ")\n";
         }
     }
@@ -273,7 +276,7 @@ configure_pc_sampling_for_agent(tool_agent_info*         agent_info,
     do
     {
         auto status =
-            rocprofiler_configure_pc_sampling_service_v2(context_id,
+            rocprofiler_pc_sampling_configure_service_v2(context_id,
                                                         agent_info->agent_id,
                                                         cfg.unit,
                                                         interval,
@@ -349,10 +352,10 @@ print_sample_v1(std::ostream& os, const rocprofiler_pc_sampling_record_v1_t* sam
 
 /**
  * @brief Print a V2 stochastic PC sampling record, including ext_data
- * decoded via the per-agent snapshot ext_v0 fields.
+ * decoded via the per-agent snapshot ext fields.
  *
- * @param agent_info The agent info containing the pre-queried ext_v0_fields
- *                   and the memoized ext_v0_field_names map.  Passed as
+ * @param agent_info The agent info containing the pre-queried ext_fields
+ *                   and the memoized ext_field_names map.  Passed as
  *                   buffer client_data so there is no need to iterate over
  *                   the global agent list -- this is the recommended policy.
  */
@@ -370,7 +373,7 @@ print_sample_v2(std::ostream&                              os,
     {
         const char* inst_name     = nullptr;
         uint64_t    inst_name_len = 0;
-        auto        inst_status   = rocprofiler_get_pc_sampling_instruction_type_name_(
+        auto        inst_status   = rocprofiler_pc_sampling_get_instruction_type_name_v2(
             static_cast<rocprofiler_pc_sampling_instruction_type_t>(snap.instruction_type),
             &inst_name,
             &inst_name_len);
@@ -384,7 +387,7 @@ print_sample_v2(std::ostream&                              os,
     {
         const char* reason_name     = nullptr;
         uint64_t    reason_name_len = 0;
-        auto        reason_status   = rocprofiler_get_pc_sampling_instruction_not_issued_reason_name_(
+        auto        reason_status   = rocprofiler_pc_sampling_get_instruction_not_issued_reason_name_v2(
             static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
                 snap.no_issue_reason),
             &reason_name,
@@ -398,26 +401,26 @@ print_sample_v2(std::ostream&                              os,
 
     os << "wave_count: " << static_cast<unsigned int>(snap.wave_count) << ", ";
 
-    // Decode ext_data using the pre-queried per-agent snapshot ext_v0 fields
+    // Decode ext_data using the pre-queried per-agent snapshot ext fields
     // and the memoized name map (avoids calling the name API per-sample).
-    if(agent_info != nullptr && agent_info->ext_v0_fields != nullptr &&
-       !agent_info->ext_v0_fields->empty())
+    if(agent_info != nullptr && agent_info->ext_fields != nullptr &&
+       !agent_info->ext_fields->empty())
     {
         os << "ext_data: {";
 
         // Use the extraction API to get field values; look up names from the LUT.
-        struct ext_v0_cb_data
+        struct ext_cb_data
         {
             std::ostream*                    os;
-            const ext_v0_field_name_map_t*   name_map;
+            const ext_field_name_map_t*   name_map;
         };
-        auto cb_data = ext_v0_cb_data{&os, &agent_info->ext_v0_field_names};
+        auto cb_data = ext_cb_data{&os, &agent_info->ext_field_names};
 
-        auto ext_v0_cb = [](const rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t* field_ids,
+        auto ext_cb = [](const rocprofiler_pc_sampling_snapshot_ext_field_id_t* field_ids,
                             const uint32_t*                                           values,
                             size_t                                                    num_fields,
                             void* user_data) -> rocprofiler_status_t {
-            auto&  data  = *static_cast<ext_v0_cb_data*>(user_data);
+            auto&  data  = *static_cast<ext_cb_data*>(user_data);
             bool   first = true;
             for(size_t i = 0; i < num_fields; i++)
             {
@@ -430,11 +433,12 @@ print_sample_v2(std::ostream&                              os,
             return ROCPROFILER_STATUS_SUCCESS;
         };
 
-        auto extract_status = rocprofiler_pc_sampling_get_snapshot_ext_v0_fields(
-            snap.ext_data,
-            agent_info->ext_v0_fields->data(),
-            agent_info->ext_v0_fields->size(),
-            ext_v0_cb,
+        auto extract_status = rocprofiler_pc_sampling_extract_snapshot_ext_field_values(
+            ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE,
+            static_cast<const void*>(sample),
+            agent_info->ext_fields->data(),
+            agent_info->ext_fields->size(),
+            ext_cb,
             static_cast<void*>(&cb_data));
 
         if(extract_status != ROCPROFILER_STATUS_SUCCESS)

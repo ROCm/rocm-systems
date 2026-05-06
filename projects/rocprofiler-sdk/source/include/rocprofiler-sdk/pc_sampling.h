@@ -176,7 +176,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
  *
  * Before calling this function, we recommend querying PC sampling configurations
  * supported by the GPU agent via the @see rocprofiler_query_pc_sampling_agent_configurations
- * or @see rocprofiler_query_pc_sampling_agent_configurations_v2.
+ * or @see rocprofiler_pc_sampling_query_agent_configurations_v2.
  * The client chooses the @p unit and @p interval to match one of the
  * available configurations. Note that the @p interval must belong to the range of values
  * [available_config.min_interval, available_config.max_interval],
@@ -215,7 +215,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
  *     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE
  * };
  *
- * rocprofiler_configure_pc_sampling_service_v2(
+ * rocprofiler_pc_sampling_configure_service_v2(
  *     context_id, agent_id, unit, interval, buffer_id,
  *     record_kinds, 2, ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC);
  * @endcode
@@ -227,7 +227,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
  * };
  *
  * // V2 record implies stochastic; no flags needed
- * rocprofiler_configure_pc_sampling_service_v2(
+ * rocprofiler_pc_sampling_configure_service_v2(
  *     context_id, agent_id, unit, interval, buffer_id,
  *     record_kinds, 1, ROCPROFILER_PC_SAMPLING_API_FLAG_NONE);
  * @endcode
@@ -239,7 +239,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
  *     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE
  * };
  *
- * rocprofiler_configure_pc_sampling_service_v2(
+ * rocprofiler_pc_sampling_configure_service_v2(
  *     context_id, agent_id, unit, interval, buffer_id,
  *     record_kinds, 2, ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP);
  * @endcode
@@ -312,7 +312,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_configure_pc_sampling_service_v2(
+rocprofiler_pc_sampling_configure_service_v2(
     rocprofiler_context_id_t                     context_id,
     rocprofiler_agent_id_t                       agent_id,
     rocprofiler_pc_sampling_unit_t               unit,
@@ -455,13 +455,13 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_configuratio
 /**
  * @brief (experimental) Rocprofiler SDK's callback function to deliver the list of available PC
  * sampling configurations upon the call to the
- * ::rocprofiler_query_pc_sampling_agent_configurations_v2.
+ * ::rocprofiler_pc_sampling_query_agent_configurations_v2.
  *
  * @param[out] configs - The array of v2 PC sampling configurations supported by the agent.
  * @param[out] num_config - The number of configurations contained in the array @p configs.
  * In case the GPU agent does not support PC sampling, the value is 0.
  * @param[in] user_data - client's private data passed via
- * ::rocprofiler_query_pc_sampling_agent_configurations_v2
+ * ::rocprofiler_pc_sampling_query_agent_configurations_v2
  * @return ::rocprofiler_status_t
  */
 ROCPROFILER_SDK_EXPERIMENTAL
@@ -498,7 +498,7 @@ typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_query_pc_sampling_agent_configurations_v2(
+rocprofiler_pc_sampling_query_agent_configurations_v2(
     rocprofiler_agent_id_t                                   agent_id,
     const rocprofiler_pc_sampling_record_kind_t*             record_kinds,
     size_t                                                   num_record_kinds,
@@ -812,7 +812,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_inval
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_get_pc_sampling_instruction_type_name_(
+rocprofiler_pc_sampling_get_instruction_type_name_v2(
     rocprofiler_pc_sampling_instruction_type_t instruction_type,
     const char**                               name,
     uint64_t*                                  name_len) ROCPROFILER_API;
@@ -830,7 +830,7 @@ rocprofiler_get_pc_sampling_instruction_type_name_(
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_get_pc_sampling_instruction_not_issued_reason_name_(
+rocprofiler_pc_sampling_get_instruction_not_issued_reason_name_v2(
     rocprofiler_pc_sampling_instruction_not_issued_reason_t not_issued_reason,
     const char**                                            name,
     uint64_t*                                               name_len) ROCPROFILER_API;
@@ -853,7 +853,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_snapshot_inf
     uint8_t wave_count;   ///< number of concurrently running waves on CU (on GFX9) or SIMD (GFX10+)
                           ///< at the moment of sampling
     uint32_t ext_data;  ///< Extension data bitfield. Architecture-dependent packed fields.
-                        ///< To decode, use ::rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t
+                        ///< To decode, use ::rocprofiler_pc_sampling_snapshot_ext_field_id_t
                         ///< and helper functions.
 } rocprofiler_pc_sampling_snapshot_information_v0_t;
 
@@ -1178,40 +1178,40 @@ ROCPROFILER_CXX_CODE(
  */
 typedef enum
 {
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_NONE = 0,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_VALU,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_MATRIX,  ///< GFX9 specific
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_LDS,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_LDS_DIRECT,  ///< GFX12 specific
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_SCALAR,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_VMEM_TEX,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_FLAT,  ///< GFX9 specific
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_EXP,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_BRMSG_MISC,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_VALU,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_MATRIX,  ///< GFX9 specific
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_LDS,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_LDS_DIRECT,  ///< GFX12 specific
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_SCALAR,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_VMEM_TEX,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_FLAT,  ///< GFX9 specific
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_EXP,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_BRMSG_MISC,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_DUAL_ISSUE_VALU,    ///< GFX9 specific
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_LOCK_CONTENTION,  ///< GFX1250 specific
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_RESERVED0,        ///< future gen specific
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_RESERVED1,        ///< future gen specific
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_LAST
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_NONE = 0,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_VALU,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_MATRIX,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_LDS,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_LDS_DIRECT,  ///< GFX12 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_SCALAR,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_VMEM_TEX,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_FLAT,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_EXP,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_ISSUED_BRMSG_MISC,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_VALU,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_MATRIX,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_LDS,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_LDS_DIRECT,  ///< GFX12 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_SCALAR,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_VMEM_TEX,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_FLAT,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_EXP,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_ARBITER_STATE_STALLED_BRMSG_MISC,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_DUAL_ISSUE_VALU,    ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_LOCK_CONTENTION,  ///< GFX1250 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_RESERVED0,        ///< future gen specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_RESERVED1,        ///< future gen specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_LAST
 
-    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_LOCK_CONTENTION
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_FIELD_ID_LOCK_CONTENTION
     /// @brief At least one wave was unable to take a snapshot because the previous snapshot
     /// had not yet been read. A high frequency of this bit indicates that the sampling
     /// interval is too small.
-} rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t;
+} rocprofiler_pc_sampling_snapshot_ext_field_id_t;
 
 /**
  * @brief (experimental) (Optional) Return the string encoding of
- * ::rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t value
+ * ::rocprofiler_pc_sampling_snapshot_ext_field_id_t value
  *
  * @param [in] field_id Snapshot ext_data field enum value
  * @param [out] name pointer to store the name string
@@ -1222,8 +1222,8 @@ typedef enum
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_get_pc_sampling_snapshot_ext_v0_field_name(
-    rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t field_id,
+rocprofiler_pc_sampling_get_snapshot_ext_field_name(
+    rocprofiler_pc_sampling_snapshot_ext_field_id_t field_id,
     const char**                                       name,
     uint64_t*                                          name_len) ROCPROFILER_API;
 
@@ -1235,12 +1235,12 @@ rocprofiler_get_pc_sampling_snapshot_ext_v0_field_name(
  * @param[out] num_fields - Number of fields in the array. May be 0 if ext_data
  *                          is not supported on this agent.
  * @param[in] user_data - Client's private data passed via
- *                        ::rocprofiler_query_pc_sampling_snapshot_ext_v0_fields
+ *                        ::rocprofiler_pc_sampling_query_snapshot_ext_fields
  * @return ::rocprofiler_status_t
  */
 ROCPROFILER_SDK_EXPERIMENTAL
-typedef rocprofiler_status_t (*rocprofiler_pc_sampling_snapshot_ext_v0_fields_cb_t)(
-    const rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t* fields,
+typedef rocprofiler_status_t (*rocprofiler_pc_sampling_snapshot_ext_fields_cb_t)(
+    const rocprofiler_pc_sampling_snapshot_ext_field_id_t* fields,
     size_t                                                    num_fields,
     void*                                                     user_data);
 
@@ -1248,29 +1248,32 @@ typedef rocprofiler_status_t (*rocprofiler_pc_sampling_snapshot_ext_v0_fields_cb
  * @brief (experimental) Query supported snapshot ext_data fields for a GPU agent.
  *
  * Queries which snapshot ext_data fields are supported by the GPU agent with @p agent_id
- * and delivers the list via the callback @p cb. Different GPU architectures support
- * different subsets of ext_data fields.
+ * for the given @p record_kind, and delivers the list via the callback @p cb.
+ * Different GPU architectures and record kinds support different subsets of ext_data fields.
  *
  * This function allows clients to determine at runtime which fields from
- * ::rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t are meaningful for a given agent.
- * To extract field values from the ext_data bitfield, use
- * ::rocprofiler_pc_sampling_get_snapshot_ext_v0_fields.
+ * ::rocprofiler_pc_sampling_snapshot_ext_field_id_t are meaningful for a given agent
+ * and record kind. To extract field values from the ext_data bitfield, use
+ * ::rocprofiler_pc_sampling_extract_snapshot_ext_field_values.
  *
  * @param[in] agent_id - ID of the agent to query
+ * @param[in] record_kind - The record kind to query fields for
  * @param[in] cb - User callback that receives the supported field IDs
  * @param[in] user_data - Passed through to @p cb
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS @p cb successfully finished
- * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT invalid agent_id or null callback
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT invalid agent_id, null callback, or
+ * record_kind does not contain snapshot information (e.g., host-trap record kinds V1, V3)
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE agent does not support PC sampling
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_query_pc_sampling_snapshot_ext_v0_fields(
-    rocprofiler_agent_id_t                               agent_id,
-    rocprofiler_pc_sampling_snapshot_ext_v0_fields_cb_t  cb,
-    void*                                                user_data) ROCPROFILER_API
-    ROCPROFILER_NONNULL(2);
+rocprofiler_pc_sampling_query_snapshot_ext_fields(
+    rocprofiler_agent_id_t                            agent_id,
+    rocprofiler_pc_sampling_record_kind_t             record_kind,
+    rocprofiler_pc_sampling_snapshot_ext_fields_cb_t  cb,
+    void*                                             user_data) ROCPROFILER_API
+    ROCPROFILER_NONNULL(3);
 
 /**
  * @brief (experimental) Callback to receive extracted snapshot ext_data field values.
@@ -1282,8 +1285,8 @@ rocprofiler_query_pc_sampling_snapshot_ext_v0_fields(
  * @return ::rocprofiler_status_t
  */
 ROCPROFILER_SDK_EXPERIMENTAL
-typedef rocprofiler_status_t (*rocprofiler_pc_sampling_snapshot_ext_v0_field_values_cb_t)(
-    const rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t* field_ids,
+typedef rocprofiler_status_t (*rocprofiler_pc_sampling_snapshot_ext_field_values_cb_t)(
+    const rocprofiler_pc_sampling_snapshot_ext_field_id_t* field_ids,
     const uint32_t*                                           values,
     size_t                                                    num_fields,
     void*                                                     user_data);
@@ -1291,39 +1294,43 @@ typedef rocprofiler_status_t (*rocprofiler_pc_sampling_snapshot_ext_v0_field_val
 /**
  * @brief (experimental) Extract multiple ext_data field values from the bitfield.
  *
- * Helper function to extract multiple field values from the ext_data bitfield in
- * ::rocprofiler_pc_sampling_snapshot_information_v0_t. The extraction uses hardware-specific
- * bit offsets and widths.
+ * Version-independent helper function to extract multiple field values from the
+ * snapshot ext_data bitfield embedded in a PC sampling record. The function
+ * uses @p record_kind to determine which record struct layout to use and
+ * locates the snapshot_information internally.
  *
  * IMPORTANT: To minimize overhead, this function does NOT validate that the requested
  * field_ids are supported. Users MUST first call
- * ::rocprofiler_query_pc_sampling_snapshot_ext_v0_fields to obtain the list of supported
- * fields for their agent, then pass those field IDs to this function. Passing unsupported
- * field IDs results in undefined behavior.
+ * ::rocprofiler_pc_sampling_query_snapshot_ext_fields to obtain the list of supported
+ * fields for their agent and record kind, then pass those field IDs to this function.
+ * Passing unsupported field IDs results in undefined behavior.
  *
  * Typical usage pattern:
- * 1. Call ::rocprofiler_query_pc_sampling_snapshot_ext_v0_fields to get supported fields
- *    for an agent
- * 2. For each PC sample from that agent, call this function with the supported field IDs
- *    to extract their values from the ext_data bitfield
+ * 1. Call ::rocprofiler_pc_sampling_query_snapshot_ext_fields to get supported fields
+ *    for an agent and record kind
+ * 2. For each PC sample from that agent, call this function with the record kind,
+ *    record pointer, and supported field IDs to extract their values
  *
- * @param[in] ext_data - The ext_data bitfield from a PC sampling snapshot record
+ * @param[in] record_kind - The record kind from the buffer record header
+ * @param[in] record - Pointer to the PC sampling record (e.g., header->payload)
  * @param[in] field_ids - Array of field IDs to extract (must be supported fields)
  * @param[in] num_fields - Number of fields to extract
  * @param[in] cb - Callback to receive the extracted values
  * @param[in] user_data - Passed through to @p cb
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS all fields extracted successfully and callback completed
- * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT null pointers or num_fields is 0
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT null pointers, num_fields is 0, or
+ * record_kind does not contain snapshot information (e.g., host-trap record kinds V1, V3)
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_pc_sampling_get_snapshot_ext_v0_fields(
-    uint32_t                                                 ext_data,
-    const rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t* field_ids,
-    size_t                                                   num_fields,
-    rocprofiler_pc_sampling_snapshot_ext_v0_field_values_cb_t cb,
-    void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2, 4);
+rocprofiler_pc_sampling_extract_snapshot_ext_field_values(
+    rocprofiler_pc_sampling_record_kind_t                 record_kind,
+    const void*                                          record,
+    const rocprofiler_pc_sampling_snapshot_ext_field_id_t* field_ids,
+    size_t                                                num_fields,
+    rocprofiler_pc_sampling_snapshot_ext_field_values_cb_t cb,
+    void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2, 3, 5);
 
 /// NOTE: the following code is kept so that we could quickly compile the existing code before full
 /// refactoring
