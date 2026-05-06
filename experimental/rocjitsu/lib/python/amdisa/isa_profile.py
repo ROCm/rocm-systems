@@ -113,7 +113,8 @@ class IsaProfile(ABC):
     **Parsing rules** control how the XML spec is interpreted:
     ``supported_versions``, ``max_enc_bits``, ``max_enc_order``,
     ``skip_encodings``, ``is_alt_encoding``, ``derive_parent_enc_name``,
-    ``is_implied_literal_encoding``, ``skip_inst_encoding``.
+    ``is_implied_literal_encoding``, ``skip_inst_encoding``,
+    ``parse_skipped_encoding_identifiers``.
 
     **Semantic overrides** let a profile supply execution semantics for
     instructions that the generic mnemonic-based derivation cannot handle:
@@ -303,6 +304,17 @@ class IsaProfile(ABC):
             (no renames).
         """
         return {}
+
+    def parse_skipped_encoding_identifiers(self, enc_name: str) -> bool:
+        """True if a skipped alternate still needs decode-table slots.
+
+        Some alternate encodings mostly alias their parent and should not emit
+        duplicate instruction classes, but also contain opcodes that do not
+        exist in the parent encoding. The parser must still build their
+        decode-table pointer map so those unique instructions can be admitted
+        by comparing the alternate opcode map against the parent's map.
+        """
+        return False
 
     @abstractmethod
     def is_alt_encoding(self, enc_name: str) -> bool:
@@ -746,6 +758,11 @@ class CdnaProfile(_AmdgpuProfileBase):
       skipping the ``default_encoding()`` size check entirely for
       encodings with ``bit_cnt >= 64``, since their ``OpEncoding``
       struct already spans the full instruction width.
+    - Some FLAT segment alternates contain opcodes that do not exist in the
+      parent ``ENC_FLAT`` table. Shared opcodes are skipped because the parent
+      FLAT encoding already represents them via dynamic segment mnemonics, but
+      segment-only opcodes such as ``GLOBAL_LOAD_LDS_*`` still need concrete
+      instruction classes and decode-table entries.
     """
 
     _FLAT_SEGMENTS = frozenset({'GLBL', 'SCRATCH'})
@@ -788,6 +805,15 @@ class CdnaProfile(_AmdgpuProfileBase):
     @property
     def skip_encodings(self) -> frozenset[str]:
         return frozenset({'ENC_VOP3PX2'})
+
+    def parse_skipped_encoding_identifiers(self, enc_name: str) -> bool:
+        parts = enc_name.upper().split('_')
+        return (
+            len(parts) == 3
+            and parts[0] == 'ENC'
+            and parts[1] == 'FLAT'
+            and parts[2] in self._FLAT_SEGMENTS
+        )
 
     @property
     def inst_size_overrides(self) -> dict[str, int]:

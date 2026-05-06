@@ -510,6 +510,21 @@ std::vector<uint32_t> lower_cdna4_ds_read_b64_tr_b16_for_test(uint8_t vdst, uint
   return lower_first_cdna4_instruction_for_test({words[0], words[1]});
 }
 
+std::vector<uint32_t> lower_cdna4_global_load_lds_dwordx4_for_test() {
+  cdna4::FlatGlblMachineInst src{};
+  src.encoding = 0x37;
+  src.op = 125;
+  src.offset = 0;
+  src.seg = 2;
+  src.addr = 4;
+  src.saddr = 127;
+  src.vdst = 0;
+
+  uint32_t words[2]{};
+  std::memcpy(words, &src, sizeof(src));
+  return lower_first_cdna4_instruction_for_test({words[0], words[1]});
+}
+
 std::vector<uint32_t> lower_cdna4_wide_k_mfma_for_test(uint16_t opcode, uint8_t vdst,
                                                        uint16_t src2) {
   cdna4::Vop3pMfmaMachineInst src{};
@@ -583,6 +598,70 @@ TEST(DsTransposeLowering, ReadB64TrB16Cdna4ToCdna3) {
   EXPECT_EQ(v_perm_count, 4);
   EXPECT_EQ(v_pack_count, 2);
   EXPECT_GE(waitcnt_count, 1);
+}
+
+TEST(GlobalLoadLdsLowering, Dwordx4Cdna4ToCdna3) {
+  const auto lowered = lower_cdna4_global_load_lds_dwordx4_for_test();
+  ASSERT_FALSE(lowered.empty());
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+
+  int global_load_count = 0;
+  int ds_write_count = 0;
+  int global_lds_count = 0;
+  int waitcnt_count = 0;
+  int mbcnt_lo_count = 0;
+  int mbcnt_hi_count = 0;
+  int lshl_count = 0;
+  int add_count = 0;
+  int global_load_saddr = -1;
+  std::vector<std::string> mnemonics;
+  for (size_t pc = 0; pc < lowered.size();) {
+    std::unique_ptr<Instruction> inst(decoder->decode(&lowered[pc]));
+    ASSERT_NE(inst, nullptr) << "decode failed at word " << pc;
+    const std::string_view mnemonic = inst->mnemonic();
+    mnemonics.emplace_back(mnemonic);
+    EXPECT_NE(mnemonic, "invalid");
+    if (mnemonic == "global_load_dwordx4") {
+      ++global_load_count;
+      cdna3::FlatMachineInst load{};
+      std::memcpy(&load, &lowered[pc], sizeof(load));
+      global_load_saddr = load.saddr;
+    } else if (mnemonic == "ds_write_b128") {
+      ++ds_write_count;
+    } else if (mnemonic.starts_with("global_load_lds")) {
+      ++global_lds_count;
+    } else if (mnemonic == "s_waitcnt") {
+      ++waitcnt_count;
+    } else if (mnemonic == "v_mbcnt_lo_u32_b32") {
+      ++mbcnt_lo_count;
+    } else if (mnemonic == "v_mbcnt_hi_u32_b32") {
+      ++mbcnt_hi_count;
+    } else if (mnemonic == "v_lshlrev_b32") {
+      ++lshl_count;
+    } else if (mnemonic == "v_add_u32") {
+      ++add_count;
+    }
+    pc += inst->size() / sizeof(uint32_t);
+  }
+
+  std::string mnemonic_list;
+  for (const auto &mnemonic : mnemonics) {
+    if (!mnemonic_list.empty())
+      mnemonic_list += ", ";
+    mnemonic_list += mnemonic;
+  }
+
+  EXPECT_EQ(global_load_count, 1) << mnemonic_list;
+  EXPECT_EQ(global_load_saddr, 127) << mnemonic_list;
+  EXPECT_EQ(ds_write_count, 1) << mnemonic_list;
+  EXPECT_EQ(global_lds_count, 0) << mnemonic_list;
+  EXPECT_GE(waitcnt_count, 2) << mnemonic_list;
+  EXPECT_EQ(mbcnt_lo_count, 1) << mnemonic_list;
+  EXPECT_EQ(mbcnt_hi_count, 1) << mnemonic_list;
+  EXPECT_EQ(lshl_count, 1) << mnemonic_list;
+  EXPECT_EQ(add_count, 1) << mnemonic_list;
 }
 
 TEST(MfmaWideKLowering, F16WideKCdna4ToCdna3) {

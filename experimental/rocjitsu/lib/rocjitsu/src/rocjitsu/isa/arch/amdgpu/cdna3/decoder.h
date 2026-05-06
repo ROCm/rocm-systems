@@ -1344,6 +1344,16 @@ private:
   static std::unique_ptr<Instruction> decodeFlatLoadSbyteD16HiFlat(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeFlatLoadShortD16Flat(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeFlatLoadShortD16HiFlat(const MachineInst *opcode);
+  static std::unique_ptr<Instruction>
+  decodeScratchLoadLdsUbyteFlatScratch(const MachineInst *opcode);
+  static std::unique_ptr<Instruction>
+  decodeScratchLoadLdsSbyteFlatScratch(const MachineInst *opcode);
+  static std::unique_ptr<Instruction>
+  decodeScratchLoadLdsUshortFlatScratch(const MachineInst *opcode);
+  static std::unique_ptr<Instruction>
+  decodeScratchLoadLdsSshortFlatScratch(const MachineInst *opcode);
+  static std::unique_ptr<Instruction>
+  decodeScratchLoadLdsDwordFlatScratch(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeFlatAtomicSwapFlat(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeFlatAtomicCmpswapFlat(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeFlatAtomicAddFlat(const MachineInst *opcode);

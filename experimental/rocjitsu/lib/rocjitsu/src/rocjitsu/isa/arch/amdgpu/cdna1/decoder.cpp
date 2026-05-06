@@ -5099,6 +5099,15 @@ std::unique_ptr<Instruction> Decoder::decodeFlatAtomicDecFlat(const MachineInst 
   return std::make_unique<FlatAtomicDecFlat>(opcode);
 }
 
+std::unique_ptr<Instruction> Decoder::decodeGlobalAtomicAddF32FlatGlbl(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicAddF32FlatGlbl>(opcode);
+}
+
+std::unique_ptr<Instruction>
+Decoder::decodeGlobalAtomicPkAddF16FlatGlbl(const MachineInst *opcode) {
+  return std::make_unique<GlobalAtomicPkAddF16FlatGlbl>(opcode);
+}
+
 std::unique_ptr<Instruction> Decoder::decodeFlatAtomicSwapX2Flat(const MachineInst *opcode) {
   return std::make_unique<FlatAtomicSwapX2Flat>(opcode);
 }
@@ -9037,8 +9046,8 @@ const std::array<Decoder::DecodeFunc, 128> Decoder::sub_decode_flat = {
     &Decoder::decodeFlatAtomicXorFlat,
     &Decoder::decodeFlatAtomicIncFlat,
     &Decoder::decodeFlatAtomicDecFlat,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
+    &Decoder::decodeGlobalAtomicAddF32FlatGlbl,
+    &Decoder::decodeGlobalAtomicPkAddF16FlatGlbl,
     &Decoder::decodeInvalid,
     &Decoder::decodeInvalid,
     &Decoder::decodeInvalid,

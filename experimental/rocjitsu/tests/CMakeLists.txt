@@ -239,6 +239,14 @@ if(HSA_RUNTIME64)
         set_tests_properties("Cdna4ToCdna3DispatchTest.TritonMatmulFixturesTranslate" PROPERTIES
             TIMEOUT 60)
 
+        add_test(NAME "Cdna4ToCdna3DispatchTest.TritonMatmulAsyncCopy64x64x64Translates"
+            COMMAND cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonMatmulAsyncCopy64x64x64Translates
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+        set_tests_properties(
+            "Cdna4ToCdna3DispatchTest.TritonMatmulAsyncCopy64x64x64Translates" PROPERTIES
+            TIMEOUT 60)
+
         if(HAS_CDNA3_GPU)
             set(CDNA4_TO_CDNA3_DISPATCH_TESTS
                 DynamicCopyLoopDispatchAndRun
@@ -246,7 +254,12 @@ if(HSA_RUNTIME64)
                 TritonMatmulStatic512x512x512DispatchAndRun
                 TritonMatmulStatic31x31x64DispatchAndRun
                 TritonMatmulStatic32x32x63DispatchAndRun
-                TritonMatmulDynamic32x32x64DispatchAndRun
+                TritonMatmulAsyncCopyProblem64x64x64DispatchAndRun
+                TritonMatmulAsyncCopyProblem128x64x64DispatchAndRun
+                TritonMatmulAsyncCopyProblem64x128x128DispatchAndRun
+                TritonMatmulAsyncCopyProblem192x128x64DispatchAndRun
+                TritonMatmulAsyncCopy64x64x64DispatchAndRun
+                TritonMatmulDynamicShapesDispatchAndRun
             )
             foreach(test_name IN LISTS CDNA4_TO_CDNA3_DISPATCH_TESTS)
                 add_test(NAME "Cdna4ToCdna3DispatchTest.${test_name}"

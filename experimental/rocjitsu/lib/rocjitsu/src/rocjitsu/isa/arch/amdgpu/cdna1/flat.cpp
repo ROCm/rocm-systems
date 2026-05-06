@@ -1606,5 +1606,45 @@ void FlatAtomicDecX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
+GlobalAtomicAddF32FlatGlbl::GlobalAtomicAddF32FlatGlbl(const MachineInst *inst)
+    : FlatGlbl("global_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
+               make_exec_fn<GlobalAtomicAddF32FlatGlbl>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
+}
+
+void GlobalAtomicAddF32FlatGlbl::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
+GlobalAtomicPkAddF16FlatGlbl::GlobalAtomicPkAddF16FlatGlbl(const MachineInst *inst)
+    : FlatGlbl("global_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
+               make_exec_fn<GlobalAtomicPkAddF16FlatGlbl>()),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &data;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
+}
+
+void GlobalAtomicPkAddF16FlatGlbl::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
 } // namespace cdna1
 } // namespace rocjitsu

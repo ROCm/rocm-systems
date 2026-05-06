@@ -451,6 +451,26 @@ public:
   Operand data;
 };
 
+class GlobalAtomicAddF32FlatGlbl : public FlatGlbl {
+public:
+  GlobalAtomicAddF32FlatGlbl(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data;
+  Operand saddr;
+};
+
+class GlobalAtomicPkAddF16FlatGlbl : public FlatGlbl {
+public:
+  GlobalAtomicPkAddF16FlatGlbl(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data;
+  Operand saddr;
+};
+
 } // namespace cdna2
 } // namespace rocjitsu
 

@@ -108,10 +108,12 @@ build_cdna3_vop3p_mfma(uint8_t op, const cdna4::Vop3pMfmaMachineInst &src, uint1
 }
 
 constexpr uint8_t kExecLo = 126;
+constexpr uint8_t kM0 = 124;
 constexpr uint16_t kInlineConst0 = 128;
 constexpr uint16_t kInlineConstNeg1 = 193;
 
-// CDNA3 VOP3 opcodes used by the generic bitop3, wide-K, and DS transpose expansions.
+// CDNA3 scalar and vector opcodes used by the expansion rules below.
+constexpr uint16_t kCdna3Sop2OpAndB64 = 13;
 constexpr uint16_t kCdna3OpMovB32 = 321;
 constexpr uint16_t kCdna3OpLshrrevB32 = 272;
 constexpr uint16_t kCdna3OpLshlrevB32 = 274;
@@ -119,6 +121,7 @@ constexpr uint16_t kCdna3OpAndB32 = 275;
 constexpr uint16_t kCdna3OpOrB32 = 276;
 constexpr uint16_t kCdna3OpXorB32 = 277;
 constexpr uint16_t kCdna3OpAddU32 = 308;
+constexpr uint16_t kCdna3OpCvtF16F32 = 330;
 constexpr uint16_t kCdna3OpPermB32 = 493;
 constexpr uint16_t kCdna3OpMbcntLoU32B32 = 652;
 constexpr uint16_t kCdna3OpMbcntHiU32B32 = 653;
@@ -131,9 +134,12 @@ constexpr uint8_t kCdna3OpMfmaF32_16x16x16F16 = 77;
 // CDNA3 DS opcodes used to synthesize CDNA4 transposed LDS reads.
 constexpr uint8_t kCdna3DsOpBpermuteB32 = 63;
 constexpr uint8_t kCdna3DsOpReadB64 = 118;
+constexpr uint8_t kCdna3DsOpWriteB128 = 223;
 
 constexpr uint8_t kCdna3SoppOpWaitcnt = 12;
 constexpr uint16_t kCdnaWaitcntLgkmcnt0 = 0xC07F;
+constexpr uint16_t kCdnaWaitcntVmcnt0 = 0x0F70;
+constexpr uint8_t kCdna3FlatOpLoadDwordx4 = 23;
 
 void emit_cdna3_vop3(std::vector<uint32_t> &words, uint16_t op, uint8_t vdst, uint16_t src0,
                      uint16_t src1 = 0, uint16_t src2 = 0) {
@@ -158,6 +164,14 @@ void emit_cdna3_lgkm_wait(std::vector<uint32_t> &words) {
   words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntLgkmcnt0));
 }
 
+void emit_cdna3_vmem_wait(std::vector<uint32_t> &words) {
+  // GFX9/CDNA s_waitcnt encodes "vmcnt(0)" with EXP/LGKM at their no-wait
+  // maxima. The global_load_lds_dwordxN expansion emits more VMEM operations
+  // than the guest instruction, so it drains those replacement loads locally
+  // instead of perturbing the surrounding guest wait-count schedule.
+  words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntVmcnt0));
+}
+
 [[nodiscard]] constexpr uint16_t vgpr_src(uint8_t reg) { return static_cast<uint16_t>(256 + reg); }
 
 void emit_s_mov_b32_lit(std::vector<uint32_t> &words, uint8_t sdst, uint32_t literal) {
@@ -166,9 +180,55 @@ void emit_s_mov_b32_lit(std::vector<uint32_t> &words, uint8_t sdst, uint32_t lit
   words.push_back(w1);
 }
 
+void emit_s_mov_b64(std::vector<uint32_t> &words, uint8_t sdst, uint16_t ssrc0) {
+  words.push_back(build_s_mov_b64(sdst, ssrc0));
+}
+
+void emit_s_mov_b64_lit(std::vector<uint32_t> &words, uint8_t sdst, uint64_t literal) {
+  emit_s_mov_b32_lit(words, sdst, static_cast<uint32_t>(literal));
+  emit_s_mov_b32_lit(words, static_cast<uint8_t>(sdst + 1), static_cast<uint32_t>(literal >> 32));
+}
+
+void emit_s_and_b64(std::vector<uint32_t> &words, uint8_t sdst, uint16_t ssrc0, uint16_t ssrc1) {
+  words.push_back(pack_sop2(kCdna3Sop2OpAndB64, sdst, ssrc0, ssrc1));
+}
+
 [[maybe_unused]] void emit_cdna3_exec_mask(std::vector<uint32_t> &words, uint64_t mask) {
   emit_s_mov_b32_lit(words, kExecLo, static_cast<uint32_t>(mask));
   emit_s_mov_b32_lit(words, kExecLo + 1, static_cast<uint32_t>(mask >> 32));
+}
+
+[[nodiscard]] bool vgpr_run_overlaps(uint16_t base, uint16_t count, uint16_t reg) {
+  return reg >= base && reg < static_cast<uint16_t>(base + count);
+}
+
+std::optional<uint16_t> find_free_run_avoiding(const LivenessAnalysis &liveness,
+                                               const Instruction &inst, uint16_t count,
+                                               uint16_t avoid0, uint16_t avoid1,
+                                               uint16_t search_start = 0) {
+  uint16_t search = search_start;
+  while (true) {
+    auto candidate = liveness.find_free_run(&inst, count, search);
+    if (!candidate)
+      return std::nullopt;
+    if (!vgpr_run_overlaps(*candidate, count, avoid0) &&
+        !vgpr_run_overlaps(*candidate, count, avoid1))
+      return candidate;
+    search = static_cast<uint16_t>(*candidate + 1);
+  }
+}
+
+std::optional<uint16_t> find_free_sgpr_pair_avoiding(const LivenessAnalysis &liveness,
+                                                     const Instruction &inst, uint16_t avoid_pair) {
+  uint16_t search = 0;
+  while (true) {
+    auto candidate = liveness.find_free_sgpr_pair(&inst, search);
+    if (!candidate)
+      return std::nullopt;
+    if (*candidate + 1 < avoid_pair || *candidate > avoid_pair + 1)
+      return candidate;
+    search = static_cast<uint16_t>(*candidate + 2);
+  }
 }
 
 void emit_cdna3_mfma(std::vector<uint32_t> &words, uint8_t op,
@@ -177,6 +237,61 @@ void emit_cdna3_mfma(std::vector<uint32_t> &words, uint8_t op,
   auto [w0, w1] = build_cdna3_vop3p_mfma(op, src, src0, src1, src2);
   words.push_back(w0);
   words.push_back(w1);
+}
+
+void emit_cdna3_flat_load_dwordx4(std::vector<uint32_t> &words,
+                                  const cdna4::FlatGlblMachineInst &src, uint8_t vdst) {
+  cdna3::FlatMachineInst dst{};
+  dst.encoding = src.encoding;
+  dst.op = kCdna3FlatOpLoadDwordx4;
+  dst.offset = src.offset & 0x0FFF;
+  dst.seg = src.seg;
+  dst.sc0 = src.sc0;
+  dst.nt = src.nt;
+  dst.sc1 = src.sc1;
+  dst.addr = src.addr;
+  // Preserve the GLOBAL address mode.  saddr=0x7f means the address comes from
+  // the VGPR pair in addr; clearing it would reinterpret addr as a 32-bit
+  // offset from an SGPR base and can fault on real hardware.
+  dst.saddr = src.saddr;
+  dst.acc = src.acc;
+  dst.vdst = vdst;
+
+  uint32_t emitted[2]{};
+  std::memcpy(emitted, &dst, sizeof(dst));
+  words.push_back(emitted[0]);
+  words.push_back(emitted[1]);
+}
+
+void emit_cdna3_ds_write_b128(std::vector<uint32_t> &words, uint8_t addr, uint8_t data) {
+  cdna3::DsMachineInst dst{};
+  dst.encoding = 0x36;
+  dst.op = kCdna3DsOpWriteB128;
+  dst.addr = addr;
+  dst.data0 = data;
+
+  uint32_t emitted[2]{};
+  std::memcpy(emitted, &dst, sizeof(dst));
+  words.push_back(emitted[0]);
+  words.push_back(emitted[1]);
+}
+
+void emit_cdna3_lds_dma_dwordx4_addr(std::vector<uint32_t> &words, uint8_t dst,
+                                     uint8_t exec_save_sgpr) {
+  // GLOBAL_LOAD_LDS takes a wave-uniform LDS base in M0 and implicitly adds
+  // 16 * lane_id for the four-dword vector payload.  DS_WRITE_B128 has no such
+  // implicit lane offset, so materialize the byte address in a scratch VGPR.
+  //
+  // MBCNT counts active lanes before the current lane. Temporarily enabling
+  // all lanes turns that into the physical lane id, matching GLOBAL_LOAD_LDS
+  // even when the guest instruction itself is EXEC-masked.
+  emit_s_mov_b64(words, exec_save_sgpr, kExecLo);
+  emit_cdna3_exec_mask(words, 0xFFFFFFFFFFFFFFFFULL);
+  emit_cdna3_vop3(words, kCdna3OpMbcntLoU32B32, dst, kInlineConstNeg1, kInlineConst0);
+  emit_cdna3_vop3(words, kCdna3OpMbcntHiU32B32, dst, kInlineConstNeg1, vgpr_src(dst));
+  emit_cdna3_vop3(words, kCdna3OpLshlrevB32, dst, scalar_positive_inline_u32(4), vgpr_src(dst));
+  emit_cdna3_vop3(words, kCdna3OpAddU32, dst, kM0, vgpr_src(dst));
+  emit_s_mov_b64(words, kExecLo, exec_save_sgpr);
 }
 
 // -----------------------------------------------------------------------------
@@ -347,6 +462,178 @@ std::vector<uint32_t> lower_cdna4_bitop3_to_cdna3(const Instruction &inst,
   if (acc != op.vdst)
     emit_mov(op.vdst, static_cast<uint16_t>(256 + acc));
 
+  return words;
+}
+
+// -----------------------------------------------------------------------------
+// Packed F32->F16 conversion expansion.
+// -----------------------------------------------------------------------------
+
+std::vector<uint32_t> lower_v_cvt_pk_f16_f32_cdna4_to_cdna3(const Instruction &inst,
+                                                            const LivenessAnalysis &liveness,
+                                                            TranslationContext &context) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop3MachineInst))
+    return {};
+
+  cdna4::Vop3MachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+
+  // The CDNA3 packed conversion opcode is the explicit RTZ form. CDNA4's
+  // V_CVT_PK_F16_F32 follows the normal F32->F16 rounding path, so lower it as
+  // two scalar half conversions followed by a pure halfword pack.
+  std::optional<uint16_t> scratch = liveness.find_free_run(&inst, 2, src.vdst + 1);
+  if (!scratch)
+    scratch = liveness.find_free_run(&inst, 2);
+  if (!scratch)
+    return {};
+  context.require_vgprs(*scratch + 2);
+
+  const uint8_t lo = static_cast<uint8_t>(*scratch);
+  const uint8_t hi = static_cast<uint8_t>(*scratch + 1);
+
+  std::vector<uint32_t> words;
+  emit_cdna3_vop3(words, kCdna3OpCvtF16F32, lo, static_cast<uint16_t>(src.src0));
+  emit_cdna3_vop3(words, kCdna3OpCvtF16F32, hi, static_cast<uint16_t>(src.src1));
+  emit_cdna3_vop3(words, kCdna3OpPackB32F16, static_cast<uint8_t>(src.vdst), vgpr_src(lo),
+                  vgpr_src(hi));
+  return words;
+}
+
+// -----------------------------------------------------------------------------
+// Row-grouped permlane swap expansion.
+// -----------------------------------------------------------------------------
+
+[[nodiscard]] std::optional<uint8_t> decode_vop1_src_vgpr(uint16_t src0) {
+  if (src0 >= 256 && src0 <= 511)
+    return static_cast<uint8_t>(src0 - 256);
+
+  // V_PERMLANE*_SWAP_B32 declares SRC0 as OPR_SRC_VGPR. Reject known non-VGPR
+  // extension sentinels, but tolerate compact VGPR numbering if the decoder
+  // ever sees that form for this VGPR-only operand.
+  if (src0 < 249)
+    return static_cast<uint8_t>(src0);
+  return std::nullopt;
+}
+
+std::vector<uint32_t> lower_v_permlane32_swap_b32_cdna4_to_cdna3(const Instruction &inst,
+                                                                 const LivenessAnalysis &liveness,
+                                                                 TranslationContext &context) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop1MachineInst))
+    return {};
+
+  cdna4::Vop1MachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  auto src0_opt = decode_vop1_src_vgpr(static_cast<uint16_t>(src.src0));
+  if (!src0_opt)
+    return {};
+
+  const uint8_t vdst = static_cast<uint8_t>(src.vdst);
+  const uint8_t src0 = *src0_opt;
+
+  auto exec_save = liveness.find_free_sgpr_pair(&inst);
+  if (!exec_save)
+    return {};
+  auto exec_mask = find_free_sgpr_pair_avoiding(liveness, inst, *exec_save);
+  if (!exec_mask)
+    return {};
+  context.require_sgprs(std::max<uint16_t>(*exec_save + 2, *exec_mask + 2));
+
+  constexpr uint16_t kScratchCount = 3;
+  const uint16_t preferred_start = std::max<uint16_t>(vdst, src0) + 1;
+  auto scratch = find_free_run_avoiding(liveness, inst, kScratchCount, vdst, src0, preferred_start);
+  if (!scratch)
+    scratch = find_free_run_avoiding(liveness, inst, kScratchCount, vdst, src0);
+  if (!scratch)
+    return {};
+  context.require_vgprs(*scratch + kScratchCount);
+
+  const uint8_t lane_addr = static_cast<uint8_t>(*scratch);
+  const uint8_t staged_dst = static_cast<uint8_t>(*scratch + 1);
+  const uint8_t staged_src = static_cast<uint8_t>(*scratch + 2);
+  const uint8_t exec_save_sgpr = static_cast<uint8_t>(*exec_save);
+  const uint8_t exec_mask_sgpr = static_cast<uint8_t>(*exec_mask);
+
+  std::vector<uint32_t> words;
+
+  // Build the partner-lane byte address with EXEC forced to all lanes. MBCNT
+  // derives lane_id from EXEC, and DS_BPERMUTE only sources active lanes, so
+  // the staging phase must run with a full wave even when the guest EXEC mask
+  // is partial. The only clobbered inactive-lane state is scratch VGPR state.
+  emit_s_mov_b64(words, exec_save_sgpr, kExecLo);
+  emit_cdna3_exec_mask(words, 0xFFFFFFFFFFFFFFFFULL);
+  emit_cdna3_vop3(words, kCdna3OpMbcntLoU32B32, lane_addr, kInlineConstNeg1, kInlineConst0);
+  emit_cdna3_vop3(words, kCdna3OpMbcntHiU32B32, lane_addr, kInlineConstNeg1, vgpr_src(lane_addr));
+  emit_cdna3_vop3(words, kCdna3OpXorB32, lane_addr, scalar_positive_inline_u32(32),
+                  vgpr_src(lane_addr));
+  emit_cdna3_vop3(words, kCdna3OpLshlrevB32, lane_addr, scalar_positive_inline_u32(2),
+                  vgpr_src(lane_addr));
+
+  emit_cdna3_ds(words, kCdna3DsOpBpermuteB32, staged_dst, lane_addr, vdst);
+  emit_cdna3_ds(words, kCdna3DsOpBpermuteB32, staged_src, lane_addr, src0);
+  emit_cdna3_lgkm_wait(words);
+
+  // CDNA4 swaps vdst lanes 32-63 with src0 lanes 0-31. Preserve the original
+  // EXEC mask for the writeback, so inactive guest lanes keep their values.
+  emit_s_mov_b64_lit(words, exec_mask_sgpr, 0x00000000FFFFFFFFULL);
+  emit_s_and_b64(words, kExecLo, exec_save_sgpr, exec_mask_sgpr);
+  emit_cdna3_vop3(words, kCdna3OpMovB32, src0, vgpr_src(staged_dst));
+
+  emit_s_mov_b64_lit(words, exec_mask_sgpr, 0xFFFFFFFF00000000ULL);
+  emit_s_and_b64(words, kExecLo, exec_save_sgpr, exec_mask_sgpr);
+  emit_cdna3_vop3(words, kCdna3OpMovB32, vdst, vgpr_src(staged_src));
+
+  emit_s_mov_b64(words, kExecLo, exec_save_sgpr);
+  return words;
+}
+
+// -----------------------------------------------------------------------------
+// Global-to-LDS vector async-copy expansion.
+// -----------------------------------------------------------------------------
+
+std::vector<uint32_t> lower_global_load_lds_dwordx4_cdna4_to_cdna3(const Instruction &inst,
+                                                                   const LivenessAnalysis &liveness,
+                                                                   TranslationContext &context) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::FlatGlblMachineInst))
+    return {};
+
+  cdna4::FlatGlblMachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+
+  // CDNA3 has no decodable GLOBAL_LOAD_LDS vector form. Materialize the copy
+  // as an ordinary flat/global vector load into scratch VGPRs, then store those
+  // four dwords into LDS through DS_WRITE_B128. GLOBAL_LOAD_LDS uses M0 plus
+  // an implicit per-lane vector-byte offset as the LDS address; DS writes need
+  // that address materialized explicitly in a VGPR.
+  if (src.offset > 0x0FFFu)
+    return {};
+
+  auto exec_save = liveness.find_free_sgpr_pair(&inst);
+  if (!exec_save)
+    return {};
+  context.require_sgprs(*exec_save + 2);
+
+  constexpr uint16_t kScratchCount = 5;
+  const uint16_t preferred_start = static_cast<uint16_t>(src.addr + 2);
+  auto scratch = find_free_run_avoiding(liveness, inst, kScratchCount, src.addr, src.addr + 1,
+                                        preferred_start);
+  if (!scratch)
+    scratch = find_free_run_avoiding(liveness, inst, kScratchCount, src.addr, src.addr + 1);
+  if (!scratch)
+    return {};
+  context.require_vgprs(*scratch + kScratchCount);
+
+  const uint8_t data = static_cast<uint8_t>(*scratch);
+  const uint8_t lds_addr = static_cast<uint8_t>(*scratch + 4);
+
+  std::vector<uint32_t> words;
+  emit_cdna3_lds_dma_dwordx4_addr(words, lds_addr, static_cast<uint8_t>(*exec_save));
+  emit_cdna3_flat_load_dwordx4(words, src, data);
+  emit_cdna3_vmem_wait(words);
+  emit_cdna3_ds_write_b128(words, lds_addr, data);
+  emit_cdna3_lgkm_wait(words);
   return words;
 }
 
@@ -569,6 +856,24 @@ std::vector<uint32_t> expand_ds_read_b64_tr_b16_cdna4_to_cdna3(
   return lower_ds_read_b64_tr_b16_cdna4_to_cdna3(inst, liveness, context);
 }
 
+std::vector<uint32_t> expand_v_cvt_pk_f16_f32_cdna4_to_cdna3(
+    const Instruction &inst, uint32_t, uint64_t, const LivenessAnalysis &liveness,
+    TranslationContext &context, const LaneLayout *, const LaneLayout *) {
+  return lower_v_cvt_pk_f16_f32_cdna4_to_cdna3(inst, liveness, context);
+}
+
+std::vector<uint32_t> expand_v_permlane32_swap_b32_cdna4_to_cdna3(
+    const Instruction &inst, uint32_t, uint64_t, const LivenessAnalysis &liveness,
+    TranslationContext &context, const LaneLayout *, const LaneLayout *) {
+  return lower_v_permlane32_swap_b32_cdna4_to_cdna3(inst, liveness, context);
+}
+
+std::vector<uint32_t> expand_global_load_lds_dwordx4_cdna4_to_cdna3(
+    const Instruction &inst, uint32_t, uint64_t, const LivenessAnalysis &liveness,
+    TranslationContext &context, const LaneLayout *, const LaneLayout *) {
+  return lower_global_load_lds_dwordx4_cdna4_to_cdna3(inst, liveness, context);
+}
+
 std::vector<uint32_t> expand_mfma_f32_16x16x32_f16_cdna4_to_cdna3(
     const Instruction &inst, uint32_t, uint64_t, const LivenessAnalysis &liveness,
     TranslationContext &context, const LaneLayout *, const LaneLayout *) {
@@ -583,28 +888,51 @@ std::vector<uint32_t> expand_mfma_f32_32x32x16_f16_cdna4_to_cdna3(
                                               WideKMfmaShape::F32_32x32x16_F16);
 }
 
+constexpr uint16_t kEncVop1Dst0 = 0xFC;
+constexpr uint16_t kEncVop1Dst1 = 0xFD;
+constexpr uint16_t kEncVop1Dst2 = 0xFE;
+constexpr uint16_t kEncVop1Dst3 = 0xFF;
 constexpr uint16_t kEncVop3 = 0x1A4;
 constexpr uint16_t kEncVop3pMfma = 0x1A7;
 constexpr uint16_t kEncDsReadB64TrB16 = 0x1B3;
+constexpr uint16_t kEncFlatGlblGlobalLoadLdsDwordx4Sc1Zero = 0x1BB;
+constexpr uint16_t kEncFlatGlblGlobalLoadLdsDwordx4Sc1One = 0x1BF;
 
 constexpr uint16_t kCdna4Op_v_mfma_f32_16x16x32_f16 = 84;
 constexpr uint16_t kCdna4Op_v_mfma_f32_32x32x16_f16 = 85;
+constexpr uint16_t kCdna4Op_v_permlane32_swap_b32 = 90;
 constexpr uint16_t kCdna4Op_v_bitop3_b16 = 563;
 constexpr uint16_t kCdna4Op_v_bitop3_b32 = 564;
+constexpr uint16_t kCdna4Op_v_cvt_pk_f16_f32 = 615;
 constexpr uint16_t kCdna4Op_ds_read_b64_tr_b16 = 227;
+constexpr uint16_t kCdna4Op_global_load_lds_dwordx4 = 125;
 
 // Rule table must stay sorted by (src_encoding_id, src_opcode).
 const TranslationRule kExpandRules_cdna4_to_cdna3[] = {
+    {kEncVop1Dst0, kCdna4Op_v_permlane32_swap_b32, RuleAction::Expand, 0, 0, nullptr,
+     expand_v_permlane32_swap_b32_cdna4_to_cdna3, nullptr, nullptr},
+    {kEncVop1Dst1, kCdna4Op_v_permlane32_swap_b32, RuleAction::Expand, 0, 0, nullptr,
+     expand_v_permlane32_swap_b32_cdna4_to_cdna3, nullptr, nullptr},
+    {kEncVop1Dst2, kCdna4Op_v_permlane32_swap_b32, RuleAction::Expand, 0, 0, nullptr,
+     expand_v_permlane32_swap_b32_cdna4_to_cdna3, nullptr, nullptr},
+    {kEncVop1Dst3, kCdna4Op_v_permlane32_swap_b32, RuleAction::Expand, 0, 0, nullptr,
+     expand_v_permlane32_swap_b32_cdna4_to_cdna3, nullptr, nullptr},
     {kEncVop3, kCdna4Op_v_bitop3_b16, RuleAction::Expand, 0, 0, nullptr,
      expand_v_bitop3_b16_cdna4_to_cdna3, nullptr, nullptr},
     {kEncVop3, kCdna4Op_v_bitop3_b32, RuleAction::Expand, 0, 0, nullptr,
      expand_v_bitop3_b32_cdna4_to_cdna3, nullptr, nullptr},
+    {kEncVop3, kCdna4Op_v_cvt_pk_f16_f32, RuleAction::Expand, 0, 0, nullptr,
+     expand_v_cvt_pk_f16_f32_cdna4_to_cdna3, nullptr, nullptr},
     {kEncVop3pMfma, kCdna4Op_v_mfma_f32_16x16x32_f16, RuleAction::Expand, 0, 0, nullptr,
      expand_mfma_f32_16x16x32_f16_cdna4_to_cdna3, nullptr, nullptr},
     {kEncVop3pMfma, kCdna4Op_v_mfma_f32_32x32x16_f16, RuleAction::Expand, 0, 0, nullptr,
      expand_mfma_f32_32x32x16_f16_cdna4_to_cdna3, nullptr, nullptr},
     {kEncDsReadB64TrB16, kCdna4Op_ds_read_b64_tr_b16, RuleAction::Expand, 0, 0, nullptr,
      expand_ds_read_b64_tr_b16_cdna4_to_cdna3, nullptr, nullptr},
+    {kEncFlatGlblGlobalLoadLdsDwordx4Sc1Zero, kCdna4Op_global_load_lds_dwordx4, RuleAction::Expand,
+     0, 0, nullptr, expand_global_load_lds_dwordx4_cdna4_to_cdna3, nullptr, nullptr},
+    {kEncFlatGlblGlobalLoadLdsDwordx4Sc1One, kCdna4Op_global_load_lds_dwordx4, RuleAction::Expand,
+     0, 0, nullptr, expand_global_load_lds_dwordx4_cdna4_to_cdna3, nullptr, nullptr},
 };
 
 } // namespace

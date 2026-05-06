@@ -186,6 +186,13 @@ public:
   std::string owned_mnemonic_;
 };
 
+class FlatGlbl : public IsaInstruction<Isa> {
+public:
+  FlatGlbl(std::string_view mnemonic, const FlatGlblMachineInst *inst, ExecuteFn exec_fn);
+  using OpEncoding = FlatGlblMachineInst;
+  const OpEncoding inst_;
+};
+
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
   Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);

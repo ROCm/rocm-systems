@@ -1420,9 +1420,19 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"flat_atomic_xor_x2", {0xFDA80000U, 0xFFFFFFFFU}},
     {"flat_atomic_inc_x2", {0xFDAC0000U, 0xFFFFFFFFU}},
     {"flat_atomic_dec_x2", {0xFDB00000U, 0xFFFFFFFFU}},
+    {"global_load_lds_ubyte", {0xFC980000U, 0xFFFFFFFFU}},
+    {"global_load_lds_sbyte", {0xFC9C0000U, 0xFFFFFFFFU}},
+    {"global_load_lds_ushort", {0xFCA00000U, 0xFFFFFFFFU}},
+    {"global_load_lds_sshort", {0xFCA40000U, 0xFFFFFFFFU}},
+    {"global_load_lds_dword", {0xFCA80000U, 0xFFFFFFFFU}},
+    {"scratch_load_lds_ubyte", {0xFC980000U, 0xFFFFFFFFU}},
+    {"scratch_load_lds_sbyte", {0xFC9C0000U, 0xFFFFFFFFU}},
+    {"scratch_load_lds_ushort", {0xFCA00000U, 0xFFFFFFFFU}},
+    {"scratch_load_lds_sshort", {0xFCA40000U, 0xFFFFFFFFU}},
+    {"scratch_load_lds_dword", {0xFCA80000U, 0xFFFFFFFFU}},
 };
 
-inline constexpr size_t NUM_ENCODINGS = 1401;
+inline constexpr size_t NUM_ENCODINGS = 1411;
 
 } // namespace rocjitsu::cdna3::test_data
 

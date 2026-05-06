@@ -15,6 +15,8 @@ RJ_DIAGNOSTIC_POP
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 
 #include <gtest/gtest.h>
 
@@ -23,7 +25,9 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <cstring>
 #include <ios>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -35,6 +39,27 @@ namespace {
 std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
 std::string kernel_hsaco_path(const char *name) {
   return std::string(KERNEL_DIR) + "/" + name + ".hsaco";
+}
+
+void expect_no_global_load_lds_in_cdna3_text(const std::vector<uint8_t> &elf_bytes) {
+  AmdGpuCodeObject co(elf_bytes.data(), elf_bytes.size());
+  ASSERT_TRUE(co.is_valid());
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+
+  for (const auto *section : co.text_sections()) {
+    const auto *words = reinterpret_cast<const uint32_t *>(section->data());
+    const size_t word_count = section->size() / sizeof(uint32_t);
+    for (size_t pc = 0; pc < word_count;) {
+      std::unique_ptr<Instruction> inst(decoder->decode(&words[pc]));
+      ASSERT_NE(inst, nullptr) << "decode failed at translated word " << pc;
+      const std::string_view mnemonic = inst->mnemonic();
+      EXPECT_FALSE(mnemonic.starts_with("global_load_lds"))
+          << "translated CDNA3 text retained " << mnemonic << " at word " << pc;
+      pc += inst->size() / sizeof(uint32_t);
+    }
+  }
 }
 
 hsa_agent_t find_cpu_agent() {
@@ -141,12 +166,22 @@ struct HsaShutdownGuard {
   ~HsaShutdownGuard() { hsa_shut_down(); }
 };
 
+enum class TritonMatmulOutput {
+  Float32,
+  Float16,
+};
+
 struct TritonMatmulCase {
   const char *kernel_name;
   uint32_t m;
   uint32_t n;
   uint32_t k;
   bool dynamic_shape;
+  uint32_t block_m = 32;
+  uint32_t block_n = 32;
+  uint32_t group_segment_size = 8192;
+  bool one_dimensional_grid = false;
+  TritonMatmulOutput output = TritonMatmulOutput::Float32;
 };
 
 constexpr TritonMatmulCase kTritonMatmulStatic32x32x64{"triton_cdna4_matmul_static_32x32x64", 32,
@@ -159,6 +194,60 @@ constexpr TritonMatmulCase kTritonMatmulStatic32x32x63{"triton_cdna4_matmul_stat
                                                        32, 63, false};
 constexpr TritonMatmulCase kTritonMatmulDynamicFixture{"triton_cdna4_matmul_dynamic_32x32x64", 32,
                                                        32, 64, true};
+constexpr TritonMatmulCase kTritonMatmulAsyncCopy64x64x64{"triton_cdna4_matmul_async_copy_64x64x64",
+                                                          256,
+                                                          256,
+                                                          256,
+                                                          true,
+                                                          64,
+                                                          64,
+                                                          65536,
+                                                          true,
+                                                          TritonMatmulOutput::Float16};
+constexpr TritonMatmulCase kTritonMatmulAsyncCopyProblem64x64x64{
+    "triton_cdna4_matmul_async_copy_64x64x64",
+    64,
+    64,
+    64,
+    true,
+    64,
+    64,
+    65536,
+    true,
+    TritonMatmulOutput::Float16};
+constexpr TritonMatmulCase kTritonMatmulAsyncCopyProblem128x64x64{
+    "triton_cdna4_matmul_async_copy_64x64x64",
+    128,
+    64,
+    64,
+    true,
+    64,
+    64,
+    65536,
+    true,
+    TritonMatmulOutput::Float16};
+constexpr TritonMatmulCase kTritonMatmulAsyncCopyProblem64x128x128{
+    "triton_cdna4_matmul_async_copy_64x64x64",
+    64,
+    128,
+    128,
+    true,
+    64,
+    64,
+    65536,
+    true,
+    TritonMatmulOutput::Float16};
+constexpr TritonMatmulCase kTritonMatmulAsyncCopyProblem192x128x64{
+    "triton_cdna4_matmul_async_copy_64x64x64",
+    192,
+    128,
+    64,
+    true,
+    64,
+    64,
+    65536,
+    true,
+    TritonMatmulOutput::Float16};
 
 constexpr std::array<TritonMatmulCase, 5> kTritonMatmulCases = {
     kTritonMatmulStatic32x32x64, kTritonMatmulStatic512x512x512, kTritonMatmulStatic31x31x64,
@@ -171,6 +260,25 @@ constexpr std::array<TritonMatmulCase, 5> kTritonMatmulDynamicCases = {{
     {"triton_cdna4_matmul_dynamic_32x32x64", 32, 32, 63, true},
     {"triton_cdna4_matmul_dynamic_32x32x64", 257, 129, 130, true},
 }};
+
+uint16_t positive_integer_half_bits(uint32_t value) {
+  if (value == 0)
+    return 0;
+
+  // The test data only produces small positive integer results. Every integer
+  // result for the chosen async-copy shapes is exactly representable in
+  // binary16, so comparing raw half bits catches both math and store-layout
+  // mistakes without pulling in a host half library.
+  const uint32_t exponent = 31u - static_cast<uint32_t>(__builtin_clz(value));
+  const uint32_t biased_exponent = exponent + 15u;
+  uint32_t mantissa = 0;
+  if (exponent <= 10) {
+    mantissa = (value - (1u << exponent)) << (10u - exponent);
+  } else {
+    mantissa = (value >> (exponent - 10u)) - (1u << 10u);
+  }
+  return static_cast<uint16_t>((biased_exponent << 10u) | (mantissa & 0x3ffu));
+}
 
 void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Cdna3Target &target) {
   hsa_agent_t cpu = find_cpu_agent();
@@ -367,37 +475,32 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target 
   const uint32_t kM = test_case.m;
   const uint32_t kN = test_case.n;
   const uint32_t kK = test_case.k;
-  constexpr uint32_t kBlockM = 32;
-  constexpr uint32_t kBlockN = 32;
+  const uint32_t kBlockM = test_case.block_m;
+  const uint32_t kBlockN = test_case.block_n;
   constexpr uint32_t kWorkgroupSize = 256;
-  constexpr uint32_t kSharedBytes = 8192;
+  const uint32_t kSharedBytes = test_case.group_segment_size;
   const uint32_t kGroupsM = (kM + kBlockM - 1) / kBlockM;
   const uint32_t kGroupsN = (kN + kBlockN - 1) / kBlockN;
   constexpr float kSentinel = -12345.0f;
+  constexpr uint16_t kHalfSentinel = 0x7E00u;
   const size_t kAElements = static_cast<size_t>(kM) * kK;
   const size_t kBElements = static_cast<size_t>(kK) * kN;
   const size_t kCElements = static_cast<size_t>(kM) * kN;
   const size_t kABytes = kAElements * sizeof(uint16_t);
   const size_t kBBytes = kBElements * sizeof(uint16_t);
-  const size_t kCBytes = kCElements * sizeof(float);
-
-  auto half_bits = [](uint32_t value) -> uint16_t {
-    static constexpr uint16_t kHalfOneToEight[] = {0x3C00, 0x4000, 0x4200, 0x4400,
-                                                   0x4500, 0x4600, 0x4700, 0x4800};
-    return kHalfOneToEight[value - 1];
-  };
+  const bool stores_fp16 = test_case.output == TritonMatmulOutput::Float16;
+  const size_t kCBytes = kCElements * (stores_fp16 ? sizeof(uint16_t) : sizeof(float));
 
   auto gpu_pool = find_pool(target.agent, HSA_AMD_SEGMENT_GLOBAL);
   ASSERT_NE(gpu_pool.handle, 0u);
   uint16_t *a_dev = nullptr;
   uint16_t *b_dev = nullptr;
-  float *c_dev = nullptr;
+  void *c_dev = nullptr;
   ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kABytes, 0, reinterpret_cast<void **>(&a_dev)),
             HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kBBytes, 0, reinterpret_cast<void **>(&b_dev)),
             HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kCBytes, 0, reinterpret_cast<void **>(&c_dev)),
-            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(gpu_pool, kCBytes, 0, &c_dev), HSA_STATUS_SUCCESS);
   ASSERT_NE(a_dev, nullptr);
   ASSERT_NE(b_dev, nullptr);
   ASSERT_NE(c_dev, nullptr);
@@ -418,7 +521,7 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target 
   struct __attribute__((packed)) StaticKernArgs {
     const uint16_t *a;
     const uint16_t *b;
-    float *c;
+    void *c;
     // Triton emits two trailing hidden global_buffer kernargs at offsets 24 and 32.
     const void *unused0;
     const void *unused1;
@@ -428,7 +531,7 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target 
   struct __attribute__((packed)) DynamicKernArgs {
     const uint16_t *a;
     const uint16_t *b;
-    float *c;
+    void *c;
     uint32_t m;
     uint32_t n;
     uint32_t k;
@@ -461,27 +564,25 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target 
 
   std::vector<uint16_t> a_host(kAElements);
   std::vector<uint16_t> b_host(kBElements);
-  std::vector<float> c_init(kCElements, kSentinel);
-  std::vector<float> c_host(kCElements);
-  std::vector<float> expected(kCElements, 0.0f);
+  std::vector<uint32_t> expected(kCElements, 0);
   for (uint32_t m = 0; m < kM; ++m) {
     for (uint32_t k = 0; k < kK; ++k) {
       const uint32_t value = 1 + ((m + k) & 0x3);
-      a_host[static_cast<size_t>(m) * kK + k] = half_bits(value);
+      a_host[static_cast<size_t>(m) * kK + k] = positive_integer_half_bits(value);
     }
   }
   for (uint32_t k = 0; k < kK; ++k) {
     for (uint32_t n = 0; n < kN; ++n) {
       const uint32_t value = 1 + ((2 * k + n) & 0x3);
-      b_host[static_cast<size_t>(k) * kN + n] = half_bits(value);
+      b_host[static_cast<size_t>(k) * kN + n] = positive_integer_half_bits(value);
     }
   }
   for (uint32_t m = 0; m < kM; ++m) {
     for (uint32_t n = 0; n < kN; ++n) {
-      float sum = 0.0f;
+      uint32_t sum = 0;
       for (uint32_t k = 0; k < kK; ++k) {
-        const float a = static_cast<float>(1 + ((m + k) & 0x3));
-        const float b = static_cast<float>(1 + ((2 * k + n) & 0x3));
+        const uint32_t a = 1 + ((m + k) & 0x3);
+        const uint32_t b = 1 + ((2 * k + n) & 0x3);
         sum += a * b;
       }
       expected[static_cast<size_t>(m) * kN + n] = sum;
@@ -489,7 +590,13 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target 
   }
   ASSERT_EQ(hsa_memory_copy(a_dev, a_host.data(), kABytes), HSA_STATUS_SUCCESS);
   ASSERT_EQ(hsa_memory_copy(b_dev, b_host.data(), kBBytes), HSA_STATUS_SUCCESS);
-  ASSERT_EQ(hsa_memory_copy(c_dev, c_init.data(), kCBytes), HSA_STATUS_SUCCESS);
+  if (stores_fp16) {
+    std::vector<uint16_t> c_init(kCElements, kHalfSentinel);
+    ASSERT_EQ(hsa_memory_copy(c_dev, c_init.data(), kCBytes), HSA_STATUS_SUCCESS);
+  } else {
+    std::vector<float> c_init(kCElements, kSentinel);
+    ASSERT_EQ(hsa_memory_copy(c_dev, c_init.data(), kCBytes), HSA_STATUS_SUCCESS);
+  }
 
   hsa_queue_t *queue = nullptr;
   uint32_t queue_size = 0;
@@ -506,13 +613,15 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target 
   auto *aql = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address) +
               (write_idx & (queue->size - 1));
   std::memset(aql, 0, sizeof(*aql));
-  // The kernel reads tl.program_id(0) and tl.program_id(1), so launch a 2D grid.
-  aql->setup = 2;
+  // Older Triton fixtures read program_id(0/1); the async-copy fixture uses a
+  // grouped 1D program_id(0) mapping like its source launch_grid helper.
+  aql->setup = test_case.one_dimensional_grid ? 1 : 2;
   aql->workgroup_size_x = kWorkgroupSize;
   aql->workgroup_size_y = 1;
   aql->workgroup_size_z = 1;
-  aql->grid_size_x = kGroupsM * kWorkgroupSize;
-  aql->grid_size_y = kGroupsN;
+  aql->grid_size_x =
+      (test_case.one_dimensional_grid ? (kGroupsM * kGroupsN) : kGroupsM) * kWorkgroupSize;
+  aql->grid_size_y = test_case.one_dimensional_grid ? 1 : kGroupsN;
   aql->grid_size_z = 1;
   aql->group_segment_size = kSharedBytes;
   aql->kernel_object = kernel_object;
@@ -530,16 +639,33 @@ void run_triton_matmul(const std::vector<uint8_t> &elf_bytes, const Cdna3Target 
       signal, HSA_SIGNAL_CONDITION_LT, 1, 5'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
-  ASSERT_EQ(hsa_memory_copy(c_host.data(), c_dev, kCBytes), HSA_STATUS_SUCCESS);
-
   uint32_t mismatches = 0;
-  for (size_t i = 0; i < kCElements; ++i) {
-    if (c_host[i] != expected[i]) {
-      if (mismatches < 8)
-        ADD_FAILURE() << "mismatch at i=" << i << " (m=" << (i / kN) << ", n=" << (i % kN)
-                      << "): got=" << c_host[i] << " expected=" << expected[i]
-                      << " diff=" << (expected[i] - c_host[i]);
-      ++mismatches;
+  if (stores_fp16) {
+    std::vector<uint16_t> c_host(kCElements);
+    ASSERT_EQ(hsa_memory_copy(c_host.data(), c_dev, kCBytes), HSA_STATUS_SUCCESS);
+    for (size_t i = 0; i < kCElements; ++i) {
+      const uint16_t expected_bits = positive_integer_half_bits(expected[i]);
+      if (c_host[i] != expected_bits) {
+        if (mismatches < 8)
+          ADD_FAILURE() << "mismatch at i=" << i << " (m=" << (i / kN) << ", n=" << (i % kN)
+                        << "): got=0x" << std::hex << static_cast<uint32_t>(c_host[i])
+                        << " expected=0x" << static_cast<uint32_t>(expected_bits) << std::dec
+                        << " expected_integer=" << expected[i];
+        ++mismatches;
+      }
+    }
+  } else {
+    std::vector<float> c_host(kCElements);
+    ASSERT_EQ(hsa_memory_copy(c_host.data(), c_dev, kCBytes), HSA_STATUS_SUCCESS);
+    for (size_t i = 0; i < kCElements; ++i) {
+      const float expected_value = static_cast<float>(expected[i]);
+      if (c_host[i] != expected_value) {
+        if (mismatches < 8)
+          ADD_FAILURE() << "mismatch at i=" << i << " (m=" << (i / kN) << ", n=" << (i % kN)
+                        << "): got=" << c_host[i] << " expected=" << expected_value
+                        << " diff=" << (expected_value - c_host[i]);
+        ++mismatches;
+      }
     }
   }
   EXPECT_EQ(mismatches, 0u) << mismatches << " matmul output mismatches";
@@ -624,8 +750,47 @@ TEST(Cdna4ToCdna3DispatchTest, TritonMatmulFixturesTranslate) {
   }
 }
 
+TEST(Cdna4ToCdna3DispatchTest, TritonMatmulAsyncCopy64x64x64Translates) {
+  std::vector<uint8_t> translated;
+  ASSERT_NO_FATAL_FAILURE(translate_triton_matmul(kTritonMatmulAsyncCopy64x64x64,
+                                                  EF_AMDGPU_MACH_AMDGCN_GFX942, translated));
+  ASSERT_NO_FATAL_FAILURE(expect_no_global_load_lds_in_cdna3_text(translated));
+}
+
+TEST(Cdna4ToCdna3DispatchTest, TritonMatmulStatic32x32x64DispatchAndRun) {
+  ASSERT_NO_FATAL_FAILURE(run_triton_matmul_dispatch_test(kTritonMatmulStatic32x32x64));
+}
+
 TEST(Cdna4ToCdna3DispatchTest, TritonMatmulStatic512x512x512DispatchAndRun) {
   ASSERT_NO_FATAL_FAILURE(run_triton_matmul_dispatch_test(kTritonMatmulStatic512x512x512));
+}
+
+TEST(Cdna4ToCdna3DispatchTest, TritonMatmulStatic31x31x64DispatchAndRun) {
+  ASSERT_NO_FATAL_FAILURE(run_triton_matmul_dispatch_test(kTritonMatmulStatic31x31x64));
+}
+
+TEST(Cdna4ToCdna3DispatchTest, TritonMatmulStatic32x32x63DispatchAndRun) {
+  ASSERT_NO_FATAL_FAILURE(run_triton_matmul_dispatch_test(kTritonMatmulStatic32x32x63));
+}
+
+TEST(Cdna4ToCdna3DispatchTest, TritonMatmulAsyncCopyProblem64x64x64DispatchAndRun) {
+  ASSERT_NO_FATAL_FAILURE(run_triton_matmul_dispatch_test(kTritonMatmulAsyncCopyProblem64x64x64));
+}
+
+TEST(Cdna4ToCdna3DispatchTest, TritonMatmulAsyncCopyProblem128x64x64DispatchAndRun) {
+  ASSERT_NO_FATAL_FAILURE(run_triton_matmul_dispatch_test(kTritonMatmulAsyncCopyProblem128x64x64));
+}
+
+TEST(Cdna4ToCdna3DispatchTest, TritonMatmulAsyncCopyProblem64x128x128DispatchAndRun) {
+  ASSERT_NO_FATAL_FAILURE(run_triton_matmul_dispatch_test(kTritonMatmulAsyncCopyProblem64x128x128));
+}
+
+TEST(Cdna4ToCdna3DispatchTest, TritonMatmulAsyncCopyProblem192x128x64DispatchAndRun) {
+  ASSERT_NO_FATAL_FAILURE(run_triton_matmul_dispatch_test(kTritonMatmulAsyncCopyProblem192x128x64));
+}
+
+TEST(Cdna4ToCdna3DispatchTest, TritonMatmulAsyncCopy64x64x64DispatchAndRun) {
+  ASSERT_NO_FATAL_FAILURE(run_triton_matmul_dispatch_test(kTritonMatmulAsyncCopy64x64x64));
 }
 
 TEST(Cdna4ToCdna3DispatchTest, TritonMatmulDynamicShapesDispatchAndRun) {

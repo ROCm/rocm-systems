@@ -1296,6 +1296,8 @@ private:
   static std::unique_ptr<Instruction> decodeFlatAtomicXorFlat(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeFlatAtomicIncFlat(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeFlatAtomicDecFlat(const MachineInst *opcode);
+  static std::unique_ptr<Instruction> decodeGlobalAtomicAddF32FlatGlbl(const MachineInst *opcode);
+  static std::unique_ptr<Instruction> decodeGlobalAtomicPkAddF16FlatGlbl(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeFlatAtomicAddF64Flat(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeFlatAtomicMinF64Flat(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeFlatAtomicMaxF64Flat(const MachineInst *opcode);

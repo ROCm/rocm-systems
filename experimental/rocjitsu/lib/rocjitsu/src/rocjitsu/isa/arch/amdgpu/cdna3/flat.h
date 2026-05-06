@@ -478,6 +478,96 @@ public:
   Operand data;
 };
 
+class GlobalLoadLdsUbyteFlatGlbl : public FlatGlbl {
+public:
+  GlobalLoadLdsUbyteFlatGlbl(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand saddr;
+};
+
+class GlobalLoadLdsSbyteFlatGlbl : public FlatGlbl {
+public:
+  GlobalLoadLdsSbyteFlatGlbl(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand saddr;
+};
+
+class GlobalLoadLdsUshortFlatGlbl : public FlatGlbl {
+public:
+  GlobalLoadLdsUshortFlatGlbl(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand saddr;
+};
+
+class GlobalLoadLdsSshortFlatGlbl : public FlatGlbl {
+public:
+  GlobalLoadLdsSshortFlatGlbl(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand saddr;
+};
+
+class GlobalLoadLdsDwordFlatGlbl : public FlatGlbl {
+public:
+  GlobalLoadLdsDwordFlatGlbl(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand saddr;
+};
+
+class ScratchLoadLdsUbyteFlatScratch : public FlatScratch {
+public:
+  ScratchLoadLdsUbyteFlatScratch(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand saddr;
+};
+
+class ScratchLoadLdsSbyteFlatScratch : public FlatScratch {
+public:
+  ScratchLoadLdsSbyteFlatScratch(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand saddr;
+};
+
+class ScratchLoadLdsUshortFlatScratch : public FlatScratch {
+public:
+  ScratchLoadLdsUshortFlatScratch(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand saddr;
+};
+
+class ScratchLoadLdsSshortFlatScratch : public FlatScratch {
+public:
+  ScratchLoadLdsSshortFlatScratch(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand saddr;
+};
+
+class ScratchLoadLdsDwordFlatScratch : public FlatScratch {
+public:
+  ScratchLoadLdsDwordFlatScratch(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand saddr;
+};
+
 } // namespace cdna3
 } // namespace rocjitsu
 

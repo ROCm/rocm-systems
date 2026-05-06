@@ -1892,5 +1892,185 @@ void FlatAtomicDecX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
+GlobalLoadLdsUbyteFlatGlbl::GlobalLoadLdsUbyteFlatGlbl(const MachineInst *inst)
+    : FlatGlbl("global_load_lds_ubyte", reinterpret_cast<const OpEncoding *>(inst),
+               make_exec_fn<GlobalLoadLdsUbyteFlatGlbl>()),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
+}
+
+void GlobalLoadLdsUbyteFlatGlbl::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
+GlobalLoadLdsSbyteFlatGlbl::GlobalLoadLdsSbyteFlatGlbl(const MachineInst *inst)
+    : FlatGlbl("global_load_lds_sbyte", reinterpret_cast<const OpEncoding *>(inst),
+               make_exec_fn<GlobalLoadLdsSbyteFlatGlbl>()),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
+}
+
+void GlobalLoadLdsSbyteFlatGlbl::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
+GlobalLoadLdsUshortFlatGlbl::GlobalLoadLdsUshortFlatGlbl(const MachineInst *inst)
+    : FlatGlbl("global_load_lds_ushort", reinterpret_cast<const OpEncoding *>(inst),
+               make_exec_fn<GlobalLoadLdsUshortFlatGlbl>()),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
+}
+
+void GlobalLoadLdsUshortFlatGlbl::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
+GlobalLoadLdsSshortFlatGlbl::GlobalLoadLdsSshortFlatGlbl(const MachineInst *inst)
+    : FlatGlbl("global_load_lds_sshort", reinterpret_cast<const OpEncoding *>(inst),
+               make_exec_fn<GlobalLoadLdsSshortFlatGlbl>()),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
+}
+
+void GlobalLoadLdsSshortFlatGlbl::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
+GlobalLoadLdsDwordFlatGlbl::GlobalLoadLdsDwordFlatGlbl(const MachineInst *inst)
+    : FlatGlbl("global_load_lds_dword", reinterpret_cast<const OpEncoding *>(inst),
+               make_exec_fn<GlobalLoadLdsDwordFlatGlbl>()),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
+}
+
+void GlobalLoadLdsDwordFlatGlbl::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
+ScratchLoadLdsUbyteFlatScratch::ScratchLoadLdsUbyteFlatScratch(const MachineInst *inst)
+    : FlatScratch("scratch_load_lds_ubyte", reinterpret_cast<const OpEncoding *>(inst),
+                  make_exec_fn<ScratchLoadLdsUbyteFlatScratch>()),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
+}
+
+void ScratchLoadLdsUbyteFlatScratch::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
+ScratchLoadLdsSbyteFlatScratch::ScratchLoadLdsSbyteFlatScratch(const MachineInst *inst)
+    : FlatScratch("scratch_load_lds_sbyte", reinterpret_cast<const OpEncoding *>(inst),
+                  make_exec_fn<ScratchLoadLdsSbyteFlatScratch>()),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
+}
+
+void ScratchLoadLdsSbyteFlatScratch::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
+ScratchLoadLdsUshortFlatScratch::ScratchLoadLdsUshortFlatScratch(const MachineInst *inst)
+    : FlatScratch("scratch_load_lds_ushort", reinterpret_cast<const OpEncoding *>(inst),
+                  make_exec_fn<ScratchLoadLdsUshortFlatScratch>()),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
+}
+
+void ScratchLoadLdsUshortFlatScratch::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
+ScratchLoadLdsSshortFlatScratch::ScratchLoadLdsSshortFlatScratch(const MachineInst *inst)
+    : FlatScratch("scratch_load_lds_sshort", reinterpret_cast<const OpEncoding *>(inst),
+                  make_exec_fn<ScratchLoadLdsSshortFlatScratch>()),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
+}
+
+void ScratchLoadLdsSshortFlatScratch::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
+ScratchLoadLdsDwordFlatScratch::ScratchLoadLdsDwordFlatScratch(const MachineInst *inst)
+    : FlatScratch("scratch_load_lds_dword", reinterpret_cast<const OpEncoding *>(inst),
+                  make_exec_fn<ScratchLoadLdsDwordFlatScratch>()),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      saddr(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
+}
+
+void ScratchLoadLdsDwordFlatScratch::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
+
 } // namespace cdna3
 } // namespace rocjitsu

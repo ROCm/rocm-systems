@@ -1464,9 +1464,11 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"flat_atomic_xor_x2", {0xFDA80000U, 0xFFFFFFFFU}},
     {"flat_atomic_inc_x2", {0xFDAC0000U, 0xFFFFFFFFU}},
     {"flat_atomic_dec_x2", {0xFDB00000U, 0xFFFFFFFFU}},
+    {"global_atomic_add_f32", {0xFD340000U, 0xFFFFFFFFU}},
+    {"global_atomic_pk_add_f16", {0xFD380000U, 0xFFFFFFFFU}},
 };
 
-inline constexpr size_t NUM_ENCODINGS = 1445;
+inline constexpr size_t NUM_ENCODINGS = 1447;
 
 } // namespace rocjitsu::cdna1::test_data
 

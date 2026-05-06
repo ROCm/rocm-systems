@@ -77,6 +77,7 @@ set(TRITON_CDNA4_MATMUL_FIXTURES
     triton_cdna4_matmul_static_31x31x64
     triton_cdna4_matmul_static_32x32x63
     triton_cdna4_matmul_dynamic_32x32x64
+    triton_cdna4_matmul_async_copy_64x64x64
 )
 
 foreach(fixture IN LISTS TRITON_CDNA4_MATMUL_FIXTURES)

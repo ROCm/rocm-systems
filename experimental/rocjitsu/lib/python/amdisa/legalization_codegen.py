@@ -76,6 +76,7 @@ def emit_all(
         sorted_entries = sorted(entries, key=lambda e: (
             e.src_encoding_order if e.src_encoding_order >= 0 else 0xFFFF,
             e.src_opcode))
+        sorted_entries = _dedupe_lookup_keys(src, dst, sorted_entries)
         _verify_unique_lookup_keys(src, dst, sorted_entries)
         pair_path = output_dir / f'legalization_{_pair_name(src, dst)}.h'
         _emit_pair(pair_path, src, dst, sorted_entries)
@@ -83,6 +84,41 @@ def emit_all(
         generated.append(str(pair_path))
 
     return generated
+
+
+def _dedupe_lookup_keys(
+    src: str,
+    dst: str,
+    entries: list[LegalizationEntry],
+) -> list[LegalizationEntry]:
+    """Collapse duplicate runtime keys when they emit identical table rows.
+
+    Segment-specific FLAT alternate mnemonics can decode to different C++
+    instruction classes while sharing the runtime legalization key
+    ``(encoding_id, opcode)``. The generated table only carries the action and
+    target opcode, so duplicate keys are valid only when those emitted fields
+    are identical. Conflicting duplicates still fail loudly in
+    ``_verify_unique_lookup_keys``.
+    """
+    deduped: list[LegalizationEntry] = []
+    seen: dict[tuple[int, int], LegalizationEntry] = {}
+    for e in entries:
+        enc_id = e.src_encoding_order if e.src_encoding_order >= 0 else 0xFFFF
+        key = (enc_id, e.src_opcode)
+        prev = seen.get(key)
+        if prev is None:
+            seen[key] = e
+            deduped.append(e)
+            continue
+        if (
+            prev.action.kind == e.action.kind
+            and prev.action.target_opcode == e.action.target_opcode
+        ):
+            continue
+        # Keep both entries so _verify_unique_lookup_keys reports the
+        # conflicting mnemonics with its existing diagnostic.
+        deduped.append(e)
+    return deduped
 
 
 def _verify_unique_lookup_keys(

@@ -49,7 +49,9 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 /// @brief Pack a SOP2 instruction word from its constituent fields.
 [[nodiscard]] inline constexpr uint32_t pack_sop2(uint32_t op, uint32_t sdst, uint32_t ssrc0,
                                                   uint32_t ssrc1) {
-  return ((op & 0x7Fu) << 23) | ((sdst & 0x7Fu) << 16) | ((ssrc1 & 0xFFu) << 8) | (ssrc0 & 0xFFu);
+  constexpr uint32_t kSop2EncodingPrefix = 0x100;
+  return (kSop2EncodingPrefix << 23) | ((op & 0x7Fu) << 23) | ((sdst & 0x7Fu) << 16) |
+         ((ssrc1 & 0xFFu) << 8) | (ssrc0 & 0xFFu);
 }
 
 /// @brief Scalar source operand encoding for a non-negative inline integer.

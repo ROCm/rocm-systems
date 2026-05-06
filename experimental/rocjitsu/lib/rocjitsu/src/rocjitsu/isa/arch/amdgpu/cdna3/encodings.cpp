@@ -286,6 +286,23 @@ void Flat::implicit_uses(RegisterSet &uses) const {
   }
 }
 
+FlatGlbl::FlatGlbl(std::string_view mnemonic, const FlatGlblMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  size_ = sizeof(OpEncoding);
+  raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
+  encoding_id_ = raw_encoding_[0] >> 23;
+  opcode_ = inst_.op;
+}
+
+FlatScratch::FlatScratch(std::string_view mnemonic, const FlatScratchMachineInst *inst,
+                         ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  size_ = sizeof(OpEncoding);
+  raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
+  encoding_id_ = raw_encoding_[0] >> 23;
+  opcode_ = inst_.op;
+}
+
 Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst,
                          ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {

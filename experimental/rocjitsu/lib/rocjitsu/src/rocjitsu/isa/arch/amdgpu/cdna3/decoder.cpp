@@ -5231,6 +5231,31 @@ std::unique_ptr<Instruction> Decoder::decodeFlatLoadShortD16HiFlat(const Machine
   return std::make_unique<FlatLoadShortD16HiFlat>(opcode);
 }
 
+std::unique_ptr<Instruction>
+Decoder::decodeScratchLoadLdsUbyteFlatScratch(const MachineInst *opcode) {
+  return std::make_unique<ScratchLoadLdsUbyteFlatScratch>(opcode);
+}
+
+std::unique_ptr<Instruction>
+Decoder::decodeScratchLoadLdsSbyteFlatScratch(const MachineInst *opcode) {
+  return std::make_unique<ScratchLoadLdsSbyteFlatScratch>(opcode);
+}
+
+std::unique_ptr<Instruction>
+Decoder::decodeScratchLoadLdsUshortFlatScratch(const MachineInst *opcode) {
+  return std::make_unique<ScratchLoadLdsUshortFlatScratch>(opcode);
+}
+
+std::unique_ptr<Instruction>
+Decoder::decodeScratchLoadLdsSshortFlatScratch(const MachineInst *opcode) {
+  return std::make_unique<ScratchLoadLdsSshortFlatScratch>(opcode);
+}
+
+std::unique_ptr<Instruction>
+Decoder::decodeScratchLoadLdsDwordFlatScratch(const MachineInst *opcode) {
+  return std::make_unique<ScratchLoadLdsDwordFlatScratch>(opcode);
+}
+
 std::unique_ptr<Instruction> Decoder::decodeFlatAtomicSwapFlat(const MachineInst *opcode) {
   return std::make_unique<FlatAtomicSwapFlat>(opcode);
 }
@@ -8832,11 +8857,11 @@ const std::array<Decoder::DecodeFunc, 128> Decoder::sub_decode_flat = {
     &Decoder::decodeFlatLoadSbyteD16HiFlat,
     &Decoder::decodeFlatLoadShortD16Flat,
     &Decoder::decodeFlatLoadShortD16HiFlat,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
-    &Decoder::decodeInvalid,
+    &Decoder::decodeScratchLoadLdsUbyteFlatScratch,
+    &Decoder::decodeScratchLoadLdsSbyteFlatScratch,
+    &Decoder::decodeScratchLoadLdsUshortFlatScratch,
+    &Decoder::decodeScratchLoadLdsSshortFlatScratch,
+    &Decoder::decodeScratchLoadLdsDwordFlatScratch,
     &Decoder::decodeInvalid,
     &Decoder::decodeInvalid,
     &Decoder::decodeInvalid,

@@ -697,8 +697,10 @@ class Parser:
                     inst_enc.is_implied_literal_enc = True
                     self.isa_spec.alt_encs_with_implied_literal.add(enc_name)
 
-            if not is_alt or not self.profile.skip_inst_encoding(
-                enc_name, 'default'
+            if (
+                not is_alt
+                or not self.profile.skip_inst_encoding(enc_name, 'default')
+                or self.profile.parse_skipped_encoding_identifiers(enc_name)
             ):
                 self.parse_encoding_identifers(
                     enc_node, inst_enc, parent_enc
@@ -708,6 +710,37 @@ class Parser:
             if enc_name in self.isa_spec.encoding_map:
                 raise KeyError(f'Duplicate encoding found: {enc_name}')
             self.isa_spec.encoding_map[enc_name] = inst_enc
+
+    def _include_unique_skipped_alt_instruction(
+        self, enc_name: str, enc_cond: str, opcode: int
+    ) -> bool:
+        """Keep skipped alternate instructions only when the parent lacks them.
+
+        FLAT segment encodings are normally skipped because opcodes shared with
+        ``ENC_FLAT`` are decoded by the parent and renamed at runtime from the
+        segment field. Some segment alternates also define extra opcodes, so
+        for skipped alternates that still parsed identifiers we compare opcode
+        maps and emit only the rows absent from the parent.
+        """
+        if enc_cond != 'default':
+            return False
+        if not self.profile.is_alt_encoding(enc_name):
+            return False
+        if not self.profile.parse_skipped_encoding_identifiers(enc_name):
+            return False
+
+        parent_name = self.profile.derive_parent_enc_name(enc_name)
+        enc = self.isa_spec.encoding_map[enc_name]
+        parent_enc = self.isa_spec.encoding_map[parent_name]
+        if enc.primary_dt_ptrs is None or parent_enc.primary_dt_ptrs is None:
+            return False
+        if opcode >= len(enc.primary_dt_ptrs):
+            return False
+        if enc.primary_dt_ptrs[opcode] == -1:
+            return False
+        if opcode >= len(parent_enc.primary_dt_ptrs):
+            return True
+        return parent_enc.primary_dt_ptrs[opcode] == -1
 
     def parse_insts(self) -> None:
         """Parse instructions and populate the decode table.
@@ -735,9 +768,14 @@ class Parser:
                 if enc_name in self.profile.skip_encodings:
                     continue
                 enc_cond = xs.get_node_text(enc_cond_node)
-                if self.profile.skip_inst_encoding(enc_name, enc_cond):
-                    continue
                 opcode = int(xs.get_node_text(opcode_node))
+                if (
+                    self.profile.skip_inst_encoding(enc_name, enc_cond)
+                    and not self._include_unique_skipped_alt_instruction(
+                        enc_name, enc_cond, opcode
+                    )
+                ):
+                    continue
                 opnds = []
                 for opnd in operands_node:
                     is_in = (
