@@ -571,7 +571,6 @@ amdsmi_status_t amdsmi_get_socket_info(amdsmi_socket_handle socket_handle, size_
   return AMDSMI_STATUS_SUCCESS;
 }
 
-#ifdef ENABLE_ESMI_LIB
 amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_handle, size_t len,
                                           char* name) {
   char proc_id[16] = {0};
@@ -591,7 +590,6 @@ amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_hand
 
   return AMDSMI_STATUS_SUCCESS;
 }
-#endif
 
 amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
                                              uint32_t* processor_count,
@@ -677,8 +675,8 @@ amdsmi_status_t amdsmi_get_switch_processor_handles(amdsmi_socket_handle socket_
       amd::smi::AMDSmiSystem::getInstance().handle_to_socket(socket_handle, &socket);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
-  processor_type_t processor_type =
-      static_cast<processor_type_t>(AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH);
+  amdsmi_processor_type_t processor_type =
+      static_cast<amdsmi_processor_type_t>(AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH);
   std::vector<amd::smi::AMDSmiProcessor*>& processors = socket->get_processors(processor_type);
   uint32_t processor_size = static_cast<uint32_t>(processors.size());
   // Get the processor count only
@@ -769,7 +767,6 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
   return AMDSMI_STATUS_SUCCESS;
 }
 
-#ifdef ENABLE_ESMI_LIB
 amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle* processor_handles,
                                                         uint32_t* processor_count,
                                                         uint32_t* nr_cpusockets,
@@ -779,7 +776,7 @@ amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle*
   uint32_t count_cpusockets = 0;
   uint32_t count_cpucores = 0;
   uint32_t count_gpus = 0;
-  processor_type_t processor_type;
+  amdsmi_processor_type_t processor_type;
 
   if (processor_count == nullptr || processor_handles == nullptr) {
     return AMDSMI_STATUS_INVAL;
@@ -805,7 +802,7 @@ amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle*
 }
 
 amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket_handle,
-                                                     processor_type_t processor_type,
+                                                     amdsmi_processor_type_t processor_type,
                                                      amdsmi_processor_handle* processor_handles,
                                                      uint32_t* processor_count) {
   AMDSMI_CHECK_INIT();
@@ -835,10 +832,8 @@ amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket
   return AMDSMI_STATUS_SUCCESS;
 }
 
-#endif
-
 amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_handle,
-                                          processor_type_t* processor_type) {
+                                          amdsmi_processor_type_t* processor_type) {
   AMDSMI_CHECK_INIT();
 
   if (processor_type == nullptr) {
@@ -7348,7 +7343,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_count(uint32_t* sock_count) {
 amdsmi_status_t amdsmi_get_cpu_handles(uint32_t* cpu_count,
                                        amdsmi_processor_handle* processor_handles) {
   uint32_t soc_count = 0, index = 0, cpu_per_soc = 0;
-  processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
+  amdsmi_processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
   std::vector<amdsmi_processor_handle> cpu_handles;
   amdsmi_status_t status;
 
@@ -7397,7 +7392,7 @@ amdsmi_status_t amdsmi_get_cpu_handles(uint32_t* cpu_count,
 amdsmi_status_t amdsmi_get_cpucore_handles(uint32_t* cores_count,
                                            amdsmi_processor_handle* processor_handles) {
   uint32_t soc_count = 0, index = 0, cores_per_soc = 0;
-  processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE;
+  amdsmi_processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE;
   std::vector<amdsmi_processor_handle> core_handles;
   amdsmi_status_t status;
 
@@ -8342,19 +8337,56 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(amdsmi_processor_handle processor_ha
 }
 
 /**
- * @brief Detect the loaded TTM kernel module name.
+ * @brief Detect the loaded TTM kernel module name (sysfs form).
  *
- * AMD ships the module as "amdttm" in some driver packages and as "ttm"
- * in upstream/other packages. This helper checks which module directory
- * exists under /sys/module/ and returns its name.
+ * AMD driver packages ship the TTM module under several names depending
+ * on the driver flavour:
+ *   * Ryzen/Radeon in-kernel amdgpu -> "ttm"
+ *   * amdgpu-dkms (Instinct, e.g. MI300A) -> "amdttm" or "amd-ttm"
  *
- * @return "amdttm" if /sys/module/amdttm exists, "ttm" otherwise.
+ * The kernel exposes modules under /sys/module/ using the C identifier
+ * form of the module name (hyphens are normalised to underscores), so
+ * the modprobe name "amd-ttm" appears as /sys/module/amd_ttm.
+ *
+ * @return The sysfs module directory name (no hyphens). The probe order
+ * is amdttm -> amd_ttm -> ttm.
  */
 static std::string ttm_module_name() {
+  // Diagnostic override. Set AMDSMI_TTM_SYSFS_NAME to one of
+  // {ttm, amdttm, amd_ttm} to force the detected name without
+  // requiring the corresponding module to be loaded. Useful for
+  // testing the amd-ttm modprobe path on hosts shipping amdttm.
+  const char* override_env = std::getenv("AMDSMI_TTM_SYSFS_NAME");
+  if (override_env != nullptr && override_env[0] != '\0') {
+    std::string v(override_env);
+    if (v == "ttm" || v == "amdttm" || v == "amd_ttm") {
+      return v;
+    }
+  }
   if (access("/sys/module/amdttm", F_OK) == 0) {
     return "amdttm";
   }
+  if (access("/sys/module/amd_ttm", F_OK) == 0) {
+    return "amd_ttm";
+  }
   return "ttm";
+}
+
+/**
+ * @brief Return the modprobe-facing name for the detected TTM module.
+ *
+ * modprobe/modprobe.d files must reference the original module name as
+ * produced by modinfo, which preserves hyphens. Sysfs normalises those
+ * hyphens to underscores, so we translate only when needed.
+ *
+ * @return "amd-ttm" when the sysfs name is "amd_ttm", otherwise the
+ * sysfs name unchanged.
+ */
+static std::string ttm_modprobe_name(const std::string& sysfs_name) {
+  if (sysfs_name == "amd_ttm") {
+    return "amd-ttm";
+  }
+  return sysfs_name;
 }
 
 amdsmi_status_t amdsmi_get_ttm_info(amdsmi_ttm_info_t* info) {
@@ -8455,10 +8487,11 @@ amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages) {
 
   if (is_dry_run()) {
     std::string mod = ttm_module_name();
-    std::string modprobe_path = "/etc/modprobe.d/" + mod + ".conf";
+    std::string conf_name = ttm_modprobe_name(mod);
+    std::string modprobe_path = "/etc/modprobe.d/" + conf_name + ".conf";
     std::ostringstream ss;
     ss << "[DRY_RUN] Would write to " << modprobe_path << ":" << std::endl;
-    ss << "[DRY_RUN]   options " << mod << " pages_limit=" << pages;
+    ss << "[DRY_RUN]   options " << conf_name << " pages_limit=" << pages;
     LOG_INFO(ss);
 
     return run_dracut_f();
@@ -8466,14 +8499,15 @@ amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages) {
 
   // Create/update modprobe configuration
   std::string mod = ttm_module_name();
-  std::string modprobe_path = "/etc/modprobe.d/" + mod + ".conf";
+  std::string conf_name = ttm_modprobe_name(mod);
+  std::string modprobe_path = "/etc/modprobe.d/" + conf_name + ".conf";
   std::ofstream modprobe_file(modprobe_path);
 
   if (!modprobe_file.good()) {
     return AMDSMI_STATUS_NO_PERM;
   }
 
-  modprobe_file << "options " << mod << " pages_limit=" << pages << std::endl;
+  modprobe_file << "options " << conf_name << " pages_limit=" << pages << std::endl;
   modprobe_file.flush();
   if (!modprobe_file) {
     modprobe_file.close();
@@ -8495,20 +8529,27 @@ amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages) {
 amdsmi_status_t amdsmi_reset_ttm_pages_limit(void) {
   AMDSMI_CHECK_INIT();
 
-  // Remove modprobe configuration to reset to default
-  // Check both possible config file names (amdttm.conf and ttm.conf)
+  // Remove modprobe configuration to reset to default. The active module
+  // may be ttm / amdttm / amd-ttm (sysfs: amd_ttm). Search all three.
   std::string mod = ttm_module_name();
-  std::string modprobe_path = "/etc/modprobe.d/" + mod + ".conf";
+  std::string primary_conf = ttm_modprobe_name(mod);
+  std::string modprobe_path = "/etc/modprobe.d/" + primary_conf + ".conf";
 
   // Check if file exists
   if (access(modprobe_path.c_str(), F_OK) != 0) {
-    // Try the other name as fallback (handles cross-upgrade scenarios)
-    std::string alt_mod = (mod == "amdttm") ? "ttm" : "amdttm";
-    std::string alt_path = "/etc/modprobe.d/" + alt_mod + ".conf";
-    if (access(alt_path.c_str(), F_OK) == 0) {
-      modprobe_path = alt_path;
-    } else {
-      // Neither file exists, nothing to do
+    // Search all known config names (handles cross-upgrade scenarios).
+    static const char* kKnownConfNames[] = {"ttm", "amdttm", "amd-ttm"};
+    bool found = false;
+    for (const char* alt : kKnownConfNames) {
+      if (alt == primary_conf) continue;
+      std::string alt_path = std::string("/etc/modprobe.d/") + alt + ".conf";
+      if (access(alt_path.c_str(), F_OK) == 0) {
+        modprobe_path = alt_path;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
       return AMDSMI_STATUS_SUCCESS;
     }
   }

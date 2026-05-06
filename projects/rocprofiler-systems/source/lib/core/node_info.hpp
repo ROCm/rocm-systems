@@ -23,15 +23,15 @@ public:
 
     static node_info& get_instance();
 
-    uint64_t    id          = 0;
-    uint64_t    hash        = 0;
-    std::string machine_id  = {};
-    std::string system_name = {};
-    std::string node_name   = {};
-    std::string release     = {};
-    std::string version     = {};
-    std::string machine     = {};
-    std::string domain_name = {};
+    std::uint64_t id          = 0;
+    std::uint64_t hash        = 0;
+    std::string   machine_id  = {};
+    std::string   system_name = {};
+    std::string   node_name   = {};
+    std::string   release     = {};
+    std::string   version     = {};
+    std::string   machine     = {};
+    std::string   domain_name = {};
 };
 
 const node_info&

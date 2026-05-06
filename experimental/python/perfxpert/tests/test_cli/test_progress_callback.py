@@ -4,7 +4,7 @@ Covers:
   * env-forced airgap skips provider-auth preflight even when
     ``enable_llm=True`` is requested for progress UX,
   * CLI non-TTY behaviour (plain ``[perfxpert]`` status lines on stderr,
-    real output on stdout — no ANSI escape codes),
+    real output on stdout when ``-o -`` is requested — no ANSI escape codes),
   * ``--no-progress`` silences the feature entirely.
 
 All tests use airgap mode so nothing hits an LLM provider.
@@ -71,7 +71,7 @@ _CLI_PRELUDE = (
     # driving _execute_agentic through the process_args path.
     "import sys\n"
     "from unittest.mock import patch\n"
-    "from perfxpert import analyze\n"
+    "from perfxpert import analyze, output_config\n"
     "def _fake_agent_root(**kwargs):\n"
     "    cb = kwargs.get('progress_callback')\n"
     "    if cb is not None:\n"
@@ -90,7 +90,7 @@ _CLI_PRELUDE = (
     "     patch('perfxpert.api.agent_root', side_effect=_fake_agent_root):\n"
     "    analyze._execute_agentic(\n"
     "        None,\n"
-    "        config=None,\n"
+    "        config=output_config.output_config(output_file='-'),\n"
     "        source_dir='.',\n"
     "        output_format='json',\n"
     "        enable_llm=True,\n"
@@ -120,7 +120,8 @@ def _airgap_env(monkeypatch, tmp_path):
 def test_analyze_cli_non_tty_prints_status_lines(_airgap_env):
     """Subprocess run of ``_execute_agentic`` with live LLM mode and a piped
     stderr emits the ``[perfxpert]`` status prefix on stderr and the
-    JSON result on stdout. No ANSI escapes in either stream.
+    JSON result on stdout when stdout output is explicitly requested.
+    No ANSI escapes in either stream.
     """
     env = dict(_airgap_env)
     env.pop("PERFXPERT_AIRGAP", None)

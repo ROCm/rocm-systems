@@ -181,6 +181,28 @@ hipError_t hipFuncGetAttributes(hipFuncAttributes* attr, const void* func) {
   HIP_RETURN(hipSuccess);
 }
 
+inline hipError_t GetDeviceKernel(const void* func, device::Kernel** d_kernel) {
+  hipFunction_t h_func = nullptr;
+
+  hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
+  if (h_func == nullptr) {
+    if (PlatformState::Instance().IsValidDynFunc(func)) {
+      h_func = reinterpret_cast<hipFunction_t>(const_cast<void*>(func));
+    } else {
+      return hipErrorInvalidDeviceFunction;
+    }
+  }
+
+  amd::Kernel* kernel = hip::asKernel(h_func);
+
+  if (kernel == nullptr) {
+    return hipErrorInvalidDeviceFunction;
+  }
+  *(d_kernel) = const_cast<device::Kernel*>(
+      kernel->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0])));
+  return hipSuccess;
+}
+
 hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value) {
   HIP_INIT_API(hipFuncSetAttribute, func, attr, value);
 
@@ -239,22 +261,12 @@ hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t cacheConfig) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  hipFunction_t h_func = nullptr;
-  hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
-  if (h_func == nullptr) {
-    if (!PlatformState::Instance().IsValidDynFunc(func)) {
-      HIP_RETURN(hipErrorInvalidDeviceFunction);
-    }
-    h_func = reinterpret_cast<hipFunction_t>(const_cast<void*>(func));
-  }
+  device::Kernel* d_kernel;
+  hipError_t status = GetDeviceKernel(func, &d_kernel);
 
-  amd::Kernel* kernel = hip::asKernel(h_func);
-  if (kernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  if (hipSuccess != status) {
+    HIP_RETURN(status);
   }
-
-  device::Kernel* d_kernel = const_cast<device::Kernel*>(
-      kernel->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0])));
   d_kernel->workGroupInfo()->groupMemCarveout_ =
       d_kernel->device().GetGroupMemCarveout(static_cast<amd::FuncCache>(cacheConfig));
 
@@ -848,13 +860,6 @@ hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr)
 hipError_t hipLaunchKernel_common(const void* hostFunction, dim3 gridDim, dim3 blockDim,
                                   void** args, size_t sharedMemBytes, hipStream_t stream,
                                   dim3 clusterDim = {1, 1, 1}) {
-  // TODO: @cjatin refactor the isValid check in hot path
-  // We do this check in `ihipLaunchKernel` as well, but the macro STREAM_CAPTURE dereferences the stream first.
-  // So this shows up in the ASAN run.
-  // I will raise a follow up PR to fix this.
-  if (!hip::isValid(stream)) {
-    return hipErrorInvalidValue;
-  }
   STREAM_CAPTURE(hipLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes);
   return ihipLaunchKernel(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream, nullptr,
                           nullptr, 0, clusterDim);
