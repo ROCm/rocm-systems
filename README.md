@@ -35,23 +35,7 @@ git clone https://github.com/ROCm/librocdxg.git
 cd librocdxg
 ```
 
-2. Verify that ROCm has been successfully installed.
-
-```bash
-tree -L 1 /opt
-```
-
-Expected result:
-
-```bash
-/opt/
-├── [...]
-├── rocm -> /etc/alternatives/rocm
-├── rocm-7.2.0
-└── [...]
-```
-
-3. Build the librocdxg.
+2. Build the librocdxg.
 
 ```bash
 # Set the Windows SDK path (adjust version number if different)
@@ -140,7 +124,7 @@ docker run -it  \
 
 | AMD Rocdxg Lib Version | AMD ROCm Version | AMD Windows Driver Version | Supported AMD GPU Products |
 | ---------------------- | ---------------- | -------------------------- | -------------------------- |
-| 1.1.0                  | 7.2.x              | AMD Windows x86 drivers can be directly downloaded from [AMD Driver](https://www.amd.com/en/support/download/drivers.html) | ***Radeon***<br><br>AMD Radeon RX 9070<br>AMD Radeon RX 9070 XT<br>AMD Radeon RX 9070 GRE<br>AMD Radeon AI PRO R9700<br>AMD Radeon RX 9060<br>AMD Radeon RX 9060 XT<br>AMD Radeon RX 7900 XTX<br>AMD Radeon RX 7900 XT<br>AMD Radeon RX 7900 GRE<br>AMD Radeon PRO W7900<br>AMD Radeon PRO W7900 Dual Slot<br>AMD Radeon PRO W7800<br>AMD Radeon PRO W7800 48GB<br>AMD Radeon RX 7800 XT<br>AMD Radeon PRO W7700<br><br>***Ryzen***<br><br>AMD Ryzen AI Max+ 395<br>AMD Ryzen AI Max 390<br>AMD Ryzen AI Max 385<br>AMD Ryzen AI 9 HX 375<br>AMD Ryzen AI 9 HX 370<br>AMD Ryzen AI 9 365 |
+| 1.2.0                  | 7.2.x              | AMD Windows x86 drivers can be directly downloaded from [AMD Driver](https://www.amd.com/en/support/download/drivers.html) | ***Radeon***<br><br>AMD Radeon RX 9070<br>AMD Radeon RX 9070 XT<br>AMD Radeon RX 9070 GRE<br>AMD Radeon AI PRO R9700<br>AMD Radeon RX 9060<br>AMD Radeon RX 9060 XT<br>AMD Radeon RX 7900 XTX<br>AMD Radeon RX 7900 XT<br>AMD Radeon RX 7900 GRE<br>AMD Radeon PRO W7900<br>AMD Radeon PRO W7900 Dual Slot<br>AMD Radeon PRO W7800<br>AMD Radeon PRO W7800 48GB<br>AMD Radeon RX 7800 XT<br>AMD Radeon PRO W7700<br><br>***Ryzen***<br><br>AMD Ryzen AI Max+ 395<br>AMD Ryzen AI Max 390<br>AMD Ryzen AI Max 385<br>AMD Ryzen AI 9 HX 375<br>AMD Ryzen AI 9 HX 370<br>AMD Ryzen AI 9 365 |
 
 
 ## Documentation
