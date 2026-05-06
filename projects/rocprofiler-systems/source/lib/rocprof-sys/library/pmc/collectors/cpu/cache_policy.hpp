@@ -23,6 +23,12 @@
 namespace rocprofsys::pmc::collectors::cpu
 {
 
+/**
+ * @brief Output policy for writing CPU PMC samples to the trace cache.
+ *
+ * Handles registration of CPU-specific metadata (tracks, PMC info)
+ * and serialization of CPU metric samples into the trace cache.
+ */
 struct cache_policy
 {
     static void initialize_category_metadata()
@@ -33,6 +39,14 @@ struct cache_policy
 
     static void initialize_tracks_metadata() {}
 
+    /**
+     * @brief Initialize per-CPU PMC metadata entries.
+     *
+     * @param socket_id Socket (physical package) ID for agent registration.
+     * @param monitored_cpus Set of CPU IDs being monitored on this socket.
+     * @param is_first_socket True if this is the first selected socket;
+     *        process-level metrics are registered only once, under this socket.
+     */
     static void initialize_pmc_metadata(size_t                  socket_id,
                                         const std::set<size_t>& monitored_cpus,
                                         bool                    is_first_socket)
@@ -113,9 +127,20 @@ struct cache_policy
                         rocprofsys::trace_cache::ABSOLUTE);
     }
 
-    // Single-writer: called only from the sampler thread, serialized by
-    // type_mutex<category::amd_smi> in pmc::sample/pause. Required for the
-    // static s_zero_entries cache in get_effective_cpu_data.
+    /**
+     * @brief Store a CPU PMC sample to the trace cache.
+     *
+     * Thread-safety: store_sample is called only from the sampler thread,
+     * serialized by type_mutex<category::amd_smi> in pmc::sample/pause.
+     * The static s_zero_entries is safe under this single-writer invariant.
+     *
+     * @param device_id Socket (physical package) ID.
+     * @param device_name Device name (unused for CPU).
+     * @param enabled_metrics_cfg Metrics enabled by configuration.
+     * @param supported_metrics Metrics supported by the device.
+     * @param metric_values Collected metric values.
+     * @param timestamp Sample timestamp in nanoseconds.
+     */
     static void store_sample(size_t device_id, const std::string& /*device_name*/,
                              const enabled_metrics& enabled_metrics_cfg,
                              const enabled_metrics& supported_metrics,
@@ -133,9 +158,14 @@ struct cache_policy
     }
 
 private:
-    // On pause, base::collector hands us metrics_t{} with empty cpu_data; emit
-    // zero entries for previously-seen CPU IDs so Perfetto tracks drop to zero
-    // instead of going stale.
+    /**
+     * @brief Return cpu_data from the metrics, or cached zero entries on pause.
+     *
+     * During normal sampling, cpu_data is non-empty and we cache the CPU IDs.
+     * During pause, base::collector creates metrics_t{} which has empty cpu_data.
+     * In that case, we return zero entries for all previously-seen CPU IDs so
+     * that Perfetto counter tracks drop to zero.
+     */
     static const std::vector<per_cpu_metrics>& get_effective_cpu_data(
         const metrics& metric_values)
     {
