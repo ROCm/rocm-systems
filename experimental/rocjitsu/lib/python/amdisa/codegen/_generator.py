@@ -36,6 +36,20 @@ from amdisa.codegen.shared_baselines import (
     CDNA_BASELINE as _CDNA_BASELINE,
     CDNA_ARCHES as _CDNA_ARCHES,
 )
+from amdisa.codegen.execute.vop3_modifiers import (
+    vop3_src_mod,
+    vop3_dst_mod,
+    vop3_dst_mod_f64,
+)
+from amdisa.codegen.execute.scalar import (
+    gen_scalar_unary,
+    gen_scalar_binop,
+    gen_scalar_bfe,
+    gen_scalar_cmp,
+    gen_scalar_cmpk,
+    gen_scalar_bitcmp,
+    gen_scalar_saveexec,
+)
 
 
 
@@ -316,6 +330,22 @@ class CodeGenerator:
                     f'{mod_impl}}}'
                 ))
             fmt_enc_name = inst_enc.fmt_enc_name
+            implicit_uses_impl = self._encoding_implicit_uses_impl(
+                inst_enc, enc_field_names
+            )
+            if implicit_uses_impl:
+                public_members.append(
+                    cgen.Line(
+                        'void implicit_uses(RegisterSet &uses) const override;'
+                    )
+                )
+                class_func_impls.append(
+                    cgen.Line(
+                        f'void {fmt_enc_name}::implicit_uses'
+                        f'(RegisterSet &uses) const '
+                        f'{{ {implicit_uses_impl} }}'
+                    )
+                )
 
             if fmt_enc_name not in cond_emitted:
                 cond_emitted.add(fmt_enc_name)
@@ -397,10 +427,14 @@ class CodeGenerator:
                 class_members.append(cgen.Statement('uint32_t dpp_bank_mask_ = 0xF'))
                 class_members.append(cgen.Statement('uint32_t dpp_bound_ctrl_ = 0'))
                 class_members.append(cgen.Statement('std::unique_ptr<DppOperand> dpp_src0_'))
-                # SDWA fields (CDNA and RDNA1/2 only; RDNA3+ has no SDWA).
-                class_members.append(cgen.Statement('uint32_t sdwa_src0_sel_ = 6'))  # DWORD
+                class_members.append(cgen.Statement('std::unique_ptr<DppOperand> dpp_src1_'))
+                # SDWA fields (CDNA and RDNA1/2 have hardware SDWA encoding; fields
+                # are present on all ISAs for uniform codegen even if unused).
+                class_members.append(cgen.Statement('uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD'))
                 class_members.append(cgen.Statement('bool sdwa_src0_sext_ = false'))
-                class_members.append(cgen.Statement('uint32_t sdwa_dst_sel_ = 6'))   # DWORD
+                class_members.append(cgen.Statement('uint32_t sdwa_src1_sel_ = amdgpu::sdwa::DWORD'))
+                class_members.append(cgen.Statement('bool sdwa_src1_sext_ = false'))
+                class_members.append(cgen.Statement('uint32_t sdwa_dst_sel_ = amdgpu::sdwa::DWORD'))
                 class_members.append(cgen.Statement('uint32_t sdwa_dst_unused_ = 0'))
                 class_members.append(cgen.Statement('bool sdwa_clamp_ = false'))
             s = cgen.Struct(
@@ -423,6 +457,7 @@ class CodeGenerator:
                     False,
                 ),
                 ('rocjitsu/isa/instruction.h', False),
+                ('rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h', False),
                 ('string', True),
                 ('string_view', True),
             ],
@@ -468,6 +503,26 @@ class CodeGenerator:
         )
         class_def_file.gen_code()
         class_impl_file.gen_code()
+
+    def _encoding_implicit_uses_impl(
+        self, inst_enc: InstEncoding, enc_field_names: set[str]
+    ) -> str:
+        """Return C++ body for hidden register uses on an encoding base."""
+        if (
+            inst_enc.enc_name.upper() == 'ENC_FLAT'
+            and {'seg', 'saddr'} <= enc_field_names
+        ):
+            return (
+                'if (inst_.saddr == 0x7F) return;'
+                'if (inst_.seg == 1) {'
+                'uses.expand(RegisterRef{RegClass::SGPR, '
+                'static_cast<uint16_t>(inst_.saddr), 1});'
+                '} else if (inst_.seg == 2) {'
+                'uses.expand(RegisterRef{RegClass::SGPR, '
+                'static_cast<uint16_t>(inst_.saddr), 2});'
+                '}'
+            )
+        return ''
 
     def _enc_field_at_bit(self, enc_name: str, bit_offset: int) -> str | None:
         """Return the field name at a given bit offset in an encoding, or None."""
@@ -542,9 +597,8 @@ class CodeGenerator:
         # Use inst.enc_name (not enc_name) because the instruction's encoding
         # may be a sub-format (e.g. VOP3_SDST_ENC) that differs from the
         # parent encoding (ENC_VOP3). VOP3_SDST_ENC has neg/omod/clamp but
-        # no abs modifier field. Set as instance state so that helper methods
-        # (_vop3_src_mod, etc.) can read it without explicit threading.
-        self._has_abs = profile.has_abs_modifier(inst.enc_name)
+        # no abs modifier field.
+        has_abs = profile.has_abs_modifier(inst.enc_name)
         self._enc_name = enc_name
         L = []  # output lines
 
@@ -645,16 +699,16 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_unary':
-            return self._gen_scalar_unary(dst_ops, src_ops, op, dtype, scc)
+            return gen_scalar_unary(dst_ops, src_ops, op, dtype, scc)
 
         if cls == 'scalar_binop':
-            return self._gen_scalar_binop(dst_ops, src_ops, op, dtype, scc)
+            return gen_scalar_binop(dst_ops, src_ops, op, dtype, scc)
 
         if cls == 'scalar_cmp':
-            return self._gen_scalar_cmp(src_ops, op, dtype)
+            return gen_scalar_cmp(src_ops, op, dtype)
 
         if cls == 'scalar_cmpk':
-            return self._gen_scalar_cmpk(dst_ops, src_ops, op, dtype)
+            return gen_scalar_cmpk(dst_ops, src_ops, op, dtype)
 
         if cls == 'scalar_addk':
             L.append(f'  int32_t s0 = static_cast<int32_t>({dst_ops[0]}.read_scalar(wf));')
@@ -672,7 +726,7 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_saveexec':
-            return self._gen_scalar_saveexec(dst_ops, src_ops, op)
+            return gen_scalar_saveexec(dst_ops, src_ops, op)
 
         if cls == 'scalar_wrexec':
             L.append(f'  uint64_t src = {src_ops[0]}.read_scalar64(wf);')
@@ -713,7 +767,7 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_bitcmp':
-            return self._gen_scalar_bitcmp(src_ops, op, dtype)
+            return gen_scalar_bitcmp(src_ops, op, dtype)
 
         if cls == 'vector_mov':
             L.append('  uint64_t exec = wf.exec();')
@@ -721,15 +775,15 @@ class CodeGenerator:
             L.append('    if (!(exec & (1ULL << lane))) continue;')
             if dtype == 'b64' and is_vop3:
                 L.append(f'    double s = std::bit_cast<double>({src_ops[0]}.read_lane64(wf, lane));')
-                L.extend(self._vop3_src_mod('s', 0))
-                L.extend(self._vop3_dst_mod_f64('s'))
+                L.extend(vop3_src_mod('s', 0, has_abs))
+                L.extend(vop3_dst_mod_f64('s'))
                 L.append(f'    {dst_ops[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(s));')
             elif dtype == 'b64':
                 L.append(f'    {dst_ops[0]}.write_lane64(wf, lane, {src_ops[0]}.read_lane64(wf, lane));')
             elif is_vop3:
                 L.append(f'    float s = std::bit_cast<float>({src_ops[0]}.read_lane(wf, lane));')
-                L.extend(self._vop3_src_mod('s', 0))
-                L.extend(self._vop3_dst_mod('s'))
+                L.extend(vop3_src_mod('s', 0, has_abs))
+                L.extend(vop3_dst_mod('s'))
                 L.append(f'    {dst_ops[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(s));')
             else:
                 L.append(f'    {dst_ops[0]}.write_lane(wf, lane, {src_ops[0]}.read_lane(wf, lane));')
@@ -737,19 +791,19 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'vector_unary':
-            return self._gen_vector_unary(dst_ops, src_ops, op, dtype, is_vop3)
+            return self._gen_vector_unary(dst_ops, src_ops, op, dtype, is_vop3, has_abs)
 
         if cls == 'vector_binop':
-            return self._gen_vector_binop(dst_ops, src_ops, op, dtype, is_vop3)
+            return self._gen_vector_binop(dst_ops, src_ops, op, dtype, is_vop3, has_abs)
 
         if cls == 'vector_ternary':
-            return self._gen_vector_ternary(dst_ops, src_ops, op, dtype, is_vop3)
+            return self._gen_vector_ternary(dst_ops, src_ops, op, dtype, is_vop3, has_abs)
 
         if cls == 'vector_cmp':
-            return self._gen_vector_cmp(dst_ops, src_ops, op, dtype, is_vop3)
+            return self._gen_vector_cmp(dst_ops, src_ops, op, dtype, is_vop3, has_abs)
 
         if cls == 'vector_cmpx':
-            return self._gen_vector_cmpx(src_ops, op, dtype, is_vop3, dst_ops)
+            return self._gen_vector_cmpx(src_ops, op, dtype, is_vop3, dst_ops, has_abs)
 
         if cls == 'vector_cndmask':
             # v_cndmask_b32 is a pure bitwise select — no input/output
@@ -812,10 +866,10 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'vector_cmp_class':
-            return self._gen_vector_cmp_class(dst_ops, src_ops, dtype, False, is_vop3)
+            return self._gen_vector_cmp_class(dst_ops, src_ops, dtype, False, is_vop3, has_abs)
 
         if cls == 'vector_cmpx_class':
-            return self._gen_vector_cmp_class(dst_ops, src_ops, dtype, True, is_vop3)
+            return self._gen_vector_cmp_class(dst_ops, src_ops, dtype, True, is_vop3, has_abs)
 
         if cls == 'vector_fmamk':
             # D = S0 * K + S2, K is inline constant (second src operand)
@@ -878,13 +932,13 @@ class CodeGenerator:
             return self._gen_vector_mad_32_16(dst_ops, src_ops, dtype)
 
         if cls == 'vector_div_fixup':
-            return self._gen_vector_div_fixup(dst_ops, src_ops, dtype, is_vop3)
+            return self._gen_vector_div_fixup(dst_ops, src_ops, dtype, is_vop3, has_abs)
 
         if cls == 'vector_div_scale':
-            return self._gen_vector_div_scale(dst_ops, src_ops, dtype, is_vop3)
+            return self._gen_vector_div_scale(dst_ops, src_ops, dtype, is_vop3, has_abs)
 
         if cls == 'vector_div_fmas':
-            return self._gen_vector_div_fmas(dst_ops, src_ops, dtype, is_vop3)
+            return self._gen_vector_div_fmas(dst_ops, src_ops, dtype, is_vop3, has_abs)
 
         if cls == 'vector_dot':
             return self._gen_vector_dot(dst_ops, src_ops, op, dtype)
@@ -1137,7 +1191,7 @@ class CodeGenerator:
 
         return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: {cls}'
 
-    def _gen_vector_cmp_class(self, dst: list[str], src: list[str], dtype: str | None, is_cmpx: bool, is_vop3: bool = False) -> str:
+    def _gen_vector_cmp_class(self, dst: list[str], src: list[str], dtype: str | None, is_cmpx: bool, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate V_CMP_CLASS / V_CMPX_CLASS body."""
         L = []
         L.append('  uint64_t exec = wf.exec();')
@@ -1153,7 +1207,7 @@ class CodeGenerator:
         if dtype == 'f64':
             L.append(f'    double s0 = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s0', 0))
+                L.extend(vop3_src_mod('s0', 0, has_abs))
             L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
             L.append('    bool match = false;')
             L.append('    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0) match = true;')
@@ -1174,7 +1228,7 @@ class CodeGenerator:
             L.append(f'    uint16_t s0_raw = static_cast<uint16_t>({src[0]}.read_lane(wf, lane));')
             L.append(f'    float s0 = util::f16_to_f32(s0_raw);')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s0', 0))
+                L.extend(vop3_src_mod('s0', 0, has_abs))
             L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
             L.append('    bool match = false;')
             L.append('    bool is_f16_nan = ((s0_raw & 0x7C00) == 0x7C00) && ((s0_raw & 0x03FF) != 0);')
@@ -1191,7 +1245,7 @@ class CodeGenerator:
         else:
             L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s0', 0))
+                L.extend(vop3_src_mod('s0', 0, has_abs))
             L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
             L.append('    bool match = false;')
             L.append('    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0) match = true;')
@@ -1289,7 +1343,7 @@ class CodeGenerator:
         L.append('  }')
         return '\n'.join(L)
 
-    def _gen_vector_div_fixup(self, dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_div_fixup(self, dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate V_DIV_FIXUP body (corrects division result)."""
         L = []
         L.append('  uint64_t exec = wf.exec();')
@@ -1300,9 +1354,9 @@ class CodeGenerator:
             L.append(f'    double b = std::bit_cast<double>({src[1]}.read_lane64(wf, lane));')
             L.append(f'    double c = std::bit_cast<double>({src[2]}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('p', 0))
-                L.extend(self._vop3_src_mod('b', 1))
-                L.extend(self._vop3_src_mod('c', 2))
+                L.extend(vop3_src_mod('p', 0, has_abs))
+                L.extend(vop3_src_mod('b', 1, has_abs))
+                L.extend(vop3_src_mod('c', 2, has_abs))
             L.append('    double result;')
             L.append('    if (std::isnan(b)) result = b;')
             L.append('    else if (std::isnan(c)) result = c;')
@@ -1320,16 +1374,16 @@ class CodeGenerator:
             L.append('    else if (std::isinf(b)) result = std::copysign(0.0, std::bit_cast<double>(std::bit_cast<uint64_t>(b) ^ std::bit_cast<uint64_t>(c)));')
             L.append('    else result = p;')
             if is_vop3:
-                L.extend(self._vop3_dst_mod_f64('result'))
+                L.extend(vop3_dst_mod_f64('result'))
             L.append(f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
         else:
             L.append(f'    float p = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
             L.append(f'    float b = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
             L.append(f'    float c = std::bit_cast<float>({src[2]}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('p', 0))
-                L.extend(self._vop3_src_mod('b', 1))
-                L.extend(self._vop3_src_mod('c', 2))
+                L.extend(vop3_src_mod('p', 0, has_abs))
+                L.extend(vop3_src_mod('b', 1, has_abs))
+                L.extend(vop3_src_mod('c', 2, has_abs))
             L.append('    float result;')
             L.append('    if (std::isnan(b)) result = b;')
             L.append('    else if (std::isnan(c)) result = c;')
@@ -1347,12 +1401,12 @@ class CodeGenerator:
             L.append('    else if (std::isinf(b)) result = std::copysign(0.0f, std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));')
             L.append('    else result = p;')
             if is_vop3:
-                L.extend(self._vop3_dst_mod('result'))
+                L.extend(vop3_dst_mod('result'))
             L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
         L.append('  }')
         return '\n'.join(L)
 
-    def _gen_vector_div_scale(self, dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_div_scale(self, dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate V_DIV_SCALE body per ISA pseudocode (CDNA4 p.363-365).
 
         S1 = denominator, S2 = numerator. S0 selects which to scale
@@ -1379,9 +1433,9 @@ class CodeGenerator:
         L.append(f'    {fp_type} s1 = std::bit_cast<{fp_type}>({src[1]}.{read_fn}(wf, lane));')
         L.append(f'    {fp_type} s2 = std::bit_cast<{fp_type}>({src[2]}.{read_fn}(wf, lane));')
         if is_vop3:
-            L.extend(self._vop3_src_mod('s0', 0))
-            L.extend(self._vop3_src_mod('s1', 1))
-            L.extend(self._vop3_src_mod('s2', 2))
+            L.extend(vop3_src_mod('s0', 0, has_abs))
+            L.extend(vop3_src_mod('s1', 1, has_abs))
+            L.extend(vop3_src_mod('s2', 2, has_abs))
         L.append(f'    {fp_type} result = s0;')
         L.append('    bool set_vcc = false;')
         L.append(f'    if (s2 == {zero} || s1 == {zero}) {{')
@@ -1423,7 +1477,7 @@ class CodeGenerator:
         L.append('  wf.set_vcc(vcc);')
         return '\n'.join(L)
 
-    def _gen_vector_div_fmas(self, dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_div_fmas(self, dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate V_DIV_FMAS body (FMA with scale based on VCC)."""
         L = []
         L.append('  uint64_t exec = wf.exec();')
@@ -1435,9 +1489,9 @@ class CodeGenerator:
             L.append(f'    double s1 = std::bit_cast<double>({src[1]}.read_lane64(wf, lane));')
             L.append(f'    double s2 = std::bit_cast<double>({src[2]}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s0', 0))
-                L.extend(self._vop3_src_mod('s1', 1))
-                L.extend(self._vop3_src_mod('s2', 2))
+                L.extend(vop3_src_mod('s0', 0, has_abs))
+                L.extend(vop3_src_mod('s1', 1, has_abs))
+                L.extend(vop3_src_mod('s2', 2, has_abs))
             L.append('    double result = std::fma(s0, s1, s2);')
             L.append('    if (vcc & (1ULL << lane)) {')
             L.append('      result = std::ldexp(result, 64);')
@@ -1448,9 +1502,9 @@ class CodeGenerator:
             L.append(f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
             L.append(f'    float s2 = std::bit_cast<float>({src[2]}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s0', 0))
-                L.extend(self._vop3_src_mod('s1', 1))
-                L.extend(self._vop3_src_mod('s2', 2))
+                L.extend(vop3_src_mod('s0', 0, has_abs))
+                L.extend(vop3_src_mod('s1', 1, has_abs))
+                L.extend(vop3_src_mod('s2', 2, has_abs))
             L.append('    float result = std::fma(s0, s1, s2);')
             L.append('    if (vcc & (1ULL << lane)) {')
             L.append('      result = std::ldexp(result, 32);')
@@ -1711,494 +1765,7 @@ class CodeGenerator:
         L.append('  }')
         return '\n'.join(L)
 
-    def _gen_scalar_unary(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, scc: str | None) -> str:
-        """Generate scalar unary operation body."""
-        L = []
-        is_64 = dtype in ('b64', 'i64')
-
-        # Special cases that don't follow the is_64 read/write pattern.
-        if op == 'flbit_i32_i64':
-            # 64-bit signed input → 32-bit output (find first bit of sign).
-            L.append(f'  int64_t sval = static_cast<int64_t>({src[0]}.read_scalar64(wf));')
-            L.append('  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);')
-            L.append('  uint32_t result = uval == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(uval));')
-            L.append(f'  {dst[0]}.write_scalar(wf, result);')
-            if scc and scc != 'none':
-                L.append('  wf.write_scc(result != 0);')
-            return '\n'.join(L)
-
-        if op == 'clz64':
-            # 64-bit unsigned input → 32-bit output (count leading zeros).
-            L.append(f'  uint64_t val = {src[0]}.read_scalar64(wf);')
-            L.append('  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));')
-            L.append(f'  {dst[0]}.write_scalar(wf, result);')
-            if scc and scc != 'none':
-                L.append('  wf.write_scc(result != 0);')
-            return '\n'.join(L)
-
-        if op == 'cls64':
-            # 64-bit signed input → 32-bit output (count leading sign bits).
-            L.append(f'  int64_t sval = static_cast<int64_t>({src[0]}.read_scalar64(wf));')
-            L.append('  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);')
-            L.append('  uint32_t result = uval == 0 ? 63u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;')
-            L.append(f'  {dst[0]}.write_scalar(wf, result);')
-            if scc and scc != 'none':
-                L.append('  wf.write_scc(result != 0);')
-            return '\n'.join(L)
-
-        if op == 'ctz' and is_64:
-            L.append(f'  uint64_t val = {src[0]}.read_scalar64(wf);')
-            L.append('  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(val));')
-            L.append(f'  {dst[0]}.write_scalar(wf, result);')
-            if scc and scc != 'none':
-                L.append('  wf.write_scc(result != 0);')
-            return '\n'.join(L)
-
-        if op == 'clz' and is_64:
-            L.append(f'  uint64_t val = {src[0]}.read_scalar64(wf);')
-            L.append('  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));')
-            L.append(f'  {dst[0]}.write_scalar(wf, result);')
-            if scc and scc != 'none':
-                L.append('  wf.write_scc(result != 0);')
-            return '\n'.join(L)
-
-        if op == 'cls' and is_64:
-            L.append(f'  int64_t sval = static_cast<int64_t>({src[0]}.read_scalar64(wf));')
-            L.append('  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);')
-            L.append('  uint32_t result = uval == 0 ? 63u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;')
-            L.append(f'  {dst[0]}.write_scalar(wf, result);')
-            if scc and scc != 'none':
-                L.append('  wf.write_scc(result != 0);')
-            return '\n'.join(L)
-
-        if op in ('bitset0', 'bitset1') and is_64:
-            # 32-bit input (bit index), 64-bit read-modify-write destination.
-            L.append(f'  uint32_t bit = {src[0]}.read_scalar(wf);')
-            if op == 'bitset0':
-                L.append(f'  uint64_t result = {dst[0]}.read_scalar64(wf) & ~(1ULL << (bit & 63));')
-            else:
-                L.append(f'  uint64_t result = {dst[0]}.read_scalar64(wf) | (1ULL << (bit & 63));')
-            L.append(f'  {dst[0]}.write_scalar64(wf, result);')
-            return '\n'.join(L)
-
-        if is_64:
-            L.append(f'  uint64_t val = {src[0]}.read_scalar64(wf);')
-            op_map = {
-                'not': '~val',
-                'wqm': '0; for (int q = 0; q < 16; ++q) if (val & (0xFULL << (q * 4))) result |= (0xFULL << (q * 4))',
-                'bcnt0': 'static_cast<uint64_t>(std::popcount(~val))',
-                'bcnt1': 'static_cast<uint64_t>(std::popcount(val))',
-                'ff0': 'static_cast<uint64_t>(val == ~0ULL ? -1 : std::countr_zero(~val))',
-                'ff1': 'static_cast<uint64_t>(val == 0 ? -1 : std::countr_zero(val))',
-                'flbit': 'static_cast<uint64_t>(val == 0 ? -1 : std::countl_zero(val))',
-                'bitrepl': 'val',
-            }
-            if op == 'brev':
-                L.append('  uint64_t result = 0;')
-                L.append('  for (int i = 0; i < 64; ++i) result |= ((val >> i) & 1) << (63 - i);')
-            elif op == 'quadmask':
-                L.append('  uint64_t result = 0;')
-                L.append('  for (int q = 0; q < 16; ++q) if (val & (0xFULL << (q * 4))) result |= (1ULL << q);')
-            elif op in op_map:
-                L.append(f'  uint64_t result = {op_map[op]};')
-            else:
-                L.append(f'  uint64_t result = val; // unhandled: {op}')
-            L.append(f'  {dst[0]}.write_scalar64(wf, result);')
-            L.append('  wf.write_scc(result != 0);')
-        else:
-            if op == 'abs':
-                # Use unsigned negation to avoid UB when val == INT_MIN.
-                L.append(f'  int32_t val = static_cast<int32_t>({src[0]}.read_scalar(wf));')
-                L.append('  uint32_t uval = static_cast<uint32_t>(val);')
-                L.append('  uint32_t result = val < 0 ? (0u - uval) : uval;')
-            elif op == 'sext8':
-                L.append(f'  uint32_t val = {src[0]}.read_scalar(wf);')
-                L.append('  uint32_t result = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(val & 0xFF)));')
-            elif op == 'sext16':
-                L.append(f'  uint32_t val = {src[0]}.read_scalar(wf);')
-                L.append('  uint32_t result = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(val & 0xFFFF)));')
-            elif op == 'flbit_i32':
-                L.append(f'  int32_t sval = static_cast<int32_t>({src[0]}.read_scalar(wf));')
-                L.append('  uint32_t val = sval < 0 ? ~static_cast<uint32_t>(sval) : static_cast<uint32_t>(sval);')
-                L.append('  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));')
-            elif op == 'flbit_i32_i64':
-                L.append(f'  int64_t sval = static_cast<int64_t>({src[0]}.read_scalar64(wf));')
-                L.append('  uint64_t val = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);')
-                L.append('  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));')
-            elif op == 'bitset0':
-                # b64 case handled by early return above (is_64 branch).
-                L.append(f'  uint32_t bit = {src[0]}.read_scalar(wf);')
-                L.append(f'  uint32_t result = {dst[0]}.read_scalar(wf) & ~(1u << (bit & 31));')
-            elif op == 'bitset1':
-                L.append(f'  uint32_t bit = {src[0]}.read_scalar(wf);')
-                L.append(f'  uint32_t result = {dst[0]}.read_scalar(wf) | (1u << (bit & 31));')
-            else:
-                L.append(f'  uint32_t val = {src[0]}.read_scalar(wf);')
-                op_map = {
-                    'not': '~val',
-                    'wqm': '0; for (int q = 0; q < 8; ++q) if (val & (0xFu << (q * 4))) result |= (0xFu << (q * 4))',
-                    'bcnt0': 'static_cast<uint32_t>(std::popcount(~val))',
-                    'bcnt1': 'static_cast<uint32_t>(std::popcount(val))',
-                    'ff0': 'val == ~0u ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(~val))',
-                    'ff1': 'val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(val))',
-                    'flbit': 'val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val))',
-                    'quadmask': '0; for (int q = 0; q < 8; ++q) if (val & (0xFu << (q * 4))) result |= (1u << q)',
-                }
-                if op == 'brev':
-                    L.append('  uint32_t result = 0;')
-                    L.append('  for (int i = 0; i < 32; ++i) result |= ((val >> i) & 1) << (31 - i);')
-                elif op == 'ceil' and dtype == 'f32':
-                    L.append('  uint32_t result = std::bit_cast<uint32_t>(std::ceil(std::bit_cast<float>(val)));')
-                elif op == 'ceil' and dtype == 'f16':
-                    L.append('  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));')
-                    L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::ceil(f)));')
-                elif op == 'floor' and dtype == 'f32':
-                    L.append('  uint32_t result = std::bit_cast<uint32_t>(std::floor(std::bit_cast<float>(val)));')
-                elif op == 'floor' and dtype == 'f16':
-                    L.append('  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));')
-                    L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::floor(f)));')
-                elif op == 'trunc' and dtype == 'f32':
-                    L.append('  uint32_t result = std::bit_cast<uint32_t>(std::trunc(std::bit_cast<float>(val)));')
-                elif op == 'trunc' and dtype == 'f16':
-                    L.append('  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));')
-                    L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::trunc(f)));')
-                elif op == 'rndne' and dtype == 'f32':
-                    L.append('  uint32_t result = std::bit_cast<uint32_t>(std::nearbyint(std::bit_cast<float>(val)));')
-                elif op == 'rndne' and dtype == 'f16':
-                    L.append('  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));')
-                    L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::nearbyint(f)));')
-                elif op == 'cvt_f32_i32':
-                    L.append('  uint32_t result = std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>(val)));')
-                elif op == 'cvt_f32_u32':
-                    L.append('  uint32_t result = std::bit_cast<uint32_t>(static_cast<float>(val));')
-                elif op == 'cvt_i32_f32':
-                    L.append('  float f = std::bit_cast<float>(val);')
-                    L.append('  int32_t r = std::isnan(f) ? 0 : (f >= 2147483648.0f ? INT32_MAX : (f < -2147483648.0f ? INT32_MIN : static_cast<int32_t>(f)));')
-                    L.append('  uint32_t result = static_cast<uint32_t>(r);')
-                elif op == 'cvt_u32_f32':
-                    L.append('  float f = std::bit_cast<float>(val);')
-                    L.append('  uint32_t result = (std::isnan(f) || f < 0.0f) ? 0u : (f >= 4294967296.0f ? UINT32_MAX : static_cast<uint32_t>(f));')
-                elif op == 'cvt_f16_f32':
-                    L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::bit_cast<float>(val)));')
-                elif op == 'cvt_f32_f16':
-                    L.append('  uint32_t result = std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF)));')
-                elif op == 'cvt_hi_f32_f16':
-                    L.append('  uint32_t result = std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>((val >> 16) & 0xFFFF)));')
-                elif op == 'ctz':
-                    L.append('  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(val));')
-                elif op == 'clz':
-                    L.append('  uint32_t result = val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));')
-                elif op == 'cls':
-                    # Count leading sign bits: number of consecutive bits matching the sign bit.
-                    L.append('  int32_t sval = static_cast<int32_t>(val);')
-                    L.append('  uint32_t uval = sval < 0 ? ~static_cast<uint32_t>(sval) : static_cast<uint32_t>(sval);')
-                    L.append('  uint32_t result = uval == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;')
-                elif op in op_map:
-                    L.append(f'  uint32_t result = {op_map[op]};')
-                else:
-                    L.append(f'  uint32_t result = val; // TODO: {op}')
-            L.append(f'  {dst[0]}.write_scalar(wf, result);')
-            if scc and scc != 'none':
-                L.append('  wf.write_scc(result != 0);')
-
-        return '\n'.join(L)
-
-    def _gen_scalar_binop(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, scc: str | None) -> str:
-        """Generate scalar binary operation body."""
-        L = []
-        is_64 = dtype in ('b64', 'i64', 'u64')
-
-        if is_64:
-            if dtype == 'i64':
-                L.append(f'  int64_t s0 = static_cast<int64_t>({src[0]}.read_scalar64(wf));')
-                L.append(f'  int64_t s1 = static_cast<int64_t>({src[1]}.read_scalar64(wf));')
-            else:
-                L.append(f'  uint64_t s0 = {src[0]}.read_scalar64(wf);')
-                L.append(f'  uint64_t s1 = {src[1]}.read_scalar64(wf);')
-        elif dtype in ('i32',):
-            L.append(f'  int32_t s0 = static_cast<int32_t>({src[0]}.read_scalar(wf));')
-            L.append(f'  int32_t s1 = static_cast<int32_t>({src[1]}.read_scalar(wf));')
-        else:
-            L.append(f'  uint32_t s0 = {src[0]}.read_scalar(wf);')
-            L.append(f'  uint32_t s1 = {src[1]}.read_scalar(wf);')
-
-        # Compute result
-        if is_64 and op == 'mul':
-            L.append(f'  {dst[0]}.write_scalar64(wf, static_cast<uint64_t>(s0 * s1));')
-        elif dtype in ('i32',) and op in ('add', 'sub'):
-            sign = '+' if op == 'add' else '-'
-            L.append(f'  int64_t wide = static_cast<int64_t>(s0) {sign} static_cast<int64_t>(s1);')
-            L.append('  int32_t result = static_cast<int32_t>(wide);')
-            L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(result));')
-            L.append('  wf.write_scc(wide != static_cast<int64_t>(result));')
-        elif dtype in ('u32',) and op == 'add':
-            L.append('  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(s1);')
-            L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
-            L.append('  wf.write_scc(wide > 0xFFFFFFFFULL);')
-        elif dtype in ('u32',) and op == 'sub':
-            L.append(f'  {dst[0]}.write_scalar(wf, s0 - s1);')
-            L.append('  wf.write_scc(s0 < s1);')
-        elif dtype in ('u32',) and op == 'addc':
-            L.append('  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(s1) + (wf.read_scc() ? 1u : 0u);')
-            L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
-            L.append('  wf.write_scc(wide > 0xFFFFFFFFULL);')
-        elif dtype in ('u32',) and op == 'subb':
-            L.append('  uint32_t bin = wf.read_scc() ? 1u : 0u;')
-            L.append('  uint64_t wide = static_cast<uint64_t>(s0) - static_cast<uint64_t>(s1) - bin;')
-            L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
-            L.append('  wf.write_scc(static_cast<uint64_t>(s0) < static_cast<uint64_t>(s1) + bin);')
-        elif dtype in ('i32',) and op == 'mul':
-            # Use unsigned multiply to avoid signed overflow UB. The lower 32
-            # bits are identical for signed and unsigned multiplication.
-            L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1)));')
-        elif dtype in ('u32',) and op == 'mul':
-            L.append(f'  {dst[0]}.write_scalar(wf, s0 * s1);')
-        elif op == 'mulhi':
-            if dtype in ('u32',):
-                L.append('  uint64_t wide = static_cast<uint64_t>(s0) * static_cast<uint64_t>(s1);')
-                L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide >> 32));')
-            else:
-                L.append('  int64_t wide = static_cast<int64_t>(s0) * static_cast<int64_t>(s1);')
-                L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(static_cast<uint64_t>(wide) >> 32));')
-        elif op == 'min':
-            if dtype in ('i32',):
-                L.append(f'  int32_t result = s0 < s1 ? s0 : s1;')
-                L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(result));')
-                L.append('  wf.write_scc(s0 < s1);')
-            else:
-                L.append(f'  uint32_t result = s0 < s1 ? s0 : s1;')
-                L.append(f'  {dst[0]}.write_scalar(wf, result);')
-                L.append('  wf.write_scc(s0 < s1);')
-        elif op == 'max':
-            if dtype in ('i32',):
-                L.append(f'  int32_t result = s0 > s1 ? s0 : s1;')
-                L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(result));')
-                L.append('  wf.write_scc(s0 > s1);')
-            else:
-                L.append(f'  uint32_t result = s0 > s1 ? s0 : s1;')
-                L.append(f'  {dst[0]}.write_scalar(wf, result);')
-                L.append('  wf.write_scc(s0 > s1);')
-        elif op == 'absdiff':
-            L.append(f'  int32_t result = s0 > s1 ? s0 - s1 : s1 - s0;')
-            L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(result));')
-            L.append('  wf.write_scc(result != 0);')
-        elif op == 'bfm':
-            if is_64:
-                L.append('  uint64_t count = s0 & 63u;')
-                L.append('  uint64_t offset = s1 & 63u;')
-                L.append('  uint64_t result = count == 0 ? 0 : ((1ULL << count) - 1) << offset;')
-                L.append(f'  {dst[0]}.write_scalar64(wf, result);')
-            else:
-                L.append('  uint32_t count = s0 & 31u;')
-                L.append('  uint32_t offset = s1 & 31u;')
-                L.append('  uint32_t result = count == 0 ? 0 : ((1u << count) - 1) << offset;')
-                L.append(f'  {dst[0]}.write_scalar(wf, result);')
-        elif op == 'bfe':
-            return self._gen_scalar_bfe(dst, src, dtype)
-        elif op in ('lshl1_add', 'lshl2_add', 'lshl3_add', 'lshl4_add'):
-            shift = op[4]  # extract digit
-            L.append(f'  uint64_t wide = (static_cast<uint64_t>(s0) << {shift}u) + static_cast<uint64_t>(s1);')
-            L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
-            L.append('  wf.write_scc(wide > 0xFFFFFFFFULL);')
-        elif dtype == 'f32' and op in ('add', 'sub', 'mul', 'min', 'max', 'fma'):
-            fp_op = {
-                'add': 'f0 + f1', 'sub': 'f0 - f1', 'mul': 'f0 * f1',
-                'min': 'std::fmin(f0, f1)', 'max': 'std::fmax(f0, f1)',
-                'fma': 'std::fma(f0, f1, std::bit_cast<float>(static_cast<uint32_t>(wf.read_scc())))',
-            }
-            L.append('  float f0 = std::bit_cast<float>(s0);')
-            L.append('  float f1 = std::bit_cast<float>(s1);')
-            L.append(f'  float fr = {fp_op[op]};')
-            L.append(f'  {dst[0]}.write_scalar(wf, std::bit_cast<uint32_t>(fr));')
-        elif dtype == 'f16' and op in ('add', 'sub', 'mul', 'min', 'max'):
-            fp_op = {
-                'add': 'f0 + f1', 'sub': 'f0 - f1', 'mul': 'f0 * f1',
-                'min': 'std::fmin(f0, f1)', 'max': 'std::fmax(f0, f1)',
-            }
-            L.append('  float f0 = util::f16_to_f32(static_cast<uint16_t>(s0 & 0xFFFF));')
-            L.append('  float f1 = util::f16_to_f32(static_cast<uint16_t>(s1 & 0xFFFF));')
-            L.append(f'  float fr = {fp_op[op]};')
-            L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(util::f32_to_f16(fr)));')
-        elif op == 'pack_ll':
-            L.append(f'  {dst[0]}.write_scalar(wf, (s0 & 0xFFFFu) | ((s1 & 0xFFFFu) << 16));')
-        elif op == 'pack_lh':
-            L.append(f'  {dst[0]}.write_scalar(wf, (s0 & 0xFFFFu) | (s1 & 0xFFFF0000u));')
-        elif op == 'pack_hh':
-            L.append(f'  {dst[0]}.write_scalar(wf, ((s0 >> 16) & 0xFFFFu) | (s1 & 0xFFFF0000u));')
-        else:
-            # Bitwise / shift ops
-            utype = 'uint64_t' if is_64 else 'uint32_t'
-            mask = 63 if is_64 else 31
-            op_map = {
-                'and': 's0 & s1',
-                'or': 's0 | s1',
-                'xor': 's0 ^ s1',
-                'nand': '~(s0 & s1)',
-                'nor': '~(s0 | s1)',
-                'xnor': '~(s0 ^ s1)',
-                'andn2': 's0 & ~s1',
-                'orn2': 's0 | ~s1',
-                'shl': f's0 << (s1 & {mask}u)',
-                'shr': f's0 >> (s1 & {mask}u)',
-            }
-            if dtype == 'i32' and op == 'ashr':
-                L.append(f'  int32_t result = s0 >> (s1 & 31);')
-                L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(result));')
-            elif dtype == 'i64' and op == 'ashr':
-                L.append(f'  int64_t result = s0 >> (s1 & 63);')
-                L.append(f'  {dst[0]}.write_scalar64(wf, static_cast<uint64_t>(result));')
-            elif op in op_map:
-                L.append(f'  {utype} result = {op_map[op]};')
-                if is_64:
-                    L.append(f'  {dst[0]}.write_scalar64(wf, result);')
-                else:
-                    L.append(f'  {dst[0]}.write_scalar(wf, result);')
-            else:
-                L.append('  (void)s1;')
-                L.append(f'  {utype} result = s0; // TODO: op={op}')
-                if is_64:
-                    L.append(f'  {dst[0]}.write_scalar64(wf, result);')
-                else:
-                    L.append(f'  {dst[0]}.write_scalar(wf, result);')
-
-            # SCC
-            if scc == 'nonzero':
-                L.append('  wf.write_scc(result != 0);')
-
-        return '\n'.join(L)
-
-    def _gen_scalar_bfe(self, dst: list[str], src: list[str], dtype: str | None) -> str:
-        """Generate scalar bit field extract body."""
-        L = []
-        if dtype in ('u64', 'i64'):
-            L.append(f'  uint64_t base = {src[0]}.read_scalar64(wf);')
-            L.append(f'  uint32_t field = {src[1]}.read_scalar(wf);')
-            L.append('  uint32_t offset = field & 63u;')
-            L.append('  uint32_t width = (field >> 16) & 127u;')
-            L.append('  if (width == 0) {')
-            L.append(f'    {dst[0]}.write_scalar64(wf, 0);')
-            L.append('    wf.write_scc(false);')
-            L.append('  } else {')
-            L.append('    uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1);')
-            L.append('    uint64_t extracted = (base >> offset) & mask;')
-            if dtype == 'i64':
-                L.append('    if (width < 64 && (extracted & (1ULL << (width - 1))))')
-                L.append('      extracted |= ~mask;')
-            L.append(f'    {dst[0]}.write_scalar64(wf, extracted);')
-            L.append('    wf.write_scc(extracted != 0);')
-            L.append('  }')
-        else:
-            L.append(f'  uint32_t base = {src[0]}.read_scalar(wf);')
-            L.append(f'  uint32_t field = {src[1]}.read_scalar(wf);')
-            L.append('  uint32_t offset = field & 31u;')
-            L.append('  uint32_t width = (field >> 16) & 127u;')
-            L.append('  if (width == 0) {')
-            L.append(f'    {dst[0]}.write_scalar(wf, 0);')
-            L.append('    wf.write_scc(false);')
-            L.append('  } else {')
-            L.append('    uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1);')
-            L.append('    uint32_t extracted = (base >> offset) & mask;')
-            if dtype == 'i32':
-                L.append('    if (width < 32 && (extracted & (1u << (width - 1))))')
-                L.append('      extracted |= ~mask;')
-            L.append(f'    {dst[0]}.write_scalar(wf, extracted);')
-            L.append('    wf.write_scc(extracted != 0);')
-            L.append('  }')
-        return '\n'.join(L)
-
-    def _gen_scalar_cmp(self, src: list[str], op: str | None, dtype: str | None) -> str:
-        """Generate scalar compare body (sets SCC)."""
-        L = []
-        cmp_map = {
-            'eq': '==', 'ne': '!=', 'lg': '!=',
-            'gt': '>', 'ge': '>=', 'lt': '<', 'le': '<=',
-        }
-        if dtype in ('i32',):
-            L.append(f'  int32_t s0 = static_cast<int32_t>({src[0]}.read_scalar(wf));')
-            L.append(f'  int32_t s1 = static_cast<int32_t>({src[1]}.read_scalar(wf));')
-        elif dtype in ('i64',):
-            L.append(f'  int64_t s0 = static_cast<int64_t>({src[0]}.read_scalar64(wf));')
-            L.append(f'  int64_t s1 = static_cast<int64_t>({src[1]}.read_scalar64(wf));')
-        elif dtype in ('u64',):
-            L.append(f'  uint64_t s0 = {src[0]}.read_scalar64(wf);')
-            L.append(f'  uint64_t s1 = {src[1]}.read_scalar64(wf);')
-        else:
-            L.append(f'  uint32_t s0 = {src[0]}.read_scalar(wf);')
-            L.append(f'  uint32_t s1 = {src[1]}.read_scalar(wf);')
-        L.append(f'  wf.write_scc(s0 {cmp_map[op]} s1);')
-        return '\n'.join(L)
-
-    def _gen_scalar_cmpk(self, dst: list[str], src: list[str], op: str | None, dtype: str | None) -> str:
-        """Generate scalar compare-with-immediate body (SOPK)."""
-        L = []
-        cmp_map = {
-            'eq': '==', 'ne': '!=', 'lg': '!=',
-            'gt': '>', 'ge': '>=', 'lt': '<', 'le': '<=',
-        }
-        if dtype in ('i32',):
-            L.append(f'  int32_t s0 = static_cast<int32_t>({dst[0]}.read_scalar(wf));')
-            L.append(f'  int32_t imm = static_cast<int16_t>({src[0]}.encoding_value_);')
-        else:
-            L.append(f'  uint32_t s0 = {dst[0]}.read_scalar(wf);')
-            L.append(f'  uint32_t imm = static_cast<uint32_t>(static_cast<uint16_t>({src[0]}.encoding_value_));')
-        L.append(f'  wf.write_scc(s0 {cmp_map[op]} imm);')
-        return '\n'.join(L)
-
-    def _gen_scalar_bitcmp(self, src: list[str], op: str | None, dtype: str | None) -> str:
-        """Generate scalar bit compare body."""
-        L = []
-        if dtype in ('b64',):
-            L.append(f'  uint64_t val = {src[0]}.read_scalar64(wf);')
-            L.append(f'  uint32_t bit = {src[1]}.read_scalar(wf) & 63u;')
-        else:
-            L.append(f'  uint32_t val = {src[0]}.read_scalar(wf);')
-            L.append(f'  uint32_t bit = {src[1]}.read_scalar(wf) & 31u;')
-        if op == 'bitcmp0':
-            L.append('  wf.write_scc(!(val & (1ULL << bit)));')
-        else:
-            L.append('  wf.write_scc((val & (1ULL << bit)) != 0);')
-        return '\n'.join(L)
-
-    def _gen_scalar_saveexec(self, dst: list[str], src: list[str], op: str | None) -> str:
-        """Generate saveexec body.
-
-        Per the ISA spec, all sources are read before any destination is written.
-        Reading ssrc0 before writing sdst prevents aliasing bugs when sdst == ssrc0.
-        """
-        L = []
-        L.append('  uint64_t old_exec = wf.exec();')
-        L.append(f'  uint64_t src = {src[0]}.read_scalar64(wf);')
-        L.append(f'  {dst[0]}.write_scalar64(wf, old_exec);')
-        saveexec_map = {
-            'and': 'old_exec & src',
-            'or': 'old_exec | src',
-            'xor': 'old_exec ^ src',
-            'nand': '~(old_exec & src)',
-            'nor': '~(old_exec | src)',
-            'xnor': '~(old_exec ^ src)',
-            'andn1': '~src & old_exec',
-            'andn2': 'src & ~old_exec',
-            'orn1': '~src | old_exec',
-            'orn2': 'src | ~old_exec',
-            # RDNA3/4 not0/not1 variants
-            'and_not0': 'old_exec & ~src',
-            'or_not0': 'old_exec | ~src',
-            'and_not1': '~src & ~old_exec',
-            'or_not1': '~src | old_exec',
-        }
-        if op not in saveexec_map:
-            L.append('  (void)src;')
-        expr = saveexec_map.get(op, f'old_exec /* TODO: {op} */')
-        L.append(f'  uint64_t result = {expr};')
-        L.append(f'  util::Logger::vm([&](auto &os) {{')
-        L.append(f'    os << std::format("saveexec ssrc0_ev={{}} src={{:#x}} exec={{:#x}}->{{:#x}}",')
-        L.append(f'                      {src[0]}.encoding_value(), src, old_exec, result);')
-        L.append(f'  }});')
-        L.append('  wf.set_exec(result);')
-        L.append('  wf.write_scc(result != 0);')
-        return '\n'.join(L)
-
-    def _gen_vector_unary(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_unary(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate vector unary operation body."""
         L = []
         L.append('  uint64_t exec = wf.exec();')
@@ -2397,7 +1964,7 @@ class CodeGenerator:
             # V_FREXP_EXP_I32_F64: extract exponent from f64, write as i32
             L.append(f'    double s = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             L.append('    int exp = 0;')
             L.append('    if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);')
             L.append(f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(exp));')
@@ -2405,34 +1972,34 @@ class CodeGenerator:
             # V_FREXP_MANT_F64: extract mantissa from f64, write as f64
             L.append(f'    double s = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             L.append('    int exp = 0;')
             L.append('    double result = std::frexp(s, &exp);')
             if is_vop3:
-                L.extend(self._vop3_dst_mod_f64('result'))
+                L.extend(vop3_dst_mod_f64('result'))
             L.append(f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
         elif op == 'frexp_exp_f32':
             L.append(f'    float s = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             L.append('    int exp = 0;')
             L.append('    if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);')
             L.append(f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(exp));')
         elif op == 'frexp_exp_f16':
             L.append(f'    float s = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane)));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             L.append('    int exp = 0;')
             L.append('    if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);')
             L.append(f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(exp));')
         elif op == 'frexp_mant_f32':
             L.append(f'    float s = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             L.append('    int exp = 0;')
             L.append(f'    float result = std::frexp(s, &exp);')
             if is_vop3:
-                L.extend(self._vop3_dst_mod('result'))
+                L.extend(vop3_dst_mod('result'))
             L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
         elif op == 'clrexcp':
             L.append(f'    (void){src[0]};')
@@ -2440,7 +2007,7 @@ class CodeGenerator:
         elif dtype == 'f64':
             L.append(f'    double s = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             math_map_f64 = {
                 'rcp': 'amdgpu::transcendental::rcp_f64(s)',
                 'sqrt': 'amdgpu::transcendental::sqrt_f64(s)',
@@ -2456,14 +2023,14 @@ class CodeGenerator:
             expr = math_map_f64.get(op, f's /* TODO: {op} */')
             if is_vop3:
                 L.append(f'    double result = {expr};')
-                L.extend(self._vop3_dst_mod_f64('result'))
+                L.extend(vop3_dst_mod_f64('result'))
                 L.append(f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
             else:
                 L.append(f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>({expr}));')
         elif dtype == 'f16':
             L.append(f'    float s = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane)));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             math_map_f16 = {
                 'rcp': '1.0f / s',
                 'sqrt': 'std::sqrt(s)',
@@ -2483,14 +2050,14 @@ class CodeGenerator:
             expr = math_map_f16.get(op, f's /* TODO: {op} */')
             if is_vop3:
                 L.append(f'    float result = {expr};')
-                L.extend(self._vop3_dst_mod('result'))
+                L.extend(vop3_dst_mod('result'))
                 L.append(f'    {dst[0]}.write_lane(wf, lane, util::f32_to_f16(result));')
             else:
                 L.append(f'    {dst[0]}.write_lane(wf, lane, util::f32_to_f16({expr}));')
         else:
             L.append(f'    float s = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             math_map = {
                 'rcp': 'amdgpu::transcendental::rcp_f32(s)',
                 'rcp_iflag': 'amdgpu::transcendental::rcp_f32(s)',
@@ -2511,7 +2078,7 @@ class CodeGenerator:
             expr = math_map.get(op, f's /* TODO: {op} */')
             if is_vop3:
                 L.append(f'    float result = {expr};')
-                L.extend(self._vop3_dst_mod('result'))
+                L.extend(vop3_dst_mod('result'))
                 L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
             else:
                 L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>({expr}));')
@@ -2519,7 +2086,7 @@ class CodeGenerator:
         L.append('  }')
         return '\n'.join(L)
 
-    def _gen_vector_binop(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_binop(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate vector binary operation body."""
         if dst:
             d = dst[0]
@@ -2541,9 +2108,9 @@ class CodeGenerator:
             else:
                 L.append(f'    double sv1 = std::bit_cast<double>({s1}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('sv0', 0))
+                L.extend(vop3_src_mod('sv0', 0, has_abs))
                 if op != 'ldexp':
-                    L.extend(self._vop3_src_mod('sv1', 1))
+                    L.extend(vop3_src_mod('sv1', 1, has_abs))
             f_op_map = {
                 'add': 'sv0 + sv1',
                 'sub': 'sv0 - sv1',
@@ -2559,7 +2126,7 @@ class CodeGenerator:
             expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
             if is_vop3:
                 L.append(f'    double result = {expr};')
-                L.extend(self._vop3_dst_mod_f64('result'))
+                L.extend(vop3_dst_mod_f64('result'))
                 L.append(f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
             else:
                 L.append(f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>({expr}));')
@@ -2571,9 +2138,9 @@ class CodeGenerator:
             else:
                 L.append(f'    float sv1 = std::bit_cast<float>({s1}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('sv0', 0))
+                L.extend(vop3_src_mod('sv0', 0, has_abs))
                 if op != 'ldexp':
-                    L.extend(self._vop3_src_mod('sv1', 1))
+                    L.extend(vop3_src_mod('sv1', 1, has_abs))
             f_op_map = {
                 'add': 'sv0 + sv1',
                 'sub': 'sv0 - sv1',
@@ -2590,7 +2157,7 @@ class CodeGenerator:
             expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
             if is_vop3:
                 L.append(f'    float result = {expr};')
-                L.extend(self._vop3_dst_mod('result'))
+                L.extend(vop3_dst_mod('result'))
                 L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
             else:
                 L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>({expr}));')
@@ -2602,9 +2169,9 @@ class CodeGenerator:
             else:
                 L.append(f'    float sv1 = util::f16_to_f32(static_cast<uint16_t>({s1}.read_lane(wf, lane)));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('sv0', 0))
+                L.extend(vop3_src_mod('sv0', 0, has_abs))
                 if op != 'ldexp':
-                    L.extend(self._vop3_src_mod('sv1', 1))
+                    L.extend(vop3_src_mod('sv1', 1, has_abs))
             f_op_map = {
                 'add': 'sv0 + sv1',
                 'sub': 'sv0 - sv1',
@@ -2620,7 +2187,7 @@ class CodeGenerator:
             expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
             if is_vop3:
                 L.append(f'    float result = {expr};')
-                L.extend(self._vop3_dst_mod('result'))
+                L.extend(vop3_dst_mod('result'))
                 L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16(result));')
             else:
                 L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16({expr}));')
@@ -2751,7 +2318,7 @@ class CodeGenerator:
         L.append('  }')
         return '\n'.join(L)
 
-    def _gen_vector_ternary(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_ternary(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate vector ternary (3-operand) operation body."""
         d = dst[0]
         s0, s1, s2 = src[0], src[1], src[2]
@@ -2811,9 +2378,9 @@ class CodeGenerator:
             L.append(f'    float b = std::bit_cast<float>({s1}.read_lane(wf, lane));')
             L.append(f'    float c = std::bit_cast<float>({s2}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('a', 0))
-                L.extend(self._vop3_src_mod('b', 1))
-                L.extend(self._vop3_src_mod('c', 2))
+                L.extend(vop3_src_mod('a', 0, has_abs))
+                L.extend(vop3_src_mod('b', 1, has_abs))
+                L.extend(vop3_src_mod('c', 2, has_abs))
             f_map = {
                 'mad': 'a * b + c',
                 'fma': 'std::fma(a, b, c)',
@@ -2837,7 +2404,7 @@ class CodeGenerator:
                 L.append('    else if (ay >= ax) face = b >= 0 ? 2.0f : 3.0f;')
                 L.append('    else face = a >= 0 ? 0.0f : 1.0f;')
                 if is_vop3:
-                    L.extend(self._vop3_dst_mod('face'))
+                    L.extend(vop3_dst_mod('face'))
                 L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(face));')
             elif op == 'cubesc':
                 L.append('    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);')
@@ -2846,7 +2413,7 @@ class CodeGenerator:
                 L.append('    else if (ay >= ax) sc = a;')
                 L.append('    else sc = a >= 0 ? -c : c;')
                 if is_vop3:
-                    L.extend(self._vop3_dst_mod('sc'))
+                    L.extend(vop3_dst_mod('sc'))
                 L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(sc));')
             elif op == 'cubetc':
                 L.append('    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);')
@@ -2855,7 +2422,7 @@ class CodeGenerator:
                 L.append('    else if (ay >= ax) tc = b >= 0 ? c : -c;')
                 L.append('    else tc = -b;')
                 if is_vop3:
-                    L.extend(self._vop3_dst_mod('tc'))
+                    L.extend(vop3_dst_mod('tc'))
                 L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(tc));')
             elif op == 'cubema':
                 L.append('    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);')
@@ -2864,13 +2431,13 @@ class CodeGenerator:
                 L.append('    else if (ay >= ax) ma = 2.0f * ay;')
                 L.append('    else ma = 2.0f * ax;')
                 if is_vop3:
-                    L.extend(self._vop3_dst_mod('ma'))
+                    L.extend(vop3_dst_mod('ma'))
                 L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(ma));')
             elif op in f_map:
                 expr = f_map[op]
                 if is_vop3:
                     L.append(f'    float result = {expr};')
-                    L.extend(self._vop3_dst_mod('result'))
+                    L.extend(vop3_dst_mod('result'))
                     L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
                 else:
                     L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>({expr}));')
@@ -2881,9 +2448,9 @@ class CodeGenerator:
             L.append(f'    double b = std::bit_cast<double>({s1}.read_lane64(wf, lane));')
             L.append(f'    double c = std::bit_cast<double>({s2}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('a', 0))
-                L.extend(self._vop3_src_mod('b', 1))
-                L.extend(self._vop3_src_mod('c', 2))
+                L.extend(vop3_src_mod('a', 0, has_abs))
+                L.extend(vop3_src_mod('b', 1, has_abs))
+                L.extend(vop3_src_mod('c', 2, has_abs))
             f_map = {
                 'mad': 'a * b + c',
                 'fma': 'std::fma(a, b, c)',
@@ -2902,7 +2469,7 @@ class CodeGenerator:
             expr = f_map.get(op, f'a /* unhandled: {op} */')
             if is_vop3:
                 L.append(f'    double result = {expr};')
-                L.extend(self._vop3_dst_mod_f64('result'))
+                L.extend(vop3_dst_mod_f64('result'))
                 L.append(f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
             else:
                 L.append(f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>({expr}));')
@@ -2911,9 +2478,9 @@ class CodeGenerator:
             L.append(f'    float b = util::f16_to_f32(static_cast<uint16_t>({s1}.read_lane(wf, lane)));')
             L.append(f'    float c = util::f16_to_f32(static_cast<uint16_t>({s2}.read_lane(wf, lane)));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('a', 0))
-                L.extend(self._vop3_src_mod('b', 1))
-                L.extend(self._vop3_src_mod('c', 2))
+                L.extend(vop3_src_mod('a', 0, has_abs))
+                L.extend(vop3_src_mod('b', 1, has_abs))
+                L.extend(vop3_src_mod('c', 2, has_abs))
             f_map = {
                 'mad': 'a * b + c',
                 'fma': 'std::fma(a, b, c)',
@@ -2932,7 +2499,7 @@ class CodeGenerator:
             expr = f_map.get(op, f'a /* unhandled: {op} */')
             if is_vop3:
                 L.append(f'    float result = {expr};')
-                L.extend(self._vop3_dst_mod('result'))
+                L.extend(vop3_dst_mod('result'))
                 L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16(result));')
             else:
                 L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16({expr}));')
@@ -3065,7 +2632,7 @@ class CodeGenerator:
         L.append('  }')
         return '\n'.join(L)
 
-    def _cmp_condition(self, src: list[str], op: str | None, dtype: str | None, is_vop3: bool, L: list[str]) -> str:
+    def _cmp_condition(self, src: list[str], op: str | None, dtype: str | None, is_vop3: bool, L: list[str], has_abs: bool = False) -> str:
         """Emit source reads and return the C++ condition expression.
 
         For FP types, handles ordered comparisons (eq, lt, le, gt, ge, lg),
@@ -3084,8 +2651,8 @@ class CodeGenerator:
                 L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
                 L.append(f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s0', 0))
-                L.extend(self._vop3_src_mod('s1', 1))
+                L.extend(vop3_src_mod('s0', 0, has_abs))
+                L.extend(vop3_src_mod('s1', 1, has_abs))
             # Ordered comparisons (false if NaN)
             ordered_map = {
                 'eq': 's0 == s1', 'ne': 's0 != s1',
@@ -3136,7 +2703,7 @@ class CodeGenerator:
         cmp_op = cmp_map.get(op, f'== /* TODO: {op} */')
         return f's0 {cmp_op} s1'
 
-    def _gen_vector_cmp(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_cmp(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate vector compare body.
 
         VOPC (VOP2-like): result always goes to VCC.
@@ -3160,7 +2727,7 @@ class CodeGenerator:
         elif op == 't':
             L.append('    vcc |= (1ULL << lane);')
         else:
-            cond = self._cmp_condition(src, op, dtype, is_vop3, L)
+            cond = self._cmp_condition(src, op, dtype, is_vop3, L, has_abs)
             L.append(f'    if ({cond})')
             L.append('      vcc |= (1ULL << lane);')
             L.append('    else')
@@ -3175,7 +2742,8 @@ class CodeGenerator:
         return '\n'.join(L)
 
     def _gen_vector_cmpx(self, src: list[str], op: str | None, dtype: str | None,
-                         is_vop3: bool = False, dst: list[str] | None = None) -> str:
+                         is_vop3: bool = False, dst: list[str] | None = None,
+                         has_abs: bool = False) -> str:
         """Generate vector compare-and-write-EXEC body.
 
         On CDNA (GFX9), V_CMPX writes both EXEC and the SDST operand.
@@ -3193,7 +2761,7 @@ class CodeGenerator:
         elif op == 't':
             L.append('    result |= (1ULL << lane);')
         else:
-            cond = self._cmp_condition(src, op, dtype, is_vop3, L)
+            cond = self._cmp_condition(src, op, dtype, is_vop3, L, has_abs)
             L.append(f'    if ({cond})')
             L.append('      result |= (1ULL << lane);')
         L.append('  }')
@@ -3264,41 +2832,6 @@ class CodeGenerator:
         else:
             L.append('  wf.set_vcc(vcc);')
         return '\n'.join(L)
-
-    def _vop3_src_mod(self, varname: str, src_idx: int,
-                       indent: str = '    ') -> list[str]:
-        """Generate VOP3 input modifier lines (abs then neg) for a float src.
-
-        Uses ``self._has_abs``, which is set by ``_gen_execute_body`` at the
-        start of each instruction's code generation.
-        """
-        lines = []
-        if self._has_abs:
-            lines.append(
-                f'{indent}if (inst_.abs & (1u << {src_idx})) {varname} = std::fabs({varname});')
-        lines.append(
-            f'{indent}if (inst_.neg & (1u << {src_idx})) {varname} = -{varname};')
-        return lines
-
-    def _vop3_dst_mod(self, varname: str,
-                       indent: str = '    ') -> list[str]:
-        """Generate VOP3 output modifier lines (omod then clamp) for a float result."""
-        return [
-            f'{indent}if (inst_.omod == 1) {varname} *= 2.0f;',
-            f'{indent}else if (inst_.omod == 2) {varname} *= 4.0f;',
-            f'{indent}else if (inst_.omod == 3) {varname} *= 0.5f;',
-            f'{indent}if (inst_.clamp) {varname} = std::clamp({varname}, 0.0f, 1.0f);',
-        ]
-
-    def _vop3_dst_mod_f64(self, varname: str,
-                           indent: str = '    ') -> list[str]:
-        """Generate VOP3 output modifier lines for a double result."""
-        return [
-            f'{indent}if (inst_.omod == 1) {varname} *= 2.0;',
-            f'{indent}else if (inst_.omod == 2) {varname} *= 4.0;',
-            f'{indent}else if (inst_.omod == 3) {varname} *= 0.5;',
-            f'{indent}if (inst_.clamp) {varname} = std::clamp({varname}, 0.0, 1.0);',
-        ]
 
     def _gen_pk_binop(self, dst: list[str], src: list[str], op: str | None, dtype: str | None) -> str:
         """Generate packed 16-bit binary op (V_PK_ADD_I16, V_PK_MUL_F16, etc.)."""
@@ -4365,7 +3898,7 @@ class CodeGenerator:
             L.append(f'    d->num_elems = {ne};')
             L.append('    d->is_load = true;')
             L.append('    d->lds_dst = true;')
-            L.append('    d->lds_base = wf.m0();')
+            L.append('    d->lds_base = wf.m0() + wf.lds_base();')
             L.append(f'    d->mtype = {self._mtype_expr()};')
             L.append(f'    d->non_temporal = {nt};')
             L.append(f'    {addr_fn}(inst_, wf, *d);')
@@ -4587,7 +4120,10 @@ class CodeGenerator:
         L = []
         esz = sem.elem_size  # 4 for B32, 8 for B64
         dwords_per_access = esz // 4  # 1 for B32, 2 for B64
-        stride_scale = '256U' if sem.operation == 'st64' else '4U'
+        if sem.operation == 'st64':
+            stride_scale = f'{esz * 64}U'
+        else:
+            stride_scale = f'{esz}U'
         acc = self._acc_vgpr_expr
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
@@ -4624,7 +4160,10 @@ class CodeGenerator:
         L = []
         esz = sem.elem_size  # 4 for B32, 8 for B64
         dwords_per_access = esz // 4
-        stride_scale = '256U' if sem.operation == 'st64' else '4U'
+        if sem.operation == 'st64':
+            stride_scale = f'{esz * 64}U'
+        else:
+            stride_scale = f'{esz}U'
         acc = self._acc_vgpr_expr
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
@@ -4784,6 +4323,10 @@ class CodeGenerator:
                     if self._enc_has_semantics(child):
                         has_sem = True
                 for inst in all_insts:
+                    inst_sem = (
+                        self.semantics.instructions.get(inst.name)
+                        if self.semantics else None
+                    )
                     # Resolve the instruction's own encoding field names.
                     # Instructions from alternate sub-encodings (e.g.,
                     # VOP3_SDST_ENC under ENC_VOP3) carry their original
@@ -4846,8 +4389,6 @@ class CodeGenerator:
                             )
                         elif opnd.name in inst_field_names:
                             opr_type = opnd.operand_type
-                            inst_sem = (self.semantics.instructions.get(inst.name)
-                                        if self.semantics else None)
                             if (inst_sem and inst_sem.accvgpr_srcs
                                     and opnd.is_input):
                                 opr_type = 'OPR_SRC_VGPR_OR_ACCVGPR'
@@ -4872,6 +4413,25 @@ class CodeGenerator:
                             'void execute_impl(amdgpu::Wavefront &wf)'
                         )
                     )
+                    # CFG metadata is emitted on the concrete ISA instruction
+                    # class, not inferred by generic analysis from mnemonic
+                    # strings. BasicBlock asks the virtual branch_offset_bytes()
+                    # for direct branch targets.
+                    label_operand = next(
+                        (op.name for op in inst.operands
+                         if op.operand_type == 'OPR_LABEL'),
+                        None,
+                    )
+                    if (
+                        inst_sem
+                        and inst_sem.semantic_class in ('branch', 'cbranch')
+                        and label_operand
+                    ):
+                        public_members.append(
+                            cgen.Statement(
+                                'std::optional<int64_t> branch_offset_bytes() const override'
+                            )
+                        )
                     # Embed the full mnemonic (with suffix) as a string literal
                     # so the encoding base gets a string_view to static storage.
                     rule = self.isa_spec.profile.mnemonic_rule(enc.enc_name)
@@ -4883,10 +4443,7 @@ class CodeGenerator:
                     ] + opnd_ctor_init
                     init_list = ', '.join(init_list_parts)
                     # Check if this is a memory instruction to set MEMORY_OP flag
-                    _mem_sem = (
-                        self.semantics.instructions.get(inst.name)
-                        if self.semantics else None
-                    )
+                    _mem_sem = inst_sem
                     _MEM_CLASSES = frozenset({
                         'smem_load', 'smem_store',
                         'flat_load', 'flat_store', 'flat_atomic',
@@ -4922,7 +4479,7 @@ class CodeGenerator:
                                     f'static_cast<int>(reinterpret_cast<const {_lit_struct}*>(inst)->simm32));'
                                 )
 
-                    # DPP fixup: when src0 == 250 (DPP marker), replace the
+                    # DPP fixup: when src0 == amdgpu::SRC_DPP (DPP marker), replace the
                     # src0 operand with vsrc0 from the DPP extension dword.
                     # This lets the instruction execute normally with the
                     # correct VGPR source. Lane permutation is not yet
@@ -4942,12 +4499,12 @@ class CodeGenerator:
                         _dpp_struct = f'{_enc_base}{_dpp_suffix}MachineInst'
                         for opnd in inst.operands:
                             if opnd.name == 'src0' and opnd.name in enc_field_names:
-                                # DPP (src0 == 250): read vsrc0 and DPP control
+                                # DPP (src0 == amdgpu::SRC_DPP): read vsrc0 and DPP control
                                 # fields from the ISA-specific extension dword,
                                 # storing them on the Instruction base for
                                 # apply_dpp() to use later.
                                 ctor_body_parts.append(
-                                    f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 250) {{'
+                                    f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) {{'
                                     f' auto *dp = reinterpret_cast<const {_dpp_struct}*>(inst);'
                                     f' src0 = Operand({opnd.size}, OperandType::OPR_VGPR, dp->vsrc0);'
                                     f' dpp_ctrl_ = dp->dpp_ctrl;'
@@ -4956,7 +4513,7 @@ class CodeGenerator:
                                     f' dpp_bound_ctrl_ = dp->bound_ctrl;'
                                     f'}}'
                                 )
-                                # SDWA (src0 == 249): CDNA and RDNA1/2 only.
+                                # SDWA (src0 == amdgpu::SRC_SDWA): CDNA and RDNA1/2 only.
                                 _has_sdwa = any(
                                     'SDWA' in ie.enc_name
                                     for ie in self.isa_spec.inst_encodings
@@ -4964,11 +4521,13 @@ class CodeGenerator:
                                 if _has_sdwa:
                                     _sdwa_struct = f'{_enc_base}VopSdwaMachineInst'
                                     ctor_body_parts.append(
-                                        f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 249) {{'
+                                        f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_SDWA) {{'
                                         f' auto *sw = reinterpret_cast<const {_sdwa_struct}*>(inst);'
                                         f' src0 = Operand({opnd.size}, OperandType::OPR_VGPR, sw->vsrc0);'
                                         f' sdwa_src0_sel_ = sw->src0_sel;'
                                         f' sdwa_src0_sext_ = sw->src0_sext;'
+                                        f' sdwa_src1_sel_ = sw->src1_sel;'
+                                        f' sdwa_src1_sext_ = sw->src1_sext;'
                                         f' sdwa_dst_sel_ = sw->dst_sel;'
                                         f' sdwa_dst_unused_ = sw->dst_unused;'
                                         f' sdwa_clamp_ = sw->clamp;'
@@ -5004,6 +4563,29 @@ class CodeGenerator:
 
                     if _mem_sem and _mem_sem.semantic_class in _MEM_CLASSES:
                         ctor_body_parts.append('flags_ |= MEMORY_OP;')
+                    # Control-flow flags drive BasicBlock splitting and CFG
+                    # edge construction. Keep this metadata generated from the
+                    # semantic classification so generic code does not have to
+                    # know AMDGPU instruction names or opcode values.
+                    if _mem_sem and _mem_sem.semantic_class == 'branch':
+                        ctor_body_parts.append('flags_ |= BRANCH;')
+                    if _mem_sem and _mem_sem.semantic_class == 'cbranch':
+                        ctor_body_parts.append('flags_ |= COND_BRANCH;')
+                    if _mem_sem and _mem_sem.semantic_class == 'endpgm':
+                        ctor_body_parts.append('flags_ |= PROGRAM_TERMINATOR;')
+                    if _mem_sem and _mem_sem.semantic_class == 'scalar_setpc':
+                        ctor_body_parts.append('flags_ |= INDIRECT_BRANCH;')
+                    if _mem_sem and _mem_sem.semantic_class in (
+                        'scalar_swappc', 'scalar_call',
+                    ):
+                        ctor_body_parts.append('flags_ |= INDIRECT_CALL;')
+                    # Conditional scalar moves leave the destination unchanged
+                    # when their predicate is false, so liveness cannot treat
+                    # them as unconditional kills.
+                    if _mem_sem and _mem_sem.semantic_class in (
+                        'scalar_cmov', 'scalar_cmovk',
+                    ):
+                        ctor_body_parts.append('flags_ |= PREDICATED_DEF;')
 
                     _waitcnt_names = {
                         'S_WAITCNT', 'S_WAIT_LOADCNT', 'S_WAIT_STORECNT',
@@ -5071,12 +4653,22 @@ class CodeGenerator:
                                 (o.name for o in inst.operands if o.is_input),
                                 None
                             )
+                            _src_inputs = [o.name for o in inst.operands if o.is_input]
+                            _src1_name = _src_inputs[1] if len(_src_inputs) > 1 else None
                             _dpp_preamble = (
-                                '  if (inst_.src0 == 250)\n'
+                                '  uint32_t sdwa_old_dst_[64] = {};\n'
+                                '  if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {\n'
+                                '    uint32_t vb = wf.vgpr_alloc().base;\n'
+                                '    uint64_t ex = wf.exec();\n'
+                                '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln)\n'
+                                '      if (ex & (1ULL << ln))\n'
+                                '        sdwa_old_dst_[ln] = wf.cu().read_vgpr(vb + inst_.vdst, ln);\n'
+                                '  }\n'
+                                '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
                                 '    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_,\n'
                                 '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_,\n'
                                 '        dpp_src0_, wf);\n'
-                                '  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {\n'
+                                '  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_src0_sel_ != amdgpu::sdwa::DWORD) {\n'
                                 '    auto &cu = wf.cu();\n'
                                 '    uint32_t ws = wf.wf_size();\n'
                                 '    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;\n'
@@ -5088,34 +4680,72 @@ class CodeGenerator:
                                 '        *src_operands_[0], result, static_cast<int>(ws));\n'
                                 '    src_operands_[0] = dpp_src0_.get();\n'
                                 '  }\n'
+                                '  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_src1_sel_ != amdgpu::sdwa::DWORD && num_src_ > 1) {\n'
+                                '    auto &cu = wf.cu();\n'
+                                '    uint32_t ws = wf.wf_size();\n'
+                                '    uint32_t vb = wf.vgpr_alloc().base + src_operands_[1]->encoding_value_;\n'
+                                '    uint32_t result1[64];\n'
+                                '    for (uint32_t i = 0; i < ws; ++i)\n'
+                                '      result1[i] = amdgpu::sdwa::sdwa_src_select(\n'
+                                '          cu.read_vgpr(vb, i), sdwa_src1_sel_, sdwa_src1_sext_);\n'
+                                '    dpp_src1_ = std::make_unique<DppOperand>(\n'
+                                '        *src_operands_[1], result1, static_cast<int>(ws));\n'
+                                '    src_operands_[1] = dpp_src1_.get();\n'
+                                '  }\n'
                                 + (f'  if (dpp_src0_) {_src0_name}.set_delegate(dpp_src0_.get());\n'
                                    if _src0_name else '')
+                                + (f'  if (dpp_src1_) {_src1_name}.set_delegate(dpp_src1_.get());\n'
+                                   if _src1_name else '')
                             )
-                        # SDWA postamble: apply float clamp after ALU.
+                        # SDWA postamble: apply dst_sel merge and float clamp after ALU.
                         _sdwa_postamble = ''
-                        is_float_op = (sem and sem.data_type in ('f16', 'f32', 'f64'))
-                        if (enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2')
-                                and is_float_op):
+                        if enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2'):
+                            is_float_op = (sem and sem.data_type in ('f16', 'f32', 'f64'))
                             _sdwa_postamble = (
-                                '  if (sdwa_clamp_) {\n'
+                                '  if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {\n'
                                 '    uint64_t ex = wf.exec();\n'
                                 '    uint32_t vb = wf.vgpr_alloc().base;\n'
                                 '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
                                 '      if (!(ex & (1ULL << ln))) continue;\n'
                                 '      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);\n'
-                                '      float fv = std::bit_cast<float>(dv);\n'
-                                '      fv = std::clamp(fv, 0.0f, 1.0f);\n'
-                                '      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));\n'
+                                '      dv = amdgpu::sdwa::sdwa_dst_merge(dv, sdwa_old_dst_[ln], sdwa_dst_sel_, sdwa_dst_unused_);\n'
+                                '      wf.cu().write_vgpr(vb + inst_.vdst, ln, dv);\n'
                                 '    }\n'
                                 '  }\n'
                             )
+                            if is_float_op:
+                                _sdwa_postamble += (
+                                    '  if (sdwa_clamp_) {\n'
+                                    '    uint64_t ex = wf.exec();\n'
+                                    '    uint32_t vb = wf.vgpr_alloc().base;\n'
+                                    '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
+                                    '      if (!(ex & (1ULL << ln))) continue;\n'
+                                    '      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);\n'
+                                    '      float fv = std::bit_cast<float>(dv);\n'
+                                    '      fv = std::clamp(fv, 0.0f, 1.0f);\n'
+                                    '      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));\n'
+                                    '    }\n'
+                                    '  }\n'
+                                )
                         _dpp_cleanup = ''
-                        if enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2') and _src0_name:
-                            _dpp_cleanup = (
-                                f'  {_src0_name}.clear_delegate();\n'
-                            )
+                        if enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2'):
+                            if _src0_name:
+                                _dpp_cleanup += f'  {_src0_name}.clear_delegate();\n'
+                            if _src1_name:
+                                _dpp_cleanup += f'  {_src1_name}.clear_delegate();\n'
+                        # Skip DPP/SDWA preamble and cleanup for unimplemented
+                        # instructions whose body is ONLY a throw — the cleanup
+                        # code after the throw would be unreachable. Only match
+                        # pure-throw bodies, not bodies with conditional throws.
+                        body_stripped = body.strip().rstrip(';').strip()
+                        body_throws = body_stripped.startswith('(void)wf;') and 'throw util::UnimplementedInst' in body_stripped and body_stripped.count('\n') <= 1
                         can_share = self._can_share_execute(inst.mnemonic)
-                        if can_share:
+                        if body_throws:
+                            exec_impl = cgen.Line(
+                                f'void {inst.fmt_name}::execute_impl'
+                                f'(amdgpu::Wavefront &wf) {{ (void)wf; throw util::UnimplementedInst(mnemonic()); }}'
+                            )
+                        elif can_share:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
                             tmpl_name = f'{inst.mnemonic}_{enc_key}'
                             exec_impl = cgen.Line(
@@ -5147,6 +4777,20 @@ class CodeGenerator:
 
                     inst_classes.append(s)
                     class_func_impls.append(class_ctor_impl)
+                    if (
+                        inst_sem
+                        and inst_sem.semantic_class in ('branch', 'cbranch')
+                        and label_operand
+                    ):
+                        class_func_impls.append(cgen.Line(
+                            f'std::optional<int64_t> '
+                            f'{inst.fmt_name}::branch_offset_bytes() const {{\n'
+                            f'  // AMDGPU direct branch labels are signed '
+                            f'instruction-count deltas.\n'
+                            f'  return static_cast<int64_t>('
+                            f'static_cast<int16_t>({label_operand}.encoding_value_)) * 4;\n'
+                            f'}}'
+                        ))
                     class_func_impls.append(exec_impl)
 
                 # Build include lists for .cpp files
@@ -5518,11 +5162,25 @@ class CodeGenerator:
         )
         opnd_type_def_file.gen_code()
 
+    @staticmethod
+    def _reg_class_for_prefix(prefix: str) -> str | None:
+        """Map an MRISA register-name prefix to an ISA register class."""
+        match prefix.lower():
+            case 's':
+                return 'RegClass::SGPR'
+            case 'v':
+                return 'RegClass::VGPR'
+            case 'acc':
+                return 'RegClass::ACC_VGPR'
+            case _:
+                return None
+
     def gen_operand(self) -> None:
         """Generate the ISA-specific Operand class with name resolution."""
         arch = self.isa_spec.arch_name
 
         switch_cases = []
+        ref_switch_cases = []
         opnd_types_with_selectors = set()
 
         for opnd_sel in self.isa_spec.opnd_selectors:
@@ -5533,6 +5191,7 @@ class CodeGenerator:
             )
 
             case_lines = []
+            ref_case_lines = []
             for pattern in opnd_sel.name_patterns:
                 if pattern.kind == OperandNamePattern.REG_RANGE:
                     case_lines.append(
@@ -5541,6 +5200,17 @@ class CodeGenerator:
                         f'return reg_name("{pattern.prefix}", '
                         f'encoding_value_ - {opsel_name}::{pattern.min_enum}, size_bits_);'
                     )
+                    reg_class = self._reg_class_for_prefix(pattern.prefix)
+                    # Only register-file prefixes tracked by RegisterSet become
+                    # register refs. Named special registers remain nullopt
+                    # until a consumer needs special-register liveness.
+                    if reg_class is not None:
+                        ref_case_lines.append(
+                            f'if (encoding_value_ >= {opsel_name}::{pattern.min_enum} && '
+                            f'encoding_value_ <= {opsel_name}::{pattern.max_enum}) '
+                            f'return RegisterRef{{{reg_class}, static_cast<uint16_t>('
+                            f'encoding_value_ - {opsel_name}::{pattern.min_enum}), reg_width}};'
+                        )
                 elif pattern.kind == OperandNamePattern.POS_INT:
                     case_lines.append(
                         f'if (encoding_value_ >= {opsel_name}::{pattern.min_enum} && '
@@ -5576,6 +5246,12 @@ class CodeGenerator:
             switch_cases.append(
                 f'case OperandType::{opnd_sel.operand_type}: '
                 f'{{ {case_body} }}'
+            )
+            ref_case_lines.append('break;')
+            ref_case_body = ' '.join(ref_case_lines)
+            ref_switch_cases.append(
+                f'case OperandType::{opnd_sel.operand_type}: '
+                f'{{ {ref_case_body} }}'
             )
 
         no_sel_types = [
@@ -5613,12 +5289,27 @@ class CodeGenerator:
             f'}}'
         )
 
+        ref_switch_body = '\n'.join(ref_switch_cases)
+        ref_impl = (
+            f'std::optional<RegisterRef> Operand::to_register_ref() const {{\n'
+            f'// Liveness tracks operands as contiguous 32-bit register lanes.\n'
+            f'const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);\n'
+            f'switch (opr_type_) {{\n'
+            f'{ref_switch_body}\n'
+            f'default:\n'
+            f'  break;\n'
+            f'}}\n'
+            f'return std::nullopt;\n'
+            f'}}'
+        )
+
         class_def = [
             cgen.Line(
                 'class Operand : public IsaOperand<Isa> {\n'
                 'public:\n'
                 'Operand(int size_bits, OperandType opr_type, int encoding_value);\n'
                 'std::string name() const override;\n'
+                'std::optional<RegisterRef> to_register_ref() const override;\n'
                 'uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;\n'
                 'uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;\n'
                 'void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;\n'
@@ -5639,6 +5330,7 @@ class CodeGenerator:
                 '}'
             ),
             cgen.Line(name_impl),
+            cgen.Line(ref_impl),
         ]
 
         reg_name_helper = cgen.Line(

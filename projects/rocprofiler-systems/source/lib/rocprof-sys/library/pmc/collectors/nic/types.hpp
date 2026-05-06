@@ -38,7 +38,7 @@ struct port_info
  */
 struct rdma_info
 {
-    uint8_t port_count = 0;
+    std::uint8_t port_count = 0;
 };
 
 /**
@@ -46,8 +46,8 @@ struct rdma_info
  */
 struct stat_entry
 {
-    std::string name;
-    uint64_t    value = 0;
+    std::string   name;
+    std::uint64_t value = 0;
 };
 
 /**
@@ -82,7 +82,7 @@ union enabled_metrics
         std::uint32_t req_rx_impl_nak_seq_err : 1;
 
     } bits;
-    uint32_t value = 0;
+    std::uint32_t value = 0;
 };
 
 /// All 10 NIC RDMA metrics enabled (bits 0-9)

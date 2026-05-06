@@ -5,6 +5,7 @@
 
 #include "core/demangler.hpp"
 #include "defines.hpp"
+#include <cstdint>
 
 #include <timemory/settings/macros.hpp>
 #include <timemory/tpls/cereal/archives.hpp>
@@ -41,12 +42,12 @@ class SettingsTextArchive
 , public traits::TextArchive
 {
 public:
-    using width_type = std::vector<uint64_t>;
+    using width_type = std::vector<std::uint64_t>;
     using value_type = std::string;
     using entry_type = std::map<std::string, value_type>;
     using array_type = std::vector<entry_type>;
     using unique_set = std::set<std::string>;
-    using int_stack  = std::stack<uint32_t>;
+    using int_stack  = std::stack<std::uint32_t>;
 
 public:
     //! Construct, outputting to the provided stream

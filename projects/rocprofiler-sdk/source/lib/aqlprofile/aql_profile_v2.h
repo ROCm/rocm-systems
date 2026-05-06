@@ -530,7 +530,7 @@ aqlprofile_att_get_buffer_packets(uint64_t*                      header,
                                   int                            shader_engine_id,
                                   int                            flags);
 
-struct aqlprofile_att_buffer_status_t
+typedef struct aqlprofile_att_buffer_status_t
 {
     uint64_t _size;       // sizeof(aqlprofile_att_buffer_status_t)
     void*    data;        // Read data from, if is full
@@ -539,7 +539,7 @@ struct aqlprofile_att_buffer_status_t
     bool     needs_swap;  // If buffer requires swap
     bool     is_too_late;
     bool     error;
-};
+} aqlprofile_att_buffer_status_t;
 
 /**
  * @brief Fn to retrieve buffer status.
@@ -794,14 +794,14 @@ aqlprofile_spm_decode_stream_v1(aqlprofile_spm_buffer_desc_t        desc,
                                 size_t                              size,
                                 void*                               userdata);
 
-enum aqlprofile_spm_decode_query_t
+typedef enum aqlprofile_spm_decode_query_t
 {
     AQLPROFILE_SPM_DECODE_QUERY_SEG_SIZE = 0,
     AQLPROFILE_SPM_DECODE_QUERY_NUM_XCC,
     AQLPROFILE_SPM_DECODE_QUERY_EVENT_COUNT,
     AQLPROFILE_SPM_DECODE_QUERY_COUNTER_MAP_BYTE_OFFSET,
     AQLPROFILE_SPM_DECODE_QUERY_LAST
-};
+} aqlprofile_spm_decode_query_t;
 
 hsa_status_t
 aqlprofile_spm_decode_query(aqlprofile_spm_buffer_desc_t  desc,

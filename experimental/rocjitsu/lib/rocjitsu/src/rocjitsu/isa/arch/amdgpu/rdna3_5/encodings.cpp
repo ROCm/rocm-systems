@@ -358,6 +358,16 @@ void Flat::build_modifiers(std::string &out) const {
     out += " slc";
 }
 
+void Flat::implicit_uses(RegisterSet &uses) const {
+  if (inst_.saddr == 0x7F)
+    return;
+  if (inst_.seg == 1) {
+    uses.expand(RegisterRef{RegClass::SGPR, static_cast<uint16_t>(inst_.saddr), 1});
+  } else if (inst_.seg == 2) {
+    uses.expand(RegisterRef{RegClass::SGPR, static_cast<uint16_t>(inst_.saddr), 2});
+  }
+}
+
 Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst,
                          ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {

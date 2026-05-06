@@ -7,7 +7,10 @@
 #ifndef ROCJITSU_ISA_OPERAND_H_
 #define ROCJITSU_ISA_OPERAND_H_
 
+#include "rocjitsu/isa/register_set.h"
+
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace rocjitsu {
@@ -32,6 +35,14 @@ public:
 
   /// @brief Human-readable name for this operand (e.g. "v0", "s4", or a literal).
   virtual std::string name() const { return std::to_string(encoding_value_); }
+
+  /// @brief Map this operand to an analysis register reference.
+  ///
+  /// @details Returns nullopt for literals, labels, waitcnt immediates, message
+  /// IDs, and other non-register operands. ISA-specific subclasses override
+  /// this using generated OperandType selector ranges so analysis never has to
+  /// parse the display string returned by name().
+  [[nodiscard]] virtual std::optional<RegisterRef> to_register_ref() const;
 
   /// @brief Raw encoding value from the instruction binary.
   int encoding_value() const { return encoding_value_; }
