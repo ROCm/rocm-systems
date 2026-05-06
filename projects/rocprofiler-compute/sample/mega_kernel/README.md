@@ -32,7 +32,7 @@ A comprehensive unit test kernel that exercises most of the instructions and fea
 
 ## Feature Compatibility Matrix
 
-This table lists **what this sample tries to run** on each GFXIP, plus a few hardware facts that are **not** individually exercised here (no standalone fixed-function graphics or branded accelerator microbenchmarks in this kernel). MFMA/WMMA rows use **zero-input / zero-output sanity checks** where builtins run; dual-issue is **BYPASSED** in the report (patterns only). Async LDS follows `__has_builtin(__builtin_amdgcn_global_load_async_to_lds_b32)` in code (gfx942 is treated as unsupported in this sample, matching `mega_kernel_device_arch.h`).
+This table lists **what this sample tries to run** on each GFXIP, plus a few hardware facts that are **not** individually exercised here (no standalone fixed-function graphics or branded accelerator microbenchmarks in this kernel). MFMA/WMMA builtins use **non-zero operands** and pass only if the accumulator fragment has **at least one non-zero lane** (FP paths also require **finite** lanes)—smoke validation, not golden-matrix or full ISA conformance. Dual-issue is **BYPASSED** in the report (patterns only). Async LDS follows `__has_builtin(__builtin_amdgcn_global_load_async_to_lds_b32)` in code (gfx942 is treated as unsupported in this sample, matching `mega_kernel_device_arch.h`).
 
 | Feature | MI250 (gfx90a) | MI300 (gfx942) | MI350 (gfx950) | Strix/Krackan (gfx115x) | RX 9070 XT (gfx1201) |
 |---------|:--------------:|:--------------:|:--------------:|:-----------------------:|:--------------------:|
@@ -306,7 +306,7 @@ MI350 can issue 2 VALU instructions from different waves per cycle under certain
 
 ### MFMA (Matrix Fused Multiply-Add) Operations (gfx90a+/CDNA)
 
-*This section lists representative MFMA intrinsics; the running kernel uses zero-input/zero-output sanity checks unless noted in the matrix—not full numerical validation.*
+*This section lists representative MFMA intrinsics. The kernel feeds **non-zero** packed operands (scalars/vectors as required per opcode) and requires **finite** FP accumulators with **at least one non-zero** `float`/`double` lane, or **at least one non-zero** `int` lane for INT8 MFMA—not reference-matrix numerical validation.*
 
 Matrix operations using dedicated Matrix Cores. For maintained MFMA / roofline work, see `src/roofline/benchmark/` in rocprofiler-compute (the older rocm-amdgpu-bench repo is deprecated).
 
@@ -329,7 +329,7 @@ Matrix operations using dedicated Matrix Cores. For maintained MFMA / roofline w
 
 ### WMMA (Wave Matrix Multiply Accumulate) Operations (RDNA4/gfx12)
 
-*Same scope note as MFMA: builtins exercised with sanity checks per the compatibility matrix, not exhaustive WMMA conformance.*
+*Same scope as MFMA: **non-zero** A/B fragments (indexed using **lane_id**), FP WMMA requires **finite** outputs with **at least one non-zero** lane in the per-lane accumulator, INT WMMA requires **at least one non-zero** lane—not exhaustive conformance. RDNA 3.5 (gfx115x) uses the 16-wide-input WMMA builtins; RDNA4 (gfx120x) uses the `_w32_gfx12` three-operand builtins—see `mega_kernel.hip`.*
 
 WMMA instructions are the matrix acceleration approach for RDNA architecture (vs MFMA for CDNA).
 Reference: [AMD GPUOpen - Using Matrix Cores on RDNA4](https://gpuopen.com/learn/using_matrix_core_amd_rdna4/)
@@ -358,8 +358,9 @@ __builtin_amdgcn_wmma_<C,D format>_16x16x16_<A,B format>_w32_gfx12
 - Each lane holds 8 elements (8 × 32 = 256 = 16 × 16)
 - Matrix A: Column-major (transposed)
 - Matrices B, C, D: Row-major
-- `laneWrapped = threadIdx.x % 16` (column index)
-- `laneGroup = threadIdx.x / 16` (upper/lower half)
+- `lane_id = threadIdx.x % warpSize` (matches `mega_kernel.hip`)
+- `laneWrapped = lane_id % 16` (column index)
+- `laneGroup = lane_id / 16` (upper/lower half)
 
 **Key RDNA4 WMMA Differences vs RDNA3:**
 - VGPR layout changed (NOT backward compatible)

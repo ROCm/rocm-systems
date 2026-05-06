@@ -1839,37 +1839,54 @@ using bf16_4vec   = __attribute__((__vector_size__(4 * sizeof(short)))) short;
 using f16_4vec    = __attribute__((__vector_size__(4 * sizeof(_Float16)))) _Float16;
 using int32_8vec  = __attribute__((__vector_size__(8 * sizeof(int)))) int;
 
+/** MFMA sanity: all lanes finite (FP paths) and at least one nonzero accumulator lane. */
 __device__ inline bool
-mfma_out_f32_all_zero(const f32_16vec& r)
+mfma_acc_f32_nonempty_finite(const f32_16vec& r)
 {
+    bool any_nonzero = false;
     for(int i = 0; i < 16; i++)
     {
-        if(!isfinite(r[i]) || r[i] != 0.0f)
+        if(!isfinite(r[i]))
             return false;
+        if(r[i] != 0.0f)
+            any_nonzero = true;
     }
-    return true;
+    return any_nonzero;
 }
 
 __device__ inline bool
-mfma_out_f64_all_zero(const f64_4vec& r)
+mfma_acc_f64_nonempty_finite(const f64_4vec& r)
 {
+    bool any_nonzero = false;
     for(int i = 0; i < 4; i++)
     {
-        if(!isfinite(r[i]) || r[i] != 0.0)
+        if(!isfinite(r[i]))
             return false;
+        if(r[i] != 0.0)
+            any_nonzero = true;
     }
-    return true;
+    return any_nonzero;
 }
 
 __device__ inline bool
-mfma_out_i32_all_zero(const int32_16vec& r)
+mfma_acc_i32_nonempty(const int32_16vec& r)
 {
+    bool any_nonzero = false;
     for(int i = 0; i < 16; i++)
     {
         if(r[i] != 0)
-            return false;
+            any_nonzero = true;
     }
-    return true;
+    return any_nonzero;
+}
+
+/** Pack operand bits for MFMA FP8 builtins that take IEEE binary64 slots at the API. */
+__device__ inline double
+mfma_fp8_packed_operand_u64(uint64_t bits)
+{
+    double d;
+    memcpy(&d, &bits, sizeof(bits));
+    return d;
 }
 
 // mfma_mode: 0=both (ASM+builtin), 1=asm only, 2=builtin only
@@ -1896,8 +1913,8 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         if(mfma_mode != 1)
         {
             f32_16vec result = { 0 };
-            result   = __builtin_amdgcn_mfma_f32_32x32x2f32(0.0f, 0.0f, result, 0, 0, 0);
-            f32_passed = mfma_out_f32_all_zero(result);
+            result = __builtin_amdgcn_mfma_f32_32x32x2f32(1.0f, 1.0f, result, 0, 0, 0);
+            f32_passed = mfma_acc_f32_nonempty_finite(result);
         }
         else
         {
@@ -1910,8 +1927,8 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         if(mfma_mode != 1)
         {
             f64_4vec result = { 0 };
-            result     = __builtin_amdgcn_mfma_f64_16x16x4f64(0.0, 0.0, result, 0, 0, 0);
-            f64_passed = mfma_out_f64_all_zero(result);
+            result = __builtin_amdgcn_mfma_f64_16x16x4f64(1.0, 1.0, result, 0, 0, 0);
+            f64_passed = mfma_acc_f64_nonempty_finite(result);
         }
         else
         {
@@ -1923,10 +1940,11 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     {
         if(mfma_mode != 1)
         {
-            f16_4vec  a = { 0 };
-            f32_16vec result = { 0 };
-            result     = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
-            f16_passed = mfma_out_f32_all_zero(result);
+            const _Float16 one_h = (_Float16)1.0f;
+            f16_4vec          a      = { one_h, one_h, one_h, one_h };
+            f32_16vec         result = { 0 };
+            result                   = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
+            f16_passed               = mfma_acc_f32_nonempty_finite(result);
         }
         else
         {
@@ -1938,10 +1956,11 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     {
         if(mfma_mode != 1)
         {
-            bf16_2vec a      = { 0, 0 };
-            f32_16vec result = { 0 };
-            result = __builtin_amdgcn_mfma_f32_32x32x4bf16(a, a, result, 0, 0, 0);
-            bf16_passed = mfma_out_f32_all_zero(result);
+            const short       bf16_one = (short) (0x3f800000u >> 16);
+            bf16_2vec         a        = { bf16_one, bf16_one };
+            f32_16vec         result   = { 0 };
+            result                     = __builtin_amdgcn_mfma_f32_32x32x4bf16(a, a, result, 0, 0, 0);
+            bf16_passed                = mfma_acc_f32_nonempty_finite(result);
         }
         else
         {
@@ -1953,10 +1972,11 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     {
         if(mfma_mode != 1)
         {
-            int32_16vec result = { 0 };
-            result =
-                __builtin_amdgcn_mfma_i32_32x32x8i8(0, 0, result, 0, 0, 0);
-            i8_passed = mfma_out_i32_all_zero(result);
+            const int     i8_pack = 0x01010101;
+            int32_16vec   result  = { 0 };
+            result                = __builtin_amdgcn_mfma_i32_32x32x8i8(i8_pack, i8_pack, result,
+                                                           0, 0, 0);
+            i8_passed             = mfma_acc_i32_nonempty(result);
         }
         else
         {
@@ -1991,8 +2011,8 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         if(mfma_mode != 1)
         {
             f32_16vec result = { 0 };
-            result   = __builtin_amdgcn_mfma_f32_32x32x2f32(0.0f, 0.0f, result, 0, 0, 0);
-            f32_passed = mfma_out_f32_all_zero(result);
+            result = __builtin_amdgcn_mfma_f32_32x32x2f32(1.0f, 1.0f, result, 0, 0, 0);
+            f32_passed = mfma_acc_f32_nonempty_finite(result);
         }
         else
         {
@@ -2005,8 +2025,8 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         if(mfma_mode != 1)
         {
             f64_4vec result = { 0 };
-            result     = __builtin_amdgcn_mfma_f64_16x16x4f64(0.0, 0.0, result, 0, 0, 0);
-            f64_passed = mfma_out_f64_all_zero(result);
+            result = __builtin_amdgcn_mfma_f64_16x16x4f64(1.0, 1.0, result, 0, 0, 0);
+            f64_passed = mfma_acc_f64_nonempty_finite(result);
         }
         else
         {
@@ -2018,10 +2038,11 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     {
         if(mfma_mode != 1)
         {
-            f16_4vec  a = { 0 };
-            f32_16vec result = { 0 };
-            result     = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
-            f16_passed = mfma_out_f32_all_zero(result);
+            const _Float16 one_h = (_Float16)1.0f;
+            f16_4vec          a      = { one_h, one_h, one_h, one_h };
+            f32_16vec         result = { 0 };
+            result                   = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
+            f16_passed               = mfma_acc_f32_nonempty_finite(result);
         }
         else
         {
@@ -2033,10 +2054,11 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     {
         if(mfma_mode != 1)
         {
-            bf16_4vec a = { 0, 0, 0, 0 };
-            f32_16vec result = { 0 };
-            result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, a, result, 0, 0, 0);
-            bf16_passed = mfma_out_f32_all_zero(result);
+            const short bf16_one       = (short) (0x3f800000u >> 16);
+            bf16_4vec   a              = { bf16_one, bf16_one, bf16_one, bf16_one };
+            f32_16vec   result         = { 0 };
+            result                     = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, a, result, 0, 0, 0);
+            bf16_passed                = mfma_acc_f32_nonempty_finite(result);
         }
         else
         {
@@ -2048,10 +2070,11 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     {
         if(mfma_mode != 1)
         {
-            int32_16vec result = { 0 };
+            const long long i8_pack = 0x0101010101010101LL;
+            int32_16vec     result  = { 0 };
             result =
-                __builtin_amdgcn_mfma_i32_32x32x16_i8(0LL, 0LL, result, 0, 0, 0);
-            i8_passed = mfma_out_i32_all_zero(result);
+                __builtin_amdgcn_mfma_i32_32x32x16_i8(i8_pack, i8_pack, result, 0, 0, 0);
+            i8_passed = mfma_acc_i32_nonempty(result);
         }
         else
         {
@@ -2063,10 +2086,15 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     {
         if(mfma_mode != 1)
         {
-            f32_16vec result = { 0 };
+            const uint64_t fp8_bits =
+                (uint64_t) (unsigned) (lane_id + 1)
+                | ((uint64_t) (unsigned) (lane_id + 1) << 32);
+            const double   fp8_a = mfma_fp8_packed_operand_u64(fp8_bits);
+            const double   fp8_b = mfma_fp8_packed_operand_u64(fp8_bits);
+            f32_16vec      result = { 0 };
             result =
-                __builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8(0.0, 0.0, result, 0, 0, 0);
-            f8_passed = mfma_out_f32_all_zero(result);
+                __builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8(fp8_a, fp8_b, result, 0, 0, 0);
+            f8_passed = mfma_acc_f32_nonempty_finite(result);
         }
         else
         {
@@ -2101,8 +2129,8 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         if(mfma_mode != 1)
         {
             f32_16vec result = { 0 };
-            result   = __builtin_amdgcn_mfma_f32_32x32x2f32(0.0f, 0.0f, result, 0, 0, 0);
-            f32_passed = mfma_out_f32_all_zero(result);
+            result = __builtin_amdgcn_mfma_f32_32x32x2f32(1.0f, 1.0f, result, 0, 0, 0);
+            f32_passed = mfma_acc_f32_nonempty_finite(result);
         }
         else
         {
@@ -2115,8 +2143,8 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         if(mfma_mode != 1)
         {
             f64_4vec result = { 0 };
-            result     = __builtin_amdgcn_mfma_f64_16x16x4f64(0.0, 0.0, result, 0, 0, 0);
-            f64_passed = mfma_out_f64_all_zero(result);
+            result = __builtin_amdgcn_mfma_f64_16x16x4f64(1.0, 1.0, result, 0, 0, 0);
+            f64_passed = mfma_acc_f64_nonempty_finite(result);
         }
         else
         {
@@ -2128,10 +2156,11 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     {
         if(mfma_mode != 1)
         {
-            f16_4vec  a = { 0 };
-            f32_16vec result = { 0 };
-            result     = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
-            f16_passed = mfma_out_f32_all_zero(result);
+            const _Float16 one_h = (_Float16)1.0f;
+            f16_4vec          a      = { one_h, one_h, one_h, one_h };
+            f32_16vec         result = { 0 };
+            result                   = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
+            f16_passed               = mfma_acc_f32_nonempty_finite(result);
         }
         else
         {
@@ -2143,10 +2172,11 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     {
         if(mfma_mode != 1)
         {
-            bf16_4vec a = { 0, 0, 0, 0 };
-            f32_16vec result = { 0 };
-            result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, a, result, 0, 0, 0);
-            bf16_passed = mfma_out_f32_all_zero(result);
+            const short bf16_one       = (short) (0x3f800000u >> 16);
+            bf16_4vec   a              = { bf16_one, bf16_one, bf16_one, bf16_one };
+            f32_16vec   result         = { 0 };
+            result                     = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, a, result, 0, 0, 0);
+            bf16_passed                = mfma_acc_f32_nonempty_finite(result);
         }
         else
         {
@@ -2158,10 +2188,11 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     {
         if(mfma_mode != 1)
         {
-            int32_16vec result = { 0 };
+            const long long i8_pack = 0x0101010101010101LL;
+            int32_16vec     result  = { 0 };
             result =
-                __builtin_amdgcn_mfma_i32_32x32x16_i8(0LL, 0LL, result, 0, 0, 0);
-            i8_passed = mfma_out_i32_all_zero(result);
+                __builtin_amdgcn_mfma_i32_32x32x16_i8(i8_pack, i8_pack, result, 0, 0, 0);
+            i8_passed = mfma_acc_i32_nonempty(result);
         }
         else
         {
@@ -2173,11 +2204,12 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     {
         if(mfma_mode != 1)
         {
-            int32_8vec  a = { 0 };
-            f32_16vec   result = { 0 };
-            result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 0, 0,
-                                                                     0, 0, 0, 0);
-            f8_passed = mfma_out_f32_all_zero(result);
+            const int  pkt       = 0x01010101 * (lane_id + 1);
+            int32_8vec a         = { pkt, pkt, pkt, pkt, pkt, pkt, pkt, pkt };
+            f32_16vec  result    = { 0 };
+            result               = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result,
+                                                                   0, 0, 0, 0, 0, 0);
+            f8_passed            = mfma_acc_f32_nonempty_finite(result);
         }
         else
         {
@@ -2745,8 +2777,8 @@ test_async_lds_operations([[maybe_unused]] float* global_src, float* global_dst,
 // - Each lane holds 8 elements (8 * 32 = 256 = 16 * 16 elements)
 // - Matrix A is column-major (transposed)
 // - Matrices B, C, D are row-major
-// - laneWrapped = threadIdx.x % 16 (column index within matrix)
-// - laneGroup = threadIdx.x / 16 (upper/lower half of matrix)
+// - laneWrapped = lane_id % 16 (column index within matrix; lane_id = threadIdx.x % warpSize)
+// - laneGroup = lane_id / 16 (upper/lower half of matrix)
 //
 // WMMA USAGE PATTERN:
 // -------------------
@@ -2773,6 +2805,32 @@ using wmma_f32_frag  = __attribute__((__vector_size__(8 * sizeof(float)))) float
 using wmma_i32_frag  = __attribute__((__vector_size__(8 * sizeof(int)))) int;
 using wmma_i8_frag   = __attribute__((
     __vector_size__(2 * sizeof(int)))) int;  // 2 packed i32 for 8 i8 elements
+
+__device__ inline bool
+wmma_frag_f32_nonempty_finite(const wmma_f32_frag& c)
+{
+    bool any_nonzero = false;
+    for(int i = 0; i < 8; i++)
+    {
+        if(!isfinite(c[i]))
+            return false;
+        if(c[i] != 0.0f)
+            any_nonzero = true;
+    }
+    return any_nonzero;
+}
+
+__device__ inline bool
+wmma_frag_i32_nonempty(const wmma_i32_frag& c)
+{
+    bool any_nonzero = false;
+    for(int i = 0; i < 8; i++)
+    {
+        if(c[i] != 0)
+            any_nonzero = true;
+    }
+    return any_nonzero;
+}
 #endif
 
 __device__ void
@@ -2876,8 +2934,8 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     bool bf16_passed = true;
     bool i8_passed   = true;
 
-    const int laneWrapped = tid % 16;
-    const int laneGroup   = tid / 16;
+    const int laneWrapped = lane_id % 16;
+    const int laneGroup   = lane_id / 16;
 
     // GFX11 WMMA uses 16-element input vectors (wmma-256b-insts)
     using wmma_f16_frag_gfx11 =
@@ -2908,11 +2966,7 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         c_frag = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(a_frag, b_frag, c_frag);
 #    endif
 
-        volatile float sink = 0;
-        for(int i = 0; i < 8; i++)
-            sink += c_frag[i];
-        f16_passed = (sink != 0.0f || tid >= 32);
-        (void) sink;
+        f16_passed = wmma_frag_f32_nonempty_finite(c_frag);
     }
 
     // ---- BF16 WMMA: __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32 ----
@@ -2935,11 +2989,7 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         c_frag = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(a_frag, b_frag, c_frag);
 #    endif
 
-        volatile float sink = 0;
-        for(int i = 0; i < 8; i++)
-            sink += c_frag[i];
-        bf16_passed = (sink != 0.0f || tid >= 32);
-        (void) sink;
+        bf16_passed = wmma_frag_f32_nonempty_finite(c_frag);
     }
 
     // ---- INT8 WMMA: __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32 ----
@@ -2972,35 +3022,9 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
                                                             c_frag, false);
 #    endif
 
-        volatile int sink = 0;
-        for(int i = 0; i < 8; i++)
-            sink += c_frag[i];
-        i8_passed = (sink != 0 || tid >= 32);
-        (void) sink;
+        i8_passed = wmma_frag_i32_nonempty(c_frag);
     }
 
-    {
-        wmma_f16_frag_gfx11 az{}, bz{};
-        wmma_f32_frag       cz = { 0 };
-#    if __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_f16_w32)
-        cz = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(az, bz, cz);
-#    endif
-        bool zok = true;
-        for(int i = 0; i < 8; i++)
-            zok = zok && isfinite(cz[i]) && fabsf(cz[i]) < 1e-4f;
-        f16_passed = f16_passed && zok;
-    }
-    {
-        wmma_bf16_frag_gfx11 az{}, bz{};
-        wmma_f32_frag        cz = { 0 };
-#    if __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32)
-        cz = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(az, bz, cz);
-#    endif
-        bool zok = true;
-        for(int i = 0; i < 8; i++)
-            zok = zok && isfinite(cz[i]) && fabsf(cz[i]) < 1e-4f;
-        bf16_passed = bf16_passed && zok;
-    }
     if(lane_id == 0)
     {
         atomicAdd(&results->wmma_f16_passed, f16_passed ? 1 : 0);
@@ -3017,8 +3041,8 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     bool bf16_passed = true;
     bool i8_passed   = true;
 
-    const int laneWrapped     = tid % 16;
-    const int laneGroup       = tid / 16;
+    const int laneWrapped     = lane_id % 16;
+    const int laneGroup       = lane_id / 16;
     const int WMMA_DATA_WIDTH = 8;
 
     // ---- FP16 WMMA: __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12 ----
@@ -3044,11 +3068,7 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         c_frag = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a_frag, b_frag, c_frag);
 #    endif
 
-        volatile float sink = 0;
-        for(int i = 0; i < 8; i++)
-            sink += c_frag[i];
-        f16_passed = (sink != 0.0f || tid >= 32);
-        (void) sink;
+        f16_passed = wmma_frag_f32_nonempty_finite(c_frag);
     }
 
     // ---- BF16 WMMA: __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12 ----
@@ -3072,11 +3092,7 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
             __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(a_frag, b_frag, c_frag);
 #    endif
 
-        volatile float sink = 0;
-        for(int i = 0; i < 8; i++)
-            sink += c_frag[i];
-        bf16_passed = (sink != 0.0f || tid >= 32);
-        (void) sink;
+        bf16_passed = wmma_frag_f32_nonempty_finite(c_frag);
     }
 
     // ---- INT8 WMMA: __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12 ----
@@ -3109,35 +3125,9 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
                                                                   b_frag, c_frag, false);
 #    endif
 
-        volatile int sink = 0;
-        for(int i = 0; i < 8; i++)
-            sink += c_frag[i];
-        i8_passed = (sink != 0 || tid >= 32);
-        (void) sink;
+        i8_passed = wmma_frag_i32_nonempty(c_frag);
     }
 
-    {
-        wmma_f16_frag az{}, bz{};
-        wmma_f32_frag cz = { 0 };
-#    if __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12)
-        cz = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(az, bz, cz);
-#    endif
-        bool zok = true;
-        for(int i = 0; i < 8; i++)
-            zok = zok && isfinite(cz[i]) && fabsf(cz[i]) < 1e-4f;
-        f16_passed = f16_passed && zok;
-    }
-    {
-        wmma_bf16_frag az{}, bz{};
-        wmma_f32_frag  cz = { 0 };
-#    if __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12)
-        cz = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(az, bz, cz);
-#    endif
-        bool zok = true;
-        for(int i = 0; i < 8; i++)
-            zok = zok && isfinite(cz[i]) && fabsf(cz[i]) < 1e-4f;
-        bf16_passed = bf16_passed && zok;
-    }
     if(lane_id == 0)
     {
         atomicAdd(&results->wmma_f16_passed, f16_passed ? 1 : 0);
