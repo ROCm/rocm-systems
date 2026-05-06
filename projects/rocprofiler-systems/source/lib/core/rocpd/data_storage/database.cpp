@@ -29,7 +29,7 @@
         ROCPD_VERSION_TRIPLET_TO_INT(ROCPROFSYS_ROCPD_COMPILE_VERSION_MAJOR,             \
                                      ROCPROFSYS_ROCPD_COMPILE_VERSION_MINOR,             \
                                      ROCPROFSYS_ROCPD_COMPILE_VERSION_PATCH)
-#    define ROCPROFSYS_ROCPD_NEW_API_VERSION ROCPD_VERSION_TRIPLET_TO_INT(1, 3, 0)
+#    define ROCPROFSYS_ROCPD_NEW_API_VERSION ROCPD_VERSION_TRIPLET_TO_INT(1, 3, 1)
 #else
 #    include "core/rocpd/data_storage/schema/data_views.hpp"
 #    include "core/rocpd/data_storage/schema/marker_views.hpp"
@@ -84,7 +84,7 @@ process_schema_template(std::string_view schema_content, const std::string& upid
 
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
 #    if ROCPROFSYS_ROCPD_COMPILE_VERSION >= ROCPROFSYS_ROCPD_NEW_API_VERSION
-// New API (>= 1.3.0): callback includes schema_version parameter
+// New API (>= 1.3.1): callback includes schema_version parameter
 void
 load_schema_cb(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
                rocpd_version_triplet_t, const rocpd_sql_schema_jinja_variables_t*,
@@ -104,7 +104,7 @@ load_schema_cb(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
     *query = std::string(schema_content);
 }
 
-// Old API (< 1.3.0) callback typedef — no schema_version parameter.
+// Old API (< 1.3.1) callback typedef — no schema_version parameter.
 // Used at runtime when the loaded library is older than the headers we compiled against.
 using rocpd_sql_load_schema_cb_v1_t = void (*)(rocpd_sql_engine_t,
                                                rocpd_sql_schema_kind_t,
@@ -112,14 +112,14 @@ using rocpd_sql_load_schema_cb_v1_t = void (*)(rocpd_sql_engine_t,
                                                const rocpd_sql_schema_jinja_variables_t*,
                                                const char*, const char*, void*);
 
-// Old API (< 1.3.0) function pointer typedef — 8 params, no schema_version.
+// Old API (< 1.3.1) function pointer typedef — 8 params, no schema_version.
 using rocpd_sql_load_schema_fn_v1_t =
     rocpd_status_t (*)(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
                        const rocpd_sql_schema_jinja_variables_t*,
                        rocpd_sql_load_schema_cb_v1_t, const char**, std::uint64_t, void*);
 #    endif
 
-// Legacy API (< 1.3.0): callback does not have schema_version parameter
+// Legacy API (< 1.3.1): callback does not have schema_version parameter
 void
 load_schema_cb_legacy(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
                       const rocpd_sql_schema_jinja_variables_t*, const char*,
@@ -260,6 +260,8 @@ database::initialize_schema()
 {
     const auto upid = get_upid();
 
+// This #IF can be removed now that MARKER_VIEWS is aliased to METADATA.
+// Kept it for clarity
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0 &&         \
     ROCPROFSYS_ROCPD_COMPILE_VERSION >= ROCPROFSYS_ROCPD_NEW_API_VERSION
     const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
