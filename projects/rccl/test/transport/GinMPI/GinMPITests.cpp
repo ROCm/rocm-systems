@@ -606,6 +606,117 @@ TEST_P(GinMPIFixedSizeTest, IPutSignalInvalidSignalOp)
     Barrier();
 }
 
+// ===========================================================================
+// GinMPIStressTest — non-parameterized stress fixture
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// IPutSignalStress10k
+//   10000 iterations of iputSignal(INC), pipelined with a sliding window of
+//   16 inflight requests. The signal counter on the receiver acts as the
+//   correctness oracle: it MUST equal kIterations after all ops drain — if
+//   even one op was lost on the wire, the counter under-counts.
+//
+//   Stresses (vs functional tests):
+//     - Sustained CQ draining concurrent with WR posting
+//     - Request slot recycling (10000 / 16 = 625 reuse cycles)
+//     - GFD ring management under continuous pressure
+//     - Cumulative state correctness (one drop = test failure)
+//
+//   Payload is small (256 B) and constant across iterations to maximize
+//   ops/sec — we are stressing the post/complete machinery, not bandwidth.
+//   Expected runtime: well under 1 s on production hardware.
+// ---------------------------------------------------------------------------
+TEST_F(GinMPIStressTest, IPutSignalStress10k)
+{
+    if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2)) return;
+
+    constexpr int    kIterations = 10000;
+    constexpr int    kInflight   = 16;
+    constexpr size_t kPayload    = 256;
+
+    void* sendBuf = AllocBuf(kPayload);
+    void* recvBuf = AllocBuf(kPayload);
+    void* sigBuf  = AllocBuf(kSignalSize);
+    ASSERT_NE(sendBuf, nullptr);
+    ASSERT_NE(recvBuf, nullptr);
+    ASSERT_NE(sigBuf,  nullptr);
+
+    if(worldRank_ == 0)
+    {
+        // Constant pattern across iterations; we are stressing the post/complete
+        // machinery, not data correctness per-iteration. The signal counter
+        // proves all 10k landed; the final payload check proves the last write
+        // settled correctly.
+        FillBuf(sendBuf, kPayload, /*seed=*/0x33);
+    }
+
+    void *sendMh, *sendGh, *recvMh, *recvGh, *sigMh, *sigGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kPayload,    &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kPayload,    &recvMh, &recvGh));
+    ASSERT_EQ(ncclSuccess, RegMr(sigBuf,  kSignalSize, &sigMh,  &sigGh));
+
+    Barrier();
+
+    if(worldRank_ == 0)
+    {
+        // Sliding window: inflight[next] holds either nullptr (slot free) or
+        // a pending request. Before posting, drain whatever currently sits in
+        // the slot we are about to overwrite.
+        std::vector<void*> inflight(kInflight, nullptr);
+        int                next = 0;
+
+        for(int i = 0; i < kIterations; ++i)
+        {
+            if(inflight[next] != nullptr)
+            {
+                ASSERT_TRUE(PollUntilDone(inflight[next]))
+                    << "iteration " << i << " (slot " << next << ") drain failed";
+                inflight[next] = nullptr;
+            }
+
+            ASSERT_EQ(ncclSuccess,
+                      gin_->iputSignal(ginCtx_, /*context=*/0,
+                                       /*srcOff=*/0, sendMh, kPayload,
+                                       /*dstOff=*/0, recvMh,
+                                       /*peerRank=*/1,
+                                       /*signalOff=*/0, sigMh,
+                                       /*signalValue=*/0,
+                                       NCCL_NET_SIGNAL_OP_INC,
+                                       &inflight[next]))
+                << "iteration " << i << " post failed";
+            next = (next + 1) % kInflight;
+        }
+
+        // Final drain: any slot still holding a request must complete.
+        for(int s = 0; s < kInflight; ++s)
+        {
+            if(inflight[s] != nullptr)
+            {
+                EXPECT_TRUE(PollUntilDone(inflight[s]))
+                    << "final drain of slot " << s << " failed";
+            }
+        }
+    }
+
+    Barrier();
+
+    if(worldRank_ == 1)
+    {
+        // PRIMARY ORACLE: signal counter must equal exactly kIterations.
+        // counter < kIterations => some ops were lost
+        // counter > kIterations => test bug or duplicate delivery (shouldn't happen with reliable IB)
+        EXPECT_EQ(ReadSignal(sigBuf), static_cast<uint64_t>(kIterations))
+            << "Signal counter mismatch — signal != " << kIterations
+            << " means some iputSignal ops did not land on receiver";
+
+        // SECONDARY: final payload bytes match what was sent. Every iteration
+        // wrote the same 256 bytes, so the final state is the seed pattern.
+        EXPECT_TRUE(VerifyBuf(recvBuf, kPayload, /*seed=*/0x33))
+            << "Final payload mismatch — last successful write left wrong contents";
+    }
+}
+
 namespace
 {
 

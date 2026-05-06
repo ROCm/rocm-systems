@@ -415,6 +415,18 @@ protected:
     int GetNumContexts() const override { return NumContexts(); }
 };
 
+// ---------------------------------------------------------------------------
+// Non-parameterized fixture — used by long-running stress tests that have
+// their own internal "iterations" dimension and need predictable runtime.
+// Single context, fixed config; the iteration count IS the stress axis.
+// Filterable as a group via `--gtest_filter='*Stress*'`.
+// ---------------------------------------------------------------------------
+class GinMPIStressTest : public GinMPITestBase
+{
+protected:
+    int GetNumContexts() const override { return 1; }
+};
+
 } // namespace RCCLGinTests
 
 #endif // RCCL_HAS_GIN_IB_PROXY
