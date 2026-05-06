@@ -2311,9 +2311,6 @@ void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags, bool a
 }
 
 void Device::memFree(void* ptr, size_t size) const {
-  if (ptr == nullptr) {
-    return;
-  }
   hsa_status_t stat = Hsa::memory_pool_free(ptr);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Free hsa memory %p", ptr);
   if (stat != HSA_STATUS_SUCCESS) {
