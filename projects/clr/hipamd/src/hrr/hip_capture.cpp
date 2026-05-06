@@ -105,6 +105,7 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 //
 // Binary layout of KERNEL_LAUNCH payload (matches hrr_reader.cpp parse_kernel_launch):
 //
+//   u64  stream_handle (recorded hipStream_t cast to uint64_t)
 //   u16  name_len
 //   u8[] kernel_name (name_len bytes, no NUL)
 //   u64  co_hash_lo   (0 = unknown)

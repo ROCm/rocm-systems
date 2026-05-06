@@ -174,6 +174,35 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint16_t payload_le
 }
 
 // ---------------------------------------------------------------------------
+// Atomic file write: write to a temp file then rename into place.
+//
+// g_written_blobs ensures only one thread ever reaches here for a given path,
+// so there is no concurrent write to the same temp file. The rename makes the
+// blob visible to readers only when fully written — a process crash mid-fwrite
+// leaves only the temp file, not a partial final blob.
+//
+// On Windows, rename() fails when the destination already exists (unlike POSIX
+// where it is atomic). Use MoveFileExA(MOVEFILE_REPLACE_EXISTING) instead.
+// ---------------------------------------------------------------------------
+
+static bool atomic_write_file(const std::string& path,
+                              const void* data, size_t len) {
+  std::string tmp = path + ".tmp";
+  FILE* f = fopen(tmp.c_str(), "wb");
+  if (!f) return false;
+  bool ok = (fwrite(data, 1, len, f) == len);
+  fclose(f);
+  if (!ok) { remove(tmp.c_str()); return false; }
+#ifdef _WIN32
+  ok = MoveFileExA(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+#else
+  ok = (rename(tmp.c_str(), path.c_str()) == 0);
+#endif
+  if (!ok) remove(tmp.c_str());
+  return ok;
+}
+
+// ---------------------------------------------------------------------------
 // write_blob
 // ---------------------------------------------------------------------------
 
@@ -193,11 +222,13 @@ Hash128 write_blob(const void* data, size_t len) {
   ensure_dir(subdir);
   std::string path = subdir + "/" + key + ".blob";
 
-  FILE* f = fopen(path.c_str(), "wb");
-  if (f) {
-    fwrite(data, 1, len, f);
-    fclose(f);
+  if (atomic_write_file(path, data, len)) {
     g_blob_count.fetch_add(1, std::memory_order_relaxed);
+  } else {
+    // Write failed — remove from set so a later call can retry.
+    LogPrintfWarning("[HRR capture] Failed to write blob %s", hex);
+    std::lock_guard<std::mutex> lk(g_blob_mu);
+    g_written_blobs.erase(key);
   }
   return h;
 }
@@ -218,11 +249,12 @@ Hash128 write_code_object(const void* image, size_t image_size) {
   }
 
   std::string path = g_output_dir + "/code_objects/" + hex + ".hsaco";
-  FILE* f = fopen(path.c_str(), "wb");
-  if (f) {
-    fwrite(image, 1, image_size, f);
-    fclose(f);
+  if (atomic_write_file(path, image, image_size)) {
     g_blob_count.fetch_add(1, std::memory_order_relaxed);
+  } else {
+    LogPrintfWarning("[HRR capture] Failed to write code object %s", hex);
+    std::lock_guard<std::mutex> lk(g_blob_mu);
+    g_written_blobs.erase(key);
   }
   return h;
 }

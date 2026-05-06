@@ -83,7 +83,7 @@ static void print_info(const hrr::Archive& archive, bool show_events) {
     size_t kid = 0;
     std::map<std::string, size_t> kernel_calls;
     for (const auto& ev : archive.events) {
-      if (ev.header().event_type != HRR_API_HIPMODULELAUNCHKERNEL || !ev.kernel_launch)
+      if (!ev.kernel_launch)
         continue;
       const auto& kl = *ev.kernel_launch;
       kernel_calls[kl.kernel_name]++;
@@ -306,15 +306,13 @@ static bool needs_ordering(uint16_t etype) {
 }
 
 static void dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
-                           size_t idx, bool log, const hrr::Event* next_ev) {
+                           size_t idx, bool log) {
   uint16_t etype = ev.header().event_type;
 
   // Give kernel-launch handlers the sequence ID so they can wait and advance
   // next_seq at the exact point of the HIP call.
   hrr_dispatch_seq = ev.header().sequence_id;
   auto order = needs_ordering(etype);
-  auto next_order = next_ev && needs_ordering(next_ev->header().event_type);
-  //order = (order ^ next_order);
 
   // Only "create" events need ordering — wait for turn then advance immediately
   // (before the call) so the next thread can start preparing while we execute.
@@ -372,8 +370,7 @@ static void replay_thread(PlaybackContext& ctx,
       fprintf(stderr, "[HRR] T%llu [%zu] %s\n",
               (unsigned long long)ev.header().thread_id, i,
               hrr::event_type_name(ev.header().event_type));
-    const hrr::Event* next_ev = (i + 1 < events.size()) ? events[i + 1] : nullptr;
-    dispatch_event(ctx, ev, i, log, next_ev);
+    dispatch_event(ctx, ev, i, log);
   }
 }
 
@@ -407,8 +404,7 @@ static void run_pass(PlaybackContext& ctx,
       if (log && ctx.verbose)
         fprintf(stderr, "[HRR] Event %zu: %s\n", i,
                 hrr::event_type_name(ev.header().event_type));
-      const hrr::Event* next_ev = (i + 1 < archive.events.size()) ? &archive.events[i + 1] : nullptr;
-      dispatch_event(ctx, ev, i, log, next_ev);
+      dispatch_event(ctx, ev, i, log);
     }
   }
   hipDeviceSynchronize();
@@ -506,6 +502,12 @@ int main(int argc, char** argv) {
   // Without this, a timing delay on one thread (e.g. hipEventSynchronize) can
   // cause another thread's kernel launch to race ahead of the module load that
   // populates module_map, resulting in "kernel not found" errors.
+  //
+  // dispatch_event() spin-waits on ctx.next_seq matching the event's sequence_id.
+  // The pre-pass skips non-module events, so next_seq would never naturally
+  // reach a module event's sequence_id — causing a deadlock. Fix: advance
+  // next_seq to each event's sequence_id immediately before dispatching it so
+  // the spin-wait passes unconditionally in this single-threaded context.
   if (use_mt) {
     for (const auto& ev : archive.events) {
       uint16_t t = ev.header().event_type;
@@ -513,9 +515,13 @@ int main(int argc, char** argv) {
           t == HRR_API_HIPMODULELOADDATA    ||
           t == HRR_API_HIPMODULELOADDATAEX  ||
           t == HRR_API_HIPMODULELOAD) {
-        dispatch_event(ctx, ev, 0, /*log=*/false, /*next_ev=*/nullptr);
+        ctx.next_seq.store(ev.header().sequence_id, std::memory_order_release);
+        dispatch_event(ctx, ev, 0, /*log=*/false);
       }
     }
+    // After the pre-pass, reset next_seq to 0 so the main MT replay starts
+    // from the beginning of the sequence ordering.
+    ctx.next_seq.store(0, std::memory_order_release);
   }
 
   // Warm-up pass: when a kernel filter is active, run the full archive once

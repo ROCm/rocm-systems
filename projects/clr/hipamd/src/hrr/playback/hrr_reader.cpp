@@ -181,19 +181,28 @@ bool load_archive(const std::string& path, Archive& archive) {
   archive.version = fh.version;
 
   // Read events sequentially
+  bool read_error = false;
   while (true) {
     Event ev;
     // Read the header first to get payload_length, then read the rest into
     // raw_payload as one contiguous block: header(32) + fields.
     uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
     ev.raw_payload.resize(hdr_size);
-    if (fread(ev.raw_payload.data(), hdr_size, 1, f) != 1) break;
+    if (fread(ev.raw_payload.data(), hdr_size, 1, f) != 1) break;  // clean EOF
 
     uint16_t total = ev.header().payload_length;
+    if (total < hdr_size) {
+      fprintf(stderr, "[HRR] Corrupt event: payload_length %u < header size %u\n",
+              total, hdr_size);
+      read_error = true; break;
+    }
     if (total > hdr_size) {
       ev.raw_payload.resize(total);
       uint16_t pl_size = total - hdr_size;
-      if (fread(ev.raw_payload.data() + hdr_size, 1, pl_size, f) != pl_size) break;
+      if (fread(ev.raw_payload.data() + hdr_size, 1, pl_size, f) != pl_size) {
+        fprintf(stderr, "[HRR] Truncated event payload (expected %u bytes)\n", pl_size);
+        read_error = true; break;
+      }
     }
 
     // Convenience cast macro — raw_payload.data() is the full hrr_args_* struct.
@@ -389,6 +398,7 @@ bool load_archive(const std::string& path, Archive& archive) {
   }
 
   fclose(f);
+  if (read_error) return false;
 
   // Sort events by sequence_id to restore causal ordering across threads.
   // Multi-threaded captures write events from different threads in file-arrival
@@ -443,9 +453,10 @@ bool load_archive(const std::string& path, Archive& archive) {
 static bool read_file(const std::string& file_path, std::vector<uint8_t>& data) {
   FILE* f = fopen(file_path.c_str(), "rb");
   if (!f) return false;
-  fseek(f, 0, SEEK_END);
+  if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return false; }
   long size = ftell(f);
-  fseek(f, 0, SEEK_SET);
+  if (size < 0) { fclose(f); return false; }
+  if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return false; }
   data.resize(static_cast<size_t>(size));
   bool ok = fread(data.data(), 1, data.size(), f) == data.size();
   fclose(f);

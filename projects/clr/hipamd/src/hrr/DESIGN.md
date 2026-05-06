@@ -639,8 +639,11 @@ reconstructed correctly but the capture mode semantics differ.
 
 ### Archive Size — No Incremental / Ring-Buffer Mode
 
-All events and blobs are accumulated in memory during capture and flushed at shutdown.
-Long-running workloads can produce very large archives. There is no windowed or
+Events are written to `events.bin` as they are captured (streaming, not buffered in memory).
+Blobs are written atomically via temp-file + rename on first occurrence; subsequent
+captures of the same content hash are skipped via an in-memory `g_written_blobs` set.
+The only unbounded in-memory state is `g_written_blobs` (one string entry per unique blob)
+and the per-event `hrr_args_*` struct (freed after `fwrite`). There is no windowed or
 ring-buffer capture mode that would limit archive size to a fixed window of events.
 
 ## Relationship to Original HRR Code
