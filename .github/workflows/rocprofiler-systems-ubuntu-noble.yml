@@ -49,7 +49,7 @@ jobs:
   ubuntu-noble:
     runs-on: ubuntu-latest
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-${{ matrix.rocm-version }}-ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -73,19 +73,6 @@ jobs:
           projects/rocprofiler-systems/
           .gitmodules
 
-    - name: Install Packages
-      timeout-minutes: 25
-      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
-      with:
-        retry_wait_seconds: 30
-        timeout_minutes: 25
-        max_attempts: 5
-        command: |
-          apt-get update &&
-          apt-get upgrade -y &&
-          apt-get install -y libomp-dev libopenmpi-dev &&
-          apt-get autoclean
-
     - name: Install Python Test Dependencies
       timeout-minutes: 10
       shell: bash
@@ -98,21 +85,12 @@ jobs:
           fi
         done
 
-    - name: Install ROCm Packages
-      timeout-minutes: 115
+    - name: Configure ROCm Environment
       shell: bash
-      working-directory: projects/rocprofiler-systems/
       run: |
-        ROCM_VERSION=${{ matrix.rocm-version }}
-        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
-        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
-        ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
-        echo "ROCM_MAJOR=${ROCM_MAJOR} ROCM_MINOR=${ROCM_MINOR} ROCM_VERSN=${ROCM_VERSN}"
-        wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/ubuntu/noble/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
-        apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
-        apt-get update
-        apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
-        apt-get autoclean
+        echo "/opt/rocm/bin" >> $GITHUB_PATH
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Configure, Build and Test
       timeout-minutes: 115
@@ -224,7 +202,7 @@ jobs:
   ubuntu-noble-system-deps:
     runs-on: ubuntu-latest
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -247,6 +225,13 @@ jobs:
     steps:
     - *sparse-checkout
 
+    - name: Configure ROCm Environment
+      shell: bash
+      run: |
+        echo "/opt/rocm/bin" >> $GITHUB_PATH
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
     - name: Install System Dependency Packages
       timeout-minutes: 25
       uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
@@ -258,7 +243,7 @@ jobs:
           cd projects/rocprofiler-systems/
           apt-get update &&
           apt-get upgrade -y &&
-          apt-get install -y libomp-dev libopenmpi-dev g++ \
+          apt-get install -y g++ \
             binutils-dev libboost-all-dev libtbb-dev \
             libdw-dev libdwarf-dev libelf-dev libiberty-dev &&
           apt-get autoclean
@@ -275,30 +260,11 @@ jobs:
           fi
         done
 
-    - name: Install ROCm 7.2
-      timeout-minutes: 25
-      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
-      with:
-        retry_wait_seconds: 30
-        timeout_minutes: 25
-        max_attempts: 5
-        shell: bash
-        command: |
-          cd projects/rocprofiler-systems/
-          ROCM_VERSION=7.2
-          ROCM_MAJOR=7
-          ROCM_MINOR=2
-          ROCM_VERSN=70200
-          echo "Installing ROCm ${ROCM_VERSION}"
-          wget -q https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/noble/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
-          apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
-          apt-get update
-          apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
-          apt-get autoclean
-          echo "/opt/rocm/bin" >> $GITHUB_PATH
-          echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
-          echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
-          /opt/rocm/bin/hipcc -O3 -c ./examples/transpose/transpose.cpp -o /tmp/transpose.o
+    - name: Sanity Check ROCm
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        /opt/rocm/bin/hipcc -O3 -c ./examples/transpose/transpose.cpp -o /tmp/transpose.o
 
     - name: Configure, Build, and Test with System Dependencies
       timeout-minutes: 115

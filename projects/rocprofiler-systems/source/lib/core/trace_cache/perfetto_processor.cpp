@@ -33,8 +33,10 @@ namespace
 {
 struct annotation_entry
 {
-    std::string                                                             key;
-    std::variant<std::string, uint64_t, int64_t, double, int32_t, uint32_t> value;
+    std::string key;
+    std::variant<std::string, std::uint64_t, std::int64_t, double, std::int32_t,
+                 std::uint32_t>
+        value;
 };
 
 void
@@ -51,7 +53,7 @@ annotate_perfetto(::perfetto::EventContext&            ctx,
 
 template <typename CategoryT>
 ::perfetto::Track
-get_track(CategoryT, std::string name, uint64_t hash_arg)
+get_track(CategoryT, std::string name, std::uint64_t hash_arg)
 {
     auto _uuid = tracing::get_perfetto_category_uuid<CategoryT>(hash_arg);
 
@@ -110,7 +112,7 @@ using amd_smi_nic_tx_ucast_pkts_track =
 
 template <typename Track>
 bool
-ensure_gpu_track(uint32_t device_id, bool enabled, const char* track_suffix,
+ensure_gpu_track(std::uint32_t device_id, bool enabled, const char* track_suffix,
                  const char* units)
 {
     if(!enabled) return false;
@@ -122,8 +124,8 @@ ensure_gpu_track(uint32_t device_id, bool enabled, const char* track_suffix,
 
 template <typename Track, typename ValueT>
 void
-emit_gpu_scalar(uint32_t device_id, size_t ts, bool enabled, const char* track_suffix,
-                const char* units, ValueT value)
+emit_gpu_scalar(std::uint32_t device_id, size_t ts, bool enabled,
+                const char* track_suffix, const char* units, ValueT value)
 {
     if(ensure_gpu_track<Track>(device_id, enabled, track_suffix, units))
         TRACE_COUNTER(trait::name<typename Track::category_type>::value,
@@ -132,7 +134,7 @@ emit_gpu_scalar(uint32_t device_id, size_t ts, bool enabled, const char* track_s
 
 template <typename Track, typename Array, typename Fn>
 void
-emit_xcp_array_metrics(uint32_t device_id, size_t ts, const char* metric_name,
+emit_xcp_array_metrics(std::uint32_t device_id, size_t ts, const char* metric_name,
                        const Array& data, std::optional<size_t> xcp_idx, const Fn& emit)
 {
     for(size_t i = 0; i < data.size(); ++i)
@@ -152,9 +154,9 @@ emit_xcp_array_metrics(uint32_t device_id, size_t ts, const char* metric_name,
                 fmt::format("GPU [{}] {} [{:02}] (S)", device_id, metric_name, i);
         }
 
-        auto unique_key = (static_cast<uint64_t>(device_id) << 16) |
-                          (static_cast<uint64_t>(xcp_idx.value_or(0)) << 8) |
-                          static_cast<uint64_t>(i);
+        auto unique_key = (static_cast<std::uint64_t>(device_id) << 16) |
+                          (static_cast<std::uint64_t>(xcp_idx.value_or(0)) << 8) |
+                          static_cast<std::uint64_t>(i);
 
         if(!Track::exists(unique_key))
         {
@@ -165,7 +167,8 @@ emit_xcp_array_metrics(uint32_t device_id, size_t ts, const char* metric_name,
 }
 
 void
-emit_xgmi_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::metrics& m)
+emit_xgmi_metrics(std::uint32_t device_id, size_t ts,
+                  const pmc::collectors::gpu::metrics& m)
 {
     emit_gpu_scalar<amd_smi_xgmi_link_width_track>(device_id, ts, true, "XGMI Link Width",
                                                    "lanes", m.xgmi.link.width);
@@ -175,7 +178,7 @@ emit_xgmi_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::met
     for(size_t link = 0; link < m.xgmi.data_acc.read.size(); ++link)
     {
         const auto read_val = m.xgmi.data_acc.read[link];
-        if(read_val != std::numeric_limits<uint64_t>::max())
+        if(read_val != std::numeric_limits<std::uint64_t>::max())
         {
             auto unique_key = (device_id << 8) | link;
             if(!amd_smi_xgmi_read_track::exists(unique_key))
@@ -191,7 +194,7 @@ emit_xgmi_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::met
         }
 
         const auto write_val = m.xgmi.data_acc.write[link];
-        if(write_val != std::numeric_limits<uint64_t>::max())
+        if(write_val != std::numeric_limits<std::uint64_t>::max())
         {
             auto unique_key = (device_id << 8) | link;
             if(!amd_smi_xgmi_write_track::exists(unique_key))
@@ -209,7 +212,8 @@ emit_xgmi_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::met
 }
 
 void
-emit_pcie_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::metrics& m)
+emit_pcie_metrics(std::uint32_t device_id, size_t ts,
+                  const pmc::collectors::gpu::metrics& m)
 {
     emit_gpu_scalar<amd_smi_pcie_link_width_track>(device_id, ts, true, "PCIe Link Width",
                                                    "lanes", m.pcie.link.width);
@@ -560,7 +564,7 @@ perfetto_processor_t::finalize_processing()
 void
 perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
 {
-    static auto _track_desc = [](uint64_t _device_id_v, uint64_t _queue_id_v) {
+    static auto _track_desc = [](std::uint64_t _device_id_v, std::uint64_t _queue_id_v) {
         return fmt::format("GPU Kernel Dispatch [{}] Queue {}", _device_id_v,
                            _queue_id_v);
     };
@@ -694,7 +698,7 @@ perfetto_processor_t::handle(const memory_copy_sample& _mcs)
         static_cast<rocprofiler_buffer_tracing_kind_t>(_mcs.kind),
         static_cast<rocprofiler_tracing_operation_t>(_mcs.operation)) };
 
-    auto _track_desc = [](int32_t _device_id_v, rocprofiler_thread_id_t _tid) {
+    auto _track_desc = [](std::int32_t _device_id_v, rocprofiler_thread_id_t _tid) {
         const auto& _tid_v = thread_info::get(_tid, SystemTID);
         return fmt::format("GPU Memory Copy to Agent [{}] Thread {}", _device_id_v,
                            _tid_v->index_data->sequent_value);
@@ -755,7 +759,7 @@ perfetto_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas
         const auto* operation = memop_to_string(
             static_cast<rocprofiler_memory_allocation_operation_t>(_mas.operation));
 
-        auto _track_desc = [](int32_t _device_id_v, rocprofiler_thread_id_t _tid) {
+        auto _track_desc = [](std::int32_t _device_id_v, rocprofiler_thread_id_t _tid) {
             const auto& _tid_v = thread_info::get(_tid, SystemTID);
             return fmt::format("GPU Memory Allocation to Agent [{}] Thread {}",
                                _device_id_v, _tid_v->index_data->sequent_value);
@@ -899,7 +903,7 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
         double value;
     };
 
-    auto deserialize_freqs = [](const std::vector<uint8_t>& buffer) {
+    auto deserialize_freqs = [](const std::vector<std::uint8_t>& buffer) {
         std::vector<core_freq_sample> result;
         size_t                        offset = 0;
 
@@ -915,7 +919,7 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
         return result;
     };
 
-    auto deserialize_loads = [](const std::vector<uint8_t>& buffer) {
+    auto deserialize_loads = [](const std::vector<std::uint8_t>& buffer) {
         std::vector<core_load_sample> result;
         size_t                        offset = 0;
 
