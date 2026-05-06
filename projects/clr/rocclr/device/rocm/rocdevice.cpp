@@ -2893,7 +2893,10 @@ VirtualGPU* Device::xferQueue() const {
       return nullptr;
     }
     if (xferQueue_->gpu_queue() == nullptr) {
-      xferQueue_->set_gpu_queue(thisDevice->AcquireActiveQueue(amd::CommandQueue::Priority::Normal));
+      void* md_rb = nullptr;
+      xferQueue_->SetGpuQueue(
+          thisDevice->AcquireActiveQueue(amd::CommandQueue::Priority::Normal,
+                                         nullptr, nullptr, &md_rb), md_rb);
     }
   }
   xferQueue_->enableSyncBlit();
@@ -2947,7 +2950,8 @@ void Device::getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* 
 // ================================================================================================
 hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
                                       hsa_queue_t* preferred,
-                                      const std::unordered_set<uint64_t>* excluded_ids) {
+                                      const std::unordered_set<uint64_t>* excluded_ids,
+                                      void** metadata_ring_buffer) {
   // Only reuse queues when we've reached the maximum limit, unless forced
   // Below the limit, return nullptr to allow creating new queues
   if (!force_reuse && queuePool_[qIndex].size() < settings().max_hw_queues_) {
@@ -2964,6 +2968,9 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
         auto it = queuePool_[qIndex].find(preferred);
         if (it != queuePool_[qIndex].end()) {
           it->second.refCount++;
+          if (metadata_ring_buffer) {
+            *metadata_ring_buffer = it->second.metadataRingBuffer_;
+          }
           ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
                   "Reusing preferred queue: %p refCount: %d",
                   it->first->base_address, it->second.refCount);
@@ -3010,6 +3017,9 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
         });
 
     lowest->second.refCount++;
+    if (metadata_ring_buffer) {
+      *metadata_ring_buffer = lowest->second.metadataRingBuffer_;
+    }
     ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
             "Selected queue (mode=%u): %p refCount: %d, depth: %lu, metric: %lu, pipe: %d%s%s",
             mode, lowest->first->base_address, lowest->second.refCount,
@@ -3027,10 +3037,12 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
 // ================================================================================================
 hsa_queue_t* Device::AcquireActiveQueue(amd::CommandQueue::Priority priority,
                                         hsa_queue_t* preferred,
-                                        const std::unordered_set<uint64_t>* excluded_ids) {
+                                        const std::unordered_set<uint64_t>* excluded_ids,
+                                        void** metadata_ring_buffer) {
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
   auto queue = acquireQueue(queue_size, false, std::vector<uint32_t>{},
-                            priority, true, false, preferred, excluded_ids);
+                            priority, true, false, preferred, excluded_ids,
+                            metadata_ring_buffer);
   return queue;
 }
 
@@ -3039,7 +3051,8 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
                                   const std::vector<uint32_t>& cuMask,
                                   amd::CommandQueue::Priority priority, bool managed,
                                   bool dedicated_queue, hsa_queue_t* preferred,
-                                  const std::unordered_set<uint64_t>* excluded_ids) {
+                                  const std::unordered_set<uint64_t>* excluded_ids,
+                                  void** metadata_ring_buffer) {
   hsa_amd_queue_priority_t queue_priority;
   uint qIndex;
   switch (priority) {
@@ -3091,7 +3104,8 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     // decide when to start reclaiming queues.
     if (!coop_queue && (cuMask.size() == 0) &&
         (queuePool_[qIndex].size() >= settings().max_hw_queues_)) {
-      hsa_queue_t* queue = getQueueFromPool(qIndex, false, preferred, excluded_ids);
+      hsa_queue_t* queue = getQueueFromPool(qIndex, false, preferred, excluded_ids,
+                                            metadata_ring_buffer);
       if (queue != nullptr) {
         if (!managed) {
           num_queues_[qIndex]++;
@@ -3129,7 +3143,8 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
         amd::ScopedLock l(active_queue_access_);
         if (queuePool_[qIndex].size() > 0) {
           bool kForceReuse = true;
-          return getQueueFromPool(qIndex, kForceReuse);
+          return getQueueFromPool(qIndex, kForceReuse, nullptr, nullptr,
+                                  metadata_ring_buffer);
         }
       }
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
@@ -3155,6 +3170,23 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
           queue, queue->base_address, queue_size, queue_priority, coop_queue);
 
   Hsa::profiling_set_profiler_enabled(queue, 1);
+
+  // Query metadata prefetch version once from the first queue created on this device.
+  // The version is identical for all queues.
+  if (!metadata_version_queried_) {
+    uint8_t major = 0, minor = 0;
+    hsa_amd_queue_get_info(queue,
+        HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MAJOR, &major);
+    hsa_amd_queue_get_info(queue,
+        HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MINOR, &minor);
+    if (major < (1 << 3) && minor < (1 << 5)) {
+      metadata_version_header_ =
+          (static_cast<uint32_t>(major) << HSA_AMD_METADATA_PACKET_HEADER_VERSION_MAJOR) |
+          (static_cast<uint32_t>(minor) << HSA_AMD_METADATA_PACKET_HEADER_VERSION_MINOR);
+    }
+    metadata_version_queried_ = true;
+  }
+
   if (cuMask.size() != 0 || info_.globalCUMask_.size() != 0) {
     std::stringstream ss;
     ss << std::hex;
@@ -3223,12 +3255,20 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
       return nullptr;
     }
 
+    if (metadata_ring_buffer) {
+      hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+                             metadata_ring_buffer);
+    }
     return queue;
   }
 
   if (coop_queue) {
     // Skip queue recycling for cooperative queues, since it should be just one
     // per device.
+    if (metadata_ring_buffer) {
+      hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+                             metadata_ring_buffer);
+    }
     return queue;
   }
 
@@ -3238,7 +3278,12 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   assert(result.second && "QueueInfo already exists");
   auto& qInfo = result.first->second;
   qInfo.refCount = 1;
-  qInfo.hasDedicatedQueue_ = dedicated_queue;  // Track if this is a dedicated queue
+  qInfo.hasDedicatedQueue_ = dedicated_queue;
+  hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+                         &qInfo.metadataRingBuffer_);
+  if (metadata_ring_buffer) {
+    *metadata_ring_buffer = qInfo.metadataRingBuffer_;
+  }
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "acquireQueue refCount: %p (%d) %s",
           result.first->first->base_address, result.first->second.refCount,
           dedicated_queue ? "(dedicated)" : "");

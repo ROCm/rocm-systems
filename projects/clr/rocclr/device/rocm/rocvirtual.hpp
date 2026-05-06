@@ -328,14 +328,12 @@ class VirtualGPU : public device::VirtualDevice {
 
   class MetaDataPreloader : public amd::EmbeddedObject {
     public:
-      //! Attach to gpu queue
-      void Attach(hsa_queue_t* queue);
-
-      //! Detach from gpu queue
-      void Detach() {
-        queue_base_ = nullptr;
-        version_major_ = 0;
-        version_minor_ = 0;
+      //! Set the metadata ring buffer base for the current queue.
+      void SetQueueBase(void* ring_buffer, uint32_t version_header = 0) {
+        queue_base_ = (DEBUG_CLR_ENABLE_PREFETCH_METADATA) ? ring_buffer : nullptr;
+        if (queue_base_ != nullptr) {
+          metadata_version_header_ = version_header;
+        }
         pending_descriptor_ = nullptr;
         pending_preload_length_ = 0;
         pending_preload_offset_ = 0;
@@ -406,9 +404,8 @@ class VirtualGPU : public device::VirtualDevice {
         metadata->header0 = GetType(header);
       }
 
-      void* queue_base_ = nullptr;  //!< The buffer base of prefetching queue
-      uint8_t version_major_ = 0;   //!< Major version: 3 bits
-      uint8_t version_minor_ = 0;   //!< Minor version: 5 bits
+      void* queue_base_ = nullptr;        //!< The buffer base of prefetching queue
+      uint32_t metadata_version_header_ = 0; //!< Pre-shifted version bits for metadata headers
       const hsa_amd_metadata_kernel_descriptor_t* pending_descriptor_ = nullptr;
       uint16_t pending_preload_length_ = 0;
       uint16_t pending_preload_offset_ = 0;
@@ -490,7 +487,9 @@ class VirtualGPU : public device::VirtualDevice {
 
   hsa_agent_t gpu_device() const { return gpu_device_; }
   hsa_queue_t* gpu_queue() { return gpu_queue_; }
-  void set_gpu_queue(hsa_queue_t* gpu_queue) { gpu_queue_ = gpu_queue; }
+
+  //! Set the active HW queue and keep the metadata preloader in sync.
+  void SetGpuQueue(hsa_queue_t* queue, void* metadata_ring_buffer = nullptr);
 
   //! Snapshot the current HW queue as preferred for future re-acquisition (used by graph launch).
   //! Only updates if the queue is still valid — avoids clobbering a hint saved by ReleaseHwQueue.

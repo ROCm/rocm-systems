@@ -694,6 +694,7 @@ void AqlQueue::Suspend() {
   auto err =
       agent_->driver().UpdateQueue(queue_id_, 0, priority_, ring_buf_, ring_buf_alloc_bytes_, NULL);
   assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
+  (void)err;
 }
 
 void AqlQueue::Resume() {
@@ -702,6 +703,7 @@ void AqlQueue::Resume() {
     auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_, ring_buf_,
                                             ring_buf_alloc_bytes_, NULL);
     assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
+    (void)err;
   }
 }
 
@@ -710,6 +712,7 @@ hsa_status_t AqlQueue::Inactivate() {
   if (active) {
     auto err = agent_->driver().DestroyQueue(queue_id_);
     assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
+    (void)err;
     atomic::Fence(std::memory_order_acquire);
   }
   return HSA_STATUS_SUCCESS;
@@ -1583,7 +1586,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   constexpr uint32_t slot_size_dw = uint32_t(slot_size_b / sizeof(uint32_t));
   uint32_t slot_data[slot_size_dw];
   hsa_signal_t local_signal = {0};
-  hsa_status_t err;
+  hsa_status_t err = HSA_STATUS_SUCCESS;
 
   if (agent_->supported_isas()[0]->GetMajorVersion() <= 8) {
     // Construct a set of PM4 to fit inside the AQL packet slot.
@@ -1687,7 +1690,9 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
                                     HSA_WAIT_STATE_ACTIVE);
     err = hsa_signal_destroy(local_signal);
     assert(ret == 0 && err == HSA_STATUS_SUCCESS);
+    (void)ret;
   }
+  (void)err;
 }
 
 void AqlQueue::FillBufRsrcWord0() {

@@ -96,9 +96,9 @@ struct cpu_traits
         }
     }
 
-    [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&       dev,
-                                               const enabled_metrics_t&  enabled,
-                                               [[maybe_unused]] uint64_t timestamp)
+    [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&            dev,
+                                               const enabled_metrics_t&       enabled,
+                                               [[maybe_unused]] std::uint64_t timestamp)
     {
         return dev->get_cpu_metrics(enabled);
     }

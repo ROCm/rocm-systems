@@ -1080,10 +1080,18 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 }
 
 // ================================================================================================
+void VirtualGPU::SetGpuQueue(hsa_queue_t* queue, void* metadata_ring_buffer) {
+  gpu_queue_ = queue;
+  metadata_preloader_.SetQueueBase(metadata_ring_buffer,
+                                   roc_device_.MetadataVersionHeader());
+}
+
+// ================================================================================================
 void VirtualGPU::AcquireQueueWithPreference() {
   std::scoped_lock lock(execution());
   if (!dedicated_queue_ && gpu_queue_ == nullptr && last_hwq_ != nullptr) {
-    gpu_queue_ = roc_device_.AcquireActiveQueue(priority_, last_hwq_);
+    void* md_rb = nullptr;
+    SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, last_hwq_, nullptr, &md_rb), md_rb);
     last_hwq_ = nullptr;
   }
 }
@@ -1099,7 +1107,8 @@ bool VirtualGPU::ReacquireQueueExcluding(const std::unordered_set<uint64_t>& exc
     roc_device_.releaseQueue(gpu_queue_, std::vector<uint32_t>{}, false, true);
     gpu_queue_ = nullptr;
   }
-  gpu_queue_ = roc_device_.AcquireActiveQueue(priority_, nullptr, &excluded_ids);
+  void* md_rb = nullptr;
+  SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, &excluded_ids, &md_rb), md_rb);
   return gpu_queue_ != nullptr;
 }
 
@@ -1108,8 +1117,8 @@ uint64_t VirtualGPU::getQueueID() {
   std::scoped_lock lock(execution());
   // Dedicated queues keep their HW queue, never acquire from pool
   if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-    gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
-    metadata_preloader_.Attach(gpu_queue_);
+    void* md_rb = nullptr;
+    SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
   }
   return gpu_queue_->id;
 }
@@ -1273,12 +1282,15 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   if (header != 0) {
     packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), header, rest);
   }
-  const auto virtual_pipe_prefix = [this]() -> const char* {
-    if (!roc_device_.settings().queue_pipe_dist_) return "";
-    static thread_local char buf[32];
-    snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,", gpu_queue_->id % roc_device_.NumHwPipes());
-    return buf;
-  }();
+  const auto virtual_pipe_prefix = IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
+                                     ? [this]() -> const char* {
+                                         if (!roc_device_.settings().queue_pipe_dist_) return "";
+                                         static thread_local char buf[32];
+                                         snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                                                  gpu_queue_->id % roc_device_.NumHwPipes());
+                                         return buf;
+                                       }()
+                                     : "";
   if (dev().settings().ext_dispatch_packet_) {
     logAqlDispatchPacketExtended(
         gpu_queue_, header, reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(packet),
@@ -1344,8 +1356,18 @@ bool VirtualGPU::dispatchAqlPacket(hsa_kernel_dispatch_packet_t* packet, uint16_
                                    uint16_t rest, bool blocking, bool capturing,
                                    const uint8_t* aqlPacket, bool attach_signal) {
   if (capturing == true) {
-    packet->header = header;
-    packet->setup = rest;
+    if (dev().settings().ext_dispatch_packet_) {
+      // For ext dispatch packets the first 32 bits are {header(16), amd_format(8), setup(8)}.
+      // rest already encodes (amd_format | (setup << 8)).
+      auto* ext_packet = reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(packet);
+      ext_packet->header = header;
+      ext_packet->amd_format =
+          static_cast<hsa_amd_packet_type8_t>(rest & 0xFF);
+      ext_packet->setup = static_cast<uint8_t>((rest >> 8) & 0xFF);
+    } else {
+      packet->header = header;
+      packet->setup = rest;
+    }
     std::memcpy(const_cast<uint8_t*>(aqlPacket), packet, sizeof(hsa_kernel_dispatch_packet_t));
     return true;
   } else {
@@ -1635,13 +1657,15 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
 
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
   logAqlBarrierPacket(gpu_queue_, packetHeader, &barrier_packet_, read, index,
-                      [this]() -> const char* {
-                        if (!roc_device_.settings().queue_pipe_dist_) return "";
-                        static thread_local char buf[32];
-                        snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
-                                 gpu_queue_->id % roc_device_.NumHwPipes());
-                        return buf;
-                      }());
+                      IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
+                        ? [this]() -> const char* {
+                            if (!roc_device_.settings().queue_pipe_dist_) return "";
+                            static thread_local char buf[32];
+                            snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                                     gpu_queue_->id % roc_device_.NumHwPipes());
+                            return buf;
+                          }()
+                        : "");
 
   // Clear dependent signals for the next packet
   barrier_packet_.dep_signal[0] = hsa_signal_t{};
@@ -1718,13 +1742,15 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
 
   logAqlBarrierValuePacket(gpu_queue_, packetHeader, &barrier_value_packet_, read, index,
-                           [this]() -> const char* {
-                             if (!roc_device_.settings().queue_pipe_dist_) return "";
-                             static thread_local char buf[32];
-                             snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
-                                      gpu_queue_->id % roc_device_.NumHwPipes());
-                             return buf;
-                           }());
+                           IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
+                             ? [this]() -> const char* {
+                                 if (!roc_device_.settings().queue_pipe_dist_) return "";
+                                 static thread_local char buf[32];
+                                 snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                                          gpu_queue_->id % roc_device_.NumHwPipes());
+                                 return buf;
+                               }()
+                             : "");
   // Clear dependent signals for the next packet
   barrier_value_packet_.signal = hsa_signal_t{};
 }
@@ -1847,13 +1873,13 @@ VirtualGPU::~VirtualGPU() {
   ReleaseSdmaEngines();
 
   delete blitMgr_;
-  metadata_preloader_.Detach();
 
   if (tracking_created_) {
     std::scoped_lock l(execution());
     // Dedicated queues keep their HW queue, never acquire from pool
     if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-      gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
+      void* md_rb = nullptr;
+      SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
     }
     // Windows requires an interrupt in more cases than Linux for OS fence updates
     force_irq_ = IS_WINDOWS;
@@ -1919,10 +1945,10 @@ VirtualGPU::~VirtualGPU() {
 bool VirtualGPU::create() {
   // Pick a reasonable queue size
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
-  gpu_queue_ = roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
-                                         dedicated_queue_);
+  void* md_rb = nullptr;
+  SetGpuQueue(roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
+                                       dedicated_queue_, nullptr, nullptr, &md_rb), md_rb);
   if (!gpu_queue_) return false;
-  metadata_preloader_.Attach(gpu_queue_);
 
   if (!managed_kernarg_buffer_.Create(Device::MemorySegment::kKernArg)) {
     LogError("Couldn't allocate arguments/signals for the queue");
@@ -2127,8 +2153,7 @@ void VirtualGPU::ReleaseHwQueue() {
         if (IsQueueIdle()) {
           last_hwq_ = gpu_queue_;
           if (roc_device_.ReleaseActiveQueue(gpu_queue_, priority_)) {
-            metadata_preloader_.Detach();
-            gpu_queue_ = nullptr;
+            SetGpuQueue(nullptr);
           }
         }
       }
@@ -2145,8 +2170,8 @@ void VirtualGPU::ReleaseHwQueue() {
 void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
   // Dedicated queues keep their HW queue, never acquire from pool
   if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-    gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
-    metadata_preloader_.Attach(gpu_queue_);
+    void* md_rb = nullptr;
+    SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
   }
   // Track the current command
   command_ = &command;
@@ -4313,8 +4338,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
     if (isGraphCapture) {
       // Dispatch the packet
-      if (!dispatchAqlPacket(&dispatchPacket, aqlHeaderWithOrder,
-                             (sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS),
+      if (!dispatchAqlPacket(&dispatchPacket, aqlHeaderWithOrder, rest,
                              GPU_FLUSH_ON_EXECUTION, command_->getPktCapturingState(),
                              command_->getAqlPacket())) {
         return false;
@@ -4443,7 +4467,8 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     // It should be safe to call flush directly if there are not pending dispatches without
     // HSA signal callback
     if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-      gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
+      void* md_rb = nullptr;
+      SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
     }
     flush(vcmd.GetBatchHead());
   } else {
@@ -4654,41 +4679,6 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
 }
 
 // ================================================================================================
-void VirtualGPU::MetaDataPreloader::Attach(hsa_queue_t* queue) {
-  if (!DEBUG_CLR_ENABLE_PREFETCH_METADATA) {
-    Detach();
-    return;
-  }
-
-  void* ring_buffer = nullptr;
-  hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
-                         &ring_buffer);
-  if (ring_buffer == nullptr) {
-    Detach();
-    return;
-  }
-
-  uint8_t version_major = 0, version_minor = 0;
-  hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MAJOR,
-                         &version_major);
-  if (version_major >= (1 << 3)) {
-    Detach();
-    return;
-  }
-
-  hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MINOR,
-                         &version_minor);
-  if (version_minor >= (1 << 5)) {
-    Detach();
-    return;
-  }
-
-  queue_base_ = ring_buffer;
-  version_major_ = version_major;
-  version_minor_ = version_minor;
-}
-
-// ================================================================================================
 void VirtualGPU::MetaDataPreloader::SetPacket(
     hsa_kernel_dispatch_packet_t* aql,  uint16_t header,
     hsa_amd_metadata_kernel_dispatch_packet_t* metadata) const {
@@ -4776,9 +4766,7 @@ void VirtualGPU::MetaDataPreloader::SetPacket(
   // Plain stores are sufficient here: the subsequent packet_store_release on the main
   // AQL dispatch header provides a release fence that orders all metadata writes (body
   // and headers) before the CP sees the valid dispatch packet.
-  uint32_t metadata_header = GetType(header);
-  metadata_header |= version_major_ << HSA_AMD_METADATA_PACKET_HEADER_VERSION_MAJOR;
-  metadata_header |= version_minor_ << HSA_AMD_METADATA_PACKET_HEADER_VERSION_MINOR;
+  uint32_t metadata_header = GetType(header) | metadata_version_header_;
   metadata->header3 = metadata_header;
   metadata->header2 = metadata_header;
   metadata->header1 = metadata_header;

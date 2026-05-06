@@ -1810,9 +1810,14 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
       }
       // userStream[0] waits on deviceStream
       NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, deviceStream, comm->sharedRes->scratchEvent), result, failure);
-    } else if (planner->streams->stream != comm->lastStream && comm->lastStream != nullptr && !persistent) {
-      // Stream changed from last call, create dependency against last NCCL kernel launch
-      CUDACHECKGOTO(hipStreamWaitEvent(planner->streams->stream, comm->doneEvent, 0), result, failure);
+    } else if (comm->lastStreamValid && comm->lastStream != launchStream) {
+      // Stream changed from last call. The new launchStream has no implicit edge to the
+      // previous kernel's completion; install a direct event-based dependency on doneEvent
+      // (which the fast/slow path now records after every kernel launch). This bypasses
+      // deviceStream entirely so we don't depend on Finish-side advance to keep deviceStream
+      // fresh — the fast path skips that advance, which is why the deviceStream-mediated
+      // sync hangs in this scenario.
+      CUDACHECKGOTO(hipStreamWaitEvent(launchStream, comm->doneEvent, 0), result, failure);
     }
 
     bool capturing = ncclCudaGraphValid(planner->capturingGraph);
@@ -1910,7 +1915,11 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   if (planner->numStreams == 1 && !plan->persistent) {
     latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
     comm->lastStream = planner->streams->stream;
+    comm->lastStreamValid = true;
     CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra), ret, do_return);
+    // Record doneEvent so a future ncclLaunchPrepare on a different stream can wait on it.
+    // Cheap (one event record per fast-path launch) and load-bearing for stream-change correctness.
+    CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
     latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
     return ncclSuccess;
   }
@@ -1997,6 +2006,11 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
   CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra), ret, do_return);
   latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
+  // Mirror fast-path bookkeeping so the next ncclLaunchPrepare can detect stream-change
+  // and find a fresh doneEvent to wait on.
+  comm->lastStream = launchStream;
+  comm->lastStreamValid = true;
+  CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
 
 do_return:
   NCCLCHECK(ncclProfilerStopKernelLaunchEvent(plan));
