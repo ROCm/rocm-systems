@@ -581,14 +581,17 @@ substring ``vecCopy``.
 Dispatch filtering
 ^^^^^^^^^^^^^^^^^^
 
-Dispatch filtering is based on the *global* dispatch index of kernels in a run.
+Dispatch filtering selects which iterations of each kernel to profile.
+Indices are 1-based, so the first dispatch of a kernel is ``1``. Each
+value is a positive integer or a ``start:end`` range with
+``start <= end`` (for example, ``1`` or ``3:5``).
 
-The following example profiles only the first kernel dispatch in the execution
-of the application (zero-based indexing).
+The following example profiles the first dispatch of each kernel in the
+application.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name vcopy -d 0 -- ./vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy -d 1 -- ./vcopy -n 1048576 -b 256
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -603,7 +606,7 @@ of the application (zero-based indexing).
    INFO Target: MI325X
    INFO Command: ./vcopy -n 1048576 -b 256
    INFO Kernel Selection: None
-   INFO Dispatch Selection: ['0']
+   INFO Dispatch Selection: ['1']
    INFO Filtered sections: All
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
