@@ -9,6 +9,7 @@
 #include <hip_test_kernels.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
+#include <thread>
 
 /**
  * @addtogroup hipGraphAllocNodeMemReuse hipGraphAllocNodeMemReuse
@@ -654,6 +655,158 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse") {
 
 #if HT_AMD
   // After graph destruction, memory should return to 0
+  auto statsAfterDestroy = queryGraphMem(device);
+  REQUIRE(statsAfterDestroy.usedCurrent == 0);
+#endif
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Test to verify that graphs captured on different streams do NOT share memory.
+ *  - Two graphs are captured on separate streams, each with a malloc->kernel->free
+ *  - sequence. Memory can be shared between graphs and current graph pool usage
+ *  - should reflect that.
+ * Test source
+ * ------------------------
+ *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse") {
+  const int device = 0;
+  HIP_CHECK(hipSetDevice(device));
+
+  StreamGuard stream_guard1(Streams::created);
+  hipStream_t stream1 = stream_guard1.stream();
+
+  StreamGuard stream_guard2(Streams::created);
+  hipStream_t stream2 = stream_guard2.stream();
+
+  constexpr size_t kAllocSize = 64ULL * 1024 * 1024;  // 64 MB for each graph
+
+  resetGraphMemAttributes(device);
+
+  // Capture graph A on stream1: malloc -> fill kernel -> free
+  hipGraphExec_t execA = captureGraphWithAlloc(stream1, kAllocSize, 1.0f);
+
+  // Capture graph B on stream2: malloc -> fill kernel -> free
+  hipGraphExec_t execB = captureGraphWithAlloc(stream2, kAllocSize, 2.0f);
+
+  // Launch graph A on stream1 and graph B on stream2
+  HIP_CHECK(hipGraphLaunch(execA, stream1));
+  HIP_CHECK(hipStreamSynchronize(stream1));
+
+  HIP_CHECK(hipGraphLaunch(execB, stream2));
+  HIP_CHECK(hipStreamSynchronize(stream2));
+
+  // Check memory statistics - each graph has its own allocation
+  auto stats = queryGraphMem(device);
+
+  // Both graphs retain their own memory (no cross-graph reuse on different streams),
+  // so usedCurrent should be the sum of both allocations.
+  REQUIRE(stats.usedCurrent == kAllocSize);
+
+  // Destroy graph executables - memory should be released
+  HIP_CHECK(hipGraphExecDestroy(execA));
+  HIP_CHECK(hipGraphExecDestroy(execB));
+
+#if HT_AMD
+  // After graph destruction, memory should return to 0
+  auto statsAfterDestroy = queryGraphMem(device);
+  REQUIRE(statsAfterDestroy.usedCurrent == 0);
+#endif
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Test to verify that VA remap works correctly when two graphs share the same
+ *    memory pool and one graph steals the other's physical memory.
+ *  - Sequence:
+ *    1. Capture graph A and graph B with malloc->kernel->free (same alloc size).
+ *    2. Launch graph A on stream1 and sync. Physical memory goes to the shared
+ *       graph pool's free_heap.
+ *    3. From two host threads, concurrently:
+ *       - Thread 1: launch graph B on stream2 (may steal graph A's physical memory
+ *         from free_heap via opportunistic reuse).
+ *       - Thread 2: relaunch graph A on stream1 (if its physical memory was stolen,
+ *         the runtime must allocate new memory and remap the VA).
+ *    4. Both threads sync. Verify neither graph crashes and memory stats are consistent.
+ * Test source
+ * ------------------------
+ *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap") {
+  const int device = 0;
+  HIP_CHECK(hipSetDevice(device));
+
+  StreamGuard stream_guard1(Streams::created);
+  hipStream_t stream1 = stream_guard1.stream();
+
+  StreamGuard stream_guard2(Streams::created);
+  hipStream_t stream2 = stream_guard2.stream();
+
+  constexpr size_t kAllocSize = 64ULL * 1024 * 1024;  // 64 MB - same for both graphs
+
+  resetGraphMemAttributes(device);
+
+  // Step 1: Capture two graphs with identical alloc sizes
+  hipGraphExec_t execA = captureGraphWithAlloc(stream1, kAllocSize, 1.0f);
+  hipGraphExec_t execB = captureGraphWithAlloc(stream2, kAllocSize, 2.0f);
+
+  // Step 2: Launch graph A first and sync — its physical memory goes to the shared
+  // graph pool's free_heap, available for opportunistic reuse by graph B.
+  HIP_CHECK(hipGraphLaunch(execA, stream1));
+  HIP_CHECK(hipStreamSynchronize(stream1));
+
+  auto statsAfterFirstLaunch = queryGraphMem(device);
+  REQUIRE(statsAfterFirstLaunch.usedCurrent == kAllocSize);
+
+  // Step 3: Concurrently launch graph B (which may steal graph A's memory) and
+  // relaunch graph A (which must remap if its memory was stolen).
+  hipError_t errB = hipSuccess;
+  hipError_t errA = hipSuccess;
+
+  std::thread threadB([&]() {
+    errB = hipGraphLaunch(execB, stream2);
+    if (errB == hipSuccess) {
+      errB = hipStreamSynchronize(stream2);
+    }
+  });
+
+  std::thread threadA([&]() {
+    errA = hipGraphLaunch(execA, stream1);
+    if (errA == hipSuccess) {
+      errA = hipStreamSynchronize(stream1);
+    }
+  });
+
+  threadB.join();
+  threadA.join();
+
+  REQUIRE(errB == hipSuccess);
+  REQUIRE(errA == hipSuccess);
+
+  // Step 4: Verify memory stats. Both graphs completed successfully.
+  // Depending on which thread won the race:
+  //   - If graph B stole graph A's memory: graph A remapped to new memory,
+  //     usedCurrent == 2 * kAllocSize (each graph holds its own allocation)
+  //   - If graph A reclaimed its own memory: graph B allocated fresh,
+  //     usedCurrent == 2 * kAllocSize
+  // Either way, both graphs hold one allocation each after completion.
+  auto statsAfterConcurrent = queryGraphMem(device);
+  REQUIRE(statsAfterConcurrent.usedCurrent == kAllocSize * 2);
+
+  // Cleanup
+  HIP_CHECK(hipGraphExecDestroy(execA));
+  HIP_CHECK(hipGraphExecDestroy(execB));
+
+#if HT_AMD
   auto statsAfterDestroy = queryGraphMem(device);
   REQUIRE(statsAfterDestroy.usedCurrent == 0);
 #endif

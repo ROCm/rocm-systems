@@ -2829,13 +2829,32 @@ class GraphMemAllocNode final : public GraphNode {
       }
       size_ = aligned_size;
 
-      if (!relaunch) {
+      // Remap is needed on relaunch when the original physical memory was
+      // reused by another consumer (hipMallocAsync or another graph). In that
+      // case AllocateMemory returns new physical memory and the VA must be
+      // remapped from the old physical address to the new one.
+      const bool remap_needed = relaunch && (dptr != *phys_ptr_ref_);
+
+      if (!relaunch || remap_needed) {
+        if (remap_needed) {
+          // Unmap old VA→old_phys before mapping to new physical memory.
+          // Submit directly to the device (not enqueue) since we're already
+          // on the queue thread inside submit(). Enqueuing would push to the
+          // back of the FIFO and deadlock the non-DD queue thread.
+          auto* sub_obj = amd::MemObjMap::FindMemObj(va_->getSvmPtr());
+          if (sub_obj != nullptr) {
+            amd::VirtualMapCommand unmap_cmd(
+                *static_cast<amd::HostQueue*>(queue()), amd::Command::EventWaitList{},
+                va_->getSvmPtr(), sub_obj->getSize(), nullptr);
+            device.submitVirtualMap(unmap_cmd);
+          }
+        }
         VirtualMapCommand::submit(device);
       }
       if (!AMD_DIRECT_DISPATCH) {
         WorkerThreadLock_.unlock();
       }
-      if (!relaunch) {
+      if (!relaunch || remap_needed) {
         amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(va_->getSvmPtr());
         assert(vaddr_sub_obj != nullptr);
         queue()->device().SetMemAccess(vaddr_sub_obj->getSvmPtr(), aligned_size,
@@ -2844,7 +2863,18 @@ class GraphMemAllocNode final : public GraphNode {
         bool has_matching_free = (graph_->memAllocNodePtrs_.find(va_->getSvmPtr())
                                   == graph_->memAllocNodePtrs_.end());
         if (has_matching_free) {
-          graph_->Device()->GetGraphMemoryPool()->IncrementRefCount(memory_);
+          auto* pool = graph_->Device()->GetGraphMemoryPool();
+          if (remap_needed) {
+            // Release the old graph's refcount claim on the stolen physical memory.
+            // The old memory is in busy_heap_ (owned by whoever took it from free_heap_).
+            // DecrementRefCount is lock-protected and checks both heaps.
+            size_t old_offset = 0;
+            auto* old_memory = getMemoryObject(*phys_ptr_ref_, old_offset);
+            if (old_memory != nullptr) {
+              pool->DecrementRefCount(old_memory);
+            }
+          }
+          pool->IncrementRefCount(memory_);
           *phys_ptr_ref_ = dptr;
           *mapped_ref_ = true;
         }
