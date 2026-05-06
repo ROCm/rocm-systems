@@ -29,14 +29,14 @@ struct sample : trace_cache::cacheable_t
     };
 
     sample() = default;
-    sample(uint32_t dev_id, uint64_t time_ns, std::vector<counter_value> ent)
+    sample(std::uint32_t dev_id, std::uint64_t time_ns, std::vector<counter_value> ent)
     : device_id(dev_id)
     , timestamp(time_ns)
     , entries(std::move(ent))
     {}
 
-    uint32_t                   device_id = 0;
-    uint64_t                   timestamp = 0;
+    std::uint32_t              device_id = 0;
+    std::uint64_t              timestamp = 0;
     std::vector<counter_value> entries;
 };
 
@@ -50,10 +50,10 @@ using gpu_perf_counter_sample = pmc::collectors::gpu_perf_counter::sample;
 
 template <>
 inline void
-serialize(uint8_t* buffer, const pmc::collectors::gpu_perf_counter::sample& item)
+serialize(std::uint8_t* buffer, const pmc::collectors::gpu_perf_counter::sample& item)
 {
     size_t     pos         = 0;
-    const auto num_entries = static_cast<uint32_t>(item.entries.size());
+    const auto num_entries = static_cast<std::uint32_t>(item.entries.size());
     utility::store_value(item.device_id, buffer, pos);
     utility::store_value(item.timestamp, buffer, pos);
     utility::store_value(num_entries, buffer, pos);
@@ -66,10 +66,10 @@ serialize(uint8_t* buffer, const pmc::collectors::gpu_perf_counter::sample& item
 
 template <>
 inline pmc::collectors::gpu_perf_counter::sample
-deserialize(uint8_t*& buffer)
+deserialize(std::uint8_t*& buffer)
 {
     pmc::collectors::gpu_perf_counter::sample item;
-    uint32_t                                  num_entries = 0;
+    std::uint32_t                             num_entries = 0;
     utility::parse_value(buffer, item.device_id, item.timestamp, num_entries);
     item.entries.resize(num_entries);
     for(auto& entry : item.entries)
@@ -83,8 +83,8 @@ template <>
 inline size_t
 get_size(const pmc::collectors::gpu_perf_counter::sample& item)
 {
-    size_t total_size = utility::get_size(item.device_id, item.timestamp,
-                                          static_cast<uint32_t>(item.entries.size()));
+    size_t total_size = utility::get_size(
+        item.device_id, item.timestamp, static_cast<std::uint32_t>(item.entries.size()));
     for(const auto& entry : item.entries)
     {
         total_size += utility::get_size(entry.counter_id, entry.value);

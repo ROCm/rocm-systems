@@ -3,6 +3,7 @@
 
 #include "library/pmc/collectors/gpu_perf_counter/device.hpp"
 #include "library/pmc/device_providers/rocprofiler_sdk/drivers/tests/mock_driver.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -179,7 +180,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
     rocprofiler_counter_record_t records[4];
     for(int i = 0; i < 4; ++i)
     {
-        records[i].id            = static_cast<uint64_t>(100 + i);
+        records[i].id            = static_cast<std::uint64_t>(100 + i);
         records[i].counter_value = static_cast<double>(10 * (i + 1));
     }
 
@@ -197,7 +198,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
     // On ROCm < 7.0, the device layer decodes each instance_id to a counter handle.
     for(int i = 0; i < 4; ++i)
     {
-        const uint64_t expected_handle = static_cast<uint64_t>(100 + i);
+        const std::uint64_t expected_handle = static_cast<std::uint64_t>(100 + i);
         EXPECT_CALL(*mock_driver,
                     query_record_counter_id(
                         rocprofiler_counter_instance_id_t{ expected_handle }, _))
@@ -232,12 +233,12 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
     // counter_id.handle = 7 is the plain counter handle stored in metadata.
     // On ROCm < 7.0, the SDK encodes this into instance_id = 0xDEAD0007 (synthetic).
     // On ROCm >= 7.0, instance_id is used directly as the metadata key.
-    constexpr uint64_t plain_counter_handle = 7;
+    constexpr std::uint64_t plain_counter_handle = 7;
 
 #if ROCPROFSYS_ROCM_VERSION < 70000
-    constexpr uint64_t sdk_instance_id = 0xDEAD0007ULL;
+    constexpr std::uint64_t sdk_instance_id = 0xDEAD0007ULL;
 #else
-    constexpr uint64_t sdk_instance_id = plain_counter_handle;
+    constexpr std::uint64_t sdk_instance_id = plain_counter_handle;
 #endif
 
     auto meta = std::vector<counter_metadata>{

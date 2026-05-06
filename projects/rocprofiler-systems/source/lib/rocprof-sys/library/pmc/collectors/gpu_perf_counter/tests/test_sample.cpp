@@ -19,7 +19,7 @@ class SdkPmcSampleTest : public ::testing::Test
 protected:
     void SetUp() override { buffer.fill(0); }
 
-    std::array<uint8_t, 8192> buffer{};
+    std::array<std::uint8_t, 8192> buffer{};
 };
 
 TEST_F(SdkPmcSampleTest, EmptySampleRoundTrip)
@@ -28,8 +28,8 @@ TEST_F(SdkPmcSampleTest, EmptySampleRoundTrip)
 
     serialize(buffer.data(), original);
 
-    uint8_t* ptr          = buffer.data();
-    auto     deserialized = deserialize<sample>(ptr);
+    std::uint8_t* ptr          = buffer.data();
+    auto          deserialized = deserialize<sample>(ptr);
 
     EXPECT_EQ(deserialized.device_id, 0U);
     EXPECT_EQ(deserialized.timestamp, 1000U);
@@ -42,8 +42,8 @@ TEST_F(SdkPmcSampleTest, SingleEntryRoundTrip)
 
     serialize(buffer.data(), original);
 
-    uint8_t* ptr          = buffer.data();
-    auto     deserialized = deserialize<sample>(ptr);
+    std::uint8_t* ptr          = buffer.data();
+    auto          deserialized = deserialize<sample>(ptr);
 
     EXPECT_EQ(deserialized.device_id, 2U);
     EXPECT_EQ(deserialized.timestamp, 5000U);
@@ -61,8 +61,8 @@ TEST_F(SdkPmcSampleTest, MultiEntryRoundTrip)
 
     serialize(buffer.data(), original);
 
-    uint8_t* ptr          = buffer.data();
-    auto     deserialized = deserialize<sample>(ptr);
+    std::uint8_t* ptr          = buffer.data();
+    auto          deserialized = deserialize<sample>(ptr);
 
     EXPECT_EQ(deserialized.device_id, 1U);
     EXPECT_EQ(deserialized.timestamp, 99000U);
@@ -83,7 +83,8 @@ TEST_F(SdkPmcSampleTest, GetSizeEmpty)
     sample test_sample{ 0, 0, {} };
 
     // device_id(4) + timestamp(8) + num_entries(4) = 16
-    size_t expected = sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint32_t);
+    size_t expected =
+        sizeof(std::uint32_t) + sizeof(std::uint64_t) + sizeof(std::uint32_t);
     EXPECT_EQ(get_size(test_sample), expected);
 }
 
@@ -104,7 +105,7 @@ TEST_F(SdkPmcSampleTest, GetSizeMatchesSerializedBytes)
     size_t computed_size = get_size(original);
     serialize(buffer.data(), original);
 
-    uint8_t* ptr = buffer.data();
+    std::uint8_t* ptr = buffer.data();
     deserialize<sample>(ptr);
     size_t bytes_consumed = static_cast<size_t>(ptr - buffer.data());
 
@@ -120,7 +121,7 @@ TEST_F(SdkPmcSampleTest, DeserializePreservesBufferPointerAdvancement)
     serialize(buffer.data(), first);
     serialize(buffer.data() + first_size, second);
 
-    uint8_t* ptr = buffer.data();
+    std::uint8_t* ptr = buffer.data();
 
     auto first_result = deserialize<sample>(ptr);
     EXPECT_EQ(first_result.device_id, 0U);

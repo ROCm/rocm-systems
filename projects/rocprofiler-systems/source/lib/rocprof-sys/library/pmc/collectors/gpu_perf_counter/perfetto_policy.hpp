@@ -26,8 +26,8 @@ namespace detail
 
 struct gpu_perf_counter_perfetto_sample
 {
-    uint64_t timestamp = 0;
-    metrics  values;
+    std::uint64_t timestamp = 0;
+    metrics       values;
 };
 
 struct gpu_perf_counter_perfetto_device_data
@@ -79,7 +79,7 @@ struct perfetto_policy
     }
 
     static void store_sample(size_t device_index, const metrics& metric_values,
-                             uint64_t timestamp)
+                             std::uint64_t timestamp)
     {
         auto it = detail::get_perfetto_data().find(device_index);
         if(it == detail::get_perfetto_data().end()) return;

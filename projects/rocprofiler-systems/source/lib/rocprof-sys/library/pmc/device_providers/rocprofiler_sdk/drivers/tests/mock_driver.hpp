@@ -4,6 +4,7 @@
 #pragma once
 
 #include "library/pmc/device_providers/rocprofiler_sdk/drivers/driver.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 
@@ -29,7 +30,7 @@ public:
     using buffer_id_t                  = rocprofiler_buffer_id_t;
     using status_t                     = rocprofiler_status_t;
 
-    static agent_id_t make_agent_id(uint64_t handle) { return agent_id_t{ handle }; }
+    static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
 
     MOCK_METHOD(rocprofiler_status_t, create_context,
                 (rocprofiler_context_id_t * context));

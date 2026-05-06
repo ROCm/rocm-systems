@@ -68,7 +68,7 @@ public:
     }
 
     [[nodiscard]] metrics get_gpu_perf_counter_metrics(const enabled_metrics& /*enabled*/,
-                                                       uint64_t /*timestamp*/)
+                                                       std::uint64_t /*timestamp*/)
     {
         m_result_cache.clear();
 

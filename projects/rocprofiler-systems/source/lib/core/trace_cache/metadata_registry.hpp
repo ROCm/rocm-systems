@@ -166,9 +166,9 @@ struct kernel_symbol_less
  */
 struct gpu_perf_counter_name_entry
 {
-    uint64_t    counter_id;     ///< SDK counter instance ID (counter_id_t)
-    std::string pmc_info_name;  ///< Qualified counter name, e.g. "SQ_WAVES[WGP=0,SA=0]"
-    std::string track_name;     ///< Perfetto track name, e.g. "GPU [0] SQ_WAVES (S)"
+    std::uint64_t counter_id;     ///< SDK counter instance ID (counter_id_t)
+    std::string   pmc_info_name;  ///< Qualified counter name, e.g. "SQ_WAVES[WGP=0,SA=0]"
+    std::string   track_name;     ///< Perfetto track name, e.g. "GPU [0] SQ_WAVES (S)"
 };
 
 }  // namespace info
@@ -222,10 +222,10 @@ struct metadata_registry
     rocprofiler::sdk::callback_name_info_t<const char*> get_callback_tracing_info() const;
 
     void set_gpu_perf_counter_counter_names(
-        uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries);
+        std::uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries);
 
     std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
-    find_gpu_perf_counter_by_id(uint32_t device_id, uint64_t counter_id) const;
+    find_gpu_perf_counter_by_id(std::uint32_t device_id, std::uint64_t counter_id) const;
 
 private:
     common::synchronized<info::process> m_process{};
@@ -253,7 +253,7 @@ private:
     };
 
     // SDK PMC counter name ordering: device_id -> ordered name entries
-    std::map<uint32_t, std::vector<info::gpu_perf_counter_name_entry>>
+    std::map<std::uint32_t, std::vector<info::gpu_perf_counter_name_entry>>
         m_gpu_perf_counter_counter_names{};
 
     using callback_rename_map_t =

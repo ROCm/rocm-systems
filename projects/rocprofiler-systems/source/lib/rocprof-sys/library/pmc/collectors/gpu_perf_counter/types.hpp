@@ -16,7 +16,7 @@
 namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
 
-using counter_id_t = uint64_t;
+using counter_id_t = std::uint64_t;
 
 struct dimension_position
 {

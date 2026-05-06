@@ -113,8 +113,9 @@ private:
                    typename driver_t::device_counting_agent_cb_t set_config,
                    void*                                         user_data) {
                     auto* configs = static_cast<std::unordered_map<
-                        uint64_t, typename driver_t::counter_config_id_t>*>(user_data);
-                    auto  iter    = configs->find(agent_cb.handle);
+                        std::uint64_t, typename driver_t::counter_config_id_t>*>(
+                        user_data);
+                    auto iter = configs->find(agent_cb.handle);
                     if(iter != configs->end()) set_config(ctx, iter->second);
                 },
                 &m_profile_configs);
@@ -186,7 +187,7 @@ private:
     // Must outlive the context: the SDK callback set via
     // configure_device_counting_service fires during start_context(), reading from this
     // map via the user_data pointer.
-    std::unordered_map<uint64_t, typename driver_t::counter_config_id_t>
+    std::unordered_map<std::uint64_t, typename driver_t::counter_config_id_t>
         m_profile_configs;
 };
 

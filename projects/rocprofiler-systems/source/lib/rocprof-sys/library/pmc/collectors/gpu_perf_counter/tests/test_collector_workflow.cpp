@@ -34,9 +34,9 @@ namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing
 
 struct captured_sample
 {
-    size_t   device_id;
-    uint64_t timestamp;
-    metrics  values;
+    size_t        device_id;
+    std::uint64_t timestamp;
+    metrics       values;
 };
 
 static std::vector<captured_sample>&
@@ -54,7 +54,7 @@ struct test_cache_policy
 
     static void store_sample(size_t device_id, const std::string&, const enabled_metrics&,
                              const enabled_metrics&, const metrics& values,
-                             uint64_t timestamp)
+                             std::uint64_t timestamp)
     {
         if(values.empty()) return;
         get_captured_samples().push_back({ device_id, timestamp, values });
@@ -69,7 +69,7 @@ struct test_perfetto_policy
     static void init_storage(const DeviceEntries&)
     {}
     static void setup_counter_tracks(size_t, const std::vector<counter_metadata>&) {}
-    static void store_sample(size_t, const metrics&, uint64_t) {}
+    static void store_sample(size_t, const metrics&, std::uint64_t) {}
     static void post_process(const enabled_metrics&) {}
 };
 
@@ -99,7 +99,7 @@ using test_collector_t =
 // ============================================================================
 
 static std::shared_ptr<rocprofsys::agent>
-make_agent(uint64_t handle, size_t device_type_index, const std::string& name)
+make_agent(std::uint64_t handle, size_t device_type_index, const std::string& name)
 {
     auto a               = std::make_shared<rocprofsys::agent>();
     a->type              = agent_type::GPU;
@@ -123,9 +123,9 @@ struct counter_setup
 };
 
 static void
-setup_provider_expectations(std::shared_ptr<MockDriver>& mock, uint64_t agent_handle,
+setup_provider_expectations(std::shared_ptr<MockDriver>& mock, std::uint64_t agent_handle,
                             std::vector<counter_setup>& counters,
-                            uint32_t                    context_handle_out)
+                            std::uint32_t               context_handle_out)
 {
     EXPECT_CALL(
         *mock, iterate_agent_supported_counters(

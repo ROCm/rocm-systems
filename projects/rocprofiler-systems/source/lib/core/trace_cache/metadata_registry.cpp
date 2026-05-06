@@ -616,14 +616,14 @@ metadata_registry::get_string_list() const
 
 void
 metadata_registry::set_gpu_perf_counter_counter_names(
-    uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries)
+    std::uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries)
 {
     m_gpu_perf_counter_counter_names[device_id] = std::move(entries);
 }
 
 std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
-metadata_registry::find_gpu_perf_counter_by_id(uint32_t device_id,
-                                               uint64_t counter_id) const
+metadata_registry::find_gpu_perf_counter_by_id(std::uint32_t device_id,
+                                               std::uint64_t counter_id) const
 {
     auto dev_it = m_gpu_perf_counter_counter_names.find(device_id);
     if(dev_it == m_gpu_perf_counter_counter_names.end()) return std::nullopt;

@@ -5,6 +5,7 @@
 
 #include "common/defines.h"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
+#include <cstdint>
 
 #include <cstddef>
 #include <memory>
@@ -46,7 +47,7 @@ struct driver
     using buffer_id_t                  = rocprofiler_buffer_id_t;
     using status_t                     = rocprofiler_status_t;
 
-    static agent_id_t make_agent_id(uint64_t handle) { return agent_id_t{ handle }; }
+    static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
 
     static rocprofiler_status_t create_context(rocprofiler_context_id_t* context)
     {
@@ -94,12 +95,12 @@ struct driver
         auto result = std::vector<counter_metadata>{};
         result.reserve(info.dimensions_instances_count);
 
-        for(uint64_t i = 0; i < info.dimensions_instances_count; ++i)
+        for(std::uint64_t i = 0; i < info.dimensions_instances_count; ++i)
         {
             const auto* dim_inst = info.dimensions_instances[i];
             auto        dims     = std::vector<dimension_position>{};
             dims.reserve(dim_inst->dimensions_count);
-            for(uint64_t d = 0; d < dim_inst->dimensions_count; ++d)
+            for(std::uint64_t d = 0; d < dim_inst->dimensions_count; ++d)
             {
                 dims.push_back({ std::string{ dim_inst->dimensions[d]->dimension_name },
                                  dim_inst->dimensions[d]->index });

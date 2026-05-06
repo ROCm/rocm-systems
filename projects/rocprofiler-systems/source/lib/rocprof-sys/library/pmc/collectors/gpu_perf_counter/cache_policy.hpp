@@ -69,7 +69,7 @@ struct cache_policy
                 { meta.counter_id, std::move(qname), std::move(track_name) });
         }
 
-        registry.set_gpu_perf_counter_counter_names(static_cast<uint32_t>(gpu_id),
+        registry.set_gpu_perf_counter_counter_names(static_cast<std::uint32_t>(gpu_id),
                                                     std::move(name_entries));
 
         LOG_DEBUG("Registered {} SDK PMC counters for device {}", counter_meta.size(),
@@ -79,12 +79,12 @@ struct cache_policy
     static void store_sample(size_t device_id, const std::string& /*device_name*/,
                              const enabled_metrics& /*enabled_metrics_cfg*/,
                              const enabled_metrics& /*supported_metrics*/,
-                             const metrics& metric_values, uint64_t timestamp)
+                             const metrics& metric_values, std::uint64_t timestamp)
     {
         if(metric_values.empty()) return;
 
         trace_cache::get_buffer_storage().store(trace_cache::gpu_perf_counter_sample{
-            static_cast<uint32_t>(device_id), timestamp, metric_values });
+            static_cast<std::uint32_t>(device_id), timestamp, metric_values });
     }
 
 private:

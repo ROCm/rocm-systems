@@ -65,7 +65,7 @@ struct gpu_perf_counter_traits
 
     [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&      dev,
                                                const enabled_metrics_t& enabled,
-                                               uint64_t                 timestamp)
+                                               std::uint64_t            timestamp)
     {
         return dev->get_gpu_perf_counter_metrics(enabled, timestamp);
     }
