@@ -51,7 +51,11 @@ def get_video_info(input_file):
         print(f"ERROR: ffprobe failed on {input_file}")
         return None
     info = json.loads(result.stdout)
-    stream = info["streams"][0]
+    streams = info.get("streams")
+    if not isinstance(streams, list) or not streams:
+        print(f"ERROR: ffprobe found no video stream in {input_file}")
+        return None
+    stream = streams[0]
     width = int(stream["width"])
     height = int(stream["height"])
     try:

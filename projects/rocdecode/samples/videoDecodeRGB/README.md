@@ -1,8 +1,12 @@
 # Video decode RGB sample
 
-This sample illustrates the FFMPEG demuxer to get the individual frames which are then decoded using rocDecode API and optionally color-converted using custom HIP kernels on AMD hardware. This sample converts decoded YUV output to one of the RGB or BGR formats (24bit, 32bit, 48bit, 64bit) in a separate thread allowing it to run both VCN hardware and compute engine in parallel.
+This sample demonstrates decoding and optionally color-converting using the FFMpeg demuxer, the rocDecode API, and custom HIP kernels.
 
-This sample uses HIP kernels to showcase the color conversion. Whenever a frame is ready after decoding, the `ColorSpaceConversionThread` is notified and can be used for post-processing.
+The FFmpeg demuxer is used to get individual frames that are then decoded using rocDecode API and optionally color-converted using custom HIP kernels on AMD hardware.
+
+Decoded YUV output is converted to either RGB or BGR formats (24bit, 32bit, 48bit, 64bit) in separate threads so that both the VCN hardware and the compute engine can run in parallel.
+
+HIP kernels are used for color conversion. After the frame has been decoded, the `ColorSpaceConversionThread` is notified and is used for post-processing.
 
 ## Prerequisites:
 
@@ -37,9 +41,9 @@ make -j
 | `-d` | `<id>` | GPU device ID | `0` |
 | `-of` | `<format>` | Output format: `native`, `bgr`, `bgr48`, `rgb`, `rgb48`, `bgra`, `bgra64`, `rgba`, `rgba64` | `native` |
 | `-cs` | `<standard>` | Color standard: `bt709`, `fcc`, `bt470`, `bt601`, `smpte240m`, `bt2020`, `bt2020c` | `bt709` |
-| `-resize` | `<W>x<H>` | Resize output (width and height must be even) | (no resize) |
-| `-crop` | `<l,t,r,b>` | Crop rectangle (width and height must be even) | (no crop) |
-| `-disp_delay` | `<n>` | Number of frames to delay for display | `1` |
+| `-resize` | `<W>x<H>` | Resize output (width and height must be even values) | (no resize) |
+| `-crop` | `<l,t,r,b>` | Crop rectangle (width and height must be even values) | (no crop) |
+| `-disp_delay` | `<n>` | Number of frames to delay before display | `1` |
 | `-f` | `<n>` | Number of frames to decode (`0` = entire stream) | `0` |
 
 ### Color conversion

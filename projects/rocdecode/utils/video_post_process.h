@@ -35,7 +35,7 @@ class VideoPostProcess {
         VideoPostProcess(){};
         ~VideoPostProcess(){};
         
-        void ColorConvertYUV2RGB(uint8_t *p_src, OutputSurfaceInfo *surf_info, uint8_t *rgb_dev_mem_ptr, OutputFormatEnum e_output_format, hipStream_t hip_stream, int col_standard = 0) {
+        void ColorConvertYUV2RGB(uint8_t *p_src, OutputSurfaceInfo *surf_info, uint8_t *rgb_dev_mem_ptr, OutputFormatEnum e_output_format, hipStream_t hip_stream, int col_standard = ColorSpaceStandard_BT709) {
             int  rgb_width = (surf_info->output_width + 1) & ~1;    // has to be a multiple of 2 for hip colorconvert kernels
             if (surf_info->surface_format == rocDecVideoSurfaceFormat_YUV444) {
                 if (e_output_format == bgr)
