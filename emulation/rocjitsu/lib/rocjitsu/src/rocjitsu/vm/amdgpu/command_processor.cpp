@@ -336,10 +336,9 @@ bool CommandProcessor::step() {
         init_wavefront_regs(cu, wf, pkt, global_wg_id, w);
         wg_wavefronts.push_back(wf);
       }
-      plugin_group_->onAmdgpuDispatchWorkgroup(
-            global_wg_id, dispatched_ - 1,
-            pkt.vgprs_per_wf, pkt.sgprs_per_wf,
-            std::span<Wavefront *>(wg_wavefronts));
+      plugin_group_->onAmdgpuDispatchWorkgroup(global_wg_id, dispatched_ - 1, pkt.vgprs_per_wf,
+                                               pkt.sgprs_per_wf,
+                                               std::span<Wavefront *>(wg_wavefronts));
       next_cu_ = (cu_idx + 1) % cus_.size();
       wg_dispatched = true;
     }
@@ -790,21 +789,17 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   }
 
   std::string kernel_sym = find_kernel_symbol(pkt.kernel_object, memory_);
-  KernelDispatchInfo dispatch_info{};
-  dispatch_info.kernel_object = pkt.kernel_object;
-  dispatch_info.entry_pc = entry_pc;
-  dispatch_info.kernel_name = kernel_sym;
-  dispatch_info.grid_size_x = pkt.grid_size_x;
-  dispatch_info.grid_size_y = pkt.grid_size_y;
-  dispatch_info.grid_size_z = pkt.grid_size_z;
-  dispatch_info.workgroup_size_x = pkt.workgroup_size_x;
-  dispatch_info.workgroup_size_y = pkt.workgroup_size_y;
-  dispatch_info.workgroup_size_z = pkt.workgroup_size_z;
-  dispatch_info.workgroup_count = total_wgs;
-  dispatch_info.wfs_per_workgroup = wfs_per_wg;
-  dispatch_info.sgprs_per_wf = dp.sgprs_per_wf;
-  dispatch_info.vgprs_per_wf = dp.vgprs_per_wf;
-  plugin_group_->onAmdgpuKernelDispatch(dispatch_info);
+  plugin_group_->onAmdgpuKernelDispatch(
+      KernelDispatchInfo{}
+          .setKernelObject(pkt.kernel_object)
+          .setEntryPc(entry_pc)
+          .setKernelName(std::move(kernel_sym))
+          .setGridSize(pkt.grid_size_x, pkt.grid_size_y, pkt.grid_size_z)
+          .setWorkgroupSize(pkt.workgroup_size_x, pkt.workgroup_size_y, pkt.workgroup_size_z)
+          .setWorkgroupCount(total_wgs)
+          .setWfsPerWorkgroup(wfs_per_wg)
+          .setSgprsPerWf(dp.sgprs_per_wf)
+          .setVgprsPerWf(dp.vgprs_per_wf));
 
   dispatch_queue_.push_back(std::move(dp));
 }
