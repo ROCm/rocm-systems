@@ -240,6 +240,14 @@ if ( ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER
     set ( CMAKE_EXE_LINKER_FLAGS -fsanitize=address )
 endif ()
 
+## Thread Sanitize Flag
+if ( THREAD_SANITIZER OR THEROCK_SANITIZER STREQUAL "TSAN" )
+    set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -g -O1 -Wno-tsan" )
+    set ( CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=thread -g -O1 -Wno-tsan" )
+    set ( CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread" )
+    message ( STATUS "kfdtest: ThreadSanitizer (TSAN) enabled" )
+endif ()
+
 # link_directories() has to be put before add_executable()
 # The modules found by pkg_check_modules() in the default pkg config
 # path do not need to use link_directories() here.
