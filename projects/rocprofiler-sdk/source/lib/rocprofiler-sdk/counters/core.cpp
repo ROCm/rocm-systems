@@ -235,7 +235,7 @@ configure_buffered_dispatch(rocprofiler_context_id_t                   context_i
                             rocprofiler_dispatch_counting_service_cb_t callback,
                             void*                                      callback_args)
 {
-    CHECK_NE(buffer.handle, 0);
+    CHECK_NE(buffer.handle, 0ULL);
     return get_controller().configure_dispatch(
         context_id, buffer, callback, callback_args, nullptr, nullptr);
 }

@@ -3130,11 +3130,29 @@ rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
 
   int32_t ret_i;
   ret_i = dev->writeDevInfo(amd::smi::kDevPCIEClk, freq_enable_str);
-  //
-  // NOTE:  kDevPCIEClk sysfs file maybe not exist for all cases.
-  //        If it doesn't exist (pp_dpm_pcie), it shouldn't be an error
-  //        and will get translated to RSMI_STATUS_NOT_SUPPORTED.
-  return amd::smi::ErrnoToRsmiStatus(ret_i);
+  // kDevPCIEClk (pp_dpm_pcie) may be missing or read-only; map to a clear
+  // status. ENOTSUP/EOPNOTSUPP are the same value on Linux
+  // (see <asm-generic/errno.h>); EROFS is handled in ErrnoToRsmiStatus.
+  ret = amd::smi::ErrnoToRsmiStatus(ret_i);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    rsmi_status_t restore_ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
+    if (restore_ret != RSMI_STATUS_SUCCESS) {
+      std::ostringstream restore_ss;
+      restore_ss << __PRETTY_FUNCTION__
+                 << " | perf level restore to AUTO failed (restore_ret=" << restore_ret
+                 << ", original_ret=" << ret << "). Device may remain in MANUAL.";
+      LOG_ERROR(restore_ss);
+    }
+    if (ret == RSMI_STATUS_UNKNOWN_ERROR) {
+      std::ostringstream unk_ss;
+      unk_ss << __PRETTY_FUNCTION__ << " | unmapped errno from writeDevInfo (errno=" << ret_i
+             << "); coercing UNKNOWN_ERROR -> NOT_SUPPORTED";
+      LOG_ERROR(unk_ss);
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
+    return ret;
+  }
+  return ret;
 
   CATCH
 }
@@ -3964,18 +3982,48 @@ rsmi_status_t rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t* power, float*
     return RSMI_STATUS_INVALID_ARGS;
   }
 
+  GET_DEV_FROM_INDX
+
   rsmi_status_t ret;
   rsmi_gpu_metrics_t gpu_metrics;
   ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
   if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Failed "
+       << " | Device #: " << dv_ind
+       << " | Read SYSFS file: " << dev->get_sys_file_path_by_type(amd::smi::kDevGpuMetrics, true)
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevGpuMetrics)
+       << " | Returning: " << amd::smi::getRSMIStatusString(ret, false) << " |";
+    LOG_WARN(ss);
     return ret;
   }
 
   *power = gpu_metrics.energy_accumulator;
   *timestamp = gpu_metrics.system_clock_counter;
+  // Some metrics tables leave energy_accumulator at the max-value sentinel when unavailable.
+  if (*power == std::numeric_limits<decltype(gpu_metrics.energy_accumulator)>::max()) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Failed "
+       << " | Device #: " << dv_ind
+       << " | Cause: energy accumulator is unavailable for this metrics table"
+       << " | Returning: " << amd::smi::getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED, false)
+       << " |";
+    LOG_INFO(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
   // hard-coded for now since all ASICs have same resolution. If it ASIC
   // dependent then this information should come from Kernel
   if (counter_resolution) *counter_resolution = kEnergyCounterResolution;
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Read SYSFS file: " << dev->get_sys_file_path_by_type(amd::smi::kDevGpuMetrics, true)
+     << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevGpuMetrics)
+     << " | Data: " << *power << " | Timestamp: " << *timestamp << " | Counter Resolution: "
+     << (counter_resolution ? std::to_string(*counter_resolution) : "N/A")
+     << " | Returning: " << amd::smi::getRSMIStatusString(ret, false) << " |";
+  LOG_INFO(ss);
 
   return ret;
   CATCH

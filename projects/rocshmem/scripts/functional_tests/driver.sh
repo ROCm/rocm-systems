@@ -127,6 +127,10 @@ declare -A TEST_NUMBERS=(
   ["flood_fadd"]="91"
   ["flood_waitadd"]="92"
   ["device_bitcode"]="93"
+  ["library_info"]="94"
+  ["teamctxsharedinfra"]="95"
+  ["quiet_on_stream"]="96"
+  ["sync_all_on_stream"]="97"
 )
 
 ExecTest() {
@@ -196,7 +200,7 @@ ExecTest() {
       )
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
-  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} )
+  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} )
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
     # Check if in volume mode
@@ -302,6 +306,29 @@ TestRMAPut() {
   ExecTest  "waveputnbi"       2       2            64        1048576
   ExecTest  "waveputnbi"       2       2            128       1048576
   ExecTest  "waveputnbi"       2       16           128       8
+
+  ################################ User Buffer Tests ################################
+  if [[ $TEST != gda* ]]; then # AIROCSHMEM-383
+    export LOCALBUFTYPE=host
+    ExecTest  "putnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+
+    export LOCALBUFTYPE=device
+    ExecTest  "putnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+
+    export LOCALBUFTYPE=fine
+    ExecTest  "putnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+
+    export LOCALBUFTYPE=uncached
+    ExecTest  "putnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+
+    export LOCALBUFTYPE=managed
+    ExecTest  "putnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+  fi
 }
 
 TestRMAGet() {
@@ -357,6 +384,31 @@ TestRMAGet() {
   ExecTest  "wavegetnbi"       2       2            128       1048576
   ExecTest  "wavegetnbi"       2       16           128       8
   else echo "Skip:   get_* (AIROCSHMEM-120: RO get tests abort)"; fi
+
+  ################################ User Buffer Tests ################################
+  # AIROCSHMEM-383 for GDA
+  # AIROCSHMEM-120 for RO
+  if [[ $TEST != gda* && $TEST != ro* ]]; then
+    export LOCALBUFTYPE=host
+    ExecTest  "getnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+
+    export LOCALBUFTYPE=device
+    ExecTest  "getnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+
+    export LOCALBUFTYPE=fine
+    ExecTest  "getnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+
+    export LOCALBUFTYPE=uncached
+    ExecTest  "getnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+
+    export LOCALBUFTYPE=managed
+    ExecTest  "getnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+  fi
 }
 
 TestRMA() {
@@ -504,6 +556,8 @@ TestOnStream() {
   else echo "Skip:   putmem_signal_on_stream (AIROCSHMEM-217: RO sometimes abort)"; fi
 
   ExecTest  "barrier_all_on_stream"  2  1           1
+  ExecTest  "quiet_on_stream"        2  1           1
+  ExecTest  "sync_all_on_stream"     2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
   ExecTest  "broadcastmem_on_stream" 2  1           64        1048576
 }
@@ -513,6 +567,7 @@ TestOther() {
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
   ExecTest  "init"             2       1            1
+  ExecTest  "library_info"     2       1            1
   ExecTest  "hipmodule_init"   2       1            1
   ExecTest  "device_bitcode"   2       1            1
   ExecTest  "device_bitcode"   2       32           1024
@@ -555,6 +610,8 @@ TestOther() {
   ExecTest  "teamctxblockinfra"   5       1            1
   ExecTest  "teamctxoddeveninfra" 4       1            1
   ExecTest  "teamctxoddeveninfra" 5       1            1
+  ExecTest  "teamctxsharedinfra"  2       1            1
+  ExecTest  "teamctxsharedinfra"  5       1            1
   unset ROCSHMEM_MAX_NUM_CONTEXTS
 
   ExecTest  "shmemptr"         2       1            1         8

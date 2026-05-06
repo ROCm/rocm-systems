@@ -759,7 +759,7 @@ namespace code {
         switch (img->EClass()) {
         case ELFCLASS64:
           // There is no e_machine and/or OS ABI for R600 so rely on checking
-          // the ELFCLASS to determin if AMDGCN verses R600. AMDHSA always uses
+          // the ELFCLASS to determine if AMDGCN verses R600. AMDHSA always uses
           // ELFCLASS64 and R600 always uses ELFCLASS32.
           isa_name += "amdgcn";
           break;

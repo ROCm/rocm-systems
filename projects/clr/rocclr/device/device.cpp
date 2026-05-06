@@ -365,19 +365,12 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
   uintptr_t key = reinterpret_cast<uintptr_t>(k);
 
   // First search the global map
-  auto it = MemObjMap_.upper_bound(key);
-  if (it != MemObjMap_.begin()) {
-    --it;
-    amd::Memory* mem = it->second;
-    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
-                          ? sizeof(mem->getUserData().hsa_handle)
-                          : mem->getSize();
-    if (key >= it->first && key < (it->first + mem_size)) {
-      if (offset != nullptr) {
-        *offset = key - it->first;
-      }
-      return mem;
+  auto it = FindMemObjIter(key);
+  if (it != MemObjMap_.end()) {
+    if (offset != nullptr) {
+      *offset = key - it->first;
     }
+    return it->second;
   }
 
   // Search per-device va maps on Windows (due to overlapping ranges)
@@ -386,6 +379,34 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
   }
 
   return nullptr;
+}
+
+std::map<uintptr_t, amd::Memory*>::iterator MemObjMap::FindMemObjIter(uintptr_t key) {
+  auto it = MemObjMap_.upper_bound(key);
+  if (it == MemObjMap_.begin()) {
+    return MemObjMap_.end();
+  }
+  --it;
+  amd::Memory* mem = it->second;
+  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                        ? sizeof(mem->getUserData().hsa_handle)
+                        : mem->getSize();
+  if (key < it->first || key >= (it->first + mem_size)) {
+    return MemObjMap_.end();
+  }
+  return it;
+}
+
+amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
+  std::unique_lock lock(AllocatedLock_);
+  uintptr_t key = reinterpret_cast<uintptr_t>(k);
+  auto it = FindMemObjIter(key);
+  if (it == MemObjMap_.end()) {
+    return nullptr;
+  }
+  amd::Memory* mem = it->second;
+  MemObjMap_.erase(it);
+  return mem;
 }
 
 void MemObjMap::UpdateAccess(amd::Device* peerDev) {
@@ -798,9 +819,7 @@ Device::~Device() {
 }
 
 bool Device::ValidateComgr() {
-  // use versioned comgr for HIP, unversioned for Opencl
-  const bool kComgrVersioned = amd::IS_HIP;
-  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
+  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib);
   return amd::Comgr::IsReady();
 }
 
@@ -1143,19 +1162,29 @@ void Device::IpcDetach(amd::Memory* amd_mem_obj) const {
 }
 
 std::vector<amd::CommandQueue*> Device::getActiveQueues() {
+  std::vector<amd::CommandQueue*> result;
+  result.reserve(activeQueues.size());
+
   amd::ScopedLock lock(activeQueuesLock_);
-  for (auto it = activeQueues.begin(); it != activeQueues.end();) {
-    if ((*it)->referenceCount() == 0) {
+  for (auto it = activeQueues.begin(); it != activeQueues.end(); ++it) {
+    if (!it->second) {
+      // An inactive queue might have been releeased already, so dereferencing
+      // it->first isn't safe
+      continue;
+    }
+    if (it->first->referenceCount() == 0) {
       // It is being terminated in HostQueue::terminate().
       // We should not wait for commands in a queue being terminated.
-      it = activeQueues.erase(it);
+      it->second = false;
     } else {
+      assert(it->second);
       // In case the queue will be destroyed in Stream::Destroy().
-      (*it)->retain();
-      ++it;
+      it->first->retain();
+      result.push_back(it->first);
     }
   }
-  return std::vector<amd::CommandQueue*>(activeQueues.begin(), activeQueues.end());
+
+  return result;
 }
 
 // =================================================================================================

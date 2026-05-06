@@ -639,7 +639,10 @@ SMemtimeSmem::SMemtimeSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SMemtimeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMemtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
     : Smem("s_memrealtime", reinterpret_cast<const OpEncoding *>(inst),
@@ -650,7 +653,10 @@ SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
     : Smem("s_atc_probe", reinterpret_cast<const OpEncoding *>(inst),
@@ -665,7 +671,10 @@ SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
     : Smem("s_atc_probe_buffer", reinterpret_cast<const OpEncoding *>(inst),
@@ -680,7 +689,10 @@ SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SDcacheDiscardSmem::SDcacheDiscardSmem(const MachineInst *inst)
     : Smem("s_dcache_discard", reinterpret_cast<const OpEncoding *>(inst),
@@ -693,7 +705,10 @@ SDcacheDiscardSmem::SDcacheDiscardSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SDcacheDiscardSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SDcacheDiscardSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SDcacheDiscardX2Smem::SDcacheDiscardX2Smem(const MachineInst *inst)
     : Smem("s_dcache_discard_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -706,7 +721,10 @@ SDcacheDiscardX2Smem::SDcacheDiscardX2Smem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SDcacheDiscardX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SDcacheDiscardX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicSwapSmem::SBufferAtomicSwapSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
@@ -721,7 +739,10 @@ SBufferAtomicSwapSmem::SBufferAtomicSwapSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicCmpswapSmem::SBufferAtomicCmpswapSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
@@ -736,7 +757,10 @@ SBufferAtomicCmpswapSmem::SBufferAtomicCmpswapSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicAddSmem::SBufferAtomicAddSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
@@ -751,7 +775,10 @@ SBufferAtomicAddSmem::SBufferAtomicAddSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicSubSmem::SBufferAtomicSubSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
@@ -766,7 +793,10 @@ SBufferAtomicSubSmem::SBufferAtomicSubSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicSminSmem::SBufferAtomicSminSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
@@ -781,7 +811,10 @@ SBufferAtomicSminSmem::SBufferAtomicSminSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicUminSmem::SBufferAtomicUminSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
@@ -796,7 +829,10 @@ SBufferAtomicUminSmem::SBufferAtomicUminSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicSmaxSmem::SBufferAtomicSmaxSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
@@ -811,7 +847,10 @@ SBufferAtomicSmaxSmem::SBufferAtomicSmaxSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicUmaxSmem::SBufferAtomicUmaxSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
@@ -826,7 +865,10 @@ SBufferAtomicUmaxSmem::SBufferAtomicUmaxSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicAndSmem::SBufferAtomicAndSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
@@ -841,7 +883,10 @@ SBufferAtomicAndSmem::SBufferAtomicAndSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicOrSmem::SBufferAtomicOrSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
@@ -856,7 +901,10 @@ SBufferAtomicOrSmem::SBufferAtomicOrSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicXorSmem::SBufferAtomicXorSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
@@ -871,7 +919,10 @@ SBufferAtomicXorSmem::SBufferAtomicXorSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicIncSmem::SBufferAtomicIncSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
@@ -886,7 +937,10 @@ SBufferAtomicIncSmem::SBufferAtomicIncSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicDecSmem::SBufferAtomicDecSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
@@ -901,7 +955,10 @@ SBufferAtomicDecSmem::SBufferAtomicDecSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicSwapX2Smem::SBufferAtomicSwapX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_swap_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -916,7 +973,10 @@ SBufferAtomicSwapX2Smem::SBufferAtomicSwapX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicCmpswapX2Smem::SBufferAtomicCmpswapX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -931,7 +991,10 @@ SBufferAtomicCmpswapX2Smem::SBufferAtomicCmpswapX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicAddX2Smem::SBufferAtomicAddX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_add_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -946,7 +1009,10 @@ SBufferAtomicAddX2Smem::SBufferAtomicAddX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicSubX2Smem::SBufferAtomicSubX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_sub_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -961,7 +1027,10 @@ SBufferAtomicSubX2Smem::SBufferAtomicSubX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicSminX2Smem::SBufferAtomicSminX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_smin_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -976,7 +1045,10 @@ SBufferAtomicSminX2Smem::SBufferAtomicSminX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicUminX2Smem::SBufferAtomicUminX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_umin_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -991,7 +1063,10 @@ SBufferAtomicUminX2Smem::SBufferAtomicUminX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicSmaxX2Smem::SBufferAtomicSmaxX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_smax_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1006,7 +1081,10 @@ SBufferAtomicSmaxX2Smem::SBufferAtomicSmaxX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicUmaxX2Smem::SBufferAtomicUmaxX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_umax_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1021,7 +1099,10 @@ SBufferAtomicUmaxX2Smem::SBufferAtomicUmaxX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicAndX2Smem::SBufferAtomicAndX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_and_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1036,7 +1117,10 @@ SBufferAtomicAndX2Smem::SBufferAtomicAndX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicOrX2Smem::SBufferAtomicOrX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_or_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1051,7 +1135,10 @@ SBufferAtomicOrX2Smem::SBufferAtomicOrX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicXorX2Smem::SBufferAtomicXorX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_xor_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1066,7 +1153,10 @@ SBufferAtomicXorX2Smem::SBufferAtomicXorX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicIncX2Smem::SBufferAtomicIncX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_inc_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1081,7 +1171,10 @@ SBufferAtomicIncX2Smem::SBufferAtomicIncX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SBufferAtomicDecX2Smem::SBufferAtomicDecX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_dec_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1096,7 +1189,10 @@ SBufferAtomicDecX2Smem::SBufferAtomicDecX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SBufferAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicSwapSmem::SAtomicSwapSmem(const MachineInst *inst)
     : Smem("s_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
@@ -1111,7 +1207,10 @@ SAtomicSwapSmem::SAtomicSwapSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicCmpswapSmem::SAtomicCmpswapSmem(const MachineInst *inst)
     : Smem("s_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
@@ -1126,7 +1225,10 @@ SAtomicCmpswapSmem::SAtomicCmpswapSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicAddSmem::SAtomicAddSmem(const MachineInst *inst)
     : Smem("s_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
@@ -1141,7 +1243,10 @@ SAtomicAddSmem::SAtomicAddSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicSubSmem::SAtomicSubSmem(const MachineInst *inst)
     : Smem("s_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
@@ -1156,7 +1261,10 @@ SAtomicSubSmem::SAtomicSubSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicSminSmem::SAtomicSminSmem(const MachineInst *inst)
     : Smem("s_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
@@ -1171,7 +1279,10 @@ SAtomicSminSmem::SAtomicSminSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicUminSmem::SAtomicUminSmem(const MachineInst *inst)
     : Smem("s_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
@@ -1186,7 +1297,10 @@ SAtomicUminSmem::SAtomicUminSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicSmaxSmem::SAtomicSmaxSmem(const MachineInst *inst)
     : Smem("s_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
@@ -1201,7 +1315,10 @@ SAtomicSmaxSmem::SAtomicSmaxSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicUmaxSmem::SAtomicUmaxSmem(const MachineInst *inst)
     : Smem("s_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
@@ -1216,7 +1333,10 @@ SAtomicUmaxSmem::SAtomicUmaxSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicAndSmem::SAtomicAndSmem(const MachineInst *inst)
     : Smem("s_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
@@ -1231,7 +1351,10 @@ SAtomicAndSmem::SAtomicAndSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicOrSmem::SAtomicOrSmem(const MachineInst *inst)
     : Smem("s_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
@@ -1246,7 +1369,10 @@ SAtomicOrSmem::SAtomicOrSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicXorSmem::SAtomicXorSmem(const MachineInst *inst)
     : Smem("s_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
@@ -1261,7 +1387,10 @@ SAtomicXorSmem::SAtomicXorSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicIncSmem::SAtomicIncSmem(const MachineInst *inst)
     : Smem("s_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
@@ -1276,7 +1405,10 @@ SAtomicIncSmem::SAtomicIncSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicDecSmem::SAtomicDecSmem(const MachineInst *inst)
     : Smem("s_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
@@ -1291,7 +1423,10 @@ SAtomicDecSmem::SAtomicDecSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicSwapX2Smem::SAtomicSwapX2Smem(const MachineInst *inst)
     : Smem("s_atomic_swap_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1306,7 +1441,10 @@ SAtomicSwapX2Smem::SAtomicSwapX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicCmpswapX2Smem::SAtomicCmpswapX2Smem(const MachineInst *inst)
     : Smem("s_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1321,7 +1459,10 @@ SAtomicCmpswapX2Smem::SAtomicCmpswapX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicAddX2Smem::SAtomicAddX2Smem(const MachineInst *inst)
     : Smem("s_atomic_add_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1336,7 +1477,10 @@ SAtomicAddX2Smem::SAtomicAddX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicSubX2Smem::SAtomicSubX2Smem(const MachineInst *inst)
     : Smem("s_atomic_sub_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1351,7 +1495,10 @@ SAtomicSubX2Smem::SAtomicSubX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicSminX2Smem::SAtomicSminX2Smem(const MachineInst *inst)
     : Smem("s_atomic_smin_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1366,7 +1513,10 @@ SAtomicSminX2Smem::SAtomicSminX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicUminX2Smem::SAtomicUminX2Smem(const MachineInst *inst)
     : Smem("s_atomic_umin_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1381,7 +1531,10 @@ SAtomicUminX2Smem::SAtomicUminX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicSmaxX2Smem::SAtomicSmaxX2Smem(const MachineInst *inst)
     : Smem("s_atomic_smax_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1396,7 +1549,10 @@ SAtomicSmaxX2Smem::SAtomicSmaxX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicUmaxX2Smem::SAtomicUmaxX2Smem(const MachineInst *inst)
     : Smem("s_atomic_umax_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1411,7 +1567,10 @@ SAtomicUmaxX2Smem::SAtomicUmaxX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicAndX2Smem::SAtomicAndX2Smem(const MachineInst *inst)
     : Smem("s_atomic_and_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1426,7 +1585,10 @@ SAtomicAndX2Smem::SAtomicAndX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicOrX2Smem::SAtomicOrX2Smem(const MachineInst *inst)
     : Smem("s_atomic_or_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1441,7 +1603,10 @@ SAtomicOrX2Smem::SAtomicOrX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicXorX2Smem::SAtomicXorX2Smem(const MachineInst *inst)
     : Smem("s_atomic_xor_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1456,7 +1621,10 @@ SAtomicXorX2Smem::SAtomicXorX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicIncX2Smem::SAtomicIncX2Smem(const MachineInst *inst)
     : Smem("s_atomic_inc_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1471,7 +1639,10 @@ SAtomicIncX2Smem::SAtomicIncX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtomicDecX2Smem::SAtomicDecX2Smem(const MachineInst *inst)
     : Smem("s_atomic_dec_x2", reinterpret_cast<const OpEncoding *>(inst),
@@ -1486,7 +1657,10 @@ SAtomicDecX2Smem::SAtomicDecX2Smem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 } // namespace cdna4
 } // namespace rocjitsu

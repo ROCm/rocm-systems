@@ -8,6 +8,7 @@
 #include "exception.hpp"
 #include "gpu.hpp"
 #include "state.hpp"
+#include <cstdint>
 
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/filepath.hpp>
@@ -682,7 +683,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("KB")
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB",
-                           p.get<int64_t>("trace-buffer-size"));
+                           p.get<std::int64_t>("trace-buffer-size"));
             });
 
         _data.processed_environs.emplace("trace_buffer_size");
@@ -978,8 +979,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 update_env(
                     _data, "ROCPROFSYS_SAMPLING_TIDS",
-                    fmt::format("{}",
-                                fmt::join(p.get<std::vector<int64_t>>("tids"), ", ")));
+                    fmt::format(
+                        "{}", fmt::join(p.get<std::vector<std::int64_t>>("tids"), ", ")));
             });
 
         _data.processed_environs.emplace("tids");
@@ -1320,7 +1321,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
 parser_data&
 add_extended_arguments(parser_t& _parser, parser_data& _data)
 {
-    auto _category_count_map = std::unordered_map<std::string, uint32_t>{};
+    auto _category_count_map = std::unordered_map<std::string, std::uint32_t>{};
     auto _settings           = std::vector<std::shared_ptr<tim::vsettings>>{};
     for(auto& itr : *rocprofsys::settings::instance())
     {

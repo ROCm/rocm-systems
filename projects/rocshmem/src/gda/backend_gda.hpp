@@ -233,6 +233,16 @@ class GDABackend : public Backend {
   void ctx_destroy(Context *ctx) override;
 
   /**
+   * @brief Register a user buffer.
+   */
+  int buffer_register(void *addr, size_t length) override;
+
+  /**
+   * @brief Unregister a user buffer.
+   */
+  int buffer_unregister(void *addr) override;
+
+  /**
    * @brief Abort the application.
    *
    * @param[in] status Exit code.
@@ -337,6 +347,18 @@ class GDABackend : public Backend {
    * @brief Allocate and initialize team world.
    */
   void setup_team_world();
+
+  /**
+   * @brief Allocate and initialize team shared.
+   *
+   * TEAM_SHARED contains the PEs that share a common memory domain
+   * (same node). Must be called after setup_ipc() since membership
+   * is determined from ipcImpl.pes_with_ipc_avail. Computes real
+   * pe_start/stride from the PE list; set to ROCSHMEM_TEAM_INVALID
+   * when IPC is disabled or when node-local ranks are not uniformly
+   * strided.
+   */
+  void setup_team_shared();
 
   /**
    * @brief Initialize the resources required to support teams
@@ -492,7 +514,7 @@ class GDABackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  GDADefaultContextProxyT default_context_proxy_;  // init handled in constructor
+  GDADefaultContextProxy default_context_proxy_;  // init handled in constructor
 
   /**
    * @brief An array of @ref ROContexts that backs the context FreeList.
@@ -502,7 +524,7 @@ class GDABackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<HIPAllocator, GDAContext *> ctx_free_list{};
+  FreeListProxy<GDAContext *> ctx_free_list{};
 
   /**
    * @brief The bitmask representing the availability of teams in the pool

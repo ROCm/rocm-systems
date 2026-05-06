@@ -214,4 +214,4 @@ The container sets the following environment variables by default:
 
 Additional environment variables for specific cluster configurations are available
 as comments in the Dockerfile. For a full list of rocSHMEM environment variables,
-see :doc:`Environment variables <./api/env_variables>`.
+see :doc:`Environment variables <./env_variables>`.

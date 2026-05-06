@@ -6,6 +6,7 @@ env:
   AIS_INPUT_BUILD_ID: ${{ inputs.build_id }}
   AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
   AIS_INPUT_CXX_COMPILER: ${{ inputs.cxx_compiler }}
+  AIS_INPUT_CXX_STANDARD: ${{ inputs.cxx_standard }}
   AIS_INPUT_JOB_DESIGNATOR: ${{ inputs.job_designator }}
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
   AIS_INPUT_UPLOAD_ARTIFACTS: ${{ inputs.upload_artifacts }}
@@ -19,7 +20,7 @@ env:
   AIS_PKG_TYPE: ${{ inputs.platform == 'ubuntu' && 'DEB' || 'RPM' }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
   # Code coverage report only vetted to work for amdclang++ on Ubuntu
-  AIS_USE_CODE_COVERAGE: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.platform == 'ubuntu' }}
+  AIS_USE_CODE_COVERAGE: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.platform == 'ubuntu' && inputs.generate_coverage }}
   AIS_HIP_ARCHITECTURES: gfx950;gfx1201;gfx1200;gfx1101;gfx1100;gfx1030;gfx942;gfx90a;gfx908
 
 on:
@@ -36,6 +37,15 @@ on:
       cxx_compiler:
         required: true
         type: string
+      cxx_standard:
+        required: false
+        type: number
+        default: 17
+      generate_coverage:
+        default: true
+        description: "Allow coverage to be generated"
+        required: false
+        type: boolean
       job_designator:
         description: "Qualifies the type of job building hipFile"
         required: false
@@ -70,9 +80,8 @@ permissions:
   packages: read
 
 jobs:
-
   compile_on_AMD:
-    name: compile_on_AMD (${{ inputs.cxx_compiler }})
+    name: compile_on_AMD (${{ inputs.cxx_compiler }} C++${{ inputs.cxx_standard}})
     outputs:
       ais_hipfile_pkg_dev_filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}
       ais_hipfile_pkg_filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}
@@ -95,7 +104,7 @@ jobs:
         # We should expect that there are multiple instances of this job with different cxx_compilers.
         # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.
         run: |
-          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}" >> "${GITHUB_ENV}"
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
       - name: Fetching code repository...
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -105,7 +114,7 @@ jobs:
             projects/hipfile
             .github/workflows
       - name: Authenticating to GitHub Container Registry
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -151,6 +160,7 @@ jobs:
               cmake \
                 -DCMAKE_BUILD_TYPE=Debug \
                 -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
+                -DAIS_CXX_STANDARD="${{ env.AIS_INPUT_CXX_STANDARD }}" \
                 -DCMAKE_CXX_FLAGS="-Werror" \
                 -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
                 -DCMAKE_HIP_PLATFORM=amd \
@@ -292,7 +302,7 @@ jobs:
             ${GITHUB_WORKSPACE}
       - name: Upload development hipFile Package as an Artifact
         if: ${{ inputs.upload_artifacts }}
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}
           path: ${{ format('{0}/{1}', github.workspace, steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME) }}
@@ -301,7 +311,7 @@ jobs:
           compression-level: 0
       - name: Upload runtime hipFile Package as an Artifact
         if: ${{ inputs.upload_artifacts }}
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}
           path: ${{ format('{0}/{1}', github.workspace, steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME) }}
@@ -320,7 +330,7 @@ jobs:
             ${GITHUB_WORKSPACE}/hipfile-build-dir
       - name: Upload runtime hipFile package as an artifact
         if: ${{ inputs.upload_artifacts }}
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hipfile-build-dir-${{ inputs.platform }}
           path: ${{ github.workspace }}/hipfile-build-dir

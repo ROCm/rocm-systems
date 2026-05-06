@@ -172,10 +172,10 @@ TEST(Gfx10WaveStartCommonTest, GetGPULocationCombinesFields)
     EXPECT_EQ(loc, expected);
 }
 
-// Tests for gfx10::wave_t::map_to_common_type
+// Tests for gfx10::map_to_common_type
 TEST(Gfx10InstMapTest, FirstEntryMapsToSalu)
 {
-    auto result = gfx10::wave_t::map_to_common_type(0, 1, 1);
+    auto result = gfx10::map_to_common_type(0, 1, 1);
     EXPECT_EQ(result.category, WaveInstCategory::SALU);
     EXPECT_EQ(result.cycles, 1);
 }
@@ -183,29 +183,29 @@ TEST(Gfx10InstMapTest, FirstEntryMapsToSalu)
 TEST(Gfx10InstMapTest, OtherSimdRangeReturnsNone)
 {
     // other_simd_start = 79, other_simd_end = 102 - boundary values
-    auto resultStart = gfx10::wave_t::map_to_common_type(79, 1, 1);
+    auto resultStart = gfx10::map_to_common_type(79, 1, 1);
     EXPECT_EQ(resultStart.category, WaveInstCategory::NONE);
     EXPECT_EQ(resultStart.cycles, 0);
 
-    auto resultMid = gfx10::wave_t::map_to_common_type(90, 1, 1);
+    auto resultMid = gfx10::map_to_common_type(90, 1, 1);
     EXPECT_EQ(resultMid.category, WaveInstCategory::NONE);
     EXPECT_EQ(resultMid.cycles, 0);
 
-    auto resultEnd = gfx10::wave_t::map_to_common_type(102, 1, 1);
+    auto resultEnd = gfx10::map_to_common_type(102, 1, 1);
     EXPECT_EQ(resultEnd.category, WaveInstCategory::NONE);
     EXPECT_EQ(resultEnd.cycles, 0);
 }
 
 TEST(Gfx10InstMapTest, UnknownInstReturnsNone)
 {
-    auto result = gfx10::wave_t::map_to_common_type(999, 1, 1);
+    auto result = gfx10::map_to_common_type(999, 1, 1);
     EXPECT_EQ(result.category, WaveInstCategory::NONE);
     EXPECT_EQ(result.cycles, 0);
 }
 
 TEST(Gfx10InstMapTest, NegativeInstReturnsNone)
 {
-    auto result = gfx10::wave_t::map_to_common_type(-1, 1, 1);
+    auto result = gfx10::map_to_common_type(-1, 1, 1);
     EXPECT_EQ(result.category, WaveInstCategory::NONE);
     EXPECT_EQ(result.cycles, 0);
 }
@@ -357,8 +357,8 @@ TEST(Gfx10WaveStartEdgeCaseTest, ZeroFieldValues)
 // Tests for map_to_common_type
 TEST(Gfx10WaveTest, MapToCommonTypeBasic)
 {
-    EXPECT_EQ(gfx10::wave_t::map_to_common_type(0, 1, 1).category, WaveInstCategory::SALU);
-    EXPECT_EQ(gfx10::wave_t::map_to_common_type(1, 1, 1).category, WaveInstCategory::SMEM);
+    EXPECT_EQ(gfx10::map_to_common_type(0, 1, 1).category, WaveInstCategory::SALU);
+    EXPECT_EQ(gfx10::map_to_common_type(1, 1, 1).category, WaveInstCategory::SMEM);
 }
 
 // Tests for new_pc

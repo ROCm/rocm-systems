@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/concepts.hpp"
-#include "core/defines.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -18,7 +18,7 @@ namespace causal
 namespace sampling
 {
 std::set<int>
-get_signal_types(int64_t _tid);
+get_signal_types(std::int64_t _tid);
 
 void
 block_samples();

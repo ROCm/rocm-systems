@@ -39,8 +39,16 @@ class GPUInfo:
         return False
 
     @property
+    def _is_gfx1250(self) -> bool:
+        """Check if any detected GPU uses the gfx1250 architecture."""
+        return "gfx1250" in self.architectures
+
+    @property
     def rocm_events_for_test(self) -> str:
         """Get appropriate ROCm events for testing based on architecture."""
+        if self._is_gfx1250:
+            return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TX_VCA_VCA_BUSY"
+
         mi300_or_later = self._is_mi300_or_later
         if mi300_or_later:
             return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY"
@@ -49,6 +57,9 @@ class GPUInfo:
     @property
     def counter_names(self) -> list[str]:
         """Get counter names for validation based on architecture"""
+        if self._is_gfx1250:
+            return ["GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU", "TX_VCA_VCA_BUSY"]
+
         mi300_or_later = self._is_mi300_or_later
         if mi300_or_later:
             return ["GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU", "TA_TA_BUSY"]

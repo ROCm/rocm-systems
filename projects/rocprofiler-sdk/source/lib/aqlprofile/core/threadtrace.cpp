@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/aql_profile.hpp"
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "lib/aqlprofile/core/aql_profile.hpp"
+#include "lib/aqlprofile/aqlprofile.hpp"
 
 #include <cstdint>
 #include <future>
@@ -30,13 +30,13 @@
 #include <vector>
 #include <shared_mutex>
 
-#include "core/logger.h"
-#include "core/pm4_factory.h"
-#include "pm4/cmd_builder.h"
-#include "pm4/sqtt_builder.h"
+#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
+#include "lib/aqlprofile/pm4/sqtt_builder.h"
 
-#include "core/commandbuffermgr.hpp"
-#include "memorymanager.hpp"
+#include "lib/aqlprofile/core/commandbuffermgr.hpp"
+#include "lib/aqlprofile/core/memorymanager.hpp"
 
 #define THREAD_TRACE_PREFIX_SIZE  0x100
 #define DEFAULT_TRACE_BUFFER_SIZE (3 << 26)

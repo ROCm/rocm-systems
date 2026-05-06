@@ -1048,6 +1048,12 @@ def _NA_amdsmi_get_gpu_metrics_info() -> Dict[str, str]:
         "pcie_lc_perf_other_end_recovery": "N/A",
         "vram_max_bandwidth": "N/A",
         "xgmi_link_status": "N/A",
+        "temperature_hbm_stacks": "N/A",
+        "temperature_mid": "N/A",
+        "temperature_aid": "N/A",
+        "current_uclk_aid": "N/A",
+        "current_socclks_mid": "N/A",
+        "xcp_stats.temperature_xcd": "N/A",
     }
     return na_gpu_metrics_info
 
@@ -1384,8 +1390,7 @@ def amdsmi_get_cpu_core_ccd_power(processor_handle: processor_handle_t) -> int:
 
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_core_ccd_power(processor_handle, ctypes.byref(power)))
 
-    # In Watt
-    return power.value
+    return power.value  # in mW
 
 
 def amdsmi_get_cpu_socket_energy(processor_handle: processor_handle_t) -> str:
@@ -1495,27 +1500,27 @@ def amdsmi_get_cpu_core_current_freq_limit(processor_handle: processor_handle_t)
     return f"{freq.value} MHz"
 
 
-def amdsmi_get_cpu_socket_power(processor_handle: processor_handle_t) -> str:
+def amdsmi_get_cpu_socket_power(processor_handle: processor_handle_t) -> int:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     ppower = ctypes.c_uint32()
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_power(processor_handle, ctypes.byref(ppower)))
 
-    return f"{ppower.value} Watts"
+    return ppower.value  # in mW
 
 
-def amdsmi_get_cpu_socket_power_cap(processor_handle: processor_handle_t) -> str:
+def amdsmi_get_cpu_socket_power_cap(processor_handle: processor_handle_t) -> int:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     pcap = ctypes.c_uint32()
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_power_cap(processor_handle, ctypes.byref(pcap)))
 
-    return f"{pcap.value} Watts"
+    return pcap.value  # in mW
 
 
-def amdsmi_get_cpu_socket_power_cap_max(processor_handle: processor_handle_t) -> str:
+def amdsmi_get_cpu_socket_power_cap_max(processor_handle: processor_handle_t) -> int:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
@@ -1524,7 +1529,7 @@ def amdsmi_get_cpu_socket_power_cap_max(processor_handle: processor_handle_t) ->
         amdsmi_wrapper.amdsmi_get_cpu_socket_power_cap_max(processor_handle, ctypes.byref(pmax))
     )
 
-    return f"{pmax.value} Watts"
+    return pmax.value  # in mW
 
 
 def amdsmi_get_cpu_pwr_svi_telemetry_all_rails(processor_handle: processor_handle_t) -> str:
@@ -2352,15 +2357,14 @@ def amdsmi_set_cpu_sdps_limit(processor_handle: processor_handle_t, sdps_limit: 
     _check_res(amdsmi_wrapper.amdsmi_set_cpu_sdps_limit(processor_handle, sdps_limit_32))
 
 
-def amdsmi_get_cpu_sdps_limit(processor_handle: processor_handle_t) -> str:
+def amdsmi_get_cpu_sdps_limit(processor_handle: processor_handle_t) -> int:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     sdps_limit = ctypes.c_uint32()
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_sdps_limit(processor_handle, ctypes.byref(sdps_limit)))
 
-    # In Watt
-    return f"{sdps_limit.value} Watts"
+    return sdps_limit.value  # in mW
 
 
 # Get 2's complement of 32 bit unsigned integer
@@ -2542,7 +2546,7 @@ def amdsmi_get_processor_type(processor_handle: processor_handle_t) -> Dict[str,
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    dev_type = amdsmi_wrapper.processor_type_t()
+    dev_type = amdsmi_wrapper.amdsmi_processor_type_t()
     _check_res(amdsmi_wrapper.amdsmi_get_processor_type(processor_handle, ctypes.byref(dev_type)))
 
     return {"processor_type": AmdSmiProcessorType(dev_type.value).name}
@@ -2875,6 +2879,7 @@ def amdsmi_get_gpu_enumeration_info(processor_handle: processor_handle_t) -> Dic
         "hsa_id": _validate_if_max_uint(enumeration_info.hsa_id, MaxUIntegerTypes.UINT32_T),
         "hip_id": _validate_if_max_uint(enumeration_info.hip_id, MaxUIntegerTypes.UINT32_T),
         "hip_uuid": enumeration_info.hip_uuid.decode("utf-8"),
+        "oam_id": _validate_if_max_uint(enumeration_info.oam_id, MaxUIntegerTypes.UINT32_T),
     }
 
     return enumeration_info
@@ -5803,6 +5808,7 @@ def amdsmi_get_gpu_metrics_info(processor_handle: processor_handle_t) -> Dict[st
         "xcp_stats.gfx_below_host_limit_thm_acc": list(gpu_metrics.xcp_stats),
         "xcp_stats.gfx_low_utilization_acc": list(gpu_metrics.xcp_stats),
         "xcp_stats.gfx_below_host_limit_total_acc": list(gpu_metrics.xcp_stats),
+        "xcp_stats.temperature_xcd": list(gpu_metrics.xcp_stats),
         "pcie_lc_perf_other_end_recovery": _validate_if_max_uint(
             gpu_metrics.pcie_lc_perf_other_end_recovery, MaxUIntegerTypes.UINT32_T
         ),
@@ -5811,6 +5817,21 @@ def amdsmi_get_gpu_metrics_info(processor_handle: processor_handle_t) -> Dict[st
         ),
         "xgmi_link_status": _validate_if_max_uint(
             list(gpu_metrics.xgmi_link_status), MaxUIntegerTypes.UINT16_T
+        ),
+        "temperature_hbm_stacks": _validate_if_max_uint(
+            list(gpu_metrics.temperature_hbm_stacks), MaxUIntegerTypes.UINT16_T
+        ),
+        "temperature_mid": _validate_if_max_uint(
+            list(gpu_metrics.temperature_mid), MaxUIntegerTypes.UINT16_T
+        ),
+        "temperature_aid": _validate_if_max_uint(
+            list(gpu_metrics.temperature_aid), MaxUIntegerTypes.UINT16_T
+        ),
+        "current_uclk_aid": _validate_if_max_uint(
+            list(gpu_metrics.current_uclk_aid), MaxUIntegerTypes.UINT16_T
+        ),
+        "current_socclks_mid": _validate_if_max_uint(
+            list(gpu_metrics.current_socclks_mid), MaxUIntegerTypes.UINT16_T
         ),
     }
 
@@ -5890,6 +5911,13 @@ def amdsmi_get_gpu_metrics_info(processor_handle: processor_handle_t) -> Dict[st
             for val in xcp_metrics.gfx_below_host_limit_total_acc:
                 xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
             gpu_metrics_output["xcp_stats.gfx_below_host_limit_total_acc"][xcp_index] = xcp_detail
+
+    if "xcp_stats.temperature_xcd" in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output["xcp_stats.temperature_xcd"]):
+            xcp_detail = []
+            for val in xcp_metrics.temperature_xcd:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T))
+            gpu_metrics_output["xcp_stats.temperature_xcd"][xcp_index] = xcp_detail
     return gpu_metrics_output
 
 
@@ -6107,6 +6135,7 @@ def amdsmi_get_gpu_partition_metrics_info(processor_handle: processor_handle_t) 
         "xcp_stats.gfx_below_host_limit_thm_acc": list(gpu_metrics.xcp_stats),
         "xcp_stats.gfx_low_utilization_acc": list(gpu_metrics.xcp_stats),
         "xcp_stats.gfx_below_host_limit_total_acc": list(gpu_metrics.xcp_stats),
+        "xcp_stats.temperature_xcd": list(gpu_metrics.xcp_stats),
         "pcie_lc_perf_other_end_recovery": _validate_if_max_uint(
             gpu_metrics.pcie_lc_perf_other_end_recovery, MaxUIntegerTypes.UINT32_T
         ),
@@ -6115,6 +6144,21 @@ def amdsmi_get_gpu_partition_metrics_info(processor_handle: processor_handle_t) 
         ),
         "xgmi_link_status": _validate_if_max_uint(
             list(gpu_metrics.xgmi_link_status), MaxUIntegerTypes.UINT16_T
+        ),
+        "temperature_hbm_stacks": _validate_if_max_uint(
+            list(gpu_metrics.temperature_hbm_stacks), MaxUIntegerTypes.UINT16_T
+        ),
+        "temperature_mid": _validate_if_max_uint(
+            list(gpu_metrics.temperature_mid), MaxUIntegerTypes.UINT16_T
+        ),
+        "temperature_aid": _validate_if_max_uint(
+            list(gpu_metrics.temperature_aid), MaxUIntegerTypes.UINT16_T
+        ),
+        "current_uclk_aid": _validate_if_max_uint(
+            list(gpu_metrics.current_uclk_aid), MaxUIntegerTypes.UINT16_T
+        ),
+        "current_socclks_mid": _validate_if_max_uint(
+            list(gpu_metrics.current_socclks_mid), MaxUIntegerTypes.UINT16_T
         ),
     }
 
@@ -6194,6 +6238,13 @@ def amdsmi_get_gpu_partition_metrics_info(processor_handle: processor_handle_t) 
             for val in xcp_metrics.gfx_below_host_limit_total_acc:
                 xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
             gpu_metrics_output["xcp_stats.gfx_below_host_limit_total_acc"][xcp_index] = xcp_detail
+
+    if "xcp_stats.temperature_xcd" in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output["xcp_stats.temperature_xcd"]):
+            xcp_detail = []
+            for val in xcp_metrics.temperature_xcd:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T))
+            gpu_metrics_output["xcp_stats.temperature_xcd"][xcp_index] = xcp_detail
     return gpu_metrics_output
 
 

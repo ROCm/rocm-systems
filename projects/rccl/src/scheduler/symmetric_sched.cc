@@ -123,7 +123,11 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm, struct ncclIntruQ
   struct ncclSymkDevWorkArgs* argsBuf = NULL;
 
   plan->isSymColl = true;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  plan->threadPerBlock = headTask->nWarps * comm->WarpSize;
+#else
   plan->threadPerBlock = headTask->nWarps * WARP_SIZE;
+#endif
   plan->hasProxyOps = false;
   plan->kernelFn = ncclSymkGetKernelPtr((ncclSymkKernelId)headTask->devFuncId, headTask->opDev.op, headTask->datatype);
   task = headTask;
@@ -136,6 +140,7 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm, struct ncclIntruQ
   }
 
   plan->kernelArgsSize = ncclSymkDevWorkArgs::calcArgsSize(nMaxChannels, workCount);
+  plan->kernelArgsSize = max(plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
   argsBuf = (struct ncclSymkDevWorkArgs*)calloc(1, plan->kernelArgsSize);
 
   remainCell = cellPerChannel = DIVUP(DIVUP(totalCount, nMaxChannels), cellCount);
@@ -217,7 +222,9 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm, struct ncclIntruQ
 
   memcpy(&argsBuf->kcomm, &comm->symkState.kcomm, sizeof(comm->symkState.kcomm));
   plan->workBytes = totalCount * ncclTypeSize(headTask->datatype);
-  // plan->channelMask = uint64_t(-1) >> (64 - curChannel);
+  for (int c = 0; c < curChannel; c++) {
+    plan->channelMask.masks[c / 64] |= (uint64_t(1) << (c % 64));
+  }
   plan->kernelSymArgs = (void*)argsBuf;
   plan->workStorageType = ncclDevWorkStorageTypeArgs;
 

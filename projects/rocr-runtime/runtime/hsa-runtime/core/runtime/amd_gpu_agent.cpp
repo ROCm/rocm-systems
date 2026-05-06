@@ -1762,15 +1762,14 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 
   switch (attribute_u) {
     case HSA_AGENT_INFO_NAME: {
-      std::string name = isa_->GetProcessorName();
-      assert(name.size() <= hsa_name_size);
-      std::memset(value, 0, hsa_name_size);
-      char* temp = reinterpret_cast<char*>(value);
-      std::strcpy(temp, name.c_str());
+      const std::string& name = isa_->GetProcessorName();
+      const size_t n = std::min(name.size(), hsa_name_size);
+      std::memset(value, 0, hsa_name_size + 1);
+      std::memcpy(value, name.data(), n);
       break;
     }
     case HSA_AGENT_INFO_VENDOR_NAME:
-      std::memset(value, 0, hsa_name_size);
+      std::memset(value, 0, hsa_name_size + 1);
       std::memcpy(value, "AMD", sizeof("AMD"));
       break;
     case HSA_AGENT_INFO_FEATURE:
@@ -2596,25 +2595,37 @@ hsa_status_t GpuAgent::SetAsyncScratchThresholds(size_t use_once_limit) {
 void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_time_t& time) {
   uint64_t start, end;
   signal->GetRawTs(false, start, end);
+
+  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+    debug_print("Signal %p time stamps may be invalid (start=%lu, end=%lu, t0=%lu).\n",
+                &signal->signal_, start, end, t0_.GPUClockCounter);
+    time.start = 0;
+    time.end = 0;
+    return;
+  }
+
   // Order is important, we want to translate the end time first to ensure that packet duration is
   // not impacted by clock measurement latency jitter.
   time.end = TranslateTime(end);
   time.start = TranslateTime(start);
-
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter))
-    debug_print("Signal %p time stamps may be invalid.\n", &signal->signal_);
 }
 
 void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_time_t& time) {
   uint64_t start, end;
   signal->GetRawTs(true, start, end);
+
+  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+    debug_print("Signal %p async copy time stamps may be invalid (start=%lu, end=%lu, t0=%lu).\n",
+                &signal->signal_, start, end, t0_.GPUClockCounter);
+    time.start = 0;
+    time.end = 0;
+    return;
+  }
+
   // Order is important, we want to translate the end time first to ensure that packet duration is
   // not impacted by clock measurement latency jitter.
   time.end = TranslateTime(end);
   time.start = TranslateTime(start);
-
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter))
-    debug_print("Signal %p time stamps may be invalid.\n", &signal->signal_);
 }
 
 /*
