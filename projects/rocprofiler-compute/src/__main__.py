@@ -48,8 +48,9 @@ except ImportError as e:
 
         from importlib import metadata
 
-        from rocprof_compute_base import RocProfCompute
         from utils.utils import console_error
+
+        from rocprof_compute_base import RocProfCompute
     except ImportError:
         pass
 

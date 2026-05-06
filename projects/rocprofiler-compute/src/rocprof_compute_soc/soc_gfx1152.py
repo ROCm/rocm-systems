@@ -53,17 +53,15 @@ class gfx1152_soc(OmniSoC_Base):
             self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx1152"))
         except KeyError:
             # Fallback to RDNA3 defaults if gfx1152 not defined
-            self.set_perfmon_config(
-                {
-                    "SQ": 16,
-                    "SQC": 8,
-                    "TCP": 4,
-                    "GL1C": 4,
-                    "GL2C": 4,
-                    "SPI": 6,
-                    "GRBM": 2,
-                }
-            )
+            self.set_perfmon_config({
+                "SQ": 16,
+                "SQC": 8,
+                "TCP": 4,
+                "GL1C": 4,
+                "GL2C": 4,
+                "SPI": 6,
+                "GRBM": 2,
+            })
 
         # Set arch specific specs for RDNA3.5
         # These values may need adjustment based on actual hardware
