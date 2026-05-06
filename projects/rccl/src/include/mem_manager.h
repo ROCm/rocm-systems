@@ -171,6 +171,10 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
 // Add peer info for buffers in the linked list entries (only for dynamic memory: scratch/offload)
 ncclResult_t ncclDynMemMarkExportToPeer(struct ncclMemManager* manager, void* ptr, int peerRank);
 
+ncclResult_t ncclCommMemSuspend(struct ncclComm* comm);
+ncclResult_t ncclCommMemResume(struct ncclComm* comm);
+ncclResult_t ncclCommMemStats(struct ncclComm* comm, ncclCommMemStat_t stat, uint64_t* value);
+
 #ifdef __cplusplus
 }
 #endif
