@@ -2,7 +2,7 @@
 name = "nccl4py"
 dynamic = ["version"]
 requires-python = ">=3.10"
-description = "nccl4py: Pythonic Python bindings for RCCL on ROCm (fork of NVIDIA nccl4py)"
+description = "nccl4py: Pythonic bindings for RCCL on ROCm (AMD fork of NVIDIA nccl4py)"
 readme = {file = "DESCRIPTION.rst", content-type = "text/x-rst"}
 license = "Apache-2.0"
 license-files = ["LICENSE.txt"]
@@ -48,7 +48,7 @@ test = [
 
 [project.urls]
 homepage = "https://github.com/ROCm/rccl"
-documentation = "https://rccl.readthedocs.io"
+documentation = "https://rocm.docs.amd.com/projects/rccl/en/latest/"
 repository = "https://github.com/ROCm/rocm-systems"
 issues = "https://github.com/ROCm/rocm-systems/issues"
 

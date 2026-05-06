@@ -27,18 +27,31 @@ Pythonic API for RCCL collective operations.
 
 ## Requirements
 
-- **Runtime:** `librccl.so` reachable via `LD_LIBRARY_PATH`,
-  `RCCL_PATH`, or the standard loader search paths. Set
-  `NCCL_LIBRARY=<path>` to override the lookup.
+- **Runtime:** `librccl.so` resolved at first use. Discovery order:
+  1. `NCCL_LIBRARY=<path>` (explicit override; path or SONAME).
+  2. `ctypes.util.find_library("rccl")` (the loader's `ldconfig`
+     cache).
+  3. `$ROCM_PATH/lib/librccl.so`, then `$HIP_PATH/lib/librccl.so`.
+  4. Bare `librccl.so`, resolved via `LD_LIBRARY_PATH` / the standard
+     loader search paths.
 - **Python:** 3.10 or later.
 - **Python deps:** `hip-python`, `numpy`, `packaging` (resolved
   automatically by `pip`).
 
 ## Installation
 
+`pip install .` is the supported install path on ROCm:
+
 ```bash
 pip install .
 ```
+
+> **Note:** The `Makefile` and `CMakeLists.txt` shipped in this
+> directory are inherited from upstream NVIDIA `nccl4py` and target
+> NVIDIA hardware (they require `CUDA_HOME` / `nvcc` and pull
+> CUDA-only `torch` / `cupy` wheels). They are out of scope for the
+> ROCm bring-up and tracked separately under release engineering;
+> use `pip install` on ROCm hosts.
 
 For a development environment with the test extras:
 
@@ -96,5 +109,5 @@ mpirun -np 2 python examples/01_basic/02_send_recv.py
 ## References
 
 - [RCCL](https://github.com/ROCm/rccl)
-- [RCCL documentation](https://rccl.readthedocs.io)
+- [RCCL documentation](https://rocm.docs.amd.com/projects/rccl/en/latest/)
 - [Upstream NVIDIA nccl4py](https://github.com/NVIDIA/nccl/tree/master/bindings/nccl4py)

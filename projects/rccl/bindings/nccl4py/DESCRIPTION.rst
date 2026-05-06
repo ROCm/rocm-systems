@@ -18,7 +18,7 @@ bindings runs unchanged on ROCm.
 
 * `Homepage <https://github.com/ROCm/rccl>`_
 * `Repository <https://github.com/ROCm/rocm-systems>`_
-* `Documentation <https://rccl.readthedocs.io>`_
+* `Documentation <https://rocm.docs.amd.com/projects/rccl/en/latest/>`_
 * `Issue tracker <https://github.com/ROCm/rocm-systems/issues>`_
 
 ``nccl4py`` is under active development. Feedback and suggestions are welcome.
