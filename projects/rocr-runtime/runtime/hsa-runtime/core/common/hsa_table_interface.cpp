@@ -1134,6 +1134,18 @@ hsa_status_t HSA_API hsa_amd_image_create(
 }
 
 // Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_image_create_v2(
+  hsa_agent_t agent,
+  const hsa_ext_image_descriptor_v2_t* image_descriptor,
+  const hsa_amd_image_descriptor_t* image_layout,
+  const void* image_data,
+  hsa_access_permission_t access_permission,
+  hsa_ext_image_t* image) {
+  return amdExtTable->hsa_amd_image_create_v2_fn(agent, image_descriptor,
+                           image_layout, image_data, access_permission, image);
+}
+
+// Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_pointer_info(const void* ptr, hsa_amd_pointer_info_t* info, void* (*alloc)(size_t),
                               uint32_t* num_agents_accessible, hsa_agent_t** accessible) {
   return amdExtTable->hsa_amd_pointer_info_fn(ptr, info, alloc, num_agents_accessible, accessible);

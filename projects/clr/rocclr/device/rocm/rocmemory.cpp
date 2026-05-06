@@ -205,7 +205,7 @@ void Memory::cpuUnmap(device::VirtualDevice& vDev) {
 // ================================================================================================
 hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t flags) {
   hsa_agent_t agent = dev().getBackendDevice();
-  size_t size;
+  size_t size = 0;
   size_t metadata_size = 0;
   void* metadata = nullptr;
   auto fd = fdn;
@@ -273,7 +273,7 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + offset;
   if(!GlInterop::Detach(owner(), resHandle)) {
-    LogPrintfError("GlInterop::Detach(handle %p) failed", resHandle);
+    ClPrint(amd::LOG_ERROR, amd::LOG_MEM, "GlInterop::Detach(handle %p) failed", resHandle);
   }
   return true;
 #else
@@ -1528,36 +1528,33 @@ bool Image::createView(const Memory& parent) {
         }
       }
     }
-  } else if (kind_ == MEMORY_KIND_INTEROP) {
-    amdImageDesc_ = static_cast<Image*>(parent.owner()->getDeviceMemory(dev()))->amdImageDesc_;
-    status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, amdImageDesc_,
-                               deviceMemory_, permission_, &hsaImageObject_);
-  } else {
-    if (ancestor->asImage()->getMipLevels() > 1 && imageDescriptor_.mipmap_levels == 1) {
-      // This is on leveled image of mipmap image ancestor
+  } else if (ancestor->asImage()->getMipLevels() > 1 && imageDescriptor_.mipmap_levels == 1) {
+      // This is on leveled image of mipmap image, including leveled view of interop mipmap.
       amd::Memory* parentOwner = parent.owner();
       auto* ancestor_image = static_cast<Image*>(ancestor->getDeviceMemory(dev()));
       if (ancestor == parentOwner) {
         // This is leveled image
-        status = Hsa::image_get_mipmap_level(dev().getBackendDevice(),
-                                           &ancestor_image->hsaImageObject_,
-                                           owner()->asImage()->getBaseMipLevel(),
-                                           nullptr, &hsaImageObject_);
+        status = Hsa::image_get_mipmap_level(
+            dev().getBackendDevice(), &ancestor_image->hsaImageObject_,
+            owner()->asImage()->getBaseMipLevel(), nullptr, &hsaImageObject_);
       } else if (ancestor == parentOwner->parent()) {
         // This is format changed view on leveled image
-        status = Hsa::image_get_mipmap_level(dev().getBackendDevice(),
-                                           &ancestor_image->hsaImageObject_,
-                                           parentOwner->asImage()->getBaseMipLevel(),
-                                           &imageDescriptor_, &hsaImageObject_);
+        status = Hsa::image_get_mipmap_level(
+            dev().getBackendDevice(), &ancestor_image->hsaImageObject_,
+            parentOwner->asImage()->getBaseMipLevel(), &imageDescriptor_, &hsaImageObject_);
       } else {
         // This is an impossible view on leveled image
         status = HSA_STATUS_ERROR_INVALID_REGION;
       }
-    } else {
-      // This is a view on regular image or mipmap image.
-      status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
+  } else if (kind_ == MEMORY_KIND_INTEROP) {
+    // This is a view on interop regular image or mipmap image.
+    amdImageDesc_ = static_cast<Image*>(parent.owner()->getDeviceMemory(dev()))->amdImageDesc_;
+    status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, amdImageDesc_,
+                               deviceMemory_, permission_, &hsaImageObject_);
+  } else {
+    // This is a view on regular image or mipmap image.
+    status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
                                  permission_, &hsaImageObject_);
-    }
   }
 
   if (status != HSA_STATUS_SUCCESS) {

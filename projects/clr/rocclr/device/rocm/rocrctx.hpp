@@ -93,6 +93,7 @@ struct RocrEntryPoints {
   decltype(hsa_amd_interop_map_buffer)* hsa_amd_interop_map_buffer_;
   decltype(hsa_amd_interop_unmap_buffer)* hsa_amd_interop_unmap_buffer_;
   decltype(hsa_amd_image_create)* hsa_amd_image_create_;
+  decltype(hsa_amd_image_create_v2)* hsa_amd_image_create_v2_;
   decltype(hsa_amd_pointer_info)* hsa_amd_pointer_info_;
   decltype(hsa_amd_ipc_memory_create)* hsa_amd_ipc_memory_create_;
   decltype(hsa_amd_ipc_memory_attach)* hsa_amd_ipc_memory_attach_;
@@ -534,10 +535,8 @@ class Hsa : public amd::AllStatic {
     const hsa_amd_image_descriptor_t* image_layout,
     const void* image_data, hsa_access_permission_t access_permission,
     hsa_ext_image_t* image) {
-    assert(image_descriptor->mipmap_levels == 1);
-    return ROCR_DYN(hsa_amd_image_create)(agent,
-                   reinterpret_cast<const hsa_ext_image_descriptor_t*>(image_descriptor),
-                   image_layout, image_data, access_permission, image);
+    return ROCR_DYN(hsa_amd_image_create_v2)(agent,
+                   image_descriptor, image_layout, image_data, access_permission, image);
   }
   static hsa_status_t image_data_get_info(
     hsa_agent_t agent, const hsa_ext_image_descriptor_v2_t* image_descriptor,
