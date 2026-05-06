@@ -8,7 +8,6 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-formatting.yml'
       - 'projects/rocprofiler-systems/**'
-      - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
       - '!**/.markdownlint-ci2.yaml'
