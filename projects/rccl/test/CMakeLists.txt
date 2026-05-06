@@ -230,6 +230,7 @@ if(BUILD_TESTS)
       ProxyTests.cpp
       RcclWrapTests.cpp
       TransportTests.cpp
+      mem_manager/MemManagerTests.cpp
       graph/XmlTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
