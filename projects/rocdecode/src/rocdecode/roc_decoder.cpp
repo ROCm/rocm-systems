@@ -23,8 +23,14 @@ THE SOFTWARE.
 #include "../commons.h"
 #include "roc_decoder.h"
 
+#ifdef ROCDECODE_BUILD_LINUX
 RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): va_video_decoder_{decoder_create_info}, decoder_create_info_{decoder_create_info} {
 }
+#else
+// Windows: Stub implementation - will be replaced with Windows backend
+RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): decoder_create_info_{decoder_create_info} {
+}
+#endif
 
  RocDecoder::~RocDecoder() {
     // clean up the VA-API/HIP interop memories
@@ -44,7 +50,7 @@ RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): va_video_deco
     }
 }
 
- rocDecStatus RocDecoder::InitializeDecoder() {
+rocDecStatus RocDecoder::InitializeDecoder() {
     FunctionEntryLog(g_rocdec_logger);
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     if (decoder_create_info_.num_decode_surfaces < 1) {
@@ -56,23 +62,35 @@ RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): va_video_deco
     for (auto i = 0; i < hip_interop_.size(); i++) {
         memset((void *)&hip_interop_[i], 0, sizeof(hip_interop_[i]));
     }
+#ifdef ROCDECODE_BUILD_LINUX
     rocdec_status = va_video_decoder_.InitializeDecoder();
     if (rocdec_status != ROCDEC_SUCCESS) {
         CriticalLog(g_rocdec_logger, "Failed to initialize the VAAPI Video decoder.");
         FunctionExitLog(g_rocdec_logger);
         return rocdec_status;
     }
+#else
+    // Windows: Stub implementation - will be replaced with Windows backend
+    CriticalLog(g_rocdec_logger, "Windows decoder backend not yet implemented.");
+    rocdec_status = ROCDEC_NOT_SUPPORTED;
+#endif
     FunctionExitLog(g_rocdec_logger);
     return rocdec_status;
- }
+}
 
 rocDecStatus RocDecoder::DecodeFrame(RocdecPicParams *pic_params) {
     FunctionEntryLog(g_rocdec_logger);
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
+#ifdef ROCDECODE_BUILD_LINUX
     rocdec_status = va_video_decoder_.SubmitDecode(pic_params);
     if (rocdec_status != ROCDEC_SUCCESS) {
         ErrorLog(g_rocdec_logger, "Decode submission is not successful.");
     }
+#else
+    // Windows: Stub implementation - will be replaced with Windows backend
+    ErrorLog(g_rocdec_logger, "Windows decoder backend not yet implemented.");
+    rocdec_status = ROCDEC_NOT_SUPPORTED;
+#endif
     FunctionExitLog(g_rocdec_logger);
     return rocdec_status;
 }
@@ -80,10 +98,16 @@ rocDecStatus RocDecoder::DecodeFrame(RocdecPicParams *pic_params) {
 rocDecStatus RocDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode_status) {
     FunctionEntryLog(g_rocdec_logger);
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
+#ifdef ROCDECODE_BUILD_LINUX
     rocdec_status = va_video_decoder_.GetDecodeStatus(pic_idx, decode_status);
     if (rocdec_status != ROCDEC_SUCCESS) {
         ErrorLog(g_rocdec_logger, "Failed to query the decode status.");
     }
+#else
+    // Windows: Stub implementation - will be replaced with Windows backend
+    ErrorLog(g_rocdec_logger, "Windows decoder backend not yet implemented.");
+    rocdec_status = ROCDEC_NOT_SUPPORTED;
+#endif
     FunctionExitLog(g_rocdec_logger);
     return rocdec_status;
 }
@@ -107,12 +131,18 @@ rocDecStatus RocDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconf
     if (hip_interop_.size() != reconfig_params->num_decode_surfaces) {
         hip_interop_.resize(reconfig_params->num_decode_surfaces);
     }
+#ifdef ROCDECODE_BUILD_LINUX
     rocdec_status = va_video_decoder_.ReconfigureDecoder(reconfig_params);
     if (rocdec_status != ROCDEC_SUCCESS) {
         CriticalLog(g_rocdec_logger, "Reconfiguration of the decoder failed.");
         FunctionExitLog(g_rocdec_logger);
         return rocdec_status;
     }
+#else
+    // Windows: Stub implementation - will be replaced with Windows backend
+    CriticalLog(g_rocdec_logger, "Windows decoder backend not yet implemented.");
+    rocdec_status = ROCDEC_NOT_SUPPORTED;
+#endif
     FunctionExitLog(g_rocdec_logger);
     return rocdec_status;
 }
@@ -125,6 +155,8 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
         return ROCDEC_INVALID_PARAMETER;
     }
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
+
+#ifdef ROCDECODE_BUILD_LINUX
 
     // wait on current surface to make sure that it is ready for the HIP interop
     rocdec_status = va_video_decoder_.SyncSurface(pic_idx);
@@ -181,6 +213,11 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
         dev_mem_ptr[i] = hip_interop_[pic_idx].hip_mapped_device_mem + hip_interop_[pic_idx].offset[i];
         horizontal_pitch[i] = hip_interop_[pic_idx].pitch[i];
     }
+#else
+    // Windows: Stub implementation - will be replaced with Windows backend
+    ErrorLog(g_rocdec_logger, "Windows decoder backend not yet implemented.");
+    rocdec_status = ROCDEC_NOT_SUPPORTED;
+#endif
     FunctionExitLog(g_rocdec_logger);
     return rocdec_status;
 }

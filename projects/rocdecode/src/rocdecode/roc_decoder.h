@@ -32,7 +32,10 @@ THE SOFTWARE.
 #include <map>
 #include "../api/rocdecode/rocdecode.h"
 #include <hip/hip_runtime.h>
+
+#ifdef ROCDECODE_BUILD_LINUX
 #include "vaapi/vaapi_videodecoder.h"
+#endif
 
 struct HipInteropDeviceMem {
     hipExternalMemory_t hip_ext_mem; // Interface to the vaapi-hip interop
@@ -56,7 +59,9 @@ public:
 
 private:
     rocDecStatus FreeVideoFrame(int pic_idx);
+#ifdef ROCDECODE_BUILD_LINUX
     VaapiVideoDecoder va_video_decoder_;
+#endif
     RocDecoderCreateInfo decoder_create_info_;
     std::vector<HipInteropDeviceMem> hip_interop_;
 

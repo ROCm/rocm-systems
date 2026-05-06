@@ -21,7 +21,9 @@ THE SOFTWARE.
 */
 #include "dec_handle.h"
 #include "rocdecode/rocdecode.h"
+#ifdef ROCDECODE_BUILD_LINUX
 #include "vaapi_videodecoder.h"
+#endif
 #include "../commons.h"
 
 namespace rocdecode {
@@ -84,6 +86,7 @@ rocDecGetDecoderCaps(RocdecDecodeCaps *pdc) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
     }
+#ifdef ROCDECODE_BUILD_LINUX
     VaContext& va_ctx = VaContext::GetInstance();
     rocDecStatus ret = ROCDEC_SUCCESS;
     if ((ret = va_ctx.CheckDecCapForCodecType(pdc)) != ROCDEC_SUCCESS) {
@@ -91,6 +94,12 @@ rocDecGetDecoderCaps(RocdecDecodeCaps *pdc) {
         FunctionExitLog(g_rocdec_logger);
         return ret;
     }
+#else
+    // Windows: decoder capabilities check not yet implemented
+    CriticalLog(g_rocdec_logger, "Error: rocDecGetDecoderCaps not yet implemented on Windows.");
+    FunctionExitLog(g_rocdec_logger);
+    return ROCDEC_NOT_IMPLEMENTED;
+#endif
     FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }

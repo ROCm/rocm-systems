@@ -22,13 +22,29 @@
 # ##############################################################################
 
 cmake_minimum_required(VERSION 3.10)
+
+# Platform detection
+if(WIN32)
+  set(IS_WINDOWS TRUE)
+  set(IS_LINUX FALSE)
+else()
+  set(IS_WINDOWS FALSE)
+  set(IS_LINUX TRUE)
+endif()
+
 # ROCM Path
 if(DEFINED ENV{ROCM_PATH})
   set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Default ROCm installation path")
 elseif(ROCM_PATH)
   message("-- INFO:ROCM_PATH Set -- ${ROCM_PATH}")
 else()
-  set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
+  # Default ROCM_PATH if not set
+  if(IS_WINDOWS)
+    set(ROCM_PATH c:/opt/rocm CACHE PATH "Default ROCm installation path")
+  else()
+    set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
+  endif()
+  message("-- INFO: Using default ROCM_PATH -- ${ROCM_PATH}")
 endif()
 
 # Check if lib/rocm_sysdeps/lib exists in the ROCm path which indicates ROCm installation via TheRock
@@ -37,13 +53,16 @@ if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
   set(USING_THE_ROCK ON)
 endif()
 
-# Set AMD Clang as default compiler
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED On)
-set(CMAKE_CXX_EXTENSIONS ON)
+# Set AMD Clang as default compiler (MUST be before project() command)
+# IMPORTANT: Compiler must be set before project() call for CMake to use it
 if (NOT DEFINED CMAKE_CXX_COMPILER)
-  set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
-  set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+  if(IS_WINDOWS)
+    set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang.exe)
+    set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++.exe)
+  else()
+    set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
+    set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+  endif()
 endif()
 
 # rocdecode Version
@@ -51,6 +70,11 @@ set(VERSION "1.8.0")
 
 # Set Project Version and Language
 project(rocdecode VERSION ${VERSION} LANGUAGES CXX)
+
+# C++ Standard (must be set after project())
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED On)
+set(CMAKE_CXX_EXTENSIONS ON)
 
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 set(CMAKE_INSTALL_INCLUDEDIR "include" CACHE STRING "Include install directory")
@@ -92,38 +116,62 @@ if(NOT CMAKE_BUILD_TYPE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
 if(CMAKE_BUILD_TYPE MATCHES Debug)
-  # -O0 -- Don't Optimize output file 
-  # -g  -- generate debugging information, generate debugging information, dwarf-4 for making valgrind work
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
+  # -O0 -- Don't Optimize output file
+  # -g  -- generate debugging information
+  if(IS_LINUX)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
+  else()
+    # Windows with AMD Clang
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g")
+  endif()
 else()
-  # -O3       -- Optimize output file 
-  # -DNDEBUG  -- turn off asserts 
-  # -fPIC     -- Generate position-independent code if possible
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+  # -O3       -- Optimize output file
+  # -DNDEBUG  -- turn off asserts
+  if(IS_LINUX)
+    # -fPIC   -- Generate position-independent code (Linux only, not supported on Windows)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+  else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG")
+  endif()
 endif()
 message("-- ${BoldBlue}${PROJECT_NAME} Build Type -- ${CMAKE_BUILD_TYPE}${ColourReset}")
 
 # Developer options
 # Add an option for enabling the rocprofiler-register
 option(ROCDECODE_ENABLE_ROCPROFILER_REGISTER "Enable rocprofiler-register support" ON)
-# Add an option for enabling FFMPEG avcodec host-based decoder
-option(ROCDECODE_ENABLE_HOST_DECODER "Enable rocdecode-host-based decoder support" ON)
+# Add an option for enabling FFMPEG avcodec host-based decoder (disabled on Windows)
+if(IS_WINDOWS)
+  option(ROCDECODE_ENABLE_HOST_DECODER "Enable rocdecode-host-based decoder support" OFF)
+else()
+  option(ROCDECODE_ENABLE_HOST_DECODER "Enable rocdecode-host-based decoder support" ON)
+endif()
 
 set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
-find_package(Libva QUIET)
-find_package(Libdrm_amdgpu QUIET)
+
+# VA-API and libdrm are Linux-only dependencies
+if(IS_LINUX)
+  find_package(Libva QUIET)
+  find_package(Libdrm_amdgpu QUIET)
+endif()
+
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads QUIET)
 
-# Check Libva version compatibility: requires libva >= 1.22
-if(Libva_FOUND)
-  if("${Libva_VERSION}" VERSION_GREATER_EQUAL "1.22")
-    message("-- ${White}\tLibva Version Supported${ColourReset}")
-  else()
-    set(Libva_FOUND FALSE)
-    message("-- ${Yellow}\tLibva Version Not Supported (found ${Libva_VERSION}, need >= 1.22)${ColourReset}")
+# Check Libva version compatibility: requires libva >= 1.22 (Linux only)
+if(IS_LINUX)
+  if(Libva_FOUND)
+    if("${Libva_VERSION}" VERSION_GREATER_EQUAL "1.22")
+      message("-- ${White}\tLibva Version Supported${ColourReset}")
+    else()
+      set(Libva_FOUND FALSE)
+      message("-- ${Yellow}\tLibva Version Not Supported (found ${Libva_VERSION}, need >= 1.22)${ColourReset}")
+    endif()
   endif()
+else()
+  # On Windows, VA-API is not supported, set to not found
+  set(Libva_FOUND FALSE)
+  set(Libdrm_amdgpu_FOUND FALSE)
 endif()
 
 if(ROCDECODE_ENABLE_ROCPROFILER_REGISTER)
@@ -135,18 +183,37 @@ if(ROCDECODE_ENABLE_HOST_DECODER)
   find_package(FFmpeg QUIET)
 endif()
 
-if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
+# Check required dependencies based on platform
+if(IS_WINDOWS)
+  # Windows only requires HIP and Threads
+  set(DEPENDENCIES_MET FALSE)
+  if(HIP_FOUND AND Threads_FOUND)
+    set(DEPENDENCIES_MET TRUE)
+  endif()
+else()
+  # Linux requires HIP, VA-API, libdrm, and Threads
+  set(DEPENDENCIES_MET FALSE)
+  if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
+    set(DEPENDENCIES_MET TRUE)
+  endif()
+endif()
+
+if(DEPENDENCIES_MET)
 
   # HIP
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
-  # LibVA
-  include_directories(${LIBVA_INCLUDE_DIR})
-  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
-  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
 
-  # DRM_AMDGPU
-  include_directories(${LIBDRM_AMDGPU_INCLUDE_DIR})
-  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
+  # LibVA and DRM_AMDGPU (Linux only)
+  if(IS_LINUX)
+    # LibVA
+    include_directories(${LIBVA_INCLUDE_DIR})
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
+
+    # DRM_AMDGPU
+    include_directories(${LIBDRM_AMDGPU_INCLUDE_DIR})
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
+  endif()
 
   # rocprofiler
   if (rocprofiler-register_FOUND)
@@ -157,12 +224,33 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
 
   # local include files
-  include_directories(${CMAKE_CURRENT_SOURCE_DIR}/api ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode ${CMAKE_CURRENT_SOURCE_DIR}/src/parser ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode/vaapi)
+  if(IS_LINUX)
+    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/api ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode ${CMAKE_CURRENT_SOURCE_DIR}/src/parser ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode/vaapi)
+  else()
+    # Windows: exclude vaapi directory
+    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/api ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode ${CMAKE_CURRENT_SOURCE_DIR}/src/parser)
+  endif()
+
   # source files
   file(GLOB_RECURSE SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+  # Exclude rocdecode-host
   list(FILTER SOURCES EXCLUDE REGEX "${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode-host/*.*")
-  # rocdecode.so
+  # Exclude VA-API files on Windows
+  if(IS_WINDOWS)
+    list(FILTER SOURCES EXCLUDE REGEX "${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode/vaapi/.*")
+    message("-- ${Yellow}${PROJECT_NAME} -- VA-API files excluded for Windows build${ColourReset}")
+  endif()
+
+  # rocdecode.so (Linux) or rocdecode.dll (Windows)
   add_library(${PROJECT_NAME} SHARED ${SOURCES})
+
+  # Windows-specific: export all symbols for DLL and define platform macro
+  if(IS_WINDOWS)
+    set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_BUILD_WINDOWS=1)
+  else()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_BUILD_LINUX=1)
+  endif()
 
   # --all-warnings/-Wall       -- Enable most warning messages
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
@@ -172,8 +260,11 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
   set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
 
-  if(USING_THE_ROCK)
-    set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
+  # RPATH settings (Linux only)
+  if(IS_LINUX)
+    if(USING_THE_ROCK)
+      set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
+    endif()
   endif()
 
   # rocprofiler
@@ -188,11 +279,13 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
       ROCDECODE_ROCP_REG_VERSION_PATCH=${VERSION_PATCH})
   endif()
 
-  # make rocdecode-host for decoding on HOST only if FFMPEG is available
-  if(ROCDECODE_ENABLE_HOST_DECODER AND FFMPEG_FOUND)
+  # make rocdecode-host for decoding on HOST only if FFMPEG is available (Linux only)
+  if(IS_LINUX AND ROCDECODE_ENABLE_HOST_DECODER AND FFMPEG_FOUND)
     add_subdirectory(src/rocdecode-host)
   else()
-    if(NOT FFMPEG_FOUND)
+    if(IS_WINDOWS)
+      message("-- ${Yellow}${PROJECT_NAME} -- rocdecode-host not supported on Windows${ColourReset}")
+    elseif(NOT FFMPEG_FOUND)
       message("-- ${Yellow}${PROJECT_NAME} -- FFMPEG NOT Found; rocdecode-host exculded${ColourReset}")
     endif()
   endif()
@@ -200,9 +293,20 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   # Generate BUILD_INFO
   configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/api/rocdecode_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/rocdecode_version.h @ONLY )
 
-  # install rocdecode libs -- {ROCM_PATH}/lib
-  install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
-  install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_ONLY)
+  # install rocdecode libs -- {ROCM_PATH}/lib or {ROCM_PATH}/bin (Windows DLLs)
+  if(IS_WINDOWS)
+    # On Windows, DLLs go to bin, import libraries go to lib
+    install(TARGETS ${PROJECT_NAME}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+    install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  else()
+    # On Linux, shared libraries go to lib
+    install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
+    install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_ONLY)
+  endif()
   # install rocdecode include files -- {ROCM_PATH}/include/rocdecode
   install(FILES api/rocdecode/rocdecode.h api/rocdecode/rocparser.h api/rocdecode/roc_bitstream_reader.h
           DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME})
@@ -223,7 +327,7 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   install(FILES samples/videoDecodeBatch/CMakeLists.txt samples/videoDecodeBatch/README.md samples/videoDecodeBatch/videodecodebatch.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeBatch)
   install(FILES samples/rocdecDecode/CMakeLists.txt samples/rocdecDecode/README.md samples/rocdecDecode/rocdecdecode.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/rocdecDecode)
   install(FILES samples/videoDecodePicFiles/CMakeLists.txt samples/videoDecodePicFiles/README.md samples/videoDecodePicFiles/videodecodepicfiles.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodePicFiles)
-  install(FILES samples/common.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples)
+  install(FILES samples/common.h samples/SampleCommon.cmake DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples)
   install(FILES utils/md5.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils)
   install(FILES utils/video_demuxer.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils)
   install(FILES utils/colorspace_kernels.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils)
@@ -287,22 +391,28 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
   )
 
-  # make test with CTest
-  set(BUILD_FROM_SOURCE ON)
-  enable_testing()
-  include(CTest)
-  add_subdirectory(test)
+  # make test with CTest (Linux only for now, as tests use FFmpeg)
+  if(IS_LINUX)
+    set(BUILD_FROM_SOURCE ON)
+    enable_testing()
+    include(CTest)
+    add_subdirectory(test)
+  else()
+    message("-- ${Yellow}${PROJECT_NAME} -- Tests skipped on Windows (require FFmpeg integration)${ColourReset}")
+  endif()
 
 else()
   message("-- ${Red}AMD ROCm ${PROJECT_NAME} -- unmet dependencies${ColourReset}")
   if(NOT HIP_FOUND)
-    message(FATAL_ERROR "-- ERROR!: HIP Not Found!")
+    message(FATAL_ERROR "-- ERROR!: HIP Not Found! On Windows, ensure HIP_PATH or ROCM_PATH is set.")
   endif()
-  if(NOT Libva_FOUND)
-    message(FATAL_ERROR "-- ERROR!: libva Not Found!")
-  endif()
-  if(NOT Libdrm_amdgpu_FOUND)
-    message(FATAL_ERROR "-- ERROR!: libdrm_amdgpu Not Found!")
+  if(IS_LINUX)
+    if(NOT Libva_FOUND)
+      message(FATAL_ERROR "-- ERROR!: libva Not Found!")
+    endif()
+    if(NOT Libdrm_amdgpu_FOUND)
+      message(FATAL_ERROR "-- ERROR!: libdrm_amdgpu Not Found!")
+    endif()
   endif()
   if(NOT Threads_FOUND)
     message(FATAL_ERROR "-- ERROR!: Threads Not Found!")

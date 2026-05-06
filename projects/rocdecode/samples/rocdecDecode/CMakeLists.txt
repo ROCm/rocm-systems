@@ -21,60 +21,25 @@
 #
 ################################################################################
 
-cmake_minimum_required (VERSION 3.10)
-# ROCM Path
-if(DEFINED ENV{ROCM_PATH})
-  set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Default ROCm installation path")
-elseif(ROCM_PATH)
-  message("-- INFO:ROCM_PATH Set -- ${ROCM_PATH}")
-else()
-  set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
-endif()
+cmake_minimum_required(VERSION 3.10)
 
-# Check if lib/rocm_sysdeps/lib exists in the ROCm path which indicates ROCm installation via TheRock
-set(USING_THE_ROCK OFF)
-if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
-  set(USING_THE_ROCK ON)
-endif()
-
-# Set AMD Clang as default compiler
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED On)
-set(CMAKE_CXX_EXTENSIONS ON)
-if (NOT DEFINED CMAKE_CXX_COMPILER)
-  set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
-  set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
-endif()
+# Include common sample configuration (must be before project())
+include(${CMAKE_CURRENT_SOURCE_DIR}/../SampleCommon.cmake)
 
 project(rocdecdecode)
-list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/../../cmake)
-list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake)
-
-# rocdecode sample build type
-set(DEFAULT_BUILD_TYPE "Release")
-if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE "${DEFAULT_BUILD_TYPE}" CACHE STRING "rocdecode Default Build Type" FORCE)
-  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
-endif()
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-  # -O0 -- Don't Optimize output file 
-  # -gdwarf-4  -- generate debugging information, dwarf-4 for making valgrind work
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4 -Wall")
-else()
-  # -O3       -- Optimize output file 
-  # -DNDEBUG  -- turn off asserts 
-  # -fPIC     -- Generate position-independent code if possible
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC -Wall")
-endif()
 
 set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads QUIET)
 find_package(FFmpeg QUIET)
 find_package(rocdecode QUIET)
 
 if(HIP_FOUND AND rocdecode_FOUND)
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
+
+    # FFmpeg and rocdecode-host are optional
     # rocdecode-host depends on FFmpeg runtime libraries, so
     # find_package for rocdecode-host is enabled when FFmpeg is available
     if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
@@ -90,36 +55,36 @@ if(HIP_FOUND AND rocdecode_FOUND)
       set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocdecode::rocdecode-host)
     endif()
 
-    # STD Filesystem
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} stdc++fs)
+    # STD Filesystem (Linux only - Windows has it built-in with C++17)
+    if(IS_LINUX)
+      set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} stdc++fs)
+    endif()
 
-    # rocdecode and utils
+    # rocdecode
     include_directories(${rocdecode_INCLUDE_DIR} ${ROCM_PATH}/lib)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocdecode::rocdecode)
 
-    # rocdecode
     # sample app exe
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} rocdecdecode.cpp)
     add_executable(${PROJECT_NAME} ${SOURCES})
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
+
     if(FFMPEG_FOUND AND rocdecode-host_FOUND AND NOT USING_THE_ROCK)
       target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_HOST_DECODE=1)
+      message("-- rocdecode-host support enabled")
     else()
       target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_HOST_DECODE=0)
+      message("-- rocdecode-host support disabled (FFmpeg or rocdecode-host not found)")
     endif()
+
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
+
+    message("-- ${PROJECT_NAME} configured successfully")
 else()
-    message("-- ERROR!: ${PROJECT_NAME} excluded! unmet dependencies")
+    message("-- ${PROJECT_NAME} excluded due to unmet dependencies:")
     if (NOT HIP_FOUND)
-        message(FATAL_ERROR "-- ERROR!: HIP Not Found!")
-    endif()
-    if (NOT FFMPEG_FOUND)
-        message(FATAL_ERROR "-- ERROR!: FFMPEG Not Found!")
+        message("   - HIP not found")
     endif()
     if (NOT rocdecode_FOUND)
-        message(FATAL_ERROR "-- ERROR!: rocdecode Not Found!")
-    endif()
-    if (NOT rocdecode-host_FOUND)
-        message(FATAL_ERROR "-- ERROR!: rocdecode-host Not Found!")
+        message("   - rocdecode not found (run 'ninja install' in main build directory)")
     endif()
 endif()

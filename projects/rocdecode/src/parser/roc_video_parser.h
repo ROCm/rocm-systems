@@ -100,7 +100,8 @@ enum {
     kBottomFieldUsedForDecode = 1 << 1,
     kFrameUsedForDecode = kTopFieldUsedForDecode | kBottomFieldUsedForDecode,
     kFrameUsedForDisplay = 1 << 2
-} FrameBufUseStatus;
+};
+typedef int FrameBufUseStatus;
 
 /**
  * @brief Base class for video parsing

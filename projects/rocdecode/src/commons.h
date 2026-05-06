@@ -30,18 +30,48 @@ THE SOFTWARE.
 #include <cstdlib>
 #include <ctime>
 #include <time.h>
+#ifndef _WIN32
 #include <unistd.h>
+#else
+#include <process.h>
+#define getpid _getpid
+#endif
 #include <stdint.h>
 #include <thread>
 #include <sstream>
 #include <iomanip>
+#ifndef _WIN32
 #include <sys/syscall.h>
+#endif
+#ifdef _WIN32
+#include <numeric>  // For std::gcd (C++17 standard)
+#endif
 
 #define MSG(X) std::clog << X << std::endl;
 #define MSG_NO_NEWLINE(X) std::clog << X;
 
 #define ROCDEC_TOSTR(X) std::to_string(X)
 #define ROCDEC_STR(X) std::string(X)
+
+// GCD function: Windows uses C++17 std::gcd, Linux uses GCC extension std::__gcd
+// Note: Even AMD Clang on Windows uses Microsoft STL which doesn't have std::__gcd
+#ifdef _WIN32
+#define ROCDEC_GCD(a, b) std::gcd(a, b)
+#else
+#define ROCDEC_GCD(a, b) std::__gcd(a, b)
+#endif
+
+// HIP error checking macro - needed by platform-agnostic code
+#ifndef CHECK_HIP
+#include <hip/hip_runtime.h>
+#define CHECK_HIP(call) {\
+    hipError_t hip_status = call;\
+    if (hip_status != hipSuccess) {\
+        CriticalLog(g_rocdec_logger, ROCDEC_STR("HIP failure: ") + #call + " failed with 'status: " + ROCDEC_STR(hipGetErrorName(hip_status)) + "' at " + __FILE__ + ":" + ROCDEC_TOSTR(__LINE__));\
+        return ROCDEC_RUNTIME_ERROR;\
+    }\
+}
+#endif
 
 // Logging control
 enum RocDecLogLevel {
@@ -53,10 +83,19 @@ enum RocDecLogLevel {
     kRocDecLogLevelMax       = 4
 };
 
+#ifdef _WIN32
+#include <chrono>
+#define GET_TIME_NS() ([]() -> uint64_t { return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }())
+#else
 #define GET_TIME_NS() ([]() -> uint64_t { struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); return static_cast<uint64_t>(ts_.tv_sec) * 1000000000LL + ts_.tv_nsec; }())
+#endif
 #define FILENAME_ONLY (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define GET_HASHED_THREAD_ID() ([]() -> std::string { std::ostringstream oss; oss << "0x" << std::hex << std::setw(5) << std::setfill('0') << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); return oss.str(); }())
+#ifdef _WIN32
+#define GET_THREAD_ID() ([]() -> uint32_t { return static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFFFFF); }())
+#else
 #define GET_THREAD_ID() (static_cast<pid_t>(syscall(SYS_gettid)))
+#endif
 #define MakeMsg(msg) ROCDEC_STR(FILENAME_ONLY) + ":" + ROCDEC_TOSTR(__LINE__) + ": " + ROCDEC_TOSTR(GET_TIME_NS() / 1000ULL) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(getpid()) + ROCDEC_STR(" tid:") + ROCDEC_TOSTR(GET_THREAD_ID()) + ROCDEC_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCDEC_STR("] ") + ROCDEC_STR(__func__) + "(): " + msg
 
 #define OutputMsg(msg) std::cout << msg << std::endl

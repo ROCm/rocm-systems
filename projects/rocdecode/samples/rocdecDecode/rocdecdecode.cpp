@@ -23,7 +23,9 @@ THE SOFTWARE.
 #include <chrono>
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <vector>
+#include <string>
 #include <algorithm>
 #if __cplusplus >= 201703L && __has_include(<filesystem>)
     #include <filesystem>
@@ -749,14 +751,14 @@ int main(int argc, char** argv) {
                     if (fs::is_directory(entry.path())) {
                         std::vector<std::string> file_names_sub_folder;
                         for (const auto& sub_entry : fs::directory_iterator(entry.path())) {
-                            file_names_sub_folder.push_back(sub_entry.path());
+                            file_names_sub_folder.push_back(sub_entry.path().string());
                         }
                         std::sort(file_names_sub_folder.begin(), file_names_sub_folder.end(), compareFilenames);
                         input_file_names.insert(input_file_names.end(), file_names_sub_folder.begin(), file_names_sub_folder.end());
                         file_names_sub_folder.clear();
                     } else if(fs::is_regular_file(entry.path())) {
                         b_sort_filenames = true;
-                        input_file_names.push_back(entry.path());
+                        input_file_names.push_back(entry.path().string());
                     }
                     else {
                         std::cout << "unknown file type in input folder: " << entry.path().string() << '\n';

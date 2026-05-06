@@ -39,7 +39,8 @@ enum {
     kStreamTypeAv1Ivf,
     kStreamTypeVp9Ivf,
     kStreamTypeNumSupported
-} StreamFileType;
+};
+typedef int StreamFileType;
 
 #define STREAM_PROBE_SIZE 2 * 1024
 #define STREAM_TYPE_SCORE_THRESHOLD 50

@@ -22,21 +22,41 @@
 ################################################################################
 
 cmake_minimum_required(VERSION 3.10)
+
+# Platform detection
+if(WIN32)
+  set(IS_WINDOWS TRUE)
+  set(IS_LINUX FALSE)
+else()
+  set(IS_WINDOWS FALSE)
+  set(IS_LINUX TRUE)
+endif()
+
 # ROCM Path
 if(DEFINED ENV{ROCM_PATH})
   set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Default ROCm installation path")
 elseif(ROCM_PATH)
   message("-- INFO:ROCM_PATH Set -- ${ROCM_PATH}")
 else()
-  set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
+  if(IS_WINDOWS)
+    set(ROCM_PATH c:/opt/rocm CACHE PATH "Default ROCm installation path")
+  else()
+    set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
+  endif()
 endif()
+
 # Set AMD Clang as default compiler
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 set(CMAKE_CXX_EXTENSIONS ON)
 if (NOT DEFINED CMAKE_CXX_COMPILER)
-  set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
-  set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+  if(IS_WINDOWS)
+    set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang.exe)
+    set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++.exe)
+  else()
+    set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
+    set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+  endif()
 endif()
 
 project(rocdecodenegativetest)
@@ -51,29 +71,51 @@ if(NOT CMAKE_BUILD_TYPE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
 if(CMAKE_BUILD_TYPE MATCHES Debug)
-  # -O0 -- Don't Optimize output file 
+  # -O0 -- Don't Optimize output file
   # -gdwarf-4  -- generate debugging information, dwarf-4 for making valgrind work
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
 else()
-  # -O3       -- Optimize output file 
-  # -DNDEBUG  -- turn off asserts 
-  # -fPIC     -- Generate position-independent code if possible
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+  # -O3       -- Optimize output file
+  # -DNDEBUG  -- turn off asserts
+  # -fPIC     -- Generate position-independent code if possible (Linux only)
+  if(IS_LINUX)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+  else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG")
+  endif()
 endif()
 
 set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads QUIET)
 find_package(rocdecode QUIET)
-find_package(rocprofiler-register QUIET)
+if(IS_LINUX)
+  find_package(rocprofiler-register QUIET)
+endif()
 
-if(HIP_FOUND AND rocdecode_FOUND AND rocprofiler-register_FOUND)
+# Dependencies check - rocprofiler-register is optional on Windows
+set(DEPENDENCIES_MET FALSE)
+if(IS_WINDOWS)
+  if(HIP_FOUND AND rocdecode_FOUND)
+    set(DEPENDENCIES_MET TRUE)
+  endif()
+else()
+  if(HIP_FOUND AND rocdecode_FOUND AND rocprofiler-register_FOUND)
+    set(DEPENDENCIES_MET TRUE)
+  endif()
+endif()
+
+if(DEPENDENCIES_MET)
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
     # rocdecode and utils
     include_directories (${rocdecode_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocdecode::rocdecode)
-    # rocprofiler-register
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
+    # rocprofiler-register (Linux only)
+    if(IS_LINUX AND rocprofiler-register_FOUND)
+      set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
+    endif()
     # sample app exe
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} rocdecodenegativetest.cpp rocdecode_api_negative_tests.cpp)
     # --all-warnings/-Wall Enable most warning messages

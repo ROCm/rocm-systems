@@ -25,12 +25,19 @@ THE SOFTWARE.
 #include <cstring>
 #include <string>
 #include <iomanip>
+#ifndef _WIN32
 #include <unistd.h>
+#include <sys/stat.h>
+#include <libgen.h>
+#else
+#include <io.h>
+#include <direct.h>
+#define access _access
+#define F_OK 0
+#endif
 #include <vector>
 #include <string>
 #include <chrono>
-#include <sys/stat.h>
-#include <libgen.h>
 #if __cplusplus >= 201703L && __has_include(<filesystem>)
     #include <filesystem>
 #else
