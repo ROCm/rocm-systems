@@ -2,15 +2,11 @@
 # SPDX-License-Identifier:  MIT
 
 import builtins
-import inspect
 import io
 import locale
 import logging
 import math
 import os
-import re
-import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -38,16 +34,6 @@ from utils.utils_analysis import (
     rollup_node_stats,
 )
 
-SUPPORTED_ARCHS = {
-    "gfx908": {"mi100": ["MI100"]},
-    "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
-    "gfx940": {"mi300": ["MI300A_A0"]},
-    "gfx941": {"mi300": ["MI300X_A0"]},
-    "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
-    "gfx950": {"mi350": ["MI350"]},
-    "gfx1151": {"rdna35_halo": ["RDNA35_HALO"]},
-}
-
 
 class MockArgs:
     def __init__(self, **kwargs):
@@ -66,235 +52,6 @@ logging.trace = lambda *args, **kwargs: None
 ##################################################
 ##          Generated tests                     ##
 ##################################################
-
-# =============================================================================
-# HELPER FUNCTIONS FOR TESTING
-# =============================================================================
-
-
-def check_resource_allocation():
-    """Check if CTEST resource allocation is enabled for parallel testing and set
-    HIP_VISIBLE_DEVICES variable accordingly with assigned gpu index.
-    """
-
-    if "CTEST_RESOURCE_GROUP_COUNT" not in os.environ:
-        return
-
-    if "CTEST_RESOURCE_GROUP_0_GPUS" in os.environ:
-        resource = os.environ["CTEST_RESOURCE_GROUP_0_GPUS"]
-        # extract assigned gpu id from env var: example format -> 'id:0,slots:1'
-        for item in resource.split(","):
-            key, value = item.split(":")
-            if key == "id":
-                os.environ["HIP_VISIBLE_DEVICES"] = value
-                return
-
-    return
-
-
-def check_file_pattern(pattern, file_path):
-    """Check if the given pattern exists in the file"""
-    content = ""
-    with open(file_path) as f:
-        content = f.read()
-    return len(re.findall(pattern, content)) != 0
-
-
-def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
-    """
-    Provides a unique output directory based on the name of the calling test function
-    with a suffix applied. For parametrized tests, pass param_id to ensure unique
-    directory names and avoid NFS conflicts.
-
-    Args:
-        suffix (str, optional): suffix to append to output_dir.
-            Defaults to "_output".
-        clean_existing (bool, optional): Whether to remove existing directory if exists.
-            Defaults to True.
-        param_id (str, optional): Unique identifier for parametrized tests.
-            When provided, appended to the directory name to ensure uniqueness.
-            Defaults to None.
-    """
-
-    func_name = inspect.stack()[1].function
-
-    param_suffix = ""
-    if param_id:
-        param_suffix = "_" + re.sub(r"[^\w\-]", "_", str(param_id))
-
-    output_dir = func_name + param_suffix + suffix
-    if clean_existing:
-        if Path(output_dir).exists():
-            shutil.rmtree(output_dir)
-    return output_dir
-
-
-def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=None):
-    """Provides a unique input workload directory with contents of input_dir
-    based on the name of the calling test function. For parametrized tests,
-    pass param_id to ensure unique directory names and avoid NFS conflicts.
-
-    Creates a copy to avoid modifying source workload data.
-
-    Args:
-        input_dir (str): Source directory to copy from.
-        suffix (str, optional): suffix to append to output_dir.
-            Defaults to "_tmp".
-        clean_existing (bool, optional): Whether to remove existing directory if exists.
-            Defaults to True.
-        param_id (str, optional): Unique identifier for parametrized tests.
-            When provided, appended to the directory name to ensure uniqueness.
-            Defaults to None.
-    """
-
-    func_name = inspect.stack()[1].function
-
-    # Include param_id in directory name if provided
-    param_suffix = ""
-    if param_id:
-        # Sanitize param_id: replace special chars that may not be valid in paths
-        param_suffix = "_" + re.sub(r"[^\w\-]", "_", str(param_id))
-
-    output_dir = func_name + param_suffix + suffix
-    if clean_existing:
-        if Path(output_dir).exists():
-            shutil.rmtree(output_dir)
-
-    shutil.copytree(input_dir, output_dir)
-    return output_dir
-
-
-def clean_output_dir(cleanup, output_dir):
-    """Remove output directory generated from rocprofiler-compute execution
-
-    Args:
-        cleanup (boolean): flag to enable/disable directory cleanup
-        output_dir (string): name of directory to remove
-    """
-    if cleanup:
-        if Path(output_dir).exists():
-            try:
-                shutil.rmtree(output_dir)
-            except OSError:
-                print(
-                    "WARNING: shutil.rmdir(output_dir): directory may not be empty..."
-                )
-    return
-
-
-def check_csv_files(output_dir, num_devices, num_kernels):
-    """Check profiling output csv files for expected
-    number of entries (based on kernel invocations)
-
-    Args:
-        output_dir (string): output directory containing csv files
-        num_kernels (int): number of kernels expected to have been profiled
-
-    Returns:
-        dict: dictionary housing file contents as pandas dataframe
-              (excludes PMC files - those are validated internally)
-    """
-    files_in_workload = os.listdir(output_dir)
-
-    # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv)
-    has_separate = any(
-        f.startswith("pmc_perf_") and f.endswith(".csv") for f in files_in_workload
-    )
-    has_results = any(
-        f.startswith("results_") and f.endswith(".csv") for f in files_in_workload
-    )
-
-    assert has_separate or has_results, (
-        "Expected pmc_perf_*.csv or results_*.csv from profile mode"
-    )
-
-    # Validate row counts for PMC files (but don't add to return dict)
-    for file in files_in_workload:
-        is_pmc = file.startswith("pmc_perf_") or file.startswith("results_")
-        if is_pmc and file.endswith(".csv"):
-            df = pd.read_csv(output_dir + "/" + file)
-            err_msg = (
-                f"PMC file {file} has insufficient rows: "
-                f"{len(df.index)} < {num_kernels}"
-            )
-            assert len(df.index) >= num_kernels, err_msg
-
-    # Check and return non-PMC files
-    return check_non_pmc_files(output_dir, num_devices, num_kernels)
-
-
-def check_non_pmc_files(output_dir, num_devices, num_kernels):
-    """
-    Check profiling output non-PMC files and return them as a dictionary.
-
-    Args:
-        output_dir (string): output directory containing non-PMC files
-        num_devices (int): number of devices expected to have been profiled
-        num_kernels (int): number of kernels expected to have been profiled
-
-    Returns:
-        dict: dictionary housing file contents as pandas dataframe
-    """
-    file_dict = {}
-    files_in_workload = os.listdir(output_dir)
-
-    # Load non-PMC files into return dict
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            # Skip PMC files (already validated above)
-            if file.startswith("pmc_perf_") or file.startswith("results_"):
-                continue
-
-            # Load other CSV files
-            file_dict[file] = pd.read_csv(output_dir + "/" + file)
-            if "roofline" in file:
-                assert len(file_dict[file].index) >= num_devices
-            elif "sysinfo" not in file and "ps_file" not in file:
-                assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".html"):
-            file_dict[file] = "html"
-        elif file.endswith(".json"):
-            file_dict[file] = "json"
-
-    return file_dict
-
-
-def get_num_pmc_file(output_dir):
-    """
-    Returns:
-        int: number of pmc perf yaml files in perfmon dir
-    """
-
-    perfmon_path = Path(output_dir) / "perfmon"
-    return len([
-        f
-        for f in perfmon_path.iterdir()
-        if f.is_file() and f.name.startswith("pmc_perf_") and f.suffix == ".yaml"
-    ])
-
-
-def gpu_soc():
-    """Return (arch, model) from rocminfo, e.g. ('gfx942', 'MI300').
-
-    Both are '' when no supported GPU is detected.
-    """
-    # decode with utf-8 to account for rocm-smi changes in latest rocm
-    rocminfo = (
-        subprocess
-        .run(["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        .stdout.decode("utf-8")
-        .split("\n")
-    )
-    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
-    devices = list(filter(soc_regex.match, rocminfo))
-    if not devices:
-        return "", ""
-    arch = devices[0].split()[1]
-    if arch not in SUPPORTED_ARCHS:
-        return "", ""
-    model = list(SUPPORTED_ARCHS[arch].keys())[0].upper()
-    return arch, model
-
 
 # =============================================================================
 # VERSION UTILITIES TESTS
@@ -968,7 +725,7 @@ def test_check_resource_allocation_no_ctest(monkeypatch):
     monkeypatch.delenv("CTEST_RESOURCE_GROUP_COUNT", raising=False)
     monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
 
-    from tests.test_utils import check_resource_allocation
+    from tests.common import check_resource_allocation
 
     result = check_resource_allocation()
 
@@ -987,7 +744,7 @@ def test_check_resource_allocation_with_gpu_resource(monkeypatch):
     monkeypatch.setenv("CTEST_RESOURCE_GROUP_COUNT", "1")
     monkeypatch.setenv("CTEST_RESOURCE_GROUP_0_GPUS", "id:2,slots:1")
     monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
-    from tests.test_utils import check_resource_allocation
+    from tests.common import check_resource_allocation
 
     result = check_resource_allocation()
 
@@ -1007,7 +764,7 @@ def test_check_resource_allocation_no_gpu_resource(monkeypatch):
     monkeypatch.delenv("CTEST_RESOURCE_GROUP_0_GPUS", raising=False)
     monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
 
-    from tests.test_utils import check_resource_allocation
+    from tests.common import check_resource_allocation
 
     result = check_resource_allocation()
 
@@ -1027,7 +784,7 @@ def test_check_resource_allocation_malformed_resource(monkeypatch):
     monkeypatch.setenv("CTEST_RESOURCE_GROUP_0_GPUS", "malformed_resource_string")
     monkeypatch.delenv("HIP_VISIBLE_DEVICES", raising=False)
 
-    from tests.test_utils import check_resource_allocation
+    from tests.common import check_resource_allocation
 
     try:
         result = check_resource_allocation()
@@ -1046,6 +803,7 @@ def test_check_file_pattern_match_found():
     Test check_file_pattern when the pattern is found in the file.
     Should return True.
     """
+    from tests.common import check_file_pattern
 
     with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
         f.write("This is a test file\nwith multiple lines\nand some pattern text\n")
@@ -1067,6 +825,8 @@ def test_check_file_pattern_file_not_found():
     Test check_file_pattern when the file doesn't exist.
     Should raise FileNotFoundError.
     """
+    from tests.common import check_file_pattern
+
     with pytest.raises(FileNotFoundError):
         check_file_pattern("pattern", "/nonexistent/file/path.txt")
 
@@ -7395,9 +7155,6 @@ class TestBuildMetricList:
 
     @classmethod
     def setup_class(cls):
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
         from utils.utils_common import build_metric_list
 
         cls.build_metric_list = staticmethod(build_metric_list)

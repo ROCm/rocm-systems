@@ -6,9 +6,9 @@ import shutil
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import common
 import pandas as pd
 import pytest
-import test_utils
 
 config = {}
 config["cleanup"] = True
@@ -30,7 +30,7 @@ time_units = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 # Roofline analyze tests
 # =============================================================================
 
-_, roofline_soc = test_utils.gpu_soc()
+_, roofline_soc = common.gpu_soc()
 
 
 def test_analyze_generates_roofline_html(
@@ -45,7 +45,7 @@ def test_analyze_generates_roofline_html(
     if roofline_soc in ("MI100"):
         pytest.skip("Roofline not supported on MI100")
 
-    workload_dir = test_utils.setup_workload_dir(roofline_dir)
+    workload_dir = common.setup_workload_dir(roofline_dir)
 
     assert (Path(workload_dir) / "roofline.csv").exists()
 
@@ -61,7 +61,7 @@ def test_analyze_generates_roofline_html(
     html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
     assert len(html_files) > 0, "Analyze should generate roofline HTML files"
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_analyze_roofline_multiple_datatypes(
@@ -76,7 +76,7 @@ def test_analyze_roofline_multiple_datatypes(
     if roofline_soc in ("MI100"):
         pytest.skip("Roofline not supported on MI100")
 
-    workload_dir = test_utils.setup_workload_dir(roofline_dir)
+    workload_dir = common.setup_workload_dir(roofline_dir)
 
     assert (Path(workload_dir) / "roofline.csv").exists()
 
@@ -93,7 +93,7 @@ def test_analyze_roofline_multiple_datatypes(
     html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
     assert len(html_files) > 0, "Analyze should generate roofline HTML files"
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_analyze_missing_roofline_csv_graceful(
@@ -103,7 +103,7 @@ def test_analyze_missing_roofline_csv_graceful(
     Analyze without roofline.csv should not crash.
     Uses a workload directory that has sysinfo.csv but no roofline.csv.
     """
-    workload_dir = test_utils.setup_workload_dir(roofline_dir)
+    workload_dir = common.setup_workload_dir(roofline_dir)
     roofline_csv = Path(workload_dir) / "roofline.csv"
     if roofline_csv.exists():
         roofline_csv.unlink()
@@ -115,7 +115,7 @@ def test_analyze_missing_roofline_csv_graceful(
     ])
     assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_analyze_roofline_idempotent(
@@ -130,7 +130,7 @@ def test_analyze_roofline_idempotent(
     if roofline_soc in ("MI100"):
         pytest.skip("Roofline not supported on MI100")
 
-    workload_dir = test_utils.setup_workload_dir(roofline_dir)
+    workload_dir = common.setup_workload_dir(roofline_dir)
 
     assert (Path(workload_dir) / "roofline.csv").exists()
 
@@ -151,7 +151,7 @@ def test_analyze_roofline_idempotent(
     html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
     assert len(html_files) > 0, "Analyze should generate roofline HTML files"
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_analyze_corrupted_roofline_csv_graceful(
@@ -160,7 +160,6 @@ def test_analyze_corrupted_roofline_csv_graceful(
     """
     Analyze with a corrupted roofline.csv should handle gracefully.
     """
-    import shutil
     import tempfile
 
     if os.path.exists(roofline_dir):
@@ -182,7 +181,7 @@ def test_analyze_corrupted_roofline_csv_graceful(
 
 def test_roof_invalid_data_type(binary_handler_analyze_rocprof_compute):
     """Invalid --roofline-data-type should be caught by analyze argparser."""
-    workload_dir = test_utils.setup_workload_dir(roofline_dir)
+    workload_dir = common.setup_workload_dir(roofline_dir)
 
     assert (Path(workload_dir) / "roofline.csv").exists()
 
@@ -195,12 +194,12 @@ def test_roof_invalid_data_type(binary_handler_analyze_rocprof_compute):
     ])
     assert code != 0, "Invalid datatype should be rejected by argparser"
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_roofline_ceiling_data_validation(binary_handler_analyze_rocprof_compute):
     """Invalid --mem-level should be caught during analyze."""
-    workload_dir = test_utils.setup_workload_dir(roofline_dir)
+    workload_dir = common.setup_workload_dir(roofline_dir)
 
     assert (Path(workload_dir) / "roofline.csv").exists()
 
@@ -213,7 +212,7 @@ def test_roofline_ceiling_data_validation(binary_handler_analyze_rocprof_compute
     ])
     assert code >= 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 roofline_mem_level_dirs = {
@@ -233,7 +232,7 @@ def test_roof_mem_levels(binary_handler_analyze_rocprof_compute, mem_level):
     if not os.path.exists(workload_src):
         pytest.skip(f"Workload directory {workload_src} not found")
 
-    workload_dir = test_utils.setup_workload_dir(workload_src, param_id=mem_level)
+    workload_dir = common.setup_workload_dir(workload_src, param_id=mem_level)
 
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
@@ -247,14 +246,11 @@ def test_roof_mem_levels(binary_handler_analyze_rocprof_compute, mem_level):
     html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
     assert len(html_files) > 0, "Analyze should generate roofline HTML files"
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_roofline_missing_file_handling():
     """cli_generate_plot with empty ai_data returns None."""
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     from roofline.roofline_main import Roofline
     from utils.file_io import load_sys_info
@@ -268,7 +264,7 @@ def test_roofline_missing_file_handling():
             self.roofline_data_type = ["FP32"]
 
     args = MockArgs()
-    workload_dir = test_utils.setup_workload_dir(roofline_dir)
+    workload_dir = common.setup_workload_dir(roofline_dir)
     sys_info = load_sys_info(f"{workload_dir}/sysinfo.csv")
     sys_info_dict = {key: value[0] for key, value in sys_info.to_dict("list").items()}
     mspec = generate_machine_specs(args, sys_info_dict)
@@ -286,14 +282,11 @@ def test_roofline_missing_file_handling():
     result = roofline_instance.cli_generate_plot("FP32", ai_data={})
     assert result is None
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_roofline_invalid_datatype_cli():
     """cli_generate_plot with invalid datatype returns None."""
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     from roofline.roofline_main import Roofline
     from utils.file_io import load_sys_info
@@ -308,7 +301,7 @@ def test_roofline_invalid_datatype_cli():
 
     args = MockArgs()
 
-    workload_dir = test_utils.setup_workload_dir(roofline_dir)
+    workload_dir = common.setup_workload_dir(roofline_dir)
     sys_info = load_sys_info(f"{workload_dir}/sysinfo.csv")
     sys_info_dict = {key: value[0] for key, value in sys_info.to_dict("list").items()}
     mspec = generate_machine_specs(args, sys_info_dict)
@@ -326,13 +319,13 @@ def test_roofline_invalid_datatype_cli():
     result = roofline_instance.cli_generate_plot("INVALID_DATATYPE", ai_data={})
     assert result is None
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
 def test_valid_path(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -340,13 +333,13 @@ def test_valid_path(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
 def test_list_kernels(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -354,7 +347,7 @@ def test_list_kernels(binary_handler_analyze_rocprof_compute):
             "--list-stats",
         ])
         assert code == 0
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics
@@ -367,7 +360,7 @@ def test_list_metrics_gfx90a(binary_handler_analyze_rocprof_compute):
     assert code == 0
 
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -377,7 +370,7 @@ def test_list_metrics_gfx90a(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics
@@ -390,7 +383,7 @@ def test_list_metrics_gfx908(binary_handler_analyze_rocprof_compute):
     assert code == 0
 
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -400,7 +393,7 @@ def test_list_metrics_gfx908(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics
@@ -415,7 +408,7 @@ def test_list_metrics_gfx908_with_block(binary_handler_analyze_rocprof_compute):
     assert code == 1
 
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -427,7 +420,7 @@ def test_list_metrics_gfx908_with_block(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 1
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics
@@ -439,7 +432,7 @@ def test_list_available_metrics(binary_handler_analyze_rocprof_compute, capsys):
     assert code == 1
 
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         try:
             code = binary_handler_analyze_rocprof_compute([
                 "analyze",
@@ -454,7 +447,7 @@ def test_list_available_metrics(binary_handler_analyze_rocprof_compute, capsys):
             assert "0 -> Top Stats" in output
             assert "1 -> System Info" in output
         finally:
-            test_utils.clean_output_dir(config["cleanup"], workload_dir)
+            common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics
@@ -470,7 +463,7 @@ def test_list_available_metrics_with_block(
     assert code == 1
 
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -481,13 +474,13 @@ def test_list_available_metrics_with_block(
         ])
         assert code == 1
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
 def test_filter_block_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -497,13 +490,13 @@ def test_filter_block_1(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
 def test_filter_block_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -513,13 +506,13 @@ def test_filter_block_2(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
 def test_filter_block_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -529,13 +522,13 @@ def test_filter_block_3(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
 def test_filter_block_4(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -545,13 +538,13 @@ def test_filter_block_4(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
 def test_filter_block_5(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -561,13 +554,13 @@ def test_filter_block_5(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
 def test_filter_block_6(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -577,13 +570,13 @@ def test_filter_block_6(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
 def test_filter_kernel_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -593,13 +586,13 @@ def test_filter_kernel_1(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
 def test_filter_kernel_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -609,13 +602,13 @@ def test_filter_kernel_2(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 1
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
 def test_filter_kernel_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -626,13 +619,13 @@ def test_filter_kernel_3(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 1
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
 def test_dispatch_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -642,13 +635,13 @@ def test_dispatch_1(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
 def test_dispatch_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -658,13 +651,13 @@ def test_dispatch_2(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
 def test_dispatch_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -674,13 +667,13 @@ def test_dispatch_3(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
 def test_dispatch_4(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -691,13 +684,13 @@ def test_dispatch_4(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 1
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
 def test_dispatch_5(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -708,7 +701,7 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 1
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
@@ -718,7 +711,7 @@ def test_gpu_ids(binary_handler_analyze_rocprof_compute):
             gpu_id = "0"
         else:
             gpu_id = "2"
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -728,13 +721,13 @@ def test_gpu_ids(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.normal_unit
 def test_normal_unit_per_wave(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -744,13 +737,13 @@ def test_normal_unit_per_wave(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.normal_unit
 def test_normal_unit_per_cycle(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -760,13 +753,13 @@ def test_normal_unit_per_cycle(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.normal_unit
 def test_normal_unit_per_second(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -776,13 +769,13 @@ def test_normal_unit_per_second(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.normal_unit
 def test_normal_unit_per_kernel(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -792,13 +785,13 @@ def test_normal_unit_per_kernel(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.max_stat
 def test_max_stat_num_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -808,13 +801,13 @@ def test_max_stat_num_1(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.max_stat
 def test_max_stat_num_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -824,13 +817,13 @@ def test_max_stat_num_2(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.max_stat
 def test_max_stat_num_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -840,13 +833,13 @@ def test_max_stat_num_3(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.max_stat
 def test_max_stat_num_4(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -856,13 +849,13 @@ def test_max_stat_num_4(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.time_unit
 def test_time_unit_s(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -872,13 +865,13 @@ def test_time_unit_s(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.time_unit
 def test_time_unit_ms(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -888,13 +881,13 @@ def test_time_unit_ms(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.time_unit
 def test_time_unit_us(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -904,13 +897,13 @@ def test_time_unit_us(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.time_unit
 def test_time_unit_ns(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -920,13 +913,13 @@ def test_time_unit_ns(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.decimal
 def test_decimal_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -936,13 +929,13 @@ def test_decimal_1(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.decimal
 def test_decimal_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -952,13 +945,13 @@ def test_decimal_2(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.decimal
 def test_decimal_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -968,14 +961,14 @@ def test_decimal_3(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
 def test_save_dfs(binary_handler_analyze_rocprof_compute):
-    output_path = test_utils.get_output_dir()
+    output_path = common.get_output_dir()
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -992,15 +985,15 @@ def test_save_dfs(binary_handler_analyze_rocprof_compute):
             df = pd.read_csv(output_path + "/" + file_name)
             assert len(df.index) >= 1
 
-        shutil.rmtree(output_path)
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-    test_utils.clean_output_dir(config["cleanup"], output_path)
+        common.clean_output_dir(True, output_path)
+        common.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], output_path)
 
 
 @pytest.mark.col
 def test_col_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -1010,13 +1003,13 @@ def test_col_1(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.col
 def test_col_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -1028,13 +1021,13 @@ def test_col_2(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.col
 def test_col_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -1045,13 +1038,13 @@ def test_col_3(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
 def test_g(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -1060,13 +1053,13 @@ def test_g(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
 def test_kernel_verbose_0(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -1076,13 +1069,13 @@ def test_kernel_verbose_0(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
 def test_kernel_verbose_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -1092,13 +1085,13 @@ def test_kernel_verbose_1(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
 def test_kernel_verbose_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -1108,13 +1101,13 @@ def test_kernel_verbose_2(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
 def test_kernel_verbose_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -1124,13 +1117,13 @@ def test_kernel_verbose_3(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
 def test_kernel_verbose_4(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -1140,13 +1133,13 @@ def test_kernel_verbose_4(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
 def test_kernel_verbose_5(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -1156,13 +1149,13 @@ def test_kernel_verbose_5(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
 def test_kernel_verbose_6(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -1172,7 +1165,7 @@ def test_kernel_verbose_6(binary_handler_analyze_rocprof_compute):
         ])
         assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
@@ -1213,7 +1206,7 @@ def test_baseline(binary_handler_analyze_rocprof_compute):
 @pytest.mark.misc
 def test_dependency_MI100(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
+        workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
@@ -1221,7 +1214,7 @@ def test_dependency_MI100(binary_handler_analyze_rocprof_compute):
             "--dependency",
         ])
         assert code == 0
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
@@ -1239,7 +1232,7 @@ def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute):
     """Test basic filters that should work"""
     for dir in ["tests/workloads/vcopy/MI100", "tests/workloads/vcopy/MI200"]:
         if os.path.exists(dir):
-            workload_dir = test_utils.setup_workload_dir(dir)
+            workload_dir = common.setup_workload_dir(dir)
 
             code = binary_handler_analyze_rocprof_compute([
                 "analyze",
@@ -1257,16 +1250,13 @@ def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute):
             ])
             assert code == 0
 
-            test_utils.clean_output_dir(config["cleanup"], workload_dir)
+            common.clean_output_dir(config["cleanup"], workload_dir)
             break
 
 
 @pytest.mark.misc
 def test_apply_filters_direct():
     """Test apply_filters function directly to cover filter branches"""
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     import pandas as pd
 
@@ -1324,7 +1314,6 @@ def test_apply_filters_direct():
 @pytest.mark.misc
 def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
     """Test scenarios with missing files to cover error paths"""
-    import shutil
     import tempfile
 
     for dir in ["tests/workloads/vcopy/MI100", "tests/workloads/vcopy/MI200"]:
@@ -1350,9 +1339,6 @@ def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
 @pytest.mark.misc
 def test_pc_sampling_basic_coverage():
     """Test PC sampling functions with minimal data"""
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     import tempfile
 
@@ -1435,9 +1421,9 @@ def test_time_unit_conversion_to_seconds(sample_time_data, original_ns_values):
     expected_min = original_ns_values["Min"] / time_units["s"]
     expected_max = original_ns_values["Max"] / time_units["s"]
 
-    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-10
-    assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-10
-    assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-10
+    assert converted_df.loc[0, "Avg"] == pytest.approx(expected_avg, abs=1e-10)
+    assert converted_df.loc[0, "Min"] == pytest.approx(expected_min, abs=1e-10)
+    assert converted_df.loc[0, "Max"] == pytest.approx(expected_max, abs=1e-10)
 
     assert converted_df.loc[1, "Unit"] == "Cycle"
     assert converted_df.loc[2, "Unit"] == "Count"
@@ -1455,9 +1441,9 @@ def test_time_unit_conversion_to_milliseconds(sample_time_data, original_ns_valu
     expected_min = original_ns_values["Min"] / time_units["ms"]
     expected_max = original_ns_values["Max"] / time_units["ms"]
 
-    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-6
-    assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-6
-    assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-6
+    assert converted_df.loc[0, "Avg"] == pytest.approx(expected_avg, abs=1e-6)
+    assert converted_df.loc[0, "Min"] == pytest.approx(expected_min, abs=1e-6)
+    assert converted_df.loc[0, "Max"] == pytest.approx(expected_max, abs=1e-6)
 
 
 @pytest.mark.time_unit_conversion
@@ -1472,9 +1458,9 @@ def test_time_unit_conversion_to_microseconds(sample_time_data, original_ns_valu
     expected_min = original_ns_values["Min"] / time_units["us"]
     expected_max = original_ns_values["Max"] / time_units["us"]
 
-    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-3
-    assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-3
-    assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-3
+    assert converted_df.loc[0, "Avg"] == pytest.approx(expected_avg, abs=1e-3)
+    assert converted_df.loc[0, "Min"] == pytest.approx(expected_min, abs=1e-3)
+    assert converted_df.loc[0, "Max"] == pytest.approx(expected_max, abs=1e-3)
 
 
 @pytest.mark.time_unit_conversion
@@ -1485,9 +1471,15 @@ def test_time_unit_conversion_to_nanoseconds(sample_time_data, original_ns_value
 
     assert converted_df.loc[0, "Unit"] == "ns"
 
-    assert abs(converted_df.loc[0, "Avg"] - original_ns_values["Avg"]) < 1e-10
-    assert abs(converted_df.loc[0, "Min"] - original_ns_values["Min"]) < 1e-10
-    assert abs(converted_df.loc[0, "Max"] - original_ns_values["Max"]) < 1e-10
+    assert converted_df.loc[0, "Avg"] == pytest.approx(
+        original_ns_values["Avg"], abs=1e-10
+    )
+    assert converted_df.loc[0, "Min"] == pytest.approx(
+        original_ns_values["Min"], abs=1e-10
+    )
+    assert converted_df.loc[0, "Max"] == pytest.approx(
+        original_ns_values["Max"], abs=1e-10
+    )
 
 
 @pytest.mark.time_unit_conversion
@@ -1531,7 +1523,7 @@ def test_conversion_with_missing_columns(sample_time_data, original_ns_values):
 
     assert converted_df.loc[0, "Unit"] == "ms"
     expected_avg = original_ns_values["Avg"] / time_units["ms"]
-    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-6
+    assert converted_df.loc[0, "Avg"] == pytest.approx(expected_avg, abs=1e-6)
 
 
 @pytest.mark.time_unit_conversion
@@ -1552,9 +1544,9 @@ def test_mathematical_correctness_all_units(sample_time_data, original_ns_values
         expected_min = original_ns_values["Min"] / divisor
         expected_max = original_ns_values["Max"] / divisor
 
-        assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-10
-        assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-10
-        assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-10
+        assert converted_df.loc[0, "Avg"] == pytest.approx(expected_avg, abs=1e-10)
+        assert converted_df.loc[0, "Min"] == pytest.approx(expected_min, abs=1e-10)
+        assert converted_df.loc[0, "Max"] == pytest.approx(expected_max, abs=1e-10)
         assert converted_df.loc[0, "Unit"] == target_unit
 
 
@@ -1582,9 +1574,9 @@ def test_integration_conversion_flow():
         converted_df = sample_df
 
     assert converted_df.loc[0, "Unit"] == "ms"
-    assert abs(converted_df.loc[0, "Avg"] - 3.44664) < 1e-5
-    assert abs(converted_df.loc[0, "Min"] - 1.76925) < 1e-5
-    assert abs(converted_df.loc[0, "Max"] - 12.53212) < 1e-5
+    assert converted_df.loc[0, "Avg"] == pytest.approx(3.44664, abs=1e-5)
+    assert converted_df.loc[0, "Min"] == pytest.approx(1.76925, abs=1e-5)
+    assert converted_df.loc[0, "Max"] == pytest.approx(12.53212, abs=1e-5)
 
 
 @pytest.mark.time_unit_integration
@@ -1606,7 +1598,7 @@ def test_show_all_with_time_unit_conversion():
         assert converted_df.loc[0, "Unit"] == time_unit
 
         expected_avg = 3446.64 / time_units[time_unit]
-        assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-10
+        assert converted_df.loc[0, "Avg"] == pytest.approx(expected_avg, abs=1e-10)
 
 
 @pytest.mark.time_unit_edge_cases
@@ -1630,7 +1622,7 @@ def test_edge_cases_and_error_handling():
 @pytest.mark.iteration_multiplexing
 def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
     workload = "tests/workloads/vcopy_iteration_multiplexing/MI350"
-    workload_dir = test_utils.setup_workload_dir(workload)
+    workload_dir = common.setup_workload_dir(workload)
 
     # Test with dispatch filtering
     code = binary_handler_analyze_rocprof_compute([
@@ -1650,7 +1642,7 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
     ])
     assert code == 0
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.torch_trace
@@ -1675,7 +1667,7 @@ def test_list_torch_operators_no_trace_data(
     """Test graceful handling when workload was profiled with --torch-trace but
     contains no torch operator data (e.g. a non-PyTorch workload like vcopy).
     """
-    workload_dir = test_utils.setup_workload_dir(indirs[0])
+    workload_dir = common.setup_workload_dir(indirs[0])
 
     # Simulate a workload profiled with --torch-trace so the sanitize guard
     # passes, but no torch marker/counter files exist (non-torch workload).
@@ -1696,7 +1688,7 @@ def test_list_torch_operators_no_trace_data(
     assert "PyTorch Operators in:" in output
     assert "Total: 0 operators" in output
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.fixture
@@ -1739,10 +1731,7 @@ def test_create_df_kernel_top_stats_returns_valid_dataframes(
     mock_raw_pmc_for_kernel_top,
 ):
     """Test create_df_kernel_top_stats returns valid DF with correct structure."""
-    import sys
     import tempfile
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     from utils.file_io import create_df_kernel_top_stats
 
@@ -1783,7 +1772,7 @@ def test_create_df_kernel_top_stats_returns_valid_dataframes(
         assert kernel_top_df.index[0] == 0
 
         # Test percentage sum is approximately 100%
-        assert abs(kernel_top_df["Percent"].sum() - 100.0) < 0.01
+        assert kernel_top_df["Percent"].sum() == pytest.approx(100.0, abs=0.01)
 
 
 @pytest.mark.misc
@@ -1791,10 +1780,7 @@ def test_create_df_kernel_top_stats_grouping_and_aggregation(
     mock_raw_pmc_for_kernel_top,
 ):
     """Test kernel grouping, aggregation functions, and sorting behavior."""
-    import sys
     import tempfile
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     from utils.file_io import create_df_kernel_top_stats
 
@@ -1841,10 +1827,7 @@ def test_create_df_kernel_top_stats_grouping_and_aggregation(
 def test_create_df_kernel_top_stats_filters():
     """Test GPU ID, dispatch ID (including '> n' syntax),
     node filters, and empty input handling."""
-    import sys
     import tempfile
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     from utils.file_io import create_df_kernel_top_stats
 
@@ -1940,9 +1923,6 @@ def test_create_df_kernel_top_stats_filters():
 def test_apply_kernel_filter_integer_ids(mock_workload_for_filter):
     """Test integer kernel ID filtering, Selected marker,
     uses workload.dfs[1], invalid ID error."""
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     from utils import schema
     from utils.parser import apply_kernel_filter
@@ -1993,9 +1973,6 @@ def test_apply_kernel_filter_integer_ids(mock_workload_for_filter):
 @pytest.mark.misc
 def test_apply_kernel_filter_string_names(mock_workload_for_filter):
     """Test string kernel name filtering and partial match."""
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     from utils import schema
     from utils.parser import apply_kernel_filter
@@ -2043,10 +2020,7 @@ def test_apply_kernel_filter_string_names(mock_workload_for_filter):
 def test_pc_sampling_single_kernel_uses_workload_dfs():
     """Test single kernel filter reads from workload.dfs[1],
     kernel index out of bounds warning."""
-    import sys
     import tempfile
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     from utils.parser import load_pc_sampling_data
 

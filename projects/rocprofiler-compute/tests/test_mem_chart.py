@@ -9,16 +9,9 @@ Covers:
 - mem_chart_gfx9.py  - CDNA (plotille-based) memory architecture visualization
 """
 
-import re
+import common
 
 from utils import mem_chart_gfx9, mem_chart_gfx11
-
-ANSI_ESCAPE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
-
-
-def strip_ansi(text: str) -> str:
-    return ANSI_ESCAPE.sub("", text)
-
 
 # =============================================================================
 # Tests for format_bw_human_readable function (gfx11)
@@ -342,7 +335,7 @@ class TestPlotMemChartGfx11:
         """Test that plot_mem_chart returns a string."""
         metrics = mem_chart_gfx11.get_sample_metrics()
         result = mem_chart_gfx11.plot_mem_chart("per_kernel", metrics)
-        clean = strip_ansi(result)
+        clean = common.strip_ansi(result)
 
         assert isinstance(result, str)
         assert len(result) > 0
@@ -358,7 +351,9 @@ class TestPlotMemChartGfx11:
             metrics,
             chart_title="3. Memory Chart (Normalization: per_kernel)",
         )
-        assert "3. Memory Chart (Normalization: per_kernel)" in strip_ansi(result)
+        assert "3. Memory Chart (Normalization: per_kernel)" in common.strip_ansi(
+            result
+        )
 
     def test_contains_architecture_elements(self):
         """Test that output contains RDNA3.5 architecture elements."""
