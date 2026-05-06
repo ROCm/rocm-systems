@@ -435,7 +435,11 @@ void GraphExec::BuildSyncPlan() {
 
   auto* device = g_devices[instantiateDeviceId_]->devices()[0];
 
-  static const std::string kBarrierKernelName = "";
+  // Barrier packets are sentinel-marked with nullptr in dispatchKernelNames so that
+  // activity.cpp can distinguish them from kernel/blit dispatch packets (which use "" or a
+  // real name).  This avoids the empty-string ambiguity that caused the last kernel node to
+  // be dropped when a copy/blit node also contributed an empty-string entry.
+  static const std::string* const kBarrierKernelNamePtr = nullptr;
 
   for (const auto& segment : segments_) {
     auto& info = sync_plan_.segment_sync[segment.id];
@@ -499,7 +503,7 @@ void GraphExec::BuildSyncPlan() {
 
           firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), barrier_pkt);
           firstBatch.dispatchKernelNames.insert(firstBatch.dispatchKernelNames.begin(),
-                                                &kBarrierKernelName);
+                                                kBarrierKernelNamePtr);
         }
 
         // nodeRanges[i].startIndex was recorded before barrier packets were prepended.
@@ -522,15 +526,25 @@ void GraphExec::BuildSyncPlan() {
       sync_plan_.barrier_packets.push_back(completion_barrier);
 
       lastBatch.dispatchPackets.push_back(completion_barrier);
-      lastBatch.dispatchKernelNames.push_back(&kBarrierKernelName);
+      lastBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
 
       sync_plan_.patch_list.push_back(
           {completion_barrier, nullptr, segment.id,
            amd::Device::HwEventPatch::kCompletionSignal});
     } else if (!lastBatch.dispatchPackets.empty()) {
-      uint8_t* last_pkt = lastBatch.dispatchPackets.back();
+      // All nodes are capturable — append a real completion barrier packet so that
+      // ApplyHwEventPatches patches the barrier's completion signal, not the last
+      // kernel dispatch's. Patching the last kernel dispatch directly causes
+      // dispatchAqlPacketBatchFlat to see a pre-patched non-zero signal and skip
+      // profiling setup (reserved2 / isPacketDispatch_) for that kernel.
+      uint8_t* completion_barrier = device->CreateBarrierPacket();
+      sync_plan_.barrier_packets.push_back(completion_barrier);
+
+      lastBatch.dispatchPackets.push_back(completion_barrier);
+      lastBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
+
       sync_plan_.patch_list.push_back(
-          {last_pkt, nullptr, segment.id,
+          {completion_barrier, nullptr, segment.id,
            amd::Device::HwEventPatch::kCompletionSignal});
     }
 

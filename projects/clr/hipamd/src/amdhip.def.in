@@ -188,6 +188,9 @@ hipPeekAtLastError
 hipPointerGetAttributes
 hipProfilerStart
 hipProfilerStop
+hipProfilerEnableExt
+hipProfilerDisableExt
+hipProfilerGetRecordsExt
 hipRuntimeGetVersion
 hipGetDeviceFlags
 hipSetDevice
@@ -258,8 +261,6 @@ hipTexRefSetMipmapFilterMode
 hipTexRefSetMipmapLevelBias
 hipTexRefSetMipmapLevelClamp
 hipTexRefSetMipmappedArray
-hipProfilerStart
-hipProfilerStop
 hipCreateSurfaceObject
 hipDestroySurfaceObject
 hipGetCmdName
