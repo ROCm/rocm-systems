@@ -155,7 +155,6 @@ struct cache_policy
      */
     static void initialize_pmc_metadata(size_t gpu_id)
     {
-        // Metadata field constants for PMC info registration
         constexpr size_t      EVENT_CODE       = 0;
         constexpr size_t      INSTANCE_ID      = 0;
         constexpr const char* LONG_DESCRIPTION = "";

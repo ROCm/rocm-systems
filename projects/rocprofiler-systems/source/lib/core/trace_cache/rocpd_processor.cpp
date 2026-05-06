@@ -452,9 +452,7 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
                   info::format_track_name<category::amd_smi_xgmi_link_speed>(),
                   enabled.bits.xgmi, m.xgmi.link.speed);
 
-    // XGMI data accumulators (per-link arrays). Use format_track_name so the
-    // emitted PMC name and track name match what cache_policy registered:
-    // "device_xgmi_(read|write)_data_<N>".
+    // PMC name and track name must match cache_policy's per-link registration.
     auto insert_xgmi_link_metrics = [&](auto category_tag, bool is_enabled,
                                         const auto& arr) {
         using category_t = decltype(category_tag);

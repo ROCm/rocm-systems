@@ -1,35 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//
-// Regression test for XGMI per-link PMC + track name alignment.
-//
-// Background. Three sites construct per-link XGMI metric names on the rocpd
-// path:
-//
-//   1. PMC desc registration (cache_policy::initialize_pmc_metadata, in
-//      library/pmc/collectors/gpu/cache_policy.hpp)
-//   2. Track registration   (cache_policy::initialize_tracks_metadata, same file)
-//   3. Sampler emit         (rocpd_processor_t::handle for gpu_pmc_sample, in
-//      core/trace_cache/rocpd_processor.cpp)
-//
-// They MUST all produce the same string, otherwise data_processor.cpp:201/221
-// emits a "non-existing PMC description" / "Unexisting track" warning on every
-// sample on multi-GPU XGMI hardware.
-//
-// Historically site 2 used info::format_track_name<C>(nullopt, link) (underscore
-// suffix), but site 1 registered a single non-per-link entry and site 3 emitted
-// "<base>_link<N>" (PMC name) + "<base> [Link <N>]" (track name). All three
-// formats disagreed. The fix aligned all three on info::format_track_name.
-//
-// Test strategy. The production headers chain (cache_policy.hpp -> cache_manager
-// -> categories.hpp) pulls timemory + rocprofiler-sdk, so we cannot link
-// cache_policy directly into the unit-test object. Instead we replicate the
-// format helper and the three sites' name-construction logic side-by-side and
-// assert they all agree, AND that they match the form the registry/track
-// lookup uses. If any of the three sites drift back to a different format,
-// this test fails.
-//
+// Pins the per-link XGMI naming contract that PMC desc registration, track
+// registration, and the sampler emit must all produce the same string.
 
 #include <gtest/gtest.h>
 #include <spdlog/fmt/fmt.h>
@@ -43,10 +16,8 @@
 namespace
 {
 
-// Mirror of trace_cache::info::format_track_name from
-// core/trace_cache/metadata_registry.hpp:107-115. Kept tiny on purpose: if the
-// production helper changes shape, both this mirror and the production sites
-// must be updated together.
+// Mirrors trace_cache::info::format_track_name; keep in sync with the
+// production helper.
 std::string
 format_track_name_mirror(const char* category_name, std::optional<int> first_section,
                          std::optional<int> second_section = std::nullopt)
@@ -56,35 +27,22 @@ format_track_name_mirror(const char* category_name, std::optional<int> first_sec
                        second_section ? fmt::format("_{}", *second_section) : "");
 }
 
-// Trait names matching the ROCPROFSYS_DEFINE_CATEGORY entries in
-// core/categories.hpp:113-114.
 constexpr const char* read_data_category_name  = "device_xgmi_read_data";
 constexpr const char* write_data_category_name = "device_xgmi_write_data";
+constexpr std::size_t max_num_xgmi_links       = 8;
 
-// MAX_NUM_XGMI_LINKS from library/pmc/collectors/gpu/types.hpp:32.
-constexpr std::size_t max_num_xgmi_links = 8;
-
-// ---------------------------------------------------------------------------
-// Site 1: PMC desc registration loop (after fix), cache_policy.hpp
-// ---------------------------------------------------------------------------
 std::string
 site_pmc_desc_register_name(const char* category_name, std::size_t link)
 {
     return format_track_name_mirror(category_name, std::nullopt, static_cast<int>(link));
 }
 
-// ---------------------------------------------------------------------------
-// Site 2: Track registration loop (already correct), cache_policy.hpp
-// ---------------------------------------------------------------------------
 std::string
 site_track_register_name(const char* category_name, std::size_t link)
 {
     return format_track_name_mirror(category_name, std::nullopt, static_cast<int>(link));
 }
 
-// ---------------------------------------------------------------------------
-// Site 3: Sampler emit (after fix), rocpd_processor.cpp:455-475
-// ---------------------------------------------------------------------------
 std::string
 site_sampler_pmc_name(const char* category_name, std::size_t link)
 {
@@ -97,10 +55,7 @@ site_sampler_track_name(const char* category_name, std::size_t link)
     return format_track_name_mirror(category_name, std::nullopt, static_cast<int>(link));
 }
 
-// ---------------------------------------------------------------------------
-// Pre-fix sampler emit: kept ONLY for the negative-side guard below. Do not
-// use this format in production.
-// ---------------------------------------------------------------------------
+// Pre-fix formats; used only by the negative guard.
 std::string
 legacy_sampler_pmc_name(const char* category_name, std::size_t link)
 {
@@ -169,14 +124,8 @@ slurp(const std::string& path)
 
 }  // namespace
 
-// Source-content guard. The compile-time mirror above only proves the helper
-// math is right, not that the production sites use the helper. This test
-// reads the two production sources and asserts:
-//   - the legacy "_link" / " [Link " literal patterns are gone,
-//   - the canonical format_track_name<...>(std::nullopt, ...) call is present
-//     for both XGMI read-data and write-data categories.
-// If TEST_SOURCE_ROOT is not provided (out-of-tree consumer build), the test
-// is skipped rather than failed.
+// Asserts the production sites use format_track_name; skipped when
+// TEST_SOURCE_ROOT is not defined (out-of-tree consumer build).
 TEST_F(XgmiPerLinkNameRoundTrip, production_sources_use_canonical_format)
 {
 #ifndef TEST_SOURCE_ROOT
@@ -215,9 +164,8 @@ TEST_F(XgmiPerLinkNameRoundTrip, production_sources_use_canonical_format)
 #endif
 }
 
-// Negative-side guard. The legacy "_link<N>" / " [Link <N>]" formats that
-// shipped before the fix must NOT match the canonical format. Documents the
-// bug class explicitly so a future refactor cannot silently revert it.
+// Asserts the pre-fix legacy formats remain distinct from the canonical
+// one; if they ever collide the regression-guard premise is gone.
 TEST_F(XgmiPerLinkNameRoundTrip, legacy_sampler_format_does_not_match_canonical)
 {
     for(std::size_t i = 0; i < max_num_xgmi_links; ++i)
