@@ -919,8 +919,6 @@ Queue::Queue(
             });
     }
 
-    set_write_interceptor(WriteInterceptor, this);
-
     create_signal(0, &ready_signal, false);
     create_signal(0, &block_signal, false);
     create_signal(0, &_active_kernels, false);
@@ -928,6 +926,10 @@ Queue::Queue(
     _core_api.hsa_signal_store_screlease_fn(_active_kernels, 0);
 
     (void) get_signal_pool();  // ensure the signal pool is constructed for this queue
+
+    // Since this is an active queue, the write interceptor may be called immediately, so this needs
+    // to appear after signal construction.
+    set_write_interceptor(WriteInterceptor, this);
 }
 
 Queue::~Queue()
