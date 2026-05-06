@@ -53,12 +53,15 @@ set(BUILD_DEBIAN_PKGING_FLAG
     "Internal Status Flag to indicate Debian Packaging Build"
 )
 
-# Make proper version for appending
-#Prepare final version for the CPACK use
-# Use package version from top-level CMakeLists.txt
-if(NOT DEFINED AMDSMI_PACKAGE_VERSION)
-    set(AMDSMI_PACKAGE_VERSION "1.1.2")  # fallback for standalone build
+# Single source of truth for the package version. Callers may override by
+# passing -DPACKAGE_VERSION=x.y.z; otherwise the value is read from the
+# shared VERSION file at the repository root.
+if(NOT DEFINED PACKAGE_VERSION OR "${PACKAGE_VERSION}" STREQUAL "")
+    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" PACKAGE_VERSION
+         LIMIT_COUNT 1)
+    string(STRIP "${PACKAGE_VERSION}" PACKAGE_VERSION)
 endif()
+set(AMDSMI_PACKAGE_VERSION "${PACKAGE_VERSION}")
 set(CPACK_PACKAGE_VERSION "${AMDSMI_PACKAGE_VERSION}")
 
 # Parse AMDSMI_PACKAGE_VERSION as the single source of truth

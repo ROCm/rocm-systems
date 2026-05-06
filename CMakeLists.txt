@@ -31,7 +31,16 @@ set ( ROCDXG "rocdxg" )
 set ( ROCDXG_PACKAGE "rocdxg-roct" )
 set ( ROCDXG_COMPONENT "lib${ROCDXG}" )
 set ( ROCDXG_TARGET "${ROCDXG}" )
-set ( ROCDXG_VERSION "1.1.2")
+
+# Single source of truth for the package version. Callers may override by
+# passing -DPACKAGE_VERSION=x.y.z; otherwise the value is read from the
+# shared VERSION file at the repository root.
+if ( NOT DEFINED PACKAGE_VERSION OR "${PACKAGE_VERSION}" STREQUAL "" )
+    file ( STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" PACKAGE_VERSION
+           LIMIT_COUNT 1 )
+    string ( STRIP "${PACKAGE_VERSION}" PACKAGE_VERSION )
+endif ()
+set ( ROCDXG_VERSION "${PACKAGE_VERSION}" )
 
 # Optional pre-release suffix (e.g. -DROCDXG_VERSION_PRERELEASE=rc1 produces 1.1.2~rc1).
 # Leave empty for a normal release build (1.1.2).
