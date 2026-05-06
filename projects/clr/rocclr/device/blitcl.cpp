@@ -27,10 +27,6 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
 
     extern void __amd_streamOpsWrite(__global uint*, __global ulong*, ulong);
 
-    extern void __amd_streamOpsIncrement(__global uint*, __global ulong*, ulong);
-
-    extern void __amd_streamOpsDecrement(__global uint*, __global ulong*, ulong);
-
     extern void __amd_streamOpsWait(__global uint*, __global ulong*, ulong, ulong, ulong);
 
     extern void __amd_batchMemOp(__global void*, uint count);
@@ -162,12 +158,24 @@ const char* HipExtraSourceCode = BLIT_KERNELS(
 
     __kernel void __amd_rocclr_streamOpsIncrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsIncrement(ptrInt, ptrUlong, value);
+      if (ptrInt)
+        atomic_fetch_add_explicit((__global atomic_uint*)ptrInt, (uint)value,
+                                  memory_order_relaxed, memory_scope_all_svm_devices);
+      else
+        atomic_fetch_add_explicit((__global atomic_ulong*)ptrUlong, value,
+                                  memory_order_relaxed, memory_scope_all_svm_devices);
     }
 
     __kernel void __amd_rocclr_streamOpsDecrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
+      // Use atomic_fetch_add_explicit as a workaround for known hardware limitations affecting
+      // atomic_fetch_sub_explicit over PCIe.
+      if (ptrInt)
+        atomic_fetch_add_explicit((__global atomic_uint*)ptrInt, (uint)-value,
+                                  memory_order_relaxed, memory_scope_all_svm_devices);
+      else
+        atomic_fetch_add_explicit((__global atomic_ulong*)ptrUlong, -value,
+                                  memory_order_relaxed, memory_scope_all_svm_devices);
     }
 
     __kernel void __amd_rocclr_streamOpsWait(__global uint* ptrInt, __global ulong* ptrUlong,
@@ -190,12 +198,24 @@ const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
 
     __kernel void __amd_rocclr_streamOpsIncrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsIncrement(ptrInt, ptrUlong, value);
+      if (ptrInt)
+        atomic_fetch_add_explicit((__global atomic_uint*)ptrInt, (uint)value,
+                                  memory_order_relaxed, memory_scope_all_svm_devices);
+      else
+        atomic_fetch_add_explicit((__global atomic_ulong*)ptrUlong, value,
+                                  memory_order_relaxed, memory_scope_all_svm_devices);
     }
 
     __kernel void __amd_rocclr_streamOpsDecrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
+      // Use atomic_fetch_add_explicit as a workaround for known hardware limitations affecting
+      // atomic_fetch_sub_explicit over PCIe.
+      if (ptrInt)
+        atomic_fetch_add_explicit((__global atomic_uint*)ptrInt, (uint)-value,
+                                  memory_order_relaxed, memory_scope_all_svm_devices);
+      else
+        atomic_fetch_add_explicit((__global atomic_ulong*)ptrUlong, -value,
+                                  memory_order_relaxed, memory_scope_all_svm_devices);
     }
 
     __kernel void __amd_rocclr_streamOpsWait(__global uint* ptrInt, __global ulong* ptrUlong,
