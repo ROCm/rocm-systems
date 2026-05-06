@@ -280,7 +280,7 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        # HITS and REQ are per-SQ per-bank; summed HITS can exceed REQ -> >100%. Use HITS+MISSES
+        # HITS and REQ are per-SQ per-bank; summed HITS can exceed REQ → >100%. Use HITS+MISSES
         # as the outcome denominator (same pairing as Memory Chart / SoL).
         Icache Hit Rate:
           avg: SUM(100 * SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
@@ -308,58 +308,69 @@ Panel Config:
           unit: Percent
 
   metrics_description:
-    WGP Utilization: |-
-      WGP busy as a percent of GRBM GUI-active cycles. RDNA3.5 WGPs pair 2 CUs,
-      each with 2 SIMD32 units.
-    Wave Life: |-
-      Average number of cycles a wave exists from creation to completion.
-      Calculated as SQ_WAVE_CYCLES / SQ_WAVES.
-    Total Instructions: |-
-      Total number of instructions executed across all waves.
-    Instructions - VALU: |-
-      Number of Vector ALU instructions executed (SQ_INSTS_VALU). VALU handles all
-      vector arithmetic and logic operations. Transcendental VALU ops are
-      reported separately as "Instructions - Transcendental" in the same
-      Wave Instruction Mix table.
-    Instructions - SALU: |-
-      Number of Scalar ALU instructions executed. SALU handles scalar operations
-      that are uniform across the wave.
-    Instructions - SMEM: |-
-      Number of Scalar Memory instructions executed. SMEM loads uniform data
-      through the scalar cache.
-    Instructions - VMEM: |-
-      Number of Vector Memory instructions executed. Includes global, buffer,
-      and texture memory operations.
-    Instructions - LDS: |-
-      Total Local Data Share instructions (SQ_INSTS_LDS). LDS provides fast
-      shared memory within a workgroup. For LDS sub-categories (direct/param/
-      wave32 param loads), see the "LDS Instruction Mix" table.
-    LDS Direct Load Instructions: |-
-      LDS direct load instructions issued (SQ_INSTS_LDS_DIRECT_LOAD). Subset of
-      total LDS; not required to sum with other LDS mix rows to equal total.
-    LDS Parameter Load Instructions: |-
-      LDS parameter load instructions issued (SQ_INSTS_LDS_PARAM_LOAD).
-    WAVE32 LDS Parameter Load Instructions: |-
-      LDS parameter load instructions under wave32 execution (SQ_INSTS_WAVE32_LDS_PARAM_LOAD).
-    Wait for Any: |-
-      Percentage of wave lifetime spent waiting for any reason including
-      memory, barriers, or instruction fetch. Computed as 100 * SQ_WAIT_ANY /
-      SQ_WAVE_CYCLES.
-    Wait for Instruction Fetch: |-
-      Percentage of wave lifetime spent waiting for instructions to arrive
-      from the instruction cache. Computed as 100 * SQ_WAIT_IFETCH /
-      SQ_WAVE_CYCLES.
-    Wait for Barrier: |-
-      Percentage of wave lifetime spent waiting at barrier synchronization
-      points. Computed as 100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES.
-    Wait for Counter: |-
-      Percentage of wave lifetime spent waiting for waitcnt counters (VMCNT,
-      LGKMCNT, etc.) to reach target values. Computed as 100 * SQ_WAIT_CNT_ANY /
-      SQ_WAVE_CYCLES.
-    Icache Hit Rate: |-
-      Instruction cache hit percentage using 100 * SQC_ICACHE_HITS / (SQC_ICACHE_HITS +
-      SQC_ICACHE_MISSES). Do not divide only by SQC_ICACHE_REQ - hits and requests are both
-      per-SQ per-bank, and summed hits can exceed summed requests.
-    Dcache Hit Rate: |-
-      Scalar data cache hit percentage: 100 * SQC_DCACHE_HITS / (SQC_DCACHE_HITS +
-      SQC_DCACHE_MISSES). Same rationale as Icache (HITS vs REQ can exceed 100%).
+    WGP Utilization: >-
+      Percentage of GPU active cycles where the Workgroup Processor is busy executing
+      wavefronts. RDNA 3.5 WGPs contain two compute units, each with dual SIMD32 units.
+      Low utilization may indicate insufficient parallelism or resource bottlenecks.
+    Wave Life: >-
+      Average number of cycles from wavefront creation to completion. Longer wave life
+      indicates more execution time per wavefront, which may be due to complex kernels,
+      memory latency, or synchronization waits.
+    Total Instructions: >-
+      Total number of instructions executed across all wavefronts. This provides an
+      overall measure of computational work. Compare with specific instruction types
+      to understand the workload characteristics.
+    Instructions - VALU: >-
+      Number of Vector ALU instructions executed. VALU handles arithmetic and logic
+      operations across all work-items in a wavefront. High VALU counts indicate
+      compute-intensive kernels.
+    Instructions - SALU: >-
+      Number of Scalar ALU instructions executed. SALU handles operations with uniform
+      values across the wavefront. Efficient kernels often have a balance of VALU and
+      SALU operations.
+    Instructions - SMEM: >-
+      Number of scalar memory instructions executed. SMEM loads constant and uniform
+      data through the scalar cache. High counts may indicate heavy use of constant
+      buffers or kernel arguments.
+    Instructions - VMEM: >-
+      Number of vector memory instructions executed, including global, buffer, and
+      texture operations. High VMEM counts relative to VALU may indicate memory-bound
+      workloads.
+    Instructions - LDS: >-
+      Number of Local Data Share instructions executed. LDS provides fast shared memory
+      within a workgroup. High counts indicate active use of shared memory for
+      inter-work-item communication.
+    LDS Direct Load Instructions: >-
+      Number of direct LDS load instructions. Direct loads fetch data from LDS without
+      address indirection. These are typically faster than indexed LDS operations.
+    LDS Parameter Load Instructions: >-
+      Number of LDS parameter load instructions. These load shader input parameters
+      that have been staged in LDS for efficient access by the wavefront.
+    WAVE32 LDS Parameter Load Instructions: >-
+      Number of LDS parameter loads executed in wave32 mode. RDNA 3.5 supports both
+      wave32 and wave64 execution modes, with wave32 providing lower latency for
+      some operations.
+    Wait for Any: >-
+      Percentage of wavefront lifetime spent waiting for any reason. High wait
+      percentages indicate opportunities to improve performance through better
+      memory access patterns, reduced synchronization, or increased occupancy.
+    Wait for Instruction Fetch: >-
+      Percentage of wavefront lifetime spent waiting for instruction fetch. High values
+      may indicate instruction cache misses, large kernel code, or divergent control
+      flow impacting instruction locality.
+    Wait for Barrier: >-
+      Percentage of wavefront lifetime spent at barrier synchronization points. High
+      barrier wait times may indicate workload imbalance within workgroups. Consider
+      restructuring algorithms to reduce synchronization frequency.
+    Wait for Counter: >-
+      Percentage of wavefront lifetime spent waiting for memory operation counters.
+      High values indicate memory latency is impacting performance. Consider improving
+      memory access patterns or increasing occupancy to hide latency.
+    Icache Hit Rate: >-
+      Percentage of instruction cache accesses that hit. High hit rates are essential
+      for sustained instruction throughput. Low rates may indicate large kernels or
+      divergent branches causing instruction cache thrashing.
+    Dcache Hit Rate: >-
+      Percentage of scalar data cache accesses that hit. High hit rates indicate
+      efficient reuse of constant and uniform data. Low rates may suggest excessive
+      unique constant data or poor temporal locality.

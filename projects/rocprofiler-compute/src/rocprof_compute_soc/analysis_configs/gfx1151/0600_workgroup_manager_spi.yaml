@@ -43,9 +43,6 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        # Use SPI_CSN_WAVE (pmc_perf column name from collection), not SPI_CSN_WAVE_sum: the
-        # latter is a counter_defs derived alias and is often absent from pmc_perf.csv, which
-        # yields all-zero / NaN metrics. Profiler output typically already aggregates instances.
         Compute Wave Dispatches:
           avg: SUM(SPI_CSN_WAVE) / SUM($denom)
           min: MIN(SPI_CSN_WAVE / $denom)
@@ -58,16 +55,15 @@ Panel Config:
           unit: Waves/cycle
 
   metrics_description:
-    SPI Busy: |-
-      Percentage of GPU active (GUI) cycles where any SPI was busy. Computed as
-      100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE (GRBM block). Do not use block-level SPI_BUSY here:
-      it is aggregated over every SPI instance, so summed busy cycles can far exceed GUI-active
-      cycles when multiple shader engines are active in parallel.
-    Compute Wave Dispatches: |-
-      SPI counter SPI_CSN_WAVE (block SPI, event 50): compute (CSN) path wave count as stored in
-      pmc_perf (column SPI_CSN_WAVE). Same idea as WGP "Dispatched Waves" (SQ_WAVES_sum) but at
-      SPI; values may differ slightly. Normalized by CLI $denom: per_kernel -> /1; per_wave ->
-      /SQ_WAVES; per_cycle -> /$GRBM_GUI_ACTIVE_PER_XCD; per_second -> /kernel wall time (s).
-    Wave Dispatch Rate: |-
-      SPI_CSN_WAVE / GRBM_GUI_ACTIVE - waves per GUI-active cycle (can exceed 1 when many SEs
-      dispatch in parallel). Uses the same SPI_CSN_WAVE column as collection emits.
+    SPI Busy: >-
+      Percentage of GPU active cycles where the Shader Processor Input is busy dispatching
+      wavefronts. High SPI busy indicates active workload dispatch. Low values may suggest
+      insufficient parallelism or dispatch bottlenecks limiting GPU utilization.
+    Compute Wave Dispatches: >-
+      Total number of compute wavefronts dispatched by the Shader Processor Input. This
+      represents the work scheduled for execution on the shader engines. Compare with
+      completed waves to identify dispatch-related bottlenecks.
+    Wave Dispatch Rate: >-
+      Average wavefronts dispatched per GPU active cycle. Values greater than one indicate
+      parallel dispatch across multiple shader engines. Low dispatch rates may indicate
+      workload submission bottlenecks or insufficient parallelism in the application.
