@@ -756,13 +756,11 @@ hsa_status_t hsa_queue_create(
   assert(cmd_queue != nullptr && "Queue not returned but status was success.\n");
   *queue = core::Queue::Convert(cmd_queue);
 
-  // LTTng dispatch-log scaffolding (spec 2026-04-27 §4 queue-create hook).
-  // Called immediately after the queue is visible to the caller. If the
-  // tracepoint is currently enabled, runs the per-queue ENABLE sequence
-  // synchronously on this thread (bounded latency: one alloc + one ioctl
-  // + MQD-flush). No-op when g_dispatch_logging_active is false (the steady
-  // state).
-  rocr::dispatch_log::on_queue_create(cmd_queue);
+  // dispatch_log on_queue_create is now invoked from agent_->QueueCreate
+  // (amd_gpu_agent.cpp) instead of here, so it covers ALL queue-creation
+  // paths uniformly: this public API, hsa_amd_queue_intercept_create's
+  // lower queue, CountedQueuePoolManager pool entries, etc. Removing the
+  // duplicate call here.
 
   return status;
 

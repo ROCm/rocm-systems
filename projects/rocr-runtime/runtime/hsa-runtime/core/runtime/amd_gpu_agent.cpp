@@ -64,6 +64,7 @@
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/isa.h"
 #include "core/inc/runtime.h"
+#include "core/inc/dispatch_log.h"
 #include "core/util/os.h"
 #include "inc/hsa_ext_image.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
@@ -2288,6 +2289,19 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   }
 
   scratchGuard.Dismiss();
+
+  // Notify the dispatch_log subsystem about the new queue. This MUST run for
+  // ALL queue-creation paths (hsa_queue_create, hsa_amd_queue_intercept_create
+  // → wraps a lower queue created here, CountedQueuePoolManager::AcquireQueue,
+  // any future internal helper). The previous on_queue_create call site at
+  // hsa.cpp::hsa_queue_create only covered the public API path; internal pool
+  // queues created via this method bypassed it, leaving them with no
+  // dispatch_log drainer worker even though SetProfiling(true) was called on
+  // them. Records FW wrote into those orphan queues' buffers were never
+  // emitted to LTTng — and only freed at process shutdown via the AqlQueue
+  // destructor, not during the per-phase queue-pool churn.
+  dispatch_log::on_queue_create(aql_queue);
+
   return HSA_STATUS_SUCCESS;
 }
 
