@@ -1059,6 +1059,10 @@ get_aql_handles()
             for(auto& agent : get_agents())
             {
                 aqlprofile_agent_handle_t handle = {.handle = 0};
+
+                const auto bdf = get_pcie_bdf(agent);
+                common::consume_args(bdf);
+
 #if ROCPROFILER_EXTERNAL_AQLPROFILE
                 ROCP_TRACE << fmt::format(
                     "Registering agent {} with external aqlprofile (libhsa-amd-aqlprofile64.so)",
@@ -1076,7 +1080,6 @@ get_aql_handles()
                     ROCP_WARNING << "Failed to register agent " << agent->name;
                 }
 #else
-                const auto bdf = get_pcie_bdf(agent);
 
                 ROCP_TRACE << fmt::format(
                     "Registering agent {:04x}:{:02x}:{:02x}.{:x} :: {} with IP discovery",
