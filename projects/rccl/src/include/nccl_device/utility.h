@@ -10,16 +10,36 @@
 
 #include "hip_compat.h"
 
+// compiler specific check for __CUDACC__
+// We define NCCL_CHECK_CUDACC as a textual alias of __CUDACC__ (not a
+// "snapshot" 0/1 value) so each `#if NCCL_CHECK_CUDACC` re-evaluates
+// __CUDACC__ at the point of use. This matters for the AMD path because
+// some host-API headers (e.g. nccl_device/lsa_barrier.h) do
+// `#undef __CUDACC__` followed by `#define __CUDACC__ 0` (which hipify
+// rewrites to __HIPCC__) to hide device-side declarations from host TUs.
+// With a snapshot value, NCCL_CHECK_CUDACC and __CUDACC__ would diverge
+// after that point and we'd compile references to types that were never
+// declared in this TU.
+#ifndef NCCL_CHECK_CUDACC
+    #define NCCL_CHECK_CUDACC __CUDACC__
+#endif
+
 #if __cplusplus
 #define NCCL_EXTERN_C extern "C"
 #else
 #define NCCL_EXTERN_C
 #endif
 
+#ifdef __clang_llvm_bitcode_lib__
+#define NCCL_IR_EXTERN_C extern "C"
+#else
+#define NCCL_IR_EXTERN_C
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 #if __HIP_PLATFORM_AMD__
 #include <atomic>
 #else
@@ -41,7 +61,7 @@ struct ValueAsType { static constexpr T value = value_; };
 
 // Returns the value zero but the compiler cannot prove that it is zero so it
 // is useful to inhibit compiler optimizations.
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename=void>
 NCCL_DEVICE_INLINE int opaqueZero() {
   __device__ static int zero = 0;
@@ -232,7 +252,7 @@ NCCL_DEVICE_INLINE uint32_t idivRcp32_upto64(int x) {
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 #if __HIP_PLATFORM_AMD__
 NCCL_HOST_DEVICE_INLINE constexpr std::memory_order acquireOrderOf(std::memory_order ord) {
   return ord == std::memory_order_release ? std::memory_order_relaxed :
@@ -291,7 +311,7 @@ NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order releaseOrderOf(cuda::memory
 #endif
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 NCCL_DEVICE_INLINE void fenceAcquireGpu() {
   static __device__ int dummy;
   int tmp;
@@ -312,7 +332,7 @@ NCCL_DEVICE_INLINE void fenceReleaseGpu() {
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename T>
 NCCL_DEVICE_INLINE T atomicLoad(T* ptr, cuda::memory_order ord, cuda::thread_scope scope) {
   switch (scope) {
@@ -329,7 +349,7 @@ NCCL_DEVICE_INLINE T atomicLoad(T* ptr, cuda::memory_order ord, cuda::thread_sco
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename T>
 NCCL_DEVICE_INLINE void atomicStore(T* ptr, T val, cuda::memory_order ord, cuda::thread_scope scope) {
   switch (scope) {

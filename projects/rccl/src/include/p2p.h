@@ -58,6 +58,7 @@ struct ncclIpcImpInfo {
   void* rmtRegAddr;
   bool legacyIpcCap;
   uintptr_t offset;
+  int numSegments;
 };
 
 struct ncclIpcRegInfo {

@@ -34,10 +34,15 @@ struct ncclInfo {
   // Optional per-operation metadata for rocSHMEM collectives.
   size_t* sizes;
 #endif
-  // When true and coll == ncclFuncAllGather, taskAppend posts the AG as an
-  // A2A-style fan of per-peer Send/Recv P2P tasks (Direct AllGather path)
-  // instead of routing through collTaskAppend (ring/PAT/etc.).
   bool useDirect;
+  // One-sided ops
+  size_t peerWinOffset;
+  ncclWindow_t peerWin;
+  int sigIdx;
+  int ctx;
+  unsigned int flags;
+  int nDesc;
+  ncclWaitSignalDesc_t* signalDescs;
 };
 
 #endif
