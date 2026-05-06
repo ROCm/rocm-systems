@@ -1082,7 +1082,7 @@ GPU: 0
         PRODUCT_SERIAL: N/A
         FRU_ID: N/A
         PRODUCT_NAME: Aqua Vanjaram [Instinct MI300A]
-        MANUFACTURER_NAME: Advanced Micro Devices, Inc. [AMD/ATI]
+        MANUFACTURER_NAME: Advanced Micro Devices Inc. [AMD/ATI]
     RAS:
         EEPROM_VERSION: 0x30000
         BAD_PAGE_THRESHOLD: N/A
