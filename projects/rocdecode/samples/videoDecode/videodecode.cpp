@@ -25,16 +25,24 @@ THE SOFTWARE.
 #include <cstring>
 #include <string>
 #include <iomanip>
+#ifndef _WIN32
 #include <unistd.h>
+#include <sys/stat.h>
+#include <libgen.h>
+#endif
 #include <vector>
 #include <string>
 #include <chrono>
-#include <sys/stat.h>
-#include <libgen.h>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#if defined(_MSC_VER) && _MSC_VER >= 1914
+    // MSVC 2017 15.7 and later have full C++17 filesystem support
     #include <filesystem>
+    namespace fs = std::filesystem;
+#elif __cplusplus >= 201703L && __has_include(<filesystem>)
+    #include <filesystem>
+    namespace fs = std::filesystem;
 #else
     #include <experimental/filesystem>
+    namespace fs = std::experimental::filesystem;
 #endif
 #include "video_demuxer.h"
 #include "rocdecode/roc_bitstream_reader.h"

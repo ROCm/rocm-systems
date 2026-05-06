@@ -25,12 +25,14 @@ THE SOFTWARE.
 #include <cstring>
 #include <string>
 #include <iomanip>
+#ifndef _WIN32
 #include <unistd.h>
+#include <sys/stat.h>
+#include <libgen.h>
+#endif
 #include <vector>
 #include <string>
 #include <chrono>
-#include <sys/stat.h>
-#include <libgen.h>
 #include "video_demuxer.h"
 #include "rocdecode/roc_bitstream_reader.h"
 #include "roc_video_dec.h"

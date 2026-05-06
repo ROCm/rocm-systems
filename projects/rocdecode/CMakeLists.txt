@@ -72,9 +72,34 @@ set(VERSION "1.8.0")
 project(rocdecode VERSION ${VERSION} LANGUAGES CXX)
 
 # C++ Standard (must be set after project())
-set(CMAKE_CXX_STANDARD 17)
+# C++ Standard - C++20 required for PAL on Windows, C++17 for Linux
+if(IS_WINDOWS)
+  set(CMAKE_CXX_STANDARD 20)
+else()
+  set(CMAKE_CXX_STANDARD 17)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 set(CMAKE_CXX_EXTENSIONS ON)
+
+# Set MSVC runtime library to static to match PAL (Windows only)
+# amdclang++ has GNU frontend, so CMake adds runtime flags automatically via Platform files
+# We need to replace them AFTER CMake adds them, which happens during target creation
+if(IS_WINDOWS)
+  message("-- ${Green}Setting static runtime library to match PAL${ColourReset}")
+  # These string replacements won't work because /MD isn't in the flags yet
+  # Instead, we need to set CMAKE_USER_MAKE_RULES_OVERRIDE or use target properties
+  set(CompilerFlags
+        CMAKE_CXX_FLAGS
+        CMAKE_CXX_FLAGS_DEBUG
+        CMAKE_CXX_FLAGS_RELEASE
+        CMAKE_CXX_FLAGS_MINSIZEREL
+        CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+  foreach(CompilerFlag ${CompilerFlags})
+    if(${CompilerFlag} MATCHES "/MD")
+      string(REPLACE "/MD" "/MT" ${CompilerFlag} "${${CompilerFlag}}")
+    endif()
+  endforeach()
+endif()
 
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 set(CMAKE_INSTALL_INCLUDEDIR "include" CACHE STRING "Include install directory")
@@ -131,6 +156,7 @@ else()
     # -fPIC   -- Generate position-independent code (Linux only, not supported on Windows)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
   else()
+    # Windows: Use static runtime to match PAL libraries
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG")
   endif()
 endif()
@@ -215,6 +241,59 @@ if(DEPENDENCIES_MET)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
   endif()
 
+  # PAL libraries (Windows only)
+  if(IS_WINDOWS)
+    if(NOT DEFINED PAL_ROOT)
+      set(PAL_ROOT "" CACHE PATH "PAL root directory (required for Windows build)")
+      message(FATAL_ERROR "PAL_ROOT must be set for Windows builds. Use: cmake -DPAL_ROOT=<path_to_pal> ..")
+    endif()
+
+    if(NOT EXISTS "${PAL_ROOT}/inc/core")
+      message(FATAL_ERROR "PAL_ROOT (${PAL_ROOT}) does not contain inc/core directory")
+    endif()
+
+    include_directories(${PAL_ROOT}/inc/core ${PAL_ROOT}/inc/util ${PAL_ROOT}/inc/gpuUtil ${PAL_ROOT}/shared/inc)
+
+    # PAL static libraries with all dependencies (matching vulkan-video-driver)
+    set(PAL_LIB_DIR "${PAL_ROOT}/lib/Release/x64")
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST}
+        ${PAL_LIB_DIR}/pal.lib
+        ${PAL_LIB_DIR}/palUtil.lib
+        ${PAL_LIB_DIR}/palCompilerDeps.lib
+        ${PAL_LIB_DIR}/addrlib.lib
+        ${PAL_LIB_DIR}/vam.lib
+        ${PAL_LIB_DIR}/amdrdf.lib
+        ${PAL_LIB_DIR}/zstd.lib
+        ${PAL_LIB_DIR}/pal_lz4.lib
+        ${PAL_LIB_DIR}/pal_uuid.lib
+        ${PAL_LIB_DIR}/metrohash.lib
+        ${PAL_LIB_DIR}/mpack.lib
+        ${PAL_LIB_DIR}/cwpack.lib
+        ${PAL_LIB_DIR}/stb_sprintf.lib
+        ${PAL_LIB_DIR}/DriverUtilsService.lib
+        ${PAL_LIB_DIR}/UberTraceService.lib
+        ${PAL_LIB_DIR}/SettingsRpcService2.lib
+        ${PAL_LIB_DIR}/dd_settings.lib
+        ${PAL_LIB_DIR}/devdriver.lib
+        ${PAL_LIB_DIR}/ddRpcServer.lib
+        ${PAL_LIB_DIR}/ddRpcClient.lib
+        ${PAL_LIB_DIR}/ddRpcShared.lib
+        ${PAL_LIB_DIR}/ddEventServer.lib
+        ${PAL_LIB_DIR}/ddEventClient.lib
+        ${PAL_LIB_DIR}/ddEventParser.lib
+        ${PAL_LIB_DIR}/ddEventStreamer.lib
+        ${PAL_LIB_DIR}/ddNet.lib
+        ${PAL_LIB_DIR}/ddSocket.lib
+        ${PAL_LIB_DIR}/ddYaml.lib
+        ${PAL_LIB_DIR}/dd_common.lib
+        ${PAL_LIB_DIR}/ddCore.lib
+        ${PAL_LIB_DIR}/ddCommon.lib
+        Setupapi.lib
+        ws2_32.lib
+    )
+    message("-- ${Green}${PROJECT_NAME} -- PAL libraries linked from ${PAL_LIB_DIR}${ColourReset}")
+  endif()
+
   # rocprofiler
   if (rocprofiler-register_FOUND)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
@@ -227,8 +306,8 @@ if(DEPENDENCIES_MET)
   if(IS_LINUX)
     include_directories(${CMAKE_CURRENT_SOURCE_DIR}/api ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode ${CMAKE_CURRENT_SOURCE_DIR}/src/parser ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode/vaapi)
   else()
-    # Windows: exclude vaapi directory
-    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/api ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode ${CMAKE_CURRENT_SOURCE_DIR}/src/parser)
+    # Windows: include pal directory instead of vaapi
+    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/api ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode ${CMAKE_CURRENT_SOURCE_DIR}/src/parser ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode/pal)
   endif()
 
   # source files
@@ -248,6 +327,9 @@ if(DEPENDENCIES_MET)
   if(IS_WINDOWS)
     set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
     target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_BUILD_WINDOWS=1)
+
+    # Set static runtime library to match PAL (works for both MSVC and Clang)
+    set_property(TARGET ${PROJECT_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   else()
     target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_BUILD_LINUX=1)
   endif()

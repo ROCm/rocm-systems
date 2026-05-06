@@ -27,7 +27,11 @@ THE SOFTWARE.
 #include <vector>
 #include <string>
 #include <algorithm>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#if defined(_MSC_VER) && _MSC_VER >= 1914
+    // MSVC 2017 15.7 and later have full C++17 filesystem support
+    #include <filesystem>
+    namespace fs = std::filesystem;
+#elif __cplusplus >= 201703L && __has_include(<filesystem>)
     #include <filesystem>
     namespace fs = std::filesystem;
 #else
@@ -41,13 +45,19 @@ THE SOFTWARE.
     #include <rocdecode/rocdecode_host.h>
 #endif
 
+// Platform-compatible visibility attribute
+#ifdef _MSC_VER
+    #define HIDDEN_ATTR
+#else
+    #define HIDDEN_ATTR __attribute__((visibility("hidden")))
+#endif
 
-__attribute__((visibility("hidden"))) inline bool is_error(rocDecStatus status)
+HIDDEN_ATTR inline bool is_error(rocDecStatus status)
 {
     return status != ROCDEC_SUCCESS;
 }
 
-__attribute__((visibility("hidden"))) inline const char* error_string(rocDecStatus status)
+HIDDEN_ATTR inline const char* error_string(rocDecStatus status)
 {
     return rocDecGetErrorName(status);
 }
@@ -60,7 +70,7 @@ struct Rect {
 };
 
 template <typename Status, typename... Args>
-__attribute__((visibility("hidden"))) inline void report_error(
+HIDDEN_ATTR inline void report_error(
     Status status, const char* function_name, const char* file_name, int line, Args&&... args)
 {
     ((std::cerr << "ERROR: " << error_string(status) << "; " << function_name << "; "

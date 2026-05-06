@@ -37,6 +37,10 @@ THE SOFTWARE.
 #include "vaapi/vaapi_videodecoder.h"
 #endif
 
+#ifdef ROCDECODE_BUILD_WINDOWS
+#include "pal/pal_videodecoder.h"
+#endif
+
 struct HipInteropDeviceMem {
     hipExternalMemory_t hip_ext_mem; // Interface to the vaapi-hip interop
     uint8_t* hip_mapped_device_mem; // Mapped device memory for the YUV plane
@@ -61,6 +65,9 @@ private:
     rocDecStatus FreeVideoFrame(int pic_idx);
 #ifdef ROCDECODE_BUILD_LINUX
     VaapiVideoDecoder va_video_decoder_;
+#endif
+#ifdef ROCDECODE_BUILD_WINDOWS
+    std::unique_ptr<rocdec::PalVideoDecoder> pal_video_decoder_;
 #endif
     RocDecoderCreateInfo decoder_create_info_;
     std::vector<HipInteropDeviceMem> hip_interop_;

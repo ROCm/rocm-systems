@@ -26,8 +26,11 @@ THE SOFTWARE.
 #ifdef ROCDECODE_BUILD_LINUX
 RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): va_video_decoder_{decoder_create_info}, decoder_create_info_{decoder_create_info} {
 }
+#elif defined(ROCDECODE_BUILD_WINDOWS)
+RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): decoder_create_info_{decoder_create_info} {
+    pal_video_decoder_ = std::make_unique<rocdec::PalVideoDecoder>();
+}
 #else
-// Windows: Stub implementation - will be replaced with Windows backend
 RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): decoder_create_info_{decoder_create_info} {
 }
 #endif
@@ -69,9 +72,21 @@ rocDecStatus RocDecoder::InitializeDecoder() {
         FunctionExitLog(g_rocdec_logger);
         return rocdec_status;
     }
+#elif defined(ROCDECODE_BUILD_WINDOWS)
+    rocdec_status = pal_video_decoder_->Initialize(
+        decoder_create_info_.codec_type,
+        decoder_create_info_.width,
+        decoder_create_info_.height,
+        decoder_create_info_.bit_depth_minus_8 + 8,
+        decoder_create_info_.num_decode_surfaces
+    );
+    if (rocdec_status != ROCDEC_SUCCESS) {
+        CriticalLog(g_rocdec_logger, "Failed to initialize the PAL Video decoder.");
+        FunctionExitLog(g_rocdec_logger);
+        return rocdec_status;
+    }
 #else
-    // Windows: Stub implementation - will be replaced with Windows backend
-    CriticalLog(g_rocdec_logger, "Windows decoder backend not yet implemented.");
+    CriticalLog(g_rocdec_logger, "No decoder backend available.");
     rocdec_status = ROCDEC_NOT_SUPPORTED;
 #endif
     FunctionExitLog(g_rocdec_logger);
@@ -86,9 +101,13 @@ rocDecStatus RocDecoder::DecodeFrame(RocdecPicParams *pic_params) {
     if (rocdec_status != ROCDEC_SUCCESS) {
         ErrorLog(g_rocdec_logger, "Decode submission is not successful.");
     }
+#elif defined(ROCDECODE_BUILD_WINDOWS)
+    rocdec_status = pal_video_decoder_->DecodeFrame(pic_params);
+    if (rocdec_status != ROCDEC_SUCCESS) {
+        ErrorLog(g_rocdec_logger, "PAL decode submission failed.");
+    }
 #else
-    // Windows: Stub implementation - will be replaced with Windows backend
-    ErrorLog(g_rocdec_logger, "Windows decoder backend not yet implemented.");
+    ErrorLog(g_rocdec_logger, "No decoder backend available.");
     rocdec_status = ROCDEC_NOT_SUPPORTED;
 #endif
     FunctionExitLog(g_rocdec_logger);
@@ -103,9 +122,13 @@ rocDecStatus RocDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode
     if (rocdec_status != ROCDEC_SUCCESS) {
         ErrorLog(g_rocdec_logger, "Failed to query the decode status.");
     }
+#elif defined(ROCDECODE_BUILD_WINDOWS)
+    rocdec_status = pal_video_decoder_->GetDecodeStatus(pic_idx, decode_status);
+    if (rocdec_status != ROCDEC_SUCCESS) {
+        ErrorLog(g_rocdec_logger, "Failed to query PAL decode status.");
+    }
 #else
-    // Windows: Stub implementation - will be replaced with Windows backend
-    ErrorLog(g_rocdec_logger, "Windows decoder backend not yet implemented.");
+    ErrorLog(g_rocdec_logger, "No decoder backend available.");
     rocdec_status = ROCDEC_NOT_SUPPORTED;
 #endif
     FunctionExitLog(g_rocdec_logger);
@@ -138,9 +161,15 @@ rocDecStatus RocDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconf
         FunctionExitLog(g_rocdec_logger);
         return rocdec_status;
     }
+#elif defined(ROCDECODE_BUILD_WINDOWS)
+    rocdec_status = pal_video_decoder_->Reconfigure(reconfig_params->width, reconfig_params->height);
+    if (rocdec_status != ROCDEC_SUCCESS) {
+        CriticalLog(g_rocdec_logger, "PAL decoder reconfiguration failed.");
+        FunctionExitLog(g_rocdec_logger);
+        return rocdec_status;
+    }
 #else
-    // Windows: Stub implementation - will be replaced with Windows backend
-    CriticalLog(g_rocdec_logger, "Windows decoder backend not yet implemented.");
+    CriticalLog(g_rocdec_logger, "No decoder backend available.");
     rocdec_status = ROCDEC_NOT_SUPPORTED;
 #endif
     FunctionExitLog(g_rocdec_logger);
