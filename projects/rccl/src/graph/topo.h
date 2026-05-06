@@ -12,6 +12,7 @@
 #include "core.h"
 #include "xml.h"
 #include "net.h"
+#include "os.h"
 #include "archinfo.h"
 #include <string.h>
 
@@ -179,7 +180,7 @@ struct ncclTopoNode {
       int arch;
       int vendor;
       int model;
-      cpu_set_t affinity;
+      ncclAffinity affinity;
     }cpu;
     struct {
       uint64_t device;
@@ -268,6 +269,7 @@ ncclResult_t ncclTopoGetGraphFromXml(struct ncclXmlNode *xmlGraphs, struct ncclT
 ncclResult_t ncclTopoGetXmlFromGraphs(int ngraphs, struct ncclTopoGraph** graphs, struct ncclTopoSystem* system, struct ncclXml *xml);
 
 ncclResult_t ncclTopoGetCompCap(struct ncclTopoSystem* system, int* ccMin, int* ccMax);
+ncclResult_t ncclTopoGetMinNetBw(struct ncclTopoSystem* system, float* bw);
 
 void rcclApplyTuningOverrides(struct ncclTopoSystem* system);
 
