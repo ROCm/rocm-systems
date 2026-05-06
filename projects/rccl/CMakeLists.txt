@@ -57,6 +57,14 @@ endif()
 # RCCL project
 #==================================================================================================
 project(rccl CXX)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(NCCL_OS_WINDOWS ON)
+    add_definitions(-DNCCL_OS_WINDOWS)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(NCCL_OS_LINUX ON)
+    add_definitions(-DNCCL_OS_LINUX)
+endif()
 set(ENV{NCCL_USE_CMAKE} "1")
 
 # Build options
@@ -653,9 +661,9 @@ if(BUILD_TESTS)
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
   if(BUILD_EXT_EXAMPLES)
-    add_subdirectory(ext-net/example)
-    add_subdirectory(ext-tuner/example)
-    add_subdirectory(ext-profiler/example)
+    add_subdirectory(plugins/net/example)
+    add_subdirectory(plugins/tuner/example)
+    add_subdirectory(plugins/profiler/example)
   endif()
   add_subdirectory(test)
 

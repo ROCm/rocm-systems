@@ -130,6 +130,28 @@ fail:
   goto exit;
 }
 
+bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty);
+
+bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, ncclSymRegType_t winRegType) {
+  if (!ncclCeImplemented(coll, red, ty)) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: not implemented");
+    return false;
+  }
+  if (comm->nNodes > 1) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: comm is not a single node");
+    return false;
+  }
+  if (!comm->symmetricSupport) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: symmetric support is not enabled");
+    return false;
+  }
+  if (winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: window registration type %d is not supported", winRegType);
+    return false;
+  }
+  return true;
+}
+
 bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
   int driverVersion;
   if (ncclCudaDriverVersion(&driverVersion) != ncclSuccess) return false;
@@ -238,7 +260,7 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
     batchParams[*opIdx] = {};
     batchParams[*opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
     batchParams[*opIdx].waitValue.address  = (CUdeviceptr)(isComplete ? (void*)&completePtrs[r] : (void*)&readyPtrs[r]);
-    batchParams[*opIdx].waitValue.value = waitValue;
+    batchParams[*opIdx].waitValue.value = capturing ? GRAPH_SYNC_VALUE : currentSeq;
     batchParams[*opIdx].waitValue.flags = CU_STREAM_WAIT_VALUE_EQ;
     (*opIdx)++;
   }
@@ -250,8 +272,9 @@ fail:
 }
 
 
-ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream) {
+ncclResult_t ncclMemOpSync(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
+  void* ceSyncHandle = NULL;
 
   // Get pointers to the ready and complete synchronization arrays
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
@@ -336,8 +359,12 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
 #endif
 }
 
-ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsParams* params, cudaStream_t stream) {
+ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeCollArgs* args,
+                                  struct ncclCeBatchOpsParams* params, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
+  bool capturing;
+  int driverVersion;
+  void* ceBatchHandle = NULL;
 
 #ifdef ENABLE_FAULT_INJECTION
   NCCLCHECK(ceFaultCheck(comm, CE_FAULT_LAUNCH_OP, "ncclCeLaunchBatchOps"));
@@ -349,10 +376,13 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   }
 
   // Check if we are in a CUDA graph capture
-  bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
+  capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
 
-  int driverVersion;
   NCCLCHECKGOTO(ncclCudaDriverVersion(&driverVersion), ret, fail);
+
+  // Start CE batch profiling
+  NCCLCHECKGOTO(ncclProfilerStartCeBatchEvent(comm, args, params, stream, &ceBatchHandle),
+                ret, fail);
 
   //--------------Graph capture--------------
   // cudaMemcpyBatchAsync is not supported during CUDA graph capture
@@ -366,7 +396,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
         stream), ret, fail);
 
       if (params->intraBatchSync && ((i+1) % comm->ceColl.intraBatchSyncFreq == 0) && ((i+1) < params->numOps)) {
-        NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+        NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
       }
     }
   }
@@ -457,11 +487,15 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
           stream), ret, fail);
 
         if (params->intraBatchSync && ((i+1) % comm->ceColl.intraBatchSyncFreq == 0) && ((i+1) < params->numOps)) {
-          NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+          NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
         }
       }
     }
   }
+
+  // Stop CE batch profiling
+  NCCLCHECKGOTO(ncclProfilerStopCeBatchEvent(comm, ceBatchHandle, stream),
+                ret, fail);
 
 exit:
   return ret;
@@ -470,21 +504,20 @@ fail:
 }
 
 
-ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
+ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args,
+                             cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
-
-  // Calculate the size of each rank's data chunk
   const size_t chunkBytes = args->nElts * args->eltSize;
   uint8_t* mySendBuff = (uint8_t*)args->sendBuff;
   uint8_t* myRecvBuff = (uint8_t*)args->recvBuff + comm->rank * chunkBytes;
   void* peerRecvBuff;
   size_t offset;
-
   struct ncclCeBatchOpsParams batchOpsParams = {};
+
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
   // Ensure all ranks are ready before starting transfers
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
   // Copy own data to receive buffer if operation is out-of-place
   if (myRecvBuff != mySendBuff) {
@@ -509,10 +542,11 @@ ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args,
   batchOpsParams.intraBatchSync = (batchOpsParams.numOps > comm->ceColl.intraBatchSyncFreq && chunkBytes*batchOpsParams.numOps >= comm->ceColl.intraBatchSyncMsgThreshold);
 
   // Launch the batch operations
-  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batchOpsParams, stream), ret, fail);
+  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, args, &batchOpsParams, stream),
+                ret, fail);
 
   // Ensure all transfers are complete across all ranks
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
 exit:
   ncclCeFreeBatchOpsParams(&batchOpsParams);
@@ -530,12 +564,11 @@ ncclResult_t ncclCeAlltoAll(struct ncclComm* comm, struct ncclCeCollArgs* args, 
   uint8_t* myRecvBuff = (uint8_t*)args->recvBuff;
   void* peerRecvBuff;
   size_t offset;
-
   struct ncclCeBatchOpsParams batchOpsParams = {};
-  NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks * comm->nRanks), ret, fail);
+  NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
   // Ensure all ranks are ready before starting transfers
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
   // Copy data to other ranks: send data chunk for each destination rank
   for (int r = 0; r < comm->nRanks; r++) {
@@ -564,10 +597,10 @@ ncclResult_t ncclCeAlltoAll(struct ncclComm* comm, struct ncclCeCollArgs* args, 
   batchOpsParams.intraBatchSync = (batchOpsParams.numOps > comm->ceColl.intraBatchSyncFreq && chunkBytes*batchOpsParams.numOps >= comm->ceColl.intraBatchSyncMsgThreshold);
 
   // Launch the batch operations
-  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batchOpsParams, stream), ret, fail);
+  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, args, &batchOpsParams, stream), ret, fail);
 
   // Ensure all transfers are complete across all ranks
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
 exit:
   ncclCeFreeBatchOpsParams(&batchOpsParams);
@@ -579,19 +612,18 @@ fail:
 ncclResult_t ncclCeScatter(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
-  // Calculate the size of data root sends to each rank
+  // Calculate the size of data each rank sends to every other rank
   const size_t chunkBytes = args->nElts * args->eltSize;
   uint8_t* mySendBuff = (uint8_t*)args->sendBuff;
   uint8_t* myRecvBuff = (uint8_t*)args->recvBuff;
   int rootRank = args->rootRank;
   void* peerDstPtr;
   size_t offset;
-
   struct ncclCeBatchOpsParams batchOpsParams = {};
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
   // Ensure all ranks are ready before starting transfers
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
   if (comm->rank == rootRank) {
     // Check if this is an in-place scatter operation
@@ -624,10 +656,10 @@ ncclResult_t ncclCeScatter(struct ncclComm* comm, struct ncclCeCollArgs* args, c
   // Non-root ranks don't need to perform any copy operations
 
   // Launch the batch operations
-  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batchOpsParams, stream), ret, fail);
+  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, args, &batchOpsParams, stream), ret, fail);
 
   // Ensure all transfers are complete across all ranks
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
 exit:
   ncclCeFreeBatchOpsParams(&batchOpsParams);
@@ -639,19 +671,18 @@ fail:
 ncclResult_t ncclCeGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
-  // Calculate the size of data each rank sends to root
+  // Calculate the size of data each rank sends to every other rank
   const size_t chunkBytes = args->nElts * args->eltSize;
   uint8_t* mySendBuff = (uint8_t*)args->sendBuff;
   uint8_t* myRecvBuff = (uint8_t*)args->recvBuff;
   int rootRank = args->rootRank;
   void* peerRecvBuff;
   size_t offset;
-
   struct ncclCeBatchOpsParams batchOpsParams = {};
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, 1), ret, fail);
 
   // Ensure all ranks are ready before starting transfers
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
   if (comm->rank == rootRank) {
     // Root rank copies its own data to the correct position in receive buffer
@@ -674,10 +705,10 @@ ncclResult_t ncclCeGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cu
   }
 
   // Launch the batch operations
-  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batchOpsParams, stream), ret, fail);
+  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, args, &batchOpsParams, stream), ret, fail);
 
   // Ensure all transfers are complete across all ranks
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
 exit:
   ncclCeFreeBatchOpsParams(&batchOpsParams);
@@ -691,22 +722,34 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
   cudaStream_t stream = comm->planner.streams->stream;
   struct ncclCeCollArgs* args = plan->ceCollArgs;
 
+  // Start CE collective profiling
+  NCCLCHECKGOTO(ncclProfilerStartCeCollEvent(comm, args, stream),
+                ret, fail);
+
   switch (args->func) {
     case ncclFuncAllGather:
-      NCCLCHECKGOTO(ncclCeAllGather(comm, args, stream), ret, fail);
+      NCCLCHECKGOTO(ncclCeAllGather(comm, args, stream),
+                    ret, fail);
       break;
     case ncclFuncAlltoAll:
-      NCCLCHECKGOTO(ncclCeAlltoAll(comm, args, stream), ret, fail);
+      NCCLCHECKGOTO(ncclCeAlltoAll(comm, args, stream),
+                    ret, fail);
       break;
     case ncclFuncScatter:
-      NCCLCHECKGOTO(ncclCeScatter(comm, args, stream), ret, fail);
+      NCCLCHECKGOTO(ncclCeScatter(comm, args, stream),
+                    ret, fail);
       break;
     case ncclFuncGather:
-      NCCLCHECKGOTO(ncclCeGather(comm, args, stream), ret, fail);
+      NCCLCHECKGOTO(ncclCeGather(comm, args, stream),
+                    ret, fail);
       break;
     default:
       ret = ncclInvalidUsage;
   }
+
+  // Stop CE collective profiling
+  NCCLCHECKGOTO(ncclProfilerStopCeCollEvent(comm, args, stream),
+                ret, fail);
 
 exit:
   return ret;
