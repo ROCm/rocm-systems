@@ -34,7 +34,7 @@
 #include <type_traits>
 #include <vector>
 #include <atomic>
-#include "util/reg_offsets.h"
+#include "lib/aqlprofile/util/reg_offsets.h"
 
 #define APPEND_COMMAND_WRAPPER(cmdbuf, ...)                                                        \
     do                                                                                             \

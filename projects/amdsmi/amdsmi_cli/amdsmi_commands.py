@@ -33,6 +33,7 @@ import time
 import copy
 
 from _version import __version__
+
 from amdsmi_cli_exceptions import (
     AmdSmiInvalidParameterException,
     AmdSmiRequiredCommandException,
@@ -110,17 +111,17 @@ class AMDSMICommands:
                 else:
                     raise e
 
-            # Resolve the node handle.
-            for dev in self.device_handles:
-                try:
-                    nh = amdsmi_interface.amdsmi_get_node_handle(dev)
-                    if nh is not None:
-                        self.node_handle = nh
-                        # Only need one handle, break after first success
-                        break
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    logging.debug("Unable to get node handle: %s", e.get_error_info())
-                    # Node handle functionality is optional, so don't raise an error
+        # Resolve the node handle (independent of AINIC init; needed for amd-smi node).
+        for dev in self.device_handles:
+            try:
+                nh = amdsmi_interface.amdsmi_get_node_handle(dev)
+                if nh is not None:
+                    self.node_handle = nh
+                    # Only need one handle, break after first success
+                    break
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Unable to get node handle: %s", e.get_error_info())
+                # Node handle functionality is optional, so don't raise an error
 
         if self.helpers.is_amd_hsmp_initialized():
             try:
@@ -176,6 +177,7 @@ class AMDSMICommands:
             version_args = argparse.Namespace()
             version_args.gpu_version = False
             version_args.cpu_version = False
+            version_args.nic_version = False
             self.version(version_args)
             sys.exit(-1)
 
@@ -192,10 +194,10 @@ class AMDSMICommands:
             args.cpu_version = cpu_version
         if nic_version:
             args.nic_version = nic_version
-        # if no args are given, display everything
+        # if no args are given, display everything available on this build
         if args.gpu_version is None and args.cpu_version is None and args.nic_version is None:
             args.gpu_version = True
-            args.cpu_version = True
+            args.cpu_version = self.helpers.is_amd_hsmp_initialized()
             args.nic_version = True
 
         if not self.group_check_printed:
@@ -370,7 +372,7 @@ class AMDSMICommands:
         self.logger.store_output(args.gpu, "node_id", node_id)
         self.logger.store_output(args.gpu, "partition_id", partition_id)
 
-        if args.e:
+        if args.enumeration:
             try:
                 enumeration_info = amdsmi_interface.amdsmi_get_gpu_enumeration_info(args.gpu)
             except amdsmi_exception.AmdSmiLibraryException:
@@ -380,6 +382,7 @@ class AMDSMICommands:
                     "hsa_id": "N/A",
                     "hip_id": "N/A",
                     "hip_uuid": "N/A",
+                    "oam_id": "N/A",
                 }
 
             # now store all the fields exactly once:
@@ -396,6 +399,7 @@ class AMDSMICommands:
             self.logger.store_output(args.gpu, "hsa_id", enumeration_info["hsa_id"])
             self.logger.store_output(args.gpu, "hip_id", enumeration_info["hip_id"])
             self.logger.store_output(args.gpu, "hip_uuid", enumeration_info["hip_uuid"])
+            self.logger.store_output(args.gpu, "oam_id", enumeration_info["oam_id"])
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
@@ -1810,7 +1814,26 @@ class AMDSMICommands:
                     else:
                         static_dict["mem_carveout"] = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["mem_carveout"] = "N/A"
+                # UMA carveout is only exposed by APU VBIOSes that support
+                # ATCS function 0xA. On dGPUs and Instinct parts (including
+                # MI300A) the sysfs attribute does not exist and the library
+                # returns NOT_SUPPORTED; surface a clearer reason than bare N/A.
+                not_supported = (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
+                if not_supported and not (
+                    self.logger.is_json_format() or self.logger.is_csv_format()
+                ):
+                    # Human-readable: give a descriptive reason. JSON/CSV
+                    # consumers keep the legacy bare "N/A" for back-compat.
+                    static_dict["mem_carveout"] = (
+                        "N/A (UMA carveout is not supported on this ASIC/VBIOS)"
+                    )
+                elif self.logger.is_csv_format():
+                    static_dict["mem_carveout_index"] = "N/A"
+                else:
+                    static_dict["mem_carveout"] = "N/A"
                 logging.debug(
                     "Failed to get mem carveout info for gpu %s | %s", gpu_id, e.get_error_info()
                 )
@@ -4596,7 +4619,8 @@ class AMDSMICommands:
             static_dict["power_metrics"] = {}
             try:
                 soc_pow = amdsmi_interface.amdsmi_get_cpu_socket_power(args.cpu)
-                static_dict["power_metrics"]["socket power"] = soc_pow
+                soc_pow = self.helpers.convert_SI_unit(float(soc_pow), self.helpers.SI_Unit.MILLI)
+                static_dict["power_metrics"]["socket power"] = f"{soc_pow:.3f} W"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["power_metrics"]["socket power"] = "N/A"
                 logging.debug(
@@ -4605,7 +4629,10 @@ class AMDSMICommands:
 
             try:
                 soc_pwr_limit = amdsmi_interface.amdsmi_get_cpu_socket_power_cap(args.cpu)
-                static_dict["power_metrics"]["socket power limit"] = soc_pwr_limit
+                soc_pwr_limit = self.helpers.convert_SI_unit(
+                    float(soc_pwr_limit), self.helpers.SI_Unit.MILLI
+                )
+                static_dict["power_metrics"]["socket power limit"] = f"{soc_pwr_limit:.3f} W"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["power_metrics"]["socket power limit"] = "N/A"
                 logging.debug(
@@ -4614,7 +4641,12 @@ class AMDSMICommands:
 
             try:
                 soc_max_pwr_limit = amdsmi_interface.amdsmi_get_cpu_socket_power_cap_max(args.cpu)
-                static_dict["power_metrics"]["socket max power limit"] = soc_max_pwr_limit
+                soc_max_pwr_limit = self.helpers.convert_SI_unit(
+                    float(soc_max_pwr_limit), self.helpers.SI_Unit.MILLI
+                )
+                static_dict["power_metrics"]["socket max power limit"] = (
+                    f"{soc_max_pwr_limit:.3f} W"
+                )
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["power_metrics"]["socket max power limit"] = "N/A"
                 logging.debug(
@@ -4743,6 +4775,9 @@ class AMDSMICommands:
                 mode, util, ppt_limit = amdsmi_interface.amdsmi_get_cpu_pwr_efficiency_mode(
                     args.cpu
                 )
+                ppt_limit = self.helpers.convert_SI_unit(
+                    float(ppt_limit), self.helpers.SI_Unit.MILLI
+                )
 
                 # Always show mode
                 static_dict["pwr_eff_mode"]["mode"] = f"{mode}"
@@ -4750,7 +4785,7 @@ class AMDSMICommands:
                 # Only show util and ppt_limit for modes 4 and 5
                 if mode in [4, 5]:
                     static_dict["pwr_eff_mode"]["util"] = f"{util}%"
-                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit} Watts"
+                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit:.3f} W"
                 else:
                     # For modes 0-3, util and ppt_limit are not displayed
                     pass
@@ -5029,7 +5064,10 @@ class AMDSMICommands:
             static_dict["sdps_limit"] = {}
             try:
                 sdps_limit = amdsmi_interface.amdsmi_get_cpu_sdps_limit(args.cpu)
-                static_dict["sdps_limit"]["value"] = sdps_limit
+                sdps_limit = self.helpers.convert_SI_unit(
+                    float(sdps_limit), self.helpers.SI_Unit.MILLI
+                )
+                static_dict["sdps_limit"]["value"] = f"{sdps_limit:.3f} W"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["sdps_limit"]["value"] = "N/A"
                 logging.debug(
@@ -5167,7 +5205,8 @@ class AMDSMICommands:
             static_dict["ccd_power"] = {}
             try:
                 power = amdsmi_interface.amdsmi_get_cpu_core_ccd_power(args.core)
-                static_dict["ccd_power"]["value"] = f"{power} Watts"
+                power = self.helpers.convert_SI_unit(float(power), self.helpers.SI_Unit.MILLI)
+                static_dict["ccd_power"]["value"] = f"{power:.3f} W"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["ccd_power"]["value"] = "N/A"
                 logging.debug(
@@ -7859,14 +7898,16 @@ class AMDSMICommands:
             static_dict["set_pwr_limit"] = {}
             try:
                 soc_max_pwr_limit = amdsmi_interface.amdsmi_get_cpu_socket_power_cap_max(args.cpu)
-                extract_numeric = soc_max_pwr_limit.split()[0]
-                max_power = int(extract_numeric)
-
-                amdsmi_interface.amdsmi_set_cpu_socket_power_cap(args.cpu, args.cpu_pwr_limit[0][0])
+                soc_max_pwr_limit = self.helpers.convert_SI_unit(
+                    float(soc_max_pwr_limit), self.helpers.SI_Unit.MILLI
+                )
+                max_power = int(soc_max_pwr_limit)
                 if args.cpu_pwr_limit[0][0] > max_power:
                     args.cpu_pwr_limit[0][0] = max_power
+
+                amdsmi_interface.amdsmi_set_cpu_socket_power_cap(args.cpu, args.cpu_pwr_limit[0][0])
                 static_dict["set_pwr_limit"]["Response"] = (
-                    f"{args.cpu_pwr_limit[0][0] / 1000:.3f} mW"
+                    f"{args.cpu_pwr_limit[0][0] / 1000:.3f} W"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["set_pwr_limit"]["Response"] = (
@@ -7940,7 +7981,7 @@ class AMDSMICommands:
                 if mode in [4, 5]:
                     ppt_limit_watts = updated_ppt_limit / 1000.0  # Convert milliwatts to watts
                     static_dict["pwr_eff_mode"]["util"] = f"{updated_util}%"
-                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit_watts} Watts"
+                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit_watts} W"
                 else:
                     # For modes 0-3, util and ppt_limit are not displayed
                     pass
@@ -8242,7 +8283,7 @@ class AMDSMICommands:
                 amdsmi_interface.amdsmi_set_cpu_sdps_limit(args.cpu, args.cpu_sdps_limit[0][0])
                 sdps_limit_watts = float(args.cpu_sdps_limit[0][0]) / 1000
                 static_dict["sdps_limit"]["Response"] = (
-                    f"Set, VALUE: {sdps_limit_watts:.3f} Watts, successful"
+                    f"Set, VALUE: {sdps_limit_watts:.3f} W, successful"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["sdps_limit"]["Response"] = (
@@ -9261,11 +9302,25 @@ class AMDSMICommands:
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                     raise PermissionError("Command requires elevation") from e
-                self.logger.store_output(
-                    args.gpu,
-                    "mem_carveout",
-                    f"[{e.get_error_info(detailed=False)}] Unable to set VRAM carveout to index {args.mem_carveout}",
-                )
+                if (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                ):
+                    # Surface an actionable message instead of a raw error code.
+                    # Avoid naming specific products here so the message does not
+                    # age as new ASICs add or drop UMA carveout support.
+                    self.logger.store_output(
+                        args.gpu,
+                        "mem_carveout",
+                        "Not supported: UMA carveout is only available on APUs whose"
+                        ' VBIOS exposes the ATCS "Set UMA Allocation Size" function.',
+                    )
+                else:
+                    self.logger.store_output(
+                        args.gpu,
+                        "mem_carveout",
+                        f"[{e.get_error_info(detailed=False)}] Unable to set VRAM carveout to index {args.mem_carveout}",
+                    )
                 self.logger.print_output()
 
             self.logger.clear_multiple_devices_output()
@@ -10201,7 +10256,9 @@ class AMDSMICommands:
             args.pcie = pcie
         if process:
             args.process = process
-        if brcm_nic or args.brcm_nic:
+        if self.helpers.is_brcm_nic_initialized() and (
+            brcm_nic or getattr(args, "brcm_nic", False)
+        ):
             self.metric_nic(
                 args,
                 multiple_devices,
@@ -10213,7 +10270,9 @@ class AMDSMICommands:
                 nic_temperature=args.temperature,
             )
             return
-        if brcm_switch or args.brcm_switch:
+        if self.helpers.is_brcm_switch_initialized() and (
+            brcm_switch or getattr(args, "brcm_switch", False)
+        ):
             self.metric_switch(
                 args,
                 multiple_devices,
@@ -12525,8 +12584,9 @@ class AMDSMICommands:
             # rest of power usage info; Will assume we're always trying to get PPT0 for now
             try:
                 power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(processor, 0)
+                socket_power_limit = power_cap_info["power_cap"]
                 socket_power_limit = self.helpers.convert_SI_unit(
-                    power_cap_info["power_cap"], AMDSMIHelpers.SI_Unit.MICRO
+                    socket_power_limit, AMDSMIHelpers.SI_Unit.MICRO
                 )
                 power_usage = {"current_power": current_power, "power_limit": socket_power_limit}
             except amdsmi_exception.AmdSmiLibraryException as e:

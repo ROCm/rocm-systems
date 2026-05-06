@@ -142,7 +142,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
         (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2)))) {
     // Enable Barrier Value packet is only for MI2XX/300
     barrier_value_packet_ = true;
-    queue_pipe_dist_ = DEBUG_HIP_DYNAMIC_QUEUES == 2 ? true : false;
+    queue_pipe_dist_ = dynamic_queues_ >= 1;
   }
 
   if (gfxipMajor == 9 && gfxipMinor >= 4) {
@@ -159,7 +159,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
      } else {
         enableWgpMode_ = GPU_ENABLE_WGP_MODE;
      }
-     if (gfxipMinor == 1) {
+     if (gfxipMajor == 10 && gfxipMinor == 1) {
        // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
        // TODO: This should be updated when ROCr support custom pitch
        imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;

@@ -5,6 +5,7 @@
 
 #include "core/config.hpp"
 #include "library/pmc/collectors/gpu/device.hpp"
+#include "library/pmc/collectors/gpu/gpu_driver.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
@@ -35,10 +36,10 @@ struct gpu_traits
     // Required type aliases for base::collector
     using metrics_t         = pmc::collectors::gpu::metrics;
     using enabled_metrics_t = pmc::collectors::gpu::enabled_metrics;
-    using device_t          = device<typename DriverProvider::driver_t>;
+    using driver_t          = pmc::collectors::gpu::gpu_driver;
+    using device_t          = device<driver_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
-    using driver_t          = typename DriverProvider::driver_t;
 
     // Required constants
     static constexpr const char* device_name = "GPU";
@@ -107,7 +108,7 @@ struct gpu_traits
      */
     [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&      device,
                                                const enabled_metrics_t& enabled,
-                                               uint64_t                 timestamp)
+                                               std::uint64_t            timestamp)
     {
         return device->get_gpu_metrics(enabled, timestamp);
     }
@@ -153,7 +154,7 @@ struct gpu_traits
             return entries;
         }
 
-        auto devices = provider->template get_devices<device_t>(device_type::GPU);
+        auto devices = provider->template get_gpu_devices<device_t, driver_t>();
 
         for(auto& device : devices)
         {

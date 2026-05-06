@@ -1273,12 +1273,15 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   if (header != 0) {
     packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), header, rest);
   }
-  const auto virtual_pipe_prefix = [this]() -> const char* {
-    if (!roc_device_.settings().queue_pipe_dist_) return "";
-    static thread_local char buf[32];
-    snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,", gpu_queue_->id % roc_device_.NumHwPipes());
-    return buf;
-  }();
+  const auto virtual_pipe_prefix = IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
+                                     ? [this]() -> const char* {
+                                         if (!roc_device_.settings().queue_pipe_dist_) return "";
+                                         static thread_local char buf[32];
+                                         snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                                                  gpu_queue_->id % roc_device_.NumHwPipes());
+                                         return buf;
+                                       }()
+                                     : "";
   if (dev().settings().ext_dispatch_packet_) {
     logAqlDispatchPacketExtended(
         gpu_queue_, header, reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(packet),
@@ -1289,11 +1292,16 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
                          Hsa::queue_load_read_index_scacquire(gpu_queue_), index,
                          virtual_pipe_prefix);
   }
-  // Optimization for native AQL path in windows has problems with PM4 emulation,
-  // skipping the doorbel will not wake up the AQL worker thread
-  //if (IS_WINDOWS && !dev().IsPm4Emulation() && (blocking || !hasPendingDispatch_))
-  {
+  // Optimization for native AQL path in Windows has problems with PM4 emulation,
+  // skipping the doorbell will not wake up the AQL worker thread
+  uint32_t skip_limit = DEBUG_CLR_DOORBELL_SKIP;
+  bool ring_doorbell = IS_LINUX || dev().IsPm4Emulation() || blocking ||
+                       (skippedDispatches_ >= skip_limit);
+  if (ring_doorbell) {
     Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+    skippedDispatches_ = 0;
+  } else {
+    ++skippedDispatches_;
   }
 
   // Mark the flag indicating if a dispatch is outstanding.
@@ -1401,15 +1409,6 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
     addSystemScope_ = false;
   }
 
-  // Update cached fence state from the last packet's release scope.
-  auto expected_fence_state =
-      extractAqlBits(lastHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
-                     HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
-  if (expected_fence_state == amd::Device::kCacheStateSystem) {
-    setFenceDirty(false);
-  }
-  fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
-
   uint8_t* queueBase = static_cast<uint8_t*>(gpu_queue_->base_address);
 
   // Reserve ALL slots with a single wptr bump, then submit in kPeriod-sized chunks.
@@ -1418,6 +1417,18 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   // the yield never fires.
   uint64_t startIndex = Hsa::queue_add_write_index_screlease(gpu_queue_, numPackets);
   setFenceDirty(true);
+
+  // Update cached fence state from the last packet's release scope.
+  // Clear fence dirty if the last packet has system-scope release, matching
+  // the single-dispatch path in dispatchGenericAqlPacket (set dirty on reserve,
+  // then conditionally clear if system scope).
+  auto expected_fence_state =
+      extractAqlBits(lastHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                     HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
+  if (expected_fence_state == amd::Device::kCacheStateSystem) {
+    setFenceDirty(false);
+  }
+  fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
 
   const size_t kPeriod = DEBUG_HIP_GRAPH_BATCH_SIZE;
   auto* first_loc = reinterpret_cast<uint32_t*>(
@@ -1527,8 +1538,16 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   }
 
   hasPendingDispatch_ = true;
+
   auto* finalLastSlot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
       queueBase + ((startIndex + numPackets - 1) & queueMask) * kPacketSize);
+
+  // Skip the pending dispatch only when both conditions are met: a completion
+  // signal tracks the last packet and the fence is already clean (system scope).
+  if (finalLastSlot->completion_signal.handle != 0 && !isFenceDirty()) {
+    hasPendingDispatch_ = false;
+  }
+
   TrackQueueProgress(*finalLastSlot, startIndex + numPackets - 1, pre_patched);
 
   if (blocking) {
@@ -1619,13 +1638,15 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
 
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
   logAqlBarrierPacket(gpu_queue_, packetHeader, &barrier_packet_, read, index,
-                      [this]() -> const char* {
-                        if (!roc_device_.settings().queue_pipe_dist_) return "";
-                        static thread_local char buf[32];
-                        snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
-                                 gpu_queue_->id % roc_device_.NumHwPipes());
-                        return buf;
-                      }());
+                      IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
+                        ? [this]() -> const char* {
+                            if (!roc_device_.settings().queue_pipe_dist_) return "";
+                            static thread_local char buf[32];
+                            snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                                     gpu_queue_->id % roc_device_.NumHwPipes());
+                            return buf;
+                          }()
+                        : "");
 
   // Clear dependent signals for the next packet
   barrier_packet_.dep_signal[0] = hsa_signal_t{};
@@ -1702,13 +1723,15 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
 
   logAqlBarrierValuePacket(gpu_queue_, packetHeader, &barrier_value_packet_, read, index,
-                           [this]() -> const char* {
-                             if (!roc_device_.settings().queue_pipe_dist_) return "";
-                             static thread_local char buf[32];
-                             snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
-                                      gpu_queue_->id % roc_device_.NumHwPipes());
-                             return buf;
-                           }());
+                           IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
+                             ? [this]() -> const char* {
+                                 if (!roc_device_.settings().queue_pipe_dist_) return "";
+                                 static thread_local char buf[32];
+                                 snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                                          gpu_queue_->id % roc_device_.NumHwPipes());
+                                 return buf;
+                               }()
+                             : "");
   // Clear dependent signals for the next packet
   barrier_value_packet_.signal = hsa_signal_t{};
 }
@@ -1729,6 +1752,7 @@ bool VirtualGPU::releaseGpuMemoryFence(bool skip_cpu_wait) {
     // Dispatch barrier packet into the queue
     dispatchBarrierPacket(kBarrierPacketHeader);
     hasPendingDispatch_ = false;
+    skippedDispatches_ = 0;
     retainExternalSignals_ = false;
   }
 
@@ -1773,6 +1797,7 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
   timestamp_ = nullptr;
   command_ = nullptr;
   hasPendingDispatch_ = false;
+  skippedDispatches_ = 0;
   profiling_ = profiling;
   cooperative_ = cooperative;
 
@@ -1893,7 +1918,7 @@ VirtualGPU::~VirtualGPU() {
   if (hostcallBuffer_) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hostcall buffer %p", hostcallBuffer_);
     amd::disableHostcalls(hostcallBuffer_);
-    roc_device_.svmFree(hostcallBuffer_);
+    roc_device_.hostFree(hostcallBuffer_, hostcallBufferSize_);
   }
 }
 
@@ -4611,6 +4636,7 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to create hostcall buffer");
     return nullptr;
   }
+  hostcallBufferSize_ = size;
 
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
           "Created hostcall buffer %p (numPackets == %d, size == %d, align == "
@@ -4622,7 +4648,9 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
             "Failed to register hostcall buffer %p with listener",
             hostcallBuffer_);
-    dev().svmFree(hostcallBuffer_);
+    dev().hostFree(hostcallBuffer_, hostcallBufferSize_);
+    hostcallBuffer_ = nullptr;
+    hostcallBufferSize_ = 0;
     return nullptr;
   }
   return hostcallBuffer_;

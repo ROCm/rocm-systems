@@ -9,6 +9,7 @@
 #include "core.h"
 #include "socket.h"
 #include "net.h"
+#include "net_ib_cast_inspect.h"
 #include "graph.h"
 #include "utils.h"
 #include "param.h"
@@ -816,8 +817,6 @@ ncclResult_t IbCastSetNetAttr(void *ctx, ncclNetAttr_t *netAttr) {
 
 static ncclProfilerCallback_t ncclProfilerFunction;
 
-#define NCCL_IB_MAX_QPS 128
-
 #define NSEC_PER_USEC           1000ULL
 #define NSEC_PER_MSEC           (NSEC_PER_USEC * 1000)
 #define NSEC_PER_SEC            (NSEC_PER_MSEC * 1000)
@@ -907,6 +906,8 @@ struct ncclIbQpTxStats {
   uint64_t numMeasurements;
   double rtt;
 };
+
+/* NCCL_IB_MAX_QPS is defined in net_ib_cast_inspect.h (included above). */
 
 // Scratchpad for computing scheduler weights
 struct ncclIbQpTxSchedScratchpad {
@@ -1470,7 +1471,11 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->latency = 0; // Not set
   props->port = ibDev->portNum + ibDev->realPort;
   props->maxComms = ibDev->maxQp;
-  props->maxRecvs = NCCL_NET_IB_MAX_RECVS;
+  if (rcclCtsOffloadEnabled) {
+      props->maxRecvs = 1; 
+  } else {
+      props->maxRecvs = NCCL_NET_IB_MAX_RECVS;
+  }
   props->netDeviceType    = NCCL_NET_DEVICE_HOST;
   props->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
   props->maxP2pBytes = NCCL_MAX_NET_SIZE_BYTES;
@@ -1714,8 +1719,10 @@ struct alignas(32) ncclIbNetCommBase {
 struct ncclIbSendComm {
   struct ncclIbNetCommBase base;
   // Start with fifo and ibv structs as they have alignment restrictions
-  struct ncclIbSendFifo fifo[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
-  struct ncclIbSendFifoCtsInline fifo_inline[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  union {
+    struct ncclIbSendFifo fifo[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+    struct ncclIbSendFifoCtsInline fifo_inline[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  };
   struct ibv_sge sges[NCCL_NET_IB_MAX_RECVS];
   struct ibv_send_wr wrs[NCCL_NET_IB_MAX_RECVS + 1];
   // Each dev correlates to a mergedIbDev
@@ -1745,8 +1752,10 @@ struct ncclIbGpuFlush {
 };
 
 struct ncclIbRemFifo {
-  struct ncclIbSendFifo elems[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
-  struct ncclIbSendFifoCtsInline elems_cts_inline[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  union {
+    struct ncclIbSendFifo elems[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+    struct ncclIbSendFifoCtsInline elems_cts_inline[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  };
   uint64_t fifoTail;
   uint64_t addr;
   uint32_t flags;
@@ -1965,7 +1974,7 @@ ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendCo
   int channel_id = 0;
   *sendComm = NULL;
 
-  if (rcclAinicRoce) {
+  if (rcclAinicRoce && sendDevComm) {
     channel_id = ((ncclNet_ctxt_t *)sendDevComm)->chId;
   }
 
@@ -2075,11 +2084,7 @@ ib_recv_dev_list:
     devInfo->lid           = ibDev->portAttr.lid;
     devInfo->ibv_dev_index = commDev->base.ibDevN;
     // Prepare my fifo
-    if (rcclCtsInlineData) {
-      NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->fifoMr, commDev->base.pd, comm->fifo_inline, sizeof(struct ncclIbSendFifoCtsInline)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS, IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
-    } else {
-      NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->fifoMr, commDev->base.pd, comm->fifo, sizeof(struct ncclIbSendFifo)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS, IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
-    }
+    NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->fifoMr, commDev->base.pd, comm->fifo, sizeof(struct ncclIbSendFifo)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS, IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
     devInfo->fifoRkey = commDev->fifoMr->rkey;
 
     // Pack local GID info
@@ -2122,11 +2127,7 @@ ib_recv_dev_list:
     }
   }
   config = (ncclNetCommConfig_t*)ctx;
-  if (rcclCtsInlineData) {
-    meta.fifoAddr = (uint64_t)comm->fifo_inline;
-  } else {
-    meta.fifoAddr = (uint64_t)comm->fifo;
-  }
+  meta.fifoAddr = (uint64_t)comm->fifo;
   meta.sl = (ncclParamIbCastSl() != -1) ? ncclParamIbCastSl() : (config && config->trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? config->trafficClass : NCCL_IB_SL_DEFAULT;
   meta.tc = (ncclParamIbCastTc() != -1) ? ncclParamIbCastTc() : (config && config->trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? config->trafficClass : NCCL_IB_TC_DEFAULT;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
@@ -2293,7 +2294,7 @@ ncclResult_t IbCastAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle
   int channel_id = 0;
   *recvComm = NULL;
 
-  if (rcclAinicRoce) {
+  if (rcclAinicRoce && recvDevComm) {
     channel_id = ((ncclNet_ctxt_t *) recvDevComm)->chId;
   }
 
@@ -2464,15 +2465,9 @@ ib_recv:
 
     // Retain remote fifo info and prepare my RDMA ops
     rComm->remFifo.addr = remMeta.fifoAddr;
-    if (rcclCtsInlineData) {
-      NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->fifoMr, rCommDev->base.pd, &rComm->remFifo.elems_cts_inline,
-                                    sizeof(struct ncclIbSendFifoCtsInline)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS,
-                                    IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
-    } else {
-      NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->fifoMr, rCommDev->base.pd, &rComm->remFifo.elems,
-                                    sizeof(struct ncclIbSendFifo)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS,
-                                    IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
-    }
+    NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->fifoMr, rCommDev->base.pd, &rComm->remFifo.elems,
+                                  sizeof(struct ncclIbSendFifo)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS,
+                                  IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
     rCommDev->fifoSge.lkey = rCommDev->fifoMr->lkey;
     if (ncclIbUseInline) rComm->remFifo.flags = IBV_SEND_INLINE;
 
@@ -3883,3 +3878,88 @@ ncclNet_t netIbCast = {
   ncclIbSetProperties,
   ncclIbRefreshDevices
 */
+
+// =============================================================================
+// Test introspection API — exposes internal WRR scheduler state from a
+// sendComm handle.  Only intended for unit tests; not part of the public net
+// plugin ABI.
+// Struct definition and function prototypes live in src/include/net_ib_cast_inspect.h.
+// =============================================================================
+
+// ncclIbCastGetSchedState — copy WRR scheduler state out of a sendComm.
+// sendComm must be a valid ncclIbSendComm* obtained from IbCastConnect/IbCastAccept.
+// Returns ncclInvalidArgument if sendComm or out is null.
+extern "C" ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCastSchedState* out) {
+  if (!sendComm || !out) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*) sendComm;
+  struct ncclIbNetCommBase* base = &comm->base;
+
+  out->nqps      = base->nqps;
+  out->schedInit = base->qpTxSchedInit;
+  out->qpIndex   = base->rrQpTxSched.qpIndex;
+
+  out->initTotTokens   = base->rrQpTxSched.initTokens.totTokens;
+  out->activeTotTokens = base->rrQpTxSched.activeTokens.totTokens;
+
+  int n = (base->nqps < NCCL_IB_MAX_QPS) ? base->nqps : NCCL_IB_MAX_QPS;
+  for (int i = 0; i < n; i++) {
+    out->initQpTokens[i]   = base->rrQpTxSched.initTokens.qpTokens[i];
+    out->activeQpTokens[i] = base->rrQpTxSched.activeTokens.qpTokens[i];
+  }
+
+  out->schedEnable  = base->schedParms.enable;
+  out->doWrr        = base->schedParms.doWrr;
+  out->splitData    = base->schedParms.splitData;
+  out->splitDataMin = base->schedParms.splitDataMin;
+
+  return ncclSuccess;
+}
+
+// ncclIbCastSetTokens — force-initialize the WRR token table for testing.
+// Bypasses the RTT-based IbCastQpSchedUpdateTx; immediately arms the scheduler.
+// qpTokens must have nqps entries; totTokens is computed as their sum.
+extern "C" ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps) {
+  if (!sendComm || !qpTokens || nqps <= 0 || nqps > NCCL_IB_MAX_QPS)
+    return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*) sendComm;
+  struct ncclIbNetCommBase* base = &comm->base;
+
+  // If the connection is already established, nqps must match the real QP count.
+  if (base->nqps > 0 && nqps != base->nqps)
+    return ncclInvalidArgument;
+
+  struct ncclIbRrTokens* t = &base->rrQpTxSched.initTokens;
+  t->totTokens = 0;
+  for (int i = 0; i < nqps; i++) {
+    t->qpTokens[i] = qpTokens[i];
+    t->totTokens  += qpTokens[i];
+  }
+  // Zero out entries beyond nqps so stale values from a previous call cannot
+  // be observed by the WRR cursor if base->nqps ever changes.
+  for (int i = nqps; i < NCCL_IB_MAX_QPS; i++)
+    t->qpTokens[i] = 0;
+
+  base->rrQpTxSched.activeTokens = *t;
+  base->rrQpTxSched.qpIndex      = 0;
+  base->qpTxSchedInit = true;
+
+  return ncclSuccess;
+}
+
+// ncclIbCastSetSchedParms — override schedParms fields for testing.
+// Takes effect on the very next isend; does not require re-connection.
+// Only the four fields most relevant to path-selection are exposed.
+extern "C" ncclResult_t ncclIbCastSetSchedParms(void* sendComm,
+                                                 bool schedEnable,
+                                                 bool doWrr,
+                                                 bool splitData,
+                                                 uint32_t splitDataMin) {
+  if (!sendComm) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*) sendComm;
+  struct ncclIbNetCommBase* base = &comm->base;
+  base->schedParms.enable       = schedEnable;
+  base->schedParms.doWrr        = doWrr;
+  base->schedParms.splitData    = splitData;
+  base->schedParms.splitDataMin = splitDataMin;
+  return ncclSuccess;
+}

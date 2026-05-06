@@ -7,7 +7,10 @@
 #ifndef ROCJITSU_ISA_OPERAND_H_
 #define ROCJITSU_ISA_OPERAND_H_
 
+#include "rocjitsu/isa/register_set.h"
+
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace rocjitsu {
@@ -33,8 +36,42 @@ public:
   /// @brief Human-readable name for this operand (e.g. "v0", "s4", or a literal).
   virtual std::string name() const { return std::to_string(encoding_value_); }
 
+  /// @brief Map this operand to an analysis register reference.
+  ///
+  /// @details Returns nullopt for literals, labels, waitcnt immediates, message
+  /// IDs, and other non-register operands. ISA-specific subclasses override
+  /// this using generated OperandType selector ranges so analysis never has to
+  /// parse the display string returned by name().
+  [[nodiscard]] virtual std::optional<RegisterRef> to_register_ref() const;
+
   /// @brief Raw encoding value from the instruction binary.
   int encoding_value() const { return encoding_value_; }
+
+  /// @brief Operand width in bits.
+  int size_bits() const { return size_bits_; }
+
+  /// @brief Whether this operand references a VGPR or AccVGPR.
+  /// @details Classified at construction time by ISA-specific subclasses using
+  /// the auto-generated is_vgpr_operand_type() from operand_types.h.
+  [[nodiscard]] bool is_vgpr() const { return is_vgpr_; }
+
+  /// @brief Unified VGPR index for this operand (0-511).
+  /// @details Maps AMDGPU encoding ranges to a unified index space:
+  ///   VGPRs 0-255, AccVGPRs 256-511. Only valid when is_vgpr() is true.
+  [[nodiscard]] uint16_t unified_vgpr_index() const {
+    if (encoding_value_ >= 768)
+      return static_cast<uint16_t>(encoding_value_ - 512);
+    if (encoding_value_ >= 512)
+      return static_cast<uint16_t>(encoding_value_ - 256);
+    if (encoding_value_ >= 256)
+      return static_cast<uint16_t>(encoding_value_ - 256);
+    return static_cast<uint16_t>(encoding_value_);
+  }
+
+  /// @brief Number of consecutive VGPRs this operand spans.
+  [[nodiscard]] uint16_t vgpr_count() const {
+    return static_cast<uint16_t>(std::max(1, size_bits_ / 32));
+  }
 
   /// @brief Read this operand as a scalar 32-bit value.
   /// @param wf Wavefront providing register state.
@@ -83,8 +120,20 @@ public:
   /// @param val Value to write.
   virtual void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const;
 
+  /// @brief Set a delegate operand that overrides read methods.
+  ///
+  /// @details Used by DPP/SDWA substitution to redirect reads through a
+  /// DppOperand without changing the member variable's type.
+  void set_delegate(Operand *d) { delegate_ = d; }
+  void clear_delegate() { delegate_ = nullptr; }
+  Operand *delegate() const { return delegate_; }
+
   int size_bits_ = 0;
   int encoding_value_ = 0;
+  bool is_vgpr_ = false;
+
+private:
+  Operand *delegate_ = nullptr;
 };
 
 /// @brief ISA-parameterized operand that adds an ISA-specific operand type tag.

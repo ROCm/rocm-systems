@@ -34,6 +34,7 @@ include(rj_add_device_kernel)
 
 rj_add_device_kernel(matmul_naive gfx950)
 rj_add_device_kernel(matmul_mfma gfx950)
+rj_add_device_kernel(matmul_mfma_16x16 gfx950)
 rj_add_device_kernel(matmul_tiled gfx950)
 rj_add_device_kernel(vector_add gfx950)
 
@@ -41,6 +42,7 @@ rj_add_device_kernel(vector_add gfx950)
 add_custom_target(device_kernels DEPENDS
     kernel_matmul_naive
     kernel_matmul_mfma
+    kernel_matmul_mfma_16x16
     kernel_matmul_tiled
     kernel_vector_add
 )

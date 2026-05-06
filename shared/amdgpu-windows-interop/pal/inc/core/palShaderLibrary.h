@@ -256,7 +256,7 @@ public:
     ///                                 size of the disassembly string in ShaderStats::isaSizeInBytes. Else reports 0.
     /// @returns Success if the stats were successfully obtained for this shader, including the shader disassembly size.
     ///          +ErrorUnavailable if a wrong shader stage for this pipeline was specified, or if some internal error
-    ///                           occured.
+    ///                           occurred.
     virtual Result GetShaderFunctionStats(
         Util::StringView<char> shaderExportName,
         ShaderLibStats*        pShaderStats) const = 0;

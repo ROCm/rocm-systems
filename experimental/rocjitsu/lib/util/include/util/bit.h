@@ -174,20 +174,62 @@ inline T extend_bits(T val, int num_bits) {
   return res;
 }
 
-/// @brief Return the popcount of val.
-/// @param[in] val Value whose bits are being counted.
-/// @returns Number of 1 bits.
-template <typename T> inline int popcount(T val) { return std::popcount<T>(val); }
+/// @brief Extract bits from a multi-word array at an arbitrary bit offset.
+/// @param[in] words Pointer to an array of unsigned integer words.
+/// @param[in] bit_offset Bit position of the first bit to extract (0-based across all words).
+/// @param[in] bit_width Number of bits to extract (must be <= digits of T).
+/// @returns The extracted bits, right-justified.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+inline T extract_bits_from_words(const T *words, int bit_offset, int bit_width) {
+  static constexpr int word_bits = std::numeric_limits<T>::digits;
+  assert(bit_offset >= 0);
+  assert(bit_width >= 0 && bit_width <= word_bits);
 
-/// @brief lead_zero_count. Return the leading zero count of val.
-/// @param[in] val Value whose bits are being counted.
-/// @returns Number of leading 0 bits.
-template <typename T> inline int lead_zero_count(T val) { return std::countl_zero<T>(val); }
+  if (bit_width == 0)
+    return T{0};
+  int word_idx = bit_offset / word_bits;
+  int local_offset = bit_offset % word_bits;
+  T m = bit_width >= word_bits ? std::numeric_limits<T>::max()
+                               : static_cast<T>((T{1} << bit_width) - 1);
+  if (local_offset + bit_width <= word_bits)
+    return (words[word_idx] >> local_offset) & m;
+  T lo = words[word_idx] >> local_offset;
+  T hi = words[word_idx + 1] << (word_bits - local_offset);
+  return (lo | hi) & m;
+}
 
-/// @brief Return the trailing zero count of val.
-/// @param[in] val Value whose bits are being counted.
-/// @returns Number of trailing 0 bits.
-template <typename T> inline int trail_zero_count(T val) { return std::countr_zero<T>(val); }
+/// @brief Insert bits into a multi-word array at an arbitrary bit offset.
+/// @param[in,out] words Pointer to an array of unsigned integer words.
+/// @param[in] bit_offset Bit position of the first bit to write (0-based across all words).
+/// @param[in] bit_width Number of bits to write (must be <= digits of T).
+/// @param[in] value The value to insert (only the lowest bit_width bits are used).
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+inline void insert_bits_into_words(T *words, int bit_offset, int bit_width, T value) {
+  static constexpr int word_bits = std::numeric_limits<T>::digits;
+  assert(bit_offset >= 0);
+  assert(bit_width >= 0 && bit_width <= word_bits);
+
+  if (bit_width == 0)
+    return;
+  int word_idx = bit_offset / word_bits;
+  int local_offset = bit_offset % word_bits;
+  T m = bit_width >= word_bits ? std::numeric_limits<T>::max()
+                               : static_cast<T>((T{1} << bit_width) - 1);
+  value &= m;
+  if (local_offset + bit_width <= word_bits) {
+    words[word_idx] = (words[word_idx] & ~(m << local_offset)) | (value << local_offset);
+    return;
+  }
+  int lo_bits = word_bits - local_offset;
+  T lo_mask = static_cast<T>((T{1} << lo_bits) - 1);
+  words[word_idx] =
+      (words[word_idx] & ~(lo_mask << local_offset)) | ((value & lo_mask) << local_offset);
+  int hi_bits = bit_width - lo_bits;
+  T hi_mask = static_cast<T>((T{1} << hi_bits) - 1);
+  words[word_idx + 1] = (words[word_idx + 1] & ~hi_mask) | ((value >> lo_bits) & hi_mask);
+}
 
 /// @brief Check if a number is a power of 2.
 /// @param[in] val Value to check.
@@ -196,6 +238,15 @@ template <typename T>
   requires metaprogramming::IsUnsignedInt<T>
 constexpr inline bool is_power_of_2(T val) {
   return std::has_single_bit(val);
+}
+
+/// @brief Round @p val up to the next multiple of @p alignment.
+/// @param alignment Must be a power of 2.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline T align_up(T val, T alignment) {
+  assert(std::has_single_bit(alignment));
+  return (val + alignment - 1) & ~(alignment - 1);
 }
 
 } // namespace util
