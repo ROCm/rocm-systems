@@ -14,7 +14,6 @@ from unittest import mock
 import pandas as pd
 import pytest
 import yaml
-
 from common import ROOT
 
 import utils.utils_analysis as utils_analysis
@@ -5094,9 +5093,7 @@ def _all_template_aliases_by_panel_id() -> dict[str, set[str]]:
 
 @pytest.mark.list_blocks
 @pytest.mark.parametrize("arch", _list_blocks_supported_archs())
-def test_list_blocks_all_archs(
-    binary_handler_analyze_rocprof_compute, capsys, arch
-):
+def test_list_blocks_all_archs(binary_handler_analyze_rocprof_compute, capsys, arch):
     """--list-blocks <arch> must list every per-arch panel with its on-disk
     title; any non-empty alias must match a panel_alias declared for that
     panel_id in some *_config_template.yaml. Auto-discovers new arches via
@@ -5115,9 +5112,7 @@ def test_list_blocks_all_archs(
     # so leading log output (e.g. an INFO line emitted on subsequent
     # module reloads in parametrized runs) does not shift the offset.
     lines = output.splitlines()
-    header_idx = next(
-        i for i, line in enumerate(lines) if line.startswith("INDEX")
-    )
+    header_idx = next(i for i, line in enumerate(lines) if line.startswith("INDEX"))
     block_entries: dict[str, tuple[str, str]] = {}
     for line in lines[header_idx + 1 :]:
         block_id = line[0:8].strip()
