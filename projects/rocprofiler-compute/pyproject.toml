@@ -80,6 +80,7 @@ markers = [
     "verbosity",
     "dispatch",
     "list_metrics",
+    "list_blocks",
     "filter_block",
     "filter_kernel",
     "dispatch",

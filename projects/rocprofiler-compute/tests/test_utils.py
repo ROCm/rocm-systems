@@ -13,6 +13,9 @@ from unittest import mock
 
 import pandas as pd
 import pytest
+import yaml
+
+from common import ROOT
 
 import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
@@ -5020,6 +5023,7 @@ def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     assert "5.2 -> Command processor packet processor (CPC)" in output
 
 
+@pytest.mark.list_blocks
 def test_list_blocks(binary_handler_analyze_rocprof_compute, capsys):
     return_code = binary_handler_analyze_rocprof_compute(["--list-blocks", "gfx90a"])
     assert return_code == 0
@@ -5044,6 +5048,105 @@ def test_list_blocks(binary_handler_analyze_rocprof_compute, capsys):
     assert block_entries["0"] == ("topstats", "Top Stats")
     assert block_entries["1"] == ("sysinfo", "System Info")
     assert block_entries["6"] == ("spi", "Workgroup Manager (SPI)")
+
+
+_ANALYSIS_CONFIGS = Path(ROOT) / "src" / "rocprof_compute_soc" / "analysis_configs"
+
+
+def _list_blocks_supported_archs() -> list[str]:
+    """Discover every arch dir under analysis_configs/. New arch dirs are
+    picked up automatically — no test edits needed when an arch is added."""
+    return sorted(
+        p.name
+        for p in _ANALYSIS_CONFIGS.iterdir()
+        if p.is_dir() and p.name.startswith("gfx")
+    )
+
+
+def _arch_panels_from_disk(arch: str) -> dict[str, str]:
+    """Return panel_id_str -> Panel Config title for every per-arch yaml.
+    Panel Config.id is encoded as panel_idx * 100 (e.g. 0, 100, 2100), so
+    divide by 100 to get the panel_id used by --list-blocks output."""
+    panels: dict[str, str] = {}
+    for yaml_path in sorted((_ANALYSIS_CONFIGS / arch).glob("*.yaml")):
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+        if not data or "Panel Config" not in data:
+            continue
+        panel_config = data["Panel Config"]
+        panels[str(panel_config["id"] // 100)] = panel_config["title"]
+    return panels
+
+
+def _all_template_aliases_by_panel_id() -> dict[str, set[str]]:
+    """Aggregate panel_id_str -> {alias, ...} declared across every
+    *_config_template.yaml. Used to assert that any non-empty alias shown
+    by --list-blocks matches a real template entry, not a fabrication."""
+    aliases: dict[str, set[str]] = {}
+    for tpl in sorted(_ANALYSIS_CONFIGS.glob("*_config_template.yaml")):
+        data = yaml.safe_load(tpl.read_text(encoding="utf-8")) or {}
+        for panel in data.get("panels") or []:
+            alias = panel.get("panel_alias")
+            if alias:
+                pid = str(panel.get("panel_id"))
+                aliases.setdefault(pid, set()).add(alias)
+    return aliases
+
+
+@pytest.mark.list_blocks
+@pytest.mark.parametrize("arch", _list_blocks_supported_archs())
+def test_list_blocks_all_archs(
+    binary_handler_analyze_rocprof_compute, capsys, arch
+):
+    """--list-blocks <arch> must list every per-arch panel with its on-disk
+    title; any non-empty alias must match a panel_alias declared for that
+    panel_id in some *_config_template.yaml. Auto-discovers new arches via
+    analysis_configs/ so future arches surface bugs in CI, not via users."""
+    return_code = binary_handler_analyze_rocprof_compute(["--list-blocks", arch])
+    assert return_code == 0
+
+    output = capsys.readouterr().out
+    assert "INDEX" in output
+    assert "BLOCK ALIAS" in output
+    assert "BLOCK NAME" in output
+
+    # Parse fixed-width columns: id [0:8], alias [9:25], name [26:].
+    # Whitespace splitting would conflate an empty alias (e.g. gfx1151
+    # today) with the start of the block name. Anchor on the header line
+    # so leading log output (e.g. an INFO line emitted on subsequent
+    # module reloads in parametrized runs) does not shift the offset.
+    lines = output.splitlines()
+    header_idx = next(
+        i for i, line in enumerate(lines) if line.startswith("INDEX")
+    )
+    block_entries: dict[str, tuple[str, str]] = {}
+    for line in lines[header_idx + 1 :]:
+        block_id = line[0:8].strip()
+        if not block_id:
+            continue
+        alias = line[9:25].strip()
+        name = line[26:].strip()
+        block_entries[block_id] = (alias, name)
+
+    expected_panels = _arch_panels_from_disk(arch)
+    assert set(block_entries) == set(expected_panels), (
+        f"--list-blocks {arch}: rows {sorted(block_entries)} != "
+        f"on-disk panels {sorted(expected_panels)}"
+    )
+
+    valid_aliases = _all_template_aliases_by_panel_id()
+    for panel_id, expected_name in expected_panels.items():
+        actual_alias, actual_name = block_entries[panel_id]
+        assert actual_name == expected_name, (
+            f"--list-blocks {arch} panel {panel_id}: name "
+            f"{actual_name!r} != on-disk title {expected_name!r}"
+        )
+        if actual_alias:
+            allowed = valid_aliases.get(panel_id, set())
+            assert actual_alias in allowed, (
+                f"--list-blocks {arch} panel {panel_id}: alias "
+                f"{actual_alias!r} not declared in any template "
+                f"(declared: {sorted(allowed)})"
+            )
 
 
 # =============================================================================
