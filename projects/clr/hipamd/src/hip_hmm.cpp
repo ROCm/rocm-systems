@@ -429,18 +429,25 @@ hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t coun
     std::vector<size_t> sizes_vec(count);
     std::vector<amd::Device*> devices_vec(count);
 
+    // Validate input pointers
+    for (size_t op_idx = 0; op_idx < count; op_idx++) {
+      if (sizes[op_idx] == 0 || dev_ptrs[op_idx] == nullptr) {
+        return hipErrorInvalidValue;
+      }
+    }
+
+    // Batched memory object lookup with single lock acquisition
+    std::vector<size_t> offsets;
+    std::vector<amd::Memory*> mem_objs = getMemoryObjectBatch(dev_ptrs, count, offsets);
+
     // Validate and prepare each operation
     size_t current_loc = 0;
     for (size_t op_idx = 0; op_idx < count; op_idx++) {
       void* dev_ptr = dev_ptrs[op_idx];
       size_t size = sizes[op_idx];
+      amd::Memory* mem_obj = mem_objs[op_idx];
+      size_t offset = offsets[op_idx];
 
-      if (size == 0 || dev_ptr == nullptr) {
-        return hipErrorInvalidValue;
-      }
-
-      size_t offset = 0;
-      amd::Memory* mem_obj = getMemoryObject(dev_ptr, offset);
       if ((mem_obj == nullptr) || (size > (mem_obj->getSize() - offset))) {
         return hipErrorInvalidValue;
       }
