@@ -1111,7 +1111,13 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   std::unordered_map<int, SegmentBatch> segmentBatches_;
 
   struct SyncPlan {
-    int num_segments = 0;  // one HW signal slot per segment (sparse, indexed by seg_id)
+    int num_segments = 0;   // total segment count (used for bounds checks)
+    int num_hw_events = 0;  // HW event slots to allocate (one per ncs=true segment)
+
+    // Dense index into segment_hw_events for each segment.
+    // seg_to_hw_event[seg_id] == -1  ->  no completion signal emitted.
+    // seg_to_hw_event[seg_id] >= 0  ->  index into the compact hw_events vector.
+    std::vector<int> seg_to_hw_event;
 
     std::vector<amd::Device::HwEventPatch> patch_list;
     std::vector<uint8_t*> barrier_packets;
