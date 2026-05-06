@@ -34,9 +34,7 @@
 #include <gtest/gtest.h>
 #include <spdlog/fmt/fmt.h>
 
-#include <array>
 #include <cstddef>
-#include <cstdint>
 #include <fstream>
 #include <optional>
 #include <sstream>
@@ -60,11 +58,11 @@ format_track_name_mirror(const char* category_name, std::optional<int> first_sec
 
 // Trait names matching the ROCPROFSYS_DEFINE_CATEGORY entries in
 // core/categories.hpp:113-114.
-constexpr const char* kReadDataCategoryName  = "device_xgmi_read_data";
-constexpr const char* kWriteDataCategoryName = "device_xgmi_write_data";
+constexpr const char* read_data_category_name  = "device_xgmi_read_data";
+constexpr const char* write_data_category_name = "device_xgmi_write_data";
 
 // MAX_NUM_XGMI_LINKS from library/pmc/collectors/gpu/types.hpp:32.
-constexpr std::size_t kMaxNumXgmiLinks = 8;
+constexpr std::size_t max_num_xgmi_links = 8;
 
 // ---------------------------------------------------------------------------
 // Site 1: PMC desc registration loop (after fix), cache_policy.hpp
@@ -118,57 +116,42 @@ legacy_sampler_track_name(const char* category_name, std::size_t link)
 }  // namespace
 
 class XgmiPerLinkNameRoundTrip : public ::testing::Test
-{};
+{
+protected:
+    static void expect_all_three_sites_agree(const char*        category_name,
+                                             const std::string& canonical_prefix)
+    {
+        for(std::size_t i = 0; i < max_num_xgmi_links; ++i)
+        {
+            const auto pmc_register   = site_pmc_desc_register_name(category_name, i);
+            const auto track_register = site_track_register_name(category_name, i);
+            const auto pmc_emit       = site_sampler_pmc_name(category_name, i);
+            const auto track_emit     = site_sampler_track_name(category_name, i);
+
+            EXPECT_EQ(pmc_register, track_register)
+                << "PMC-desc register and track register must agree (link " << i << ")";
+            EXPECT_EQ(pmc_register, pmc_emit)
+                << "PMC-desc register and sampler PMC emit must agree (link " << i << ")";
+            EXPECT_EQ(track_register, track_emit)
+                << "Track register and sampler track emit must agree (link " << i << ")";
+            EXPECT_EQ(pmc_emit, track_emit)
+                << "Sampler PMC emit and sampler track emit must be the same string "
+                   "so data_processor uses one lookup key (link "
+                << i << ")";
+            EXPECT_EQ(pmc_register, canonical_prefix + std::to_string(i))
+                << "Canonical per-link XGMI name format drifted (link " << i << ")";
+        }
+    }
+};
 
 TEST_F(XgmiPerLinkNameRoundTrip, read_data_all_three_sites_agree)
 {
-    for(std::size_t i = 0; i < kMaxNumXgmiLinks; ++i)
-    {
-        const auto pmc_register   = site_pmc_desc_register_name(kReadDataCategoryName, i);
-        const auto track_register = site_track_register_name(kReadDataCategoryName, i);
-        const auto pmc_emit       = site_sampler_pmc_name(kReadDataCategoryName, i);
-        const auto track_emit     = site_sampler_track_name(kReadDataCategoryName, i);
-
-        EXPECT_EQ(pmc_register, track_register)
-            << "PMC-desc register and track register must agree (link " << i << ")";
-        EXPECT_EQ(pmc_register, pmc_emit)
-            << "PMC-desc register and sampler PMC emit must agree (link " << i << ")";
-        EXPECT_EQ(track_register, track_emit)
-            << "Track register and sampler track emit must agree (link " << i << ")";
-        EXPECT_EQ(pmc_emit, track_emit)
-            << "Sampler PMC emit and sampler track emit must be the same string "
-               "so data_processor uses one lookup key (link "
-            << i << ")";
-        EXPECT_EQ(pmc_register,
-                  std::string{ "device_xgmi_read_data_" } + std::to_string(i))
-            << "Canonical per-link XGMI read-data name format drifted (link " << i << ")";
-    }
+    expect_all_three_sites_agree(read_data_category_name, "device_xgmi_read_data_");
 }
 
 TEST_F(XgmiPerLinkNameRoundTrip, write_data_all_three_sites_agree)
 {
-    for(std::size_t i = 0; i < kMaxNumXgmiLinks; ++i)
-    {
-        const auto pmc_register = site_pmc_desc_register_name(kWriteDataCategoryName, i);
-        const auto track_register = site_track_register_name(kWriteDataCategoryName, i);
-        const auto pmc_emit       = site_sampler_pmc_name(kWriteDataCategoryName, i);
-        const auto track_emit     = site_sampler_track_name(kWriteDataCategoryName, i);
-
-        EXPECT_EQ(pmc_register, track_register)
-            << "PMC-desc register and track register must agree (link " << i << ")";
-        EXPECT_EQ(pmc_register, pmc_emit)
-            << "PMC-desc register and sampler PMC emit must agree (link " << i << ")";
-        EXPECT_EQ(track_register, track_emit)
-            << "Track register and sampler track emit must agree (link " << i << ")";
-        EXPECT_EQ(pmc_emit, track_emit)
-            << "Sampler PMC emit and sampler track emit must be the same string "
-               "so data_processor uses one lookup key (link "
-            << i << ")";
-        EXPECT_EQ(pmc_register,
-                  std::string{ "device_xgmi_write_data_" } + std::to_string(i))
-            << "Canonical per-link XGMI write-data name format drifted (link " << i
-            << ")";
-    }
+    expect_all_three_sites_agree(write_data_category_name, "device_xgmi_write_data_");
 }
 
 namespace
@@ -237,11 +220,11 @@ TEST_F(XgmiPerLinkNameRoundTrip, production_sources_use_canonical_format)
 // bug class explicitly so a future refactor cannot silently revert it.
 TEST_F(XgmiPerLinkNameRoundTrip, legacy_sampler_format_does_not_match_canonical)
 {
-    for(std::size_t i = 0; i < kMaxNumXgmiLinks; ++i)
+    for(std::size_t i = 0; i < max_num_xgmi_links; ++i)
     {
-        const auto canonical    = site_pmc_desc_register_name(kReadDataCategoryName, i);
-        const auto legacy_pmc   = legacy_sampler_pmc_name(kReadDataCategoryName, i);
-        const auto legacy_track = legacy_sampler_track_name(kReadDataCategoryName, i);
+        const auto canonical    = site_pmc_desc_register_name(read_data_category_name, i);
+        const auto legacy_pmc   = legacy_sampler_pmc_name(read_data_category_name, i);
+        const auto legacy_track = legacy_sampler_track_name(read_data_category_name, i);
 
         EXPECT_NE(canonical, legacy_pmc)
             << "Legacy sampler PMC format collided with canonical at link " << i
