@@ -133,6 +133,9 @@ class XdnaDriver final : public core::Driver {
 public:
   XdnaDriver(std::string devnode_name);
 
+  /// @brief Determine if the xdna-driver is present on the system and attempt to open it if found.
+  ///
+  /// @param[out] driver object
   static hsa_status_t DiscoverDriver(std::unique_ptr<core::Driver>& driver);
 
   /// @brief Returns the size of the dev heap in bytes.
@@ -141,7 +144,6 @@ public:
   hsa_status_t Init() override;
   hsa_status_t ShutDown() override;
   hsa_status_t QueryKernelModeDriver(core::DriverQuery query) override;
-
   hsa_status_t Open() override;
   hsa_status_t Close() override;
   hsa_status_t GetSystemProperties(HsaSystemProperties& sys_props) const override;
@@ -223,36 +225,38 @@ public:
   /// @brief Destroys @p bo_handle.
   ///
   /// This function will unmap the virtual address and close the BO, but will not return any status.
+  ///
+  /// @param[in,out] bo_handle BO handle to destroy.
   void DestroyBOHandle(BOHandle& bo_handle);
 
   /// @brief Returns the BO associated with the address.
+  ///
+  /// @param[in] mem virtual address to query.
   BOHandle FindBOHandle(void* mem) const;
 
   /// @brief Creates a new hardware context with the given PDI BO handles.
+  ///
+  /// @param[in] pdi_bo_handles PDI BO handles to use for the new hardware context.
+  /// @param[in,out] queue_id queue ID. It will be updated if the driver needs to create a new
+  /// hardware context for this command chain.
+  /// @param[in] num_core_tiles number of core tiles in the AIE device
   hsa_status_t ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID& queue_id,
                            uint32_t num_core_tiles) const;
 
+  /// @brief Queries the driver version and updates internal state.
   hsa_status_t QueryDriverVersion();
 
-  /// @brief Allocate device accesible heap space.
-  ///
-  /// Allocate and map a buffer object (BO) that the AIE device can access.
+  /// @brief Allocate device accessible heap space.
   hsa_status_t InitDeviceHeap();
+
+  /// @brief Free device accessible heap space.
   hsa_status_t FreeDeviceHeap();
 
   /// @brief Creates a command BO and returns it to @p bo_info.
   ///
-  /// @param size size of memory to allocate
-  /// @param bo_info allocated BO
+  /// @param[in] size size of memory to allocate
+  /// @param[out] bo_info allocated BO
   hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info);
-
-  /// @brief Executes a command and waits for its completion
-  ///
-  /// @param cmd_chain_bo_handle command to execute
-  /// @param bo_handles handles associated with the command
-  /// @param aie_queue queue to submit to
-  hsa_status_t ExecCmdAndWait(const BOHandle& cmd_chain_bo_handle,
-                              const std::vector<uint32_t>& bo_handles, HSA_QUEUEID queue_id);
 
   std::map<void*, BOHandle> vmem_addr_mappings;
 

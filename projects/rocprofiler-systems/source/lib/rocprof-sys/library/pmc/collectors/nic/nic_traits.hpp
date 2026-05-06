@@ -103,7 +103,7 @@ struct nic_traits
 
     [[nodiscard]] static metrics_t get_metrics(
         const device_ptr_t& device, [[maybe_unused]] const enabled_metrics_t& enabled,
-        [[maybe_unused]] uint64_t timestamp)
+        [[maybe_unused]] std::uint64_t timestamp)
     {
         return device->get_nic_metrics();
     }
@@ -157,9 +157,9 @@ struct nic_traits
             agent cur_agent{ agent_type::NIC,
                              0,
                              nic_index,
-                             static_cast<uint32_t>(nic_index),
-                             static_cast<int32_t>(nic_index),
-                             static_cast<int32_t>(nic_index),
+                             static_cast<std::uint32_t>(nic_index),
+                             static_cast<std::int32_t>(nic_index),
+                             static_cast<std::int32_t>(nic_index),
                              entry.device->get_product_name().c_str(),
                              entry.device->get_vendor_name().c_str(),
                              "AI NIC",

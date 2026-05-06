@@ -15,6 +15,7 @@
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
+#include <cstdint>
 
 #include <map>
 #include <thread>
@@ -36,8 +37,8 @@ namespace
 {
 
 void
-cache_region(uint64_t thread_id, const std::string& name, uint64_t start_ts,
-             uint64_t end_ts, const std::string& category)
+cache_region(std::uint64_t thread_id, const std::string& name, std::uint64_t start_ts,
+             std::uint64_t end_ts, const std::string& category)
 {
     constexpr size_t      NO_CORRELATION_ID = 0;
     constexpr const char* CALLSTACK         = "{}";
@@ -64,7 +65,7 @@ struct entry_key
     }
 };
 
-using timestamp_t = uint64_t;
+using timestamp_t = std::uint64_t;
 
 thread_local std::map<entry_key, timestamp_t> map_name_to_args;
 
@@ -90,7 +91,7 @@ cache_stop(const char* name)
 
         const auto end_ts =
             static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-        uint64_t thread_id = 0;
+        std::uint64_t thread_id = 0;
 
         const auto& extended_info =
             rocprofsys::thread_info::get(std::this_thread::get_id());
@@ -114,7 +115,7 @@ inline void
 flush_pending_cached_entries()
 {
     const auto end_ts = static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    uint64_t   thread_id = 0;
+    std::uint64_t thread_id = 0;
 
     const auto& extended_info = rocprofsys::thread_info::get(std::this_thread::get_id());
     if(extended_info.has_value() && extended_info->index_data.has_value())
@@ -414,7 +415,7 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
     start<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
         {
-            int64_t _n = 0;
+            std::int64_t _n = 0;
             ROCPROFSYS_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
                 ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
                 _args, _n++));
@@ -445,7 +446,7 @@ category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
     start<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
         {
-            int64_t _n = 0;
+            std::int64_t _n = 0;
             ROCPROFSYS_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
                 ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
                 _args, _n++));

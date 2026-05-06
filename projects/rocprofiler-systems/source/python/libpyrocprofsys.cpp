@@ -182,7 +182,7 @@ namespace pyprofile
 using profiler_t           = std::function<void()>;
 using profiler_vec_t       = std::vector<profiler_t>;
 using profiler_label_map_t = std::unordered_map<std::string, profiler_vec_t>;
-using profiler_index_map_t = std::unordered_map<uint32_t, profiler_label_map_t>;
+using profiler_index_map_t = std::unordered_map<std::uint32_t, profiler_label_map_t>;
 using strset_t             = std::unordered_set<std::string>;
 using note_t               = rocprofsys_annotation_t;
 using annotations_t        = std::array<note_t, 6>;
@@ -196,7 +196,7 @@ strset_t default_exclude_filenames = { "(encoder|decoder|threading).py$", "^<.*>
 auto&
 get_paused()
 {
-    static thread_local int64_t _v = 0;
+    static thread_local std::int64_t _v = 0;
     return _v;
 }
 //
@@ -210,10 +210,10 @@ struct config
     bool                    include_filename   = false;
     bool                    full_filepath      = false;
     bool                    annotate_trace     = false;
-    int32_t                 ignore_stack_depth = 0;
-    int32_t                 base_stack_depth   = -1;
-    int32_t                 verbose            = 0;
-    int64_t                 depth_tracker      = 0;
+    std::int32_t            ignore_stack_depth = 0;
+    std::int32_t            base_stack_depth   = -1;
+    std::int32_t            verbose            = 0;
+    std::int64_t            depth_tracker      = 0;
     std::string             base_module_path   = {};
     strset_t                restrict_functions = {};
     strset_t                restrict_filenames = {};
@@ -235,8 +235,8 @@ get_config()
 {
     static auto*              _instance    = new config{};
     static thread_local auto* _tl_instance = []() {
-        static std::atomic<uint32_t> _count{ 0 };
-        auto                         _cnt = _count++;
+        static std::atomic<std::uint32_t> _count{ 0 };
+        auto                              _cnt = _count++;
         if(_cnt == 0) return _instance;
 
         auto* _tmp               = new config{};
@@ -625,7 +625,7 @@ generate(py::module& _pymod)
         "annotate_trace", bool,
         "Add detailed annotations to the trace about the executing function",
         get_config().annotate_trace)
-    CONFIGURATION_PROPERTY("verbosity", int32_t, "Verbosity of the logging",
+    CONFIGURATION_PROPERTY("verbosity", std::int32_t, "Verbosity of the logging",
                            get_config().verbose)
 
     static auto _get_strset = [](const strset_t& _targ) {
