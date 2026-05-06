@@ -936,6 +936,52 @@ def get_panel_alias() -> dict[str, str]:
     }
 
 
+def _select_smallest_covering_alias_map(
+    template_aliases: list[dict[str, str]],
+    arch_panel_ids: set[str],
+) -> dict[str, str]:
+    """Among template_aliases, return the map with the fewest entries whose
+    key set is a superset of arch_panel_ids (most specific match). Ties
+    resolve to the first such map in input order. Returns {} when no map
+    covers arch_panel_ids."""
+    best_size: Optional[int] = None
+    best_map: dict[str, str] = {}
+    for id_to_alias in template_aliases:
+        if not arch_panel_ids.issubset(id_to_alias):
+            continue
+        if best_size is None or len(id_to_alias) < best_size:
+            best_size = len(id_to_alias)
+            best_map = id_to_alias
+    return best_map
+
+
+def _load_arch_template_aliases() -> list[dict[str, str]]:
+    """Load panel_id -> alias maps from every *_config_template.yaml."""
+    template_glob = (
+        f"{config.rocprof_compute_home}"
+        "/rocprof_compute_soc/analysis_configs/*_config_template.yaml"
+    )
+    template_aliases: list[dict[str, str]] = []
+    for path in sorted(glob.glob(template_glob)):
+        panel_yaml = load_yaml(path) or {}
+        panels = panel_yaml.get("panels") or []
+        if not panels or "panel_id" not in panels[0]:
+            continue
+        template_aliases.append({
+            str(p["panel_id"]): (p.get("panel_alias") or "") for p in panels
+        })
+    return template_aliases
+
+
+def get_arch_panel_id_to_alias(arch_panel_ids: set[str]) -> dict[str, str]:
+    """Return panel_id -> alias for the *_config_template.yaml whose panels
+    best match arch_panel_ids (smallest superset wins). Missing or None
+    aliases map to "". Returns {} when no template fits."""
+    return _select_smallest_covering_alias_map(
+        _load_arch_template_aliases(), arch_panel_ids
+    )
+
+
 def get_job_rank_and_size() -> tuple[Optional[str], Optional[int]]:
     """Detect job rank and total ranks from runtime environment variables.
 
