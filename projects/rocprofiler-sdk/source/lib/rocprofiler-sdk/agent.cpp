@@ -1043,6 +1043,10 @@ get_agent_mapping()
 bdf_info
 get_bdf_info(const rocprofiler_agent_t* agent)
 {
+    // location_id encodes PCI Bus/Device/Function (BDF) as a 16-bit value:
+    //   bits [15:8] = bus number
+    //   bits  [7:3] = device number
+    //   bits  [2:0] = function number
     return {.domain   = agent->domain,
             .bus      = static_cast<uint8_t>((agent->location_id >> 8) & 0xFF),
             .device   = static_cast<uint8_t>((agent->location_id >> 3) & 0x1F),
@@ -1066,7 +1070,7 @@ get_aql_handles()
 #if ROCPROFILER_EXTERNAL_AQLPROFILE
                 ROCP_TRACE << fmt::format(
                     "Registering agent {} with external aqlprofile (libhsa-amd-aqlprofile64.so)",
-                    agent->product_name);
+                    agent->name);
 
                 aqlprofile_agent_info_t agent_info = {
                     .agent_gfxip          = agent->name,
@@ -1087,8 +1091,7 @@ get_aql_handles()
                     bdf.bus,
                     bdf.device,
                     bdf.function,
-                    agent->product_name,
-                    agent->product_name);
+                    agent->name);
 
                 aqlprofile_agent_info_v1_t agent_info = {
                     .agent_gfxip          = agent->name,
@@ -1109,7 +1112,7 @@ get_aql_handles()
                         bdf.bus,
                         bdf.device,
                         bdf.function,
-                        agent->product_name);
+                        agent->name);
                 }
 #endif
                 agent_handles.push_back(handle);
