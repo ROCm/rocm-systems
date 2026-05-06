@@ -38,7 +38,7 @@ The build generates multiple variants of each executable:
 **Targets:**
 
 | Target | Description |
-|--------|-------------|
+| ------ | ----------- |
 | `causal-both` | Both RNG and CPU workloads |
 | `causal-rng` | RNG-based workload only |
 | `causal-cpu` | CPU-based workload only |
@@ -58,7 +58,7 @@ The build generates multiple variants of each executable:
 **Arguments:**
 
 | Position | Description | Default |
-|----------|-------------|---------|
+| -------- | ----------- | ------- |
 | 1 | Work fraction (percentage ratio fast/slow) | 70 |
 | 2 | Number of iterations | 50 |
 | 3 | Random seed | random |
