@@ -1602,8 +1602,13 @@ void GraphExec::PacketBatch::appendPacketToFlatBuffer(const uint8_t* pkt_raw,
   uint32_t fullHeader = 0;
   memcpy(&fullHeader, pkt_raw, sizeof(fullHeader));
   fullHeaders.push_back(fullHeader);
-  // Invalidate header
-  dst[0] = dst[1] = 0;
+  // Set header to HSA_PACKET_TYPE_INVALID (type=1) so the GPU CP skips this
+  // packet until the valid header is committed with release semantics during
+  // dispatch. Using type=0 (VENDOR_SPECIFIC) would be a processable packet type
+  // that the CP could attempt to execute with incomplete body data.
+  static constexpr uint16_t kInvalidAqlHeader =
+      1;  // HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE
+  memcpy(dst, &kInvalidAqlHeader, sizeof(kInvalidAqlHeader));
   // Zero completion signal; ApplyHwEventPatches re-patches it directly via flat_packet pointers.
   memset(dst + kSigOff, 0, sizeof(uint64_t));
 }
