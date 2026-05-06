@@ -224,9 +224,12 @@ static void FlushArguments(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
 /**
  * @brief Destroys the amdxdna_hwctx with the given handle.
  *
+ * @param[in] fd driver file descriptor
  * @param[in] hw_ctx_handle handle of the hardware context to destroy
  */
 static hsa_status_t DestroyHwCtx(int fd, uint32_t hw_ctx_handle) {
+  assert(hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE);
+
   amdxdna_drm_destroy_hwctx args = {};
   args.handle = hw_ctx_handle;
   if (ioctl(fd, DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &args) < 0) {
@@ -234,6 +237,81 @@ static hsa_status_t DestroyHwCtx(int fd, uint32_t hw_ctx_handle) {
   }
   return HSA_STATUS_SUCCESS;
 }
+
+/**
+ * @brief Submits a command for execution.
+ *
+ * @param[in] fd driver file descriptor
+ * @param[in] cmd_bo_handle BO handle of the command to execute
+ * @param[in] bo_handles handles associated with the command
+ * @param[in] hw_ctx_handle hardware context handle
+ * @param[out] seq_out sequence number of the command
+ */
+static hsa_status_t SubmitCommand(int fd, uint32_t cmd_bo_handle,
+                                  const std::vector<uint32_t>& bo_handles, uint32_t hw_ctx_handle,
+                                  uint64_t& seq_out) {
+  assert(hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE);
+
+  amdxdna_drm_exec_cmd exec_cmd = {};
+  exec_cmd.hwctx = hw_ctx_handle;
+  exec_cmd.type = AMDXDNA_CMD_SUBMIT_EXEC_BUF;
+  exec_cmd.cmd_handles = cmd_bo_handle;
+  exec_cmd.args = reinterpret_cast<uint64_t>(bo_handles.data());
+  exec_cmd.cmd_count = 1;
+  exec_cmd.arg_count = static_cast<uint32_t>(bo_handles.size());
+  if (ioctl(fd, DRM_IOCTL_AMDXDNA_EXEC_CMD, &exec_cmd) < 0) {
+    return HSA_STATUS_ERROR;
+  }
+
+  seq_out = exec_cmd.seq;
+  return HSA_STATUS_SUCCESS;
+}
+
+/**
+ * @brief Waits for a command to finish.
+ *
+ * @param[in] fd driver file descriptor
+ * @param[in] cmd command to wait for
+ * @param[in] hw_ctx_handle hardware context handle
+ * @param[in] seq sequence number of the command
+ */
+static hsa_status_t WaitCommand(int fd, ert_start_kernel_cmd* cmd, uint32_t hw_ctx_handle,
+                                uint64_t seq) {
+  assert(hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE);
+
+  // Check command status before waiting to avoid unnecessary ioctl if the command has already
+  // completed.
+  auto& cmd_ref = *static_cast<volatile ert_start_kernel_cmd*>(cmd);
+  switch (cmd_ref.state) {
+    case ERT_CMD_STATE_NEW:
+    case ERT_CMD_STATE_QUEUED:
+    case ERT_CMD_STATE_RUNNING:
+      // Command is still in progress, need to wait.
+      break;
+    case ERT_CMD_STATE_COMPLETED:
+      // Command has completed, no need to wait.
+      return HSA_STATUS_SUCCESS;
+    default:
+      // Command is in an error state.
+      return HSA_STATUS_ERROR;
+  }
+
+  // Wait for command completion.
+  amdxdna_drm_wait_cmd wait_cmd = {};
+  wait_cmd.hwctx = hw_ctx_handle;
+  wait_cmd.timeout = 0;  // no timeout, wait until the command finishes
+  wait_cmd.seq = seq;
+  if (ioctl(fd, DRM_IOCTL_AMDXDNA_WAIT_CMD, &wait_cmd) < 0) {
+    return HSA_STATUS_ERROR;
+  }
+
+  if (cmd_ref.state != ERT_CMD_STATE_COMPLETED) {
+    // Command is in an error state.
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
 
 XdnaDriver::XdnaDriver(std::string devnode_name)
     : core::Driver(core::DriverType::XDNA, std::move(devnode_name)) {}
@@ -627,14 +705,16 @@ hsa_status_t XdnaDriver::Map(core::ShareableHandle handle, void *mem,
   drm_prime_handle params = {};
   params.handle = handle.handle;
   params.fd = -1;
-  if (ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &params) < 0)
+  if (ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &params) < 0) {
     return HSA_STATUS_ERROR;
+  }
 
   // Change permissions.
   void *mapped_ptr = mmap(mem, size, PermissionsToMmapFlags(perms),
                           MAP_FIXED | MAP_SHARED, params.fd, offset);
-  if (mapped_ptr == MAP_FAILED)
+  if (mapped_ptr == MAP_FAILED) {
     return HSA_STATUS_ERROR;
+  }
 
   return HSA_STATUS_SUCCESS;
 }
@@ -694,7 +774,7 @@ hsa_status_t XdnaDriver::DestroyShareableHandle(core::ShareableHandle* handle) {
   if (ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_params) < 0)
     return HSA_STATUS_ERROR;
 
-  handle = {};
+  *handle = {};
 
   return HSA_STATUS_SUCCESS;
 }
@@ -766,37 +846,6 @@ hsa_status_t XdnaDriver::FreeDeviceHeap() {
   }
 
   DestroyBOHandle(dev_heap_handle);
-
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t XdnaDriver::ExecCmdAndWait(const BOHandle& cmd_chain_bo_handle,
-                                        const std::vector<uint32_t>& bo_handles,
-                                        HSA_QUEUEID queue_id) {
-  assert(queue_id != AMDXDNA_INVALID_CTX_HANDLE);
-
-  auto hw_ctx_handle = static_cast<uint32_t>(queue_id);
-
-  // Submit commands in a command chain.
-  amdxdna_drm_exec_cmd exec_cmd = {};
-  exec_cmd.hwctx = hw_ctx_handle;
-  exec_cmd.type = AMDXDNA_CMD_SUBMIT_EXEC_BUF;
-  exec_cmd.cmd_handles = cmd_chain_bo_handle.handle;
-  exec_cmd.args = reinterpret_cast<uint64_t>(bo_handles.data());
-  exec_cmd.cmd_count = 1;
-  exec_cmd.arg_count = bo_handles.size();
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_EXEC_CMD, &exec_cmd) < 0) {
-    return HSA_STATUS_ERROR;
-  }
-
-  // Waiting for command chain to finish.
-  amdxdna_drm_wait_cmd wait_cmd = {};
-  wait_cmd.hwctx = hw_ctx_handle;
-  wait_cmd.timeout = 0;  // no timeout, wait until the command finishes
-  wait_cmd.seq = exec_cmd.seq;
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_WAIT_CMD, &wait_cmd) < 0) {
-    return HSA_STATUS_ERROR;
-  }
 
   return HSA_STATUS_SUCCESS;
 }
@@ -961,35 +1010,8 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
     queue_pdi_map_.emplace(queue_id, pdi_cache);
   }
 
-  // Create command chain.
-  const uint32_t cmd_chain_data_bytesize = cmd_bo_handles.size() * sizeof(uint64_t);
-  const uint32_t cmd_data_bytesize = sizeof(ert_cmd_chain_data) + cmd_chain_data_bytesize;
-  const uint32_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + cmd_data_bytesize;
-  BOHandle cmd_bo_handle;
-  hsa_status_t status = CreateCmdBO(cmd_bytesize, cmd_bo_handle);
-  if (status != HSA_STATUS_SUCCESS) {
-    assert(false && "Failed to create command chain BO.");
-    return status;
-  }
-  // Unmap and close the command chain BO at exit or in case of an error.
-  MAKE_NAMED_SCOPE_GUARD(cmd_bo_handle_guard, [&] { DestroyBOHandle(cmd_bo_handle); });
-
-  // Create a command BO for the command chain.
-  auto* cmd = static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr);
-  memset(cmd, 0, cmd_bytesize);
-  cmd->state = ERT_CMD_STATE_NEW;
-  cmd->extra_cu_masks = 0;
-  cmd->count = cmd_data_bytesize / sizeof(uint32_t);
-  cmd->opcode = ERT_CMD_CHAIN;
-  auto* cmd_chain = reinterpret_cast<ert_cmd_chain_data*>(cmd->data);
-  cmd_chain->command_count = cmd_bo_handles.size();
-  for (size_t i = 0; i < cmd_bo_handles.size(); i++) {
-    cmd_chain->data[i] = cmd_bo_handles[i].handle;
-  }
-
-  // Remove duplicate BOs, since the driver reports an error if the same BO handle is provided
-  // multiple times in the command chain. This can happen if any of the BOs are the same across
-  // packets.
+  // Remove duplicate BOs, since the driver reports an error if the same BO is provided multiple
+  // times.
   std::sort(bo_handles.begin(), bo_handles.end());
   bo_handles.erase(std::unique(bo_handles.begin(), bo_handles.end()), bo_handles.end());
 
@@ -1000,11 +1022,60 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
     FlushArguments(pkt);
   }
 
-  // Execute all commands in the command chain.
-  status = ExecCmdAndWait(cmd_bo_handle, bo_handles, queue_id);
-  if (status != HSA_STATUS_SUCCESS) {
-    assert(false && "Failed to dispatch command chain.");
-    return status;
+  auto hw_ctx_handle = static_cast<uint32_t>(queue_id);
+
+  if (num_pkts == 1) {
+    // Single packet: submit the per-kernel cmd BO directly, no chain wrapper.
+    uint64_t seq = 0;
+    hsa_status_t status =
+        SubmitCommand(fd_, cmd_bo_handles[0].handle, bo_handles, hw_ctx_handle, seq);
+    if (status != HSA_STATUS_SUCCESS) {
+      assert(false && "Failed to submit command.");
+      return status;
+    }
+    status = WaitCommand(fd_, static_cast<ert_start_kernel_cmd*>(cmd_bo_handles[0].vaddr),
+                         hw_ctx_handle, seq);
+    if (status != HSA_STATUS_SUCCESS) {
+      assert(false && "Failed waiting for command.");
+      return status;
+    }
+  } else {
+    // Create command chain for multi-packet dispatches.
+    const size_t cmd_chain_data_bytesize = cmd_bo_handles.size() * sizeof(uint64_t);
+    const size_t cmd_data_bytesize = sizeof(ert_cmd_chain_data) + cmd_chain_data_bytesize;
+    const size_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + cmd_data_bytesize;
+    BOHandle cmd_bo_handle;
+    hsa_status_t status = CreateCmdBO(cmd_bytesize, cmd_bo_handle);
+    if (status != HSA_STATUS_SUCCESS) {
+      assert(false && "Failed to create command chain BO.");
+      return status;
+    }
+    MAKE_NAMED_SCOPE_GUARD(cmd_bo_handle_guard, [&] { DestroyBOHandle(cmd_bo_handle); });
+
+    auto* cmd = static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr);
+    memset(cmd, 0, cmd_bytesize);
+    cmd->state = ERT_CMD_STATE_NEW;
+    cmd->count = static_cast<uint32_t>(cmd_data_bytesize / sizeof(uint32_t));
+    cmd->opcode = ERT_CMD_CHAIN;
+    auto* cmd_chain = reinterpret_cast<ert_cmd_chain_data*>(cmd->data);
+    cmd_chain->command_count = static_cast<uint32_t>(cmd_bo_handles.size());
+    for (size_t i = 0; i < cmd_bo_handles.size(); i++) {
+      cmd_chain->data[i] = cmd_bo_handles[i].handle;
+    }
+
+    // Execute all commands in the command chain.
+    uint64_t seq = 0;
+    status = SubmitCommand(fd_, cmd_bo_handle.handle, bo_handles, hw_ctx_handle, seq);
+    if (status != HSA_STATUS_SUCCESS) {
+      assert(false && "Failed to submit command chain.");
+      return status;
+    }
+    status = WaitCommand(fd_, static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr),
+                         hw_ctx_handle, seq);
+    if (status != HSA_STATUS_SUCCESS) {
+      assert(false && "Failed waiting for command chain.");
+      return status;
+    }
   }
 
   // Flush cache for the arguments again to ensure visibility of any changes made by the AIE kernels
@@ -1036,7 +1107,7 @@ hsa_status_t XdnaDriver::SPMAcquire(uint32_t preferred_node_id) const {
 hsa_status_t XdnaDriver::SPMRelease(uint32_t preferred_node_id) const {
   // AIE does not support streaming performance monitor.
   return HSA_STATUS_ERROR_INVALID_AGENT;
-};
+}
 
 hsa_status_t XdnaDriver::SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes,
                                           uint32_t* timeout, uint32_t* size_copied,
@@ -1109,12 +1180,11 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID
 
   auto* xdna_config_cu_param =
       static_cast<amdxdna_hwctx_param_config_cu*>(malloc(config_cu_param_size));
-  memset(xdna_config_cu_param, 0, config_cu_param_size);
-
   if (xdna_config_cu_param == nullptr) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   MAKE_SCOPE_GUARD([xdna_config_cu_param] { free(xdna_config_cu_param); });
+  memset(xdna_config_cu_param, 0, config_cu_param_size);
 
   xdna_config_cu_param->num_cus = pdi_bo_handles.size();
 
