@@ -44,21 +44,25 @@ NCCL_DEVICE_INLINE int ncclCoopPopc(ncclCoopMask_t x) { return (int)__popc(x); }
 // parameter type and forward it to the templated session classes
 // (e.g. ncclLsaBarrierSession<ncclCoopAny>).
 //
-// Currently disabled (#if 0) because:
-//   - The IR feature (ir/nccl_device_wrapper.h) that consumes this type is
-//     not yet authored in RCCL.
+// Disabled by default because:
 //   - No regular RCCL kernel uses ncclCoopAny today (they use the static
 //     types directly for performance: indirect device function calls
 //     through the vtable are slower than direct inlined calls).
+//   - The ir/ wrapper headers that consume it are themselves gated on the
+//     same RCCL_ENABLE_NCCL_COOP_ANY switch.
 //
-// To enable: flip the `#if 0` below to `#if __CUDACC__` (matching the rest
-// of this file). No other code in RCCL needs to change. The static_asserts
-// in get_vtable<Impl>() will fire at compile time if a future RCCL coop
-// type ever outgrows the 16-byte / 8-byte-aligned Storage.
+// To enable: build with -DRCCL_ENABLE_NCCL_COOP_ANY=1. No other code in
+// RCCL needs to change. The static_asserts in get_vtable<Impl>() will fire
+// at compile time if a future RCCL coop type ever outgrows the 16-byte /
+// 8-byte-aligned Storage.
 //
 // Source: NVIDIA NCCL v2.29.2-1 src/include/nccl_device/coop.h.
 // ----------------------------------------------------------------------------
-#if 0  // TODO(rccl-ir): enable when ir/ wrapper headers are added
+#ifndef RCCL_ENABLE_NCCL_COOP_ANY
+#define RCCL_ENABLE_NCCL_COOP_ANY 0
+#endif
+
+#if RCCL_ENABLE_NCCL_COOP_ANY  // default: disabled. Enable via -DRCCL_ENABLE_NCCL_COOP_ANY=1
 struct ncclCoopAny {
   struct Storage { alignas(alignof(void*)) char space[16]; };
   struct VTable {
@@ -106,7 +110,7 @@ struct ncclCoopAny {
   __device__ int  num_threads() const { return vtable->size(&storage); }
   __device__ void sync()              { vtable->sync(&storage); }
 };
-#endif  // ncclCoopAny (disabled)
+#endif  // RCCL_ENABLE_NCCL_COOP_ANY
 
 #if __CUDACC__
 template<int nThreadsPow2>
