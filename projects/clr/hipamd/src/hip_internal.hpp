@@ -122,9 +122,12 @@ const char* ihipGetErrorName(hipError_t hip_error);
   HIP_CB_SPAWNER_OBJECT(cid);
 
 // This macro should be called at the beginning of every HIP API.
+// Device gpu_error_ is not cleared at API entry; once set by the runtime it stays latched.
+// We only mirror it into TLS for hipGetLastError. We do not return early on GPU error so APIs such
+// as hipStreamWaitEvent are not blocked after an async device failure.
 #define HIP_INIT_API(cid, ...)                                                                     \
   if (amd::Device::IsGPUInError()) {                                                               \
-    HIP_RETURN(ConvertCLErrorIntoHIPError(amd::Device::GetGPUError()));                            \
+    hip::tls.last_error_ = ConvertCLErrorIntoHIPError(amd::Device::GetGPUError());                 \
   }                                                                                                \
   HIP_INIT_API_INTERNAL(0, cid, __VA_ARGS__)                                                       \
   if (hip::g_devices.empty()) {                                                                    \
@@ -137,7 +140,7 @@ const char* ihipGetErrorName(hipError_t hip_error);
 // Version without logging for internal __hip* functions (high frequency, low value logs)
 #define HIP_INIT_API_NOLOG(cid)                                                                    \
   if (amd::Device::IsGPUInError()) {                                                              \
-    HIP_RETURN_NOLOG(ConvertCLErrorIntoHIPError(amd::Device::GetGPUError()));                      \
+    hip::tls.last_error_ = ConvertCLErrorIntoHIPError(amd::Device::GetGPUError());                 \
   }                                                                                                \
   HIP_INIT(0)                                                                                      \
   HIP_CB_SPAWNER_OBJECT(cid);                                                                      \
@@ -146,7 +149,7 @@ const char* ihipGetErrorName(hipError_t hip_error);
   }
 
 // Helper: update thread-local error state from a return code.
-// Overrides with GPU error if the device is in an error state.
+// Global GPU error overrides the per-call return while gpu_error_ remains latched.
 #define HIP_UPDATE_ERROR_STATE(ret)                                                                \
   hip::tls.last_command_error_ = ret;                                                              \
   if (amd::Device::IsGPUInError()) {                                                               \

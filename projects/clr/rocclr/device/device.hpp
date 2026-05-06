@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <atomic>
 #include <string>
 #include <vector>
 #include <map>
@@ -1736,7 +1737,7 @@ class Device : public RuntimeObject {
   // Max Scratch size is based on ISA and thus per device.
   // Def value is as per GFX9 being the least among supported devices.
   size_t maxStackSize_ = kMaxStackSize9X;
-  static cl_int gpu_error_;  //!< Store the GPU error cause during kernel launch
+  static std::atomic<cl_int> gpu_error_;  //!< Store the GPU error cause during kernel launch
 
   typedef std::list<CommandQueue*> CommandQueues;
 
@@ -2312,8 +2313,8 @@ class Device : public RuntimeObject {
 #endif
 #endif
 
-  static bool IsGPUInError() { return (gpu_error_ != CL_SUCCESS); }
-  static cl_int GetGPUError() { return gpu_error_; }
+  static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_acquire) != CL_SUCCESS); }
+  static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_acquire); }
 
   bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle);
 
