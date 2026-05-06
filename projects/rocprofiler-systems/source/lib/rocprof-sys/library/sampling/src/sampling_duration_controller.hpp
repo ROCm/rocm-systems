@@ -109,7 +109,7 @@ sampling_duration_controller<ClockPolicy>::start(double duration_sec)
 
     stop_requested_ = false;
     thread_         = std::make_unique<std::thread>([this]() {
-        ::pthread_setname_np(::pthread_self(), "omni.samp.dur");
+        ::pthread_setname_np(::pthread_self(), "rocprofsys.sampling.duration");
 
         sigset_t ss;
         sigemptyset(&ss);

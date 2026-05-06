@@ -6,7 +6,6 @@
 #include "get_availability.hpp"
 
 #include "api.hpp"
-#include "library/components/backtrace.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"

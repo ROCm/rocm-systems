@@ -6,36 +6,21 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
+#include "core/demangler.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
-#include "library/components/backtrace.hpp"
-#include "library/components/ensure_storage.hpp"
 #include "library/perf.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 
-#include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
-#include <timemory/components/data_tracker/components.hpp>
 #include <timemory/components/macros.hpp>
-#include <timemory/components/papi/extern.hpp>
-#include <timemory/components/papi/papi_array.hpp>
-#include <timemory/components/papi/papi_vector.hpp>
-#include <timemory/components/rusage/components.hpp>
-#include <timemory/components/rusage/types.hpp>
-#include <timemory/components/timing/backends.hpp>
-#include <timemory/components/trip_count/extern.hpp>
-#include <timemory/macros.hpp>
-#include <timemory/math.hpp>
 #include <timemory/mpl.hpp>
 #include <timemory/mpl/quirks.hpp>
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/operations.hpp>
 #include <timemory/storage.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/entry.hpp>
-#include <timemory/utility/demangle.hpp>
-#include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
 
 #include <array>
@@ -120,12 +105,52 @@ callchain::description()
 std::vector<callchain::ts_entry_vec_t>
 callchain::filter_and_patch(const std::vector<ts_entry_vec_t>& _data)
 {
+    auto _use_label = [](std::string_view _lbl) -> short {
+        bool       _keep_internal = get_sampling_keep_internal();
+        const auto _npos          = std::string::npos;
+        if(_keep_internal) return 1;
+        if(_lbl.find("rocprofsys_main") != _npos) return 0;
+        if(_lbl.find("rocprofsys::") != _npos) return 0;
+        if(_lbl.find("tim::openmp::") != _npos) return -1;
+        if(_lbl.find("tim::") != _npos) return 0;
+        if(_lbl.find("DYNINST_") != _npos) return 0;
+        if(_lbl.find("rocprofsys_") != _npos) return -1;
+        if(_lbl.find("rocprofiler_") != _npos) return -1;
+        if(_lbl.find("perfetto::") != _npos) return -1;
+        if(_lbl.find("protozero::") == 0) return -1;
+        if(_lbl.find("gotcha_") != _npos) return -1;
+        return 1;
+    };
+
+    static bool _keep_suffix = rocprofsys::get_env<bool>(
+        "ROCPROFSYS_SAMPLING_KEEP_DYNINST_SUFFIX", get_debug_sampling());
+
+    auto _patch_label = [](std::string_view _lbl) -> std::string {
+        if(_keep_suffix) return std::string{ _lbl };
+        const std::string _dyninst{ "_dyninst" };
+        auto              _pos = _lbl.find(_dyninst);
+        if(_pos == std::string::npos) return std::string{ _lbl };
+        return std::string{ _lbl }.replace(_pos, _dyninst.length(), "");
+    };
+
     auto _ret = std::vector<ts_entry_vec_t>{};
     _ret.reserve(_data.size());
     for(const auto& itr : _data)
     {
-        auto _v = backtrace::filter_and_patch(itr.second);
-        if(!_v.empty()) _ret.emplace_back(ts_entry_vec_t{ itr.first, std::move(_v) });
+        auto _filtered = entry_vec_t{};
+        _filtered.reserve(itr.second.size());
+        for(const auto& entry : itr.second)
+        {
+            auto _name = rocprofsys::utility::demangle(_patch_label(entry.name));
+            auto _use  = _use_label(_name);
+            if(_use == -1) break;
+            if(_use == 0) continue;
+            auto _v = entry;
+            _v.name = _name;
+            _filtered.emplace_back(_v);
+        }
+        if(!_filtered.empty())
+            _ret.emplace_back(ts_entry_vec_t{ itr.first, std::move(_filtered) });
     }
 
     return _ret;
