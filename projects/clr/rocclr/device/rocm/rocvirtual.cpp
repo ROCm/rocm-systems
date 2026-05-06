@@ -1273,12 +1273,15 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   if (header != 0) {
     packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), header, rest);
   }
-  const auto virtual_pipe_prefix = [this]() -> const char* {
-    if (!roc_device_.settings().queue_pipe_dist_) return "";
-    static thread_local char buf[32];
-    snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,", gpu_queue_->id % roc_device_.NumHwPipes());
-    return buf;
-  }();
+  const auto virtual_pipe_prefix = IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
+                                     ? [this]() -> const char* {
+                                         if (!roc_device_.settings().queue_pipe_dist_) return "";
+                                         static thread_local char buf[32];
+                                         snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                                                  gpu_queue_->id % roc_device_.NumHwPipes());
+                                         return buf;
+                                       }()
+                                     : "";
   if (dev().settings().ext_dispatch_packet_) {
     logAqlDispatchPacketExtended(
         gpu_queue_, header, reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(packet),
@@ -1635,13 +1638,15 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
 
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
   logAqlBarrierPacket(gpu_queue_, packetHeader, &barrier_packet_, read, index,
-                      [this]() -> const char* {
-                        if (!roc_device_.settings().queue_pipe_dist_) return "";
-                        static thread_local char buf[32];
-                        snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
-                                 gpu_queue_->id % roc_device_.NumHwPipes());
-                        return buf;
-                      }());
+                      IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
+                        ? [this]() -> const char* {
+                            if (!roc_device_.settings().queue_pipe_dist_) return "";
+                            static thread_local char buf[32];
+                            snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                                     gpu_queue_->id % roc_device_.NumHwPipes());
+                            return buf;
+                          }()
+                        : "");
 
   // Clear dependent signals for the next packet
   barrier_packet_.dep_signal[0] = hsa_signal_t{};
@@ -1718,13 +1723,15 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
 
   logAqlBarrierValuePacket(gpu_queue_, packetHeader, &barrier_value_packet_, read, index,
-                           [this]() -> const char* {
-                             if (!roc_device_.settings().queue_pipe_dist_) return "";
-                             static thread_local char buf[32];
-                             snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
-                                      gpu_queue_->id % roc_device_.NumHwPipes());
-                             return buf;
-                           }());
+                           IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
+                             ? [this]() -> const char* {
+                                 if (!roc_device_.settings().queue_pipe_dist_) return "";
+                                 static thread_local char buf[32];
+                                 snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                                          gpu_queue_->id % roc_device_.NumHwPipes());
+                                 return buf;
+                               }()
+                             : "");
   // Clear dependent signals for the next packet
   barrier_value_packet_.signal = hsa_signal_t{};
 }
