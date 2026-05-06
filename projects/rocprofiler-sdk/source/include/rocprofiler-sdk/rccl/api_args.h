@@ -353,11 +353,6 @@ typedef union rocprofiler_rccl_api_args_t
         ncclComm_t   comm;
         ncclWindow_t win;
     } ncclCommWindowDeregister;
-    struct
-    {
-        ncclComm_t comm;
-        int        revokeFlags;
-    } ncclCommRevoke;
 #endif
 #if RCCL_API_TRACE_VERSION_PATCH >= 3
     struct
@@ -381,6 +376,13 @@ typedef union rocprofiler_rccl_api_args_t
         ncclComm_t     comm;
         hipStream_t    stream;
     } ncclAlltoAllv;
+#endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 4
+    struct
+    {
+        ncclComm_t comm;
+        int        revokeFlags;
+    } ncclCommRevoke;
 #endif
 } rocprofiler_rccl_api_args_t;
 
