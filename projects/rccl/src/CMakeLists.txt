@@ -65,10 +65,14 @@ set(SRC_FILES
   device/symmetric/all_gather.cuh
   device/symmetric/all_gather_gin.cuh
   device/symmetric/all_reduce.cuh
+  device/symmetric/data_ops.cuh
+  device/symmetric/gin_scratch.h
+  device/symmetric/gin_scratch__funcs.h
   device/symmetric/gin_scratch__types.h
   device/symmetric/kernel.cuh
   device/symmetric/primitives.cuh
   device/symmetric/reduce_scatter.cuh
+  device/symmetric/reduce_scatter_gin.cuh
   graph/connect.cc
   graph/paths.cc
   graph/rings.cc
@@ -85,6 +89,7 @@ set(SRC_FILES
   graph/xml.cc
   graph/xml.h
   include/alloc.h
+  include/mem_manager.h
   include/allocator.h
   include/algorithms/CollCommon.h
   include/algorithms/all_reduce/all_reduce_dda.h
@@ -101,6 +106,7 @@ set(SRC_FILES
   include/checks.h
   include/collectives.h
   include/coll_net.h
+  include/cudawrap.h
   include/comm.h
   include/compiler.h
   include/compiler/gcc.h
@@ -119,6 +125,7 @@ set(SRC_FILES
   include/git_version.h
   include/graph.h
   include/group.h
+  include/gin.h
   include/gin/gin_host.h
   include/gin/gin_host_proxy.h
   include/hip_rocm_version_info.h
@@ -206,6 +213,13 @@ set(SRC_FILES
   include/nccl_device/impl/lsa_barrier__types.h
   include/nccl_device/impl/ptr__funcs.h
   include/nccl_device/impl/ptr__types.h
+  include/nccl_device/impl/multimem__funcs.h
+  include/nccl_device/impl/reduce_copy__funcs.h
+  include/nccl_device/impl/reduce_copy__impl.h
+  include/nccl_device/impl/reduce_copy__types.h
+  include/nccl_device/impl/vector__funcs.h
+  include/nccl_device/impl/vector__types.h
+  include/nccl_device/reduce_copy.h
   include/npkit/npkit.h
   include/npkit/npkit_event.h
   include/npkit/npkit_struct.h
@@ -270,6 +284,9 @@ set(SRC_FILES
   include/plugin/tuner/tuner_v3.h
   include/plugin/tuner/tuner_v4.h
   include/plugin/tuner/tuner_v5.h
+  include/plugin/nccl_gin.h
+  include/plugin/gin/gin_v11.h
+  include/plugin/gin/gin_v12.h
   misc/alt_rsmi.cc
   misc/archinfo.cc
   misc/argcheck.cc
@@ -302,7 +319,7 @@ set(SRC_FILES
   nccl_device/ll_a2a.cc
   nccl_device/lsa_barrier.cc
   os/linux.cc
-  include/os/os.h
+  include/os.h
   rma/rma.cc
   rma/rma_ce.cc
   rma/rma_proxy.cc
@@ -332,6 +349,9 @@ set(SRC_FILES
   plugin/tuner/tuner_v4.cc
   plugin/tuner/tuner_v5.cc
   plugin/tuner/csv_tuner.cc
+  plugin/gin.cc
+  plugin/gin/gin_v11.cc
+  plugin/gin/gin_v12.cc
   ras/client.cc
   ras/client_support.cc
   ras/collectives.cc
@@ -588,7 +608,7 @@ target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src)                    # 
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device/network/unpack)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include)
-target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/os)
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/mlx5)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/nccl_device)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/ionic)

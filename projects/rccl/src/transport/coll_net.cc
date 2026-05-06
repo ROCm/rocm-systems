@@ -666,6 +666,12 @@ static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct
   struct sendResources* resources = (struct sendResources*)(connection->transportResources);
 
   if (resources) {
+    while (!ncclIntruQueueEmpty(&connection->proxyMemHandleQueue)) {
+      struct proxyMemHandle* memHandle = ncclIntruQueueDequeue(&connection->proxyMemHandleQueue);
+      NCCLCHECK(proxyState->ncclCollNet->deregMr(resources->collNetComm, memHandle->handle));
+      free(memHandle);
+    }
+
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
       if (resources->sendMhandles[p]) {
         NCCLCHECK(proxyState->ncclCollNet->deregMr(resources->collNetComm, resources->sendMhandles[p]));
@@ -687,6 +693,12 @@ static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct
   struct recvResources* resources = (struct recvResources*)(connection->transportResources);
 
   if (resources) {
+    while (!ncclIntruQueueEmpty(&connection->proxyMemHandleQueue)) {
+      struct proxyMemHandle* memHandle = ncclIntruQueueDequeue(&connection->proxyMemHandleQueue);
+      NCCLCHECK(proxyState->ncclCollNet->deregMr(resources->collNetComm, memHandle->handle));
+      free(memHandle);
+    }
+
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
       if (resources->mhandles[p]) {
         NCCLCHECK(proxyState->ncclCollNet->deregMr(resources->collNetComm, resources->mhandles[p]));
@@ -1138,7 +1150,7 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
             if (resources->gdcFlush) {
 #if defined (__x86_64__)
               // Force a PCI-E read from GPU memory
-              asm volatile ("mov (%0), %%eax" :: "l"(resources->gdcFlush) : "%eax");
+              asm volatile ("mov (%0), %%eax" :: "l"(resources->gdcFlush) : "%eax", "memory");
 #else
               WARN("NET: GDR Flush only supported on x86_64");
               return ncclInternalError;
@@ -1333,7 +1345,7 @@ ncclResult_t ncclCollnetDeregBuffer(struct ncclComm* comm, struct ncclProxyConne
 }
 
 static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
-  void* handle;
+  void* handle = NULL;
   struct collnetRegInfo* info = (struct collnetRegInfo*)reqBuff;
   struct sendResources* resources = (struct sendResources*)(connection->transportResources);
   ncclResult_t ret = ncclSuccess;
@@ -1369,6 +1381,12 @@ peermem:
   }
 
 exit:
+  if (handle) {
+    struct proxyMemHandle* memHandle;
+    NCCLCHECK(ncclCalloc(&memHandle, 1));
+    memHandle->handle = handle;
+    ncclIntruQueueEnqueue(&connection->proxyMemHandleQueue, memHandle);
+  }
   memcpy(respBuff, (void*)&handle, sizeof(void*));
   *done = 1;
   return ncclSuccess;
@@ -1378,7 +1396,7 @@ fail:
 }
 
 static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
-  void* handle;
+  void* handle = NULL;
   struct collnetRegInfo* info = (struct collnetRegInfo*)reqBuff;
   struct recvResources* resources = (struct recvResources*)(connection->transportResources);
   ncclResult_t ret = ncclSuccess;
@@ -1413,6 +1431,12 @@ peermem:
   }
 
 exit:
+  if (handle) {
+    struct proxyMemHandle* memHandle;
+    NCCLCHECK(ncclCalloc(&memHandle, 1));
+    memHandle->handle = handle;
+    ncclIntruQueueEnqueue(&connection->proxyMemHandleQueue, memHandle);
+  }
   memcpy(respBuff, (void*)&handle, sizeof(void*));
   *done = 1;
   return ncclSuccess;
@@ -1421,12 +1445,23 @@ fail:
   goto exit;
 }
 
+static bool collnetHandleCmp(struct proxyMemHandle* a, struct proxyMemHandle* b) {
+  return a->handle == b->handle;
+}
+
 static ncclResult_t sendProxyDeregBuffer(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, int* done) {
   void* handle;
   struct sendResources* resources = (struct sendResources*)(connection->transportResources);
 
   assert(reqSize == sizeof(void*));
   memcpy(&handle, reqBuff, sizeof(void*));
+  if (handle) {
+    struct proxyMemHandle memHandle = {};
+    struct proxyMemHandle* deletedHandle;
+    memHandle.handle = handle;
+    deletedHandle = ncclIntruQueueDelete(&connection->proxyMemHandleQueue, &memHandle, collnetHandleCmp);
+    free(deletedHandle);
+  }
   NCCLCHECK(proxyState->ncclCollNet->deregMr(resources->collNetComm, handle));
   *done = 1;
   return ncclSuccess;
@@ -1438,6 +1473,13 @@ static ncclResult_t recvProxyDeregBuffer(struct ncclProxyConnection* connection,
 
   assert(reqSize == sizeof(void*));
   memcpy(&handle, reqBuff, sizeof(void*));
+  if (handle) {
+    struct proxyMemHandle memHandle = {};
+    struct proxyMemHandle* deletedHandle;
+    memHandle.handle = handle;
+    deletedHandle = ncclIntruQueueDelete(&connection->proxyMemHandleQueue, &memHandle, collnetHandleCmp);
+    free(deletedHandle);
+  }
   NCCLCHECK(proxyState->ncclCollNet->deregMr(resources->collNetComm, handle));
   *done = 1;
   return ncclSuccess;

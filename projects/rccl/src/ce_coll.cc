@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "comm.h"
 #include "register_inline.h"
@@ -127,6 +128,9 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
 exit:
   return ret;
 fail:
+  // [RCCL] In ncclCeFinalize there are no ceWinDev/ceDevBase locals, so the
+  // cleanup uses the comm->ceColl.* members directly. The NCCLCHECKIGNORE
+  // helpers tolerate null pointers safely.
   goto exit;
 }
 
@@ -370,23 +374,26 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeCollArgs* 
   NCCLCHECK(ceFaultCheck(comm, CE_FAULT_LAUNCH_OP, "ncclCeLaunchBatchOps"));
 #endif
 
+  // cudaMemcpyBatchAsync does not accept the legacy null stream (e.g. PyTorch null stream).
+  // Fall back to cudaMemcpyAsync per-op when stream is NULL.
+  bool isLegacyStream;
+  NCCLCHECKGOTO(ncclCudaStreamIsLegacyNull(stream, &isLegacyStream), ret, fail);
+
+  // Start CE batch profiling
+  NCCLCHECKGOTO(ncclProfilerStartCeBatchEvent(comm, args, params, stream, &ceBatchHandle),
+                ret, fail);
+
   // Check if there are any operations to perform
-  if (params->numOps == 0) {
-    return ncclSuccess;
-  }
+  if (params->numOps == 0) goto exit;
 
   // Check if we are in a CUDA graph capture
   capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
 
   NCCLCHECKGOTO(ncclCudaDriverVersion(&driverVersion), ret, fail);
 
-  // Start CE batch profiling
-  NCCLCHECKGOTO(ncclProfilerStartCeBatchEvent(comm, args, params, stream, &ceBatchHandle),
-                ret, fail);
-
-  //--------------Graph capture--------------
-  // cudaMemcpyBatchAsync is not supported during CUDA graph capture
-  if (capturing) {
+  //--------------Graph capture / legacy stream--------------
+  // cudaMemcpyBatchAsync is not supported during CUDA graph capture or with legacy stream
+  if (capturing || isLegacyStream) {
     for (int i =0; i < params->numOps; i++) {
       CUDACHECKGOTO(cudaMemcpyAsync(
         (void*)params->dsts[i],
@@ -433,7 +440,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeCollArgs* 
           params->attrs, params->attrIdxs, params->numAttrs, nullptr, stream), ret, fail);
         // Sync after each batch
         if (i + batchSize < params->numOps) {
-          NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+          NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
         }
       }
     } else {
@@ -493,11 +500,9 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeCollArgs* 
     }
   }
 
-  // Stop CE batch profiling
-  NCCLCHECKGOTO(ncclProfilerStopCeBatchEvent(comm, ceBatchHandle, stream),
-                ret, fail);
-
 exit:
+  // Stop CE batch profiling - always attempt if started, even on error
+  ncclProfilerStopCeBatchEvent(comm, ceBatchHandle, stream);
   return ret;
 fail:
   goto exit;
@@ -747,11 +752,9 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
       ret = ncclInvalidUsage;
   }
 
-  // Stop CE collective profiling
-  NCCLCHECKGOTO(ncclProfilerStopCeCollEvent(comm, args, stream),
-                ret, fail);
-
 exit:
+  // Stop CE collective profiling - always attempt if started, even on error
+  ncclProfilerStopCeCollEvent(comm, args, stream);
   return ret;
 fail:
   goto exit;

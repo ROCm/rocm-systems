@@ -1359,11 +1359,14 @@ done:
   return ncclSuccess;
 }
 
+// Max chars per GPU entry: " GPU/xxxxxxxxxxxxxxxx-xxxxxxxxxxxxxxxx" (~40 chars)
+#define CHARS_PER_GPU_ENTRY 48
+
 ncclResult_t ncclTopoPrintGraph(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) {
   INFO(NCCL_GRAPH, "Pattern %d, crossNic %d, nChannels %d, bw %f/%f, type %s/%s, sameChannels %d", graph->pattern, graph->crossNic, graph->nChannels, graph->bwIntra, graph->bwInter, topoPathTypeStr[graph->typeIntra], topoPathTypeStr[graph->typeInter], graph->sameChannels);
   int ngpus = system->nodes[GPU].count;
 
-  char line[1024];
+  char* line = (char*)malloc(ngpus * CHARS_PER_GPU_ENTRY);
   for (int c=0; c<graph->nChannels; c++) {
     sprintf(line, "%2d :", c);
     int offset = strlen(line);
@@ -1395,6 +1398,7 @@ ncclResult_t ncclTopoPrintGraph(struct ncclTopoSystem* system, struct ncclTopoGr
     }
     INFO(NCCL_GRAPH, "%s", line);
   }
+  free(line);
   return ncclSuccess;
 }
 
