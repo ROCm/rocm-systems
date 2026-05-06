@@ -26,7 +26,7 @@ else()
 endif()
 
 set(attachment-env
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH} AMD_LOG_LEVEL=7"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 
 # Test that launches the app and attaches to it
@@ -48,7 +48,7 @@ rocprofiler_add_integration_execute_test(
 
 # Validate the output from the attached profiling
 rocprofiler_add_integration_validate_test(
-    rocprofv3-test-attachment-attach-once-csv
+    rocprofv3-test-attachment-attach-once
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
@@ -65,26 +65,7 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_memory_copy_trace.csv
          --agent-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv
-         --skip-if
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)
-
-rocprofiler_add_integration_validate_test(
-    rocprofv3-test-attachment-attach-once-json
-    TEST_PATHS validate.py
-    COPY conftest.py
-    CONFIG pytest.ini
-    TIMEOUT 30
-    LABELS "attachment"
-    DISABLED ${IS_DISABLED}
-    SKIP_REGULAR_EXPRESSION "SKIPPED"
-    FIXTURES_REQUIRED rocprofv3-test-attachment-attach-once
-    ARGS --kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
-         --hsa-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
-         --memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
-         --agent-input
+         --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
          --skip-if
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)

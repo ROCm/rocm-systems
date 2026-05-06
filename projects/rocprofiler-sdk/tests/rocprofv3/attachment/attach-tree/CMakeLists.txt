@@ -46,9 +46,9 @@ rocprofiler_add_integration_execute_test(
     SKIP_REGULAR_EXPRESSION "This test is skipped."
     FIXTURES_SETUP rocprofv3-test-attachment-attach-tree)
 
-# Validate the CSV output
+# Validate the output from the attached profiling
 rocprofiler_add_integration_validate_test(
-    rocprofv3-test-attachment-attach-tree-csv
+    rocprofv3-test-attachment-attach-tree
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
@@ -65,27 +65,7 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_memory_copy_trace.csv
          --agent-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv
-         --skip-if
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)
-
-# Validate the JSON output
-rocprofiler_add_integration_validate_test(
-    rocprofv3-test-attachment-attach-tree-json
-    TEST_PATHS validate.py
-    COPY conftest.py
-    CONFIG pytest.ini
-    TIMEOUT 30
-    LABELS "attachment"
-    DISABLED ${IS_DISABLED}
-    SKIP_REGULAR_EXPRESSION "SKIPPED"
-    FIXTURES_REQUIRED rocprofv3-test-attachment-attach-tree
-    ARGS --kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
-         --hsa-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
-         --memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
-         --agent-input
+         --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
          --skip-if
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)
