@@ -233,12 +233,17 @@ const char* ihipGetErrorName(hipError_t hip_error);
 
 #define STREAM_CAPTURE(name, stream, ...)                                                          \
   hip::getStreamPerThread(stream);                                                                 \
-  if (stream != nullptr && stream != hipStreamLegacy) {                                            \
-    auto captureStatus = reinterpret_cast<hip::Stream*>(stream)->GetCaptureStatus();               \
-    if (captureStatus == hipStreamCaptureStatusActive) {                                           \
-      return hip::capture##name(stream, ##__VA_ARGS__);                                            \
-    } else if (captureStatus == hipStreamCaptureStatusInvalidated) {                               \
-      return hipErrorStreamCaptureInvalidated;                                                     \
+  if (!g_allCapturingStreams.empty()) {                                                            \
+    if (!hip::isValid(stream)) {                                                                   \
+      return hipErrorInvalidValue;                                                                 \
+    }                                                                                              \
+    if (stream != nullptr && stream != hipStreamLegacy) {                                          \
+      auto captureStatus = reinterpret_cast<hip::Stream*>(stream)->GetCaptureStatus();             \
+      if (captureStatus == hipStreamCaptureStatusActive) {                                         \
+        return hip::capture##name(stream, ##__VA_ARGS__);                                          \
+      } else if (captureStatus == hipStreamCaptureStatusInvalidated) {                             \
+        return hipErrorStreamCaptureInvalidated;                                                   \
+      }                                                                                            \
     }                                                                                              \
   }
 
