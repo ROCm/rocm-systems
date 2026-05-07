@@ -81,9 +81,7 @@ class VirtualGPU : public device::VirtualDevice {
 
     // This type is allocated exclusively via amd::AllocWithTrailing<Queue>(extSize, ...) so
     // that a single block holds the wrapper plus PAL's IQueue / ICmdBuffer / IFence objects
-    // placed in the trailing region. Plain new / delete would route through global
-    // ::operator new while DestroyWithTrailing calls std::free — a silent allocator mismatch.
-    // Deleting these forces the contract at compile time.
+    // placed in the trailing region.
     void* operator new(size_t) = delete;
     void operator delete(void*) = delete;
 
