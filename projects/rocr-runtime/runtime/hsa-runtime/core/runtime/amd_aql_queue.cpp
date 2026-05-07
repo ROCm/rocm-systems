@@ -1387,7 +1387,7 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
       // EC_QUEUE_PACKET_DISPATCH_WORK_GROUP_SIZE_INVALID
       { 21, HSA_STATUS_ERROR_INVALID_ARGUMENT },
       // EC_QUEUE_PACKET_DISPATCH_REGISTER_SIZE_INVALID
-      { 22, HSA_STATUS_ERROR_INVALID_ISA },
+      { 22, (hsa_status_t)HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS },
       // EC_QUEUE_PACKET_VENDOR_UNSUPPORTED
       { 23, HSA_STATUS_ERROR_INVALID_PACKET_FORMAT },
       // EC_QUEUE_PREEMPTION_ERROR
@@ -1431,6 +1431,13 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
   if (errorCode == static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_FAULT)) {
     debug_print("Queue error - HSA_STATUS_ERROR_MEMORY_FAULT\n");
     return exceptionHandlerDone();
+  }
+
+  const char* errorMsg = nullptr;
+  if (HSA::hsa_status_string(errorCode, &errorMsg) == HSA_STATUS_SUCCESS && errorMsg) {
+    fprintf(stderr, "Queue error: %s\n", errorMsg);
+  } else {
+    fprintf(stderr, "Queue error: code 0x%lx\n", (unsigned long)error_code);
   }
 
   // Fallback if KFD does not support GPU core dump. In this case, the core
