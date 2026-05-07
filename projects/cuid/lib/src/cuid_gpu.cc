@@ -248,9 +248,9 @@ CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
       }
     }
 
-    uint8_t fingerprint_size = 8;
-    uint8_t *fingerprint_buffer = new uint8_t[fingerprint_size];
-    status = PciUtil::read_pci_config_space(m_info.bdf, fingerprint_buffer,
+    const uint8_t fingerprint_size = 8;
+    uint8_t fingerprint_bytes[fingerprint_size] = {0};
+    status = PciUtil::read_pci_config_space(m_info.bdf, fingerprint_bytes,
                                             fingerprint_size, offset);
     if (status != AMDCUID_STATUS_SUCCESS) {
       fingerprint = 0;
@@ -258,7 +258,7 @@ CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
     }
     // pcie config file is little endian, so need to convert to big endian
     uint64_t fingerprint_value = 0;
-    std::memcpy(&fingerprint_value, fingerprint_buffer,
+    std::memcpy(&fingerprint_value, fingerprint_bytes,
                 sizeof(fingerprint_value));
     fingerprint = PciUtil::le64_to_be64(fingerprint_value);
   } else {
