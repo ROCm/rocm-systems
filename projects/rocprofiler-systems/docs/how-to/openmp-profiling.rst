@@ -80,7 +80,7 @@ By default, this file contains all captured traces from the profiling session.
 
 .. tip::
 
-    More information about presets can be found in the :doc:`Using preset profiles <./using-preset-profiles>` documentation.
+    More information about presets can be found in the `Using preset profiles <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/how-to/using-preset-profiles.rst#using-preset-profiles-and-domain-flags>`_ documentation.
 
 Understanding the proto file output
 -----------------------------------------------
@@ -189,7 +189,7 @@ Instrumenting the application with rocprof-sys-instrument
 -------------------------------------------------------------
 
 The application can be instrumented using ``rocprof-sys-instrument`` to gather more data than would be obtained from tracing using ``rocprof-sys-run`` alone.
-More details on ``rocprof-sys-instrument`` and the data it gathers can be found in the :doc:`data collection modes document <../conceptual/data-collection-modes>`.
+More details on ``rocprof-sys-instrument`` and the data it gathers can be found in the `data collection modes document <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/conceptual/data-collection-modes.rst>`_.
 
 .. code-block:: shell
 
@@ -213,7 +213,7 @@ Compared to the trace from the preset-only run, the instrumented trace additiona
 .. important::
 
     With ``rocprof-sys-instrument``, data on user-defined functions can be gathered. However, default values on certain settings
-    may prevent the expected function from being instrumented. For details, see the :doc:`selective instrumentation guide <./instrumenting-rewriting-binary-application>`.
+    may prevent the expected function from being instrumented. For details, see the `selective instrumentation guide <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/how-to/instrumenting-rewriting-binary-application.rst#selective-instrumentation>`_.
 
 Environment variable configuration
 ===================================
@@ -231,7 +231,7 @@ To enable OMPT callback capture without a preset:
 .. tip::
 
     Creating a default configuration file helps maintain consistent profiling settings across sessions.
-    For details, see the :doc:`configuring runtime options guide <./configuring-runtime-options>`.
+    For details, see the `configuring runtime options guide <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/docs/how-to/configuring-runtime-options.rst>`_.
 
 .. note::
 
