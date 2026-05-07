@@ -64,9 +64,12 @@ int main()
     dim3 blockSize(64);
     dim3 gridSize((N + blockSize.x - 1) / blockSize.x);
 
-    // Launch kernel
-    hipLaunchKernelGGL(randomAccessKernel, gridSize, blockSize, 0, 0, d_data, N, d_seeds);
-    hip_status = hipDeviceSynchronize();
+    // Repeat the launch so the profile is robust.
+    const int kIters = 30;
+    for (int i = 0; i < kIters; ++i)
+    {
+        hipLaunchKernelGGL(randomAccessKernel, gridSize, blockSize, 0, 0, d_data, N, d_seeds);
+    }
 
     HIP_ASSERT(hipMemcpy(h_data.data(), d_data, size, hipMemcpyDeviceToHost));
 
