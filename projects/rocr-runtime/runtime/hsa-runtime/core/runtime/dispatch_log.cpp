@@ -739,24 +739,45 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
               ++stale_end;
             }
             const uint64_t stale_count = stale_end - i;
-            rocm_trace_emit_hsa_kernel_dispatch_drop(
-                queue_id_to_wire(qs.queue_id), stale_count);
-            qs.next_idx = stale_end;
-            if (qs.rptr_ptr) {
-              __atomic_store_n(qs.rptr_ptr, stale_end, __ATOMIC_RELEASE);
+            if (stale_count == 0) {
+              // Race: between the first rt==0 load at the top of this
+              // iteration and the sweep's re-read of slot i, FW
+              // published into slot i (zrt != 0 caused the sweep loop
+              // to break immediately with stale_end == i). The slot is
+              // no longer stale; emitting a zero-count drop would
+              // violate the tracepoint contract (bytes_lost is the
+              // count of lost records — 0 is semantically invalid).
+              // Disarm the quarantine and let the main loop retry this
+              // same index, which will now observe the published
+              // record and process it normally.
+              qs.pending_zero_stall.store(false, std::memory_order_release);
+              // Do not set `any = true`: nothing was emitted or
+              // advanced; the retry of slot i will set it if the
+              // published record is processed.
+              // Do not advance i; the for-loop's ++i would skip the
+              // freshly-published slot. Step back one so ++i lands on
+              // i again.
+              --i;
+            } else {
+              rocm_trace_emit_hsa_kernel_dispatch_drop(
+                  queue_id_to_wire(qs.queue_id), stale_count);
+              qs.next_idx = stale_end;
+              if (qs.rptr_ptr) {
+                __atomic_store_n(qs.rptr_ptr, stale_end, __ATOMIC_RELEASE);
+              }
+              qs.pending_zero_stall.store(false, std::memory_order_release);
+              any = true;
+              // If the sweep stopped at a real record, fall through to
+              // process it (and the rest of [stale_end, end)) in this
+              // same pass by resuming the for-loop at stale_end. If the
+              // sweep consumed the entire remaining window, the loop
+              // condition (i < end) will exit naturally.
+              i = stale_end;
+              // The for-loop's ++i would skip past stale_end; counteract
+              // by stepping back one. (When stale_end == end, this still
+              // works: i becomes end-1, ++i → end, loop exits.)
+              --i;
             }
-            qs.pending_zero_stall.store(false, std::memory_order_release);
-            any = true;
-            // If the sweep stopped at a real record, fall through to
-            // process it (and the rest of [stale_end, end)) in this
-            // same pass by resuming the for-loop at stale_end. If the
-            // sweep consumed the entire remaining window, the loop
-            // condition (i < end) will exit naturally.
-            i = stale_end;
-            // The for-loop's ++i would skip past stale_end; counteract
-            // by stepping back one. (When stale_end == end, this still
-            // works: i becomes end-1, ++i → end, loop exits.)
-            --i;
             continue;
           }
         } else {
