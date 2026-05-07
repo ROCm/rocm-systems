@@ -51,6 +51,8 @@ RUN apt update && \
         libboost-program-options-dev \
         libmount-dev \
         llvm-dev \
+        python3.12-dev \
+        python3.12-venv \
         rocm-llvm-dev
 
 # Configure system linker for ROCm

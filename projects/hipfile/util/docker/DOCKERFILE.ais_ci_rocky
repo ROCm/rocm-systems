@@ -71,6 +71,7 @@ RUN dnf makecache && \
         hip-devel \
         libmount-devel \
         llvm-devel \
+        python3.12-devel \
         rpm-build
 
 # Configure system linker for ROCm

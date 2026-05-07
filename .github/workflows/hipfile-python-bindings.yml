@@ -122,21 +122,6 @@ jobs:
                 )
               }}
             '
-      - name: Install Python and development headers
-        run: |
-          docker exec \
-            -t \
-            "${AIS_CONTAINER_NAME}" \
-            /bin/bash -c '
-              ${{
-                inputs.platform == 'ubuntu' &&
-                  'apt update && apt install -y python3-venv python3-dev' ||
-                inputs.platform == 'rocky' &&
-                  'dnf install -y python3.12-devel' ||
-                inputs.platform == 'suse' &&
-                  'zypper --non-interactive install python312-devel'
-              }}
-            '
       - name: Create Python virtual environment and install build dependencies
         run: |
           docker exec \

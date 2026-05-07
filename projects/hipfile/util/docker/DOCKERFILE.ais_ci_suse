@@ -68,6 +68,7 @@ RUN zypper install -y \
         hip-devel \
         libmount-devel \
         llvm19-devel \
+        python312-devel \
         rocm-device-libs \
         rpm-build
 
