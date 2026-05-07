@@ -125,12 +125,12 @@ struct collector
      *
      * @param timestamp Current timestamp in nanoseconds for the sample.
      */
-    void sample(int64_t timestamp)
+    void sample(std::int64_t timestamp)
     {
         auto new_end = std::remove_if(
             m_device_entries.begin(), m_device_entries.end(),
             [this, timestamp](const device_entry& entry) {
-                auto _timestamp = static_cast<uint64_t>(timestamp);
+                auto _timestamp = static_cast<std::uint64_t>(timestamp);
 
                 try
                 {
@@ -208,9 +208,9 @@ struct collector
      *
      * @param timestamp The current time in nanoseconds, typically when the pause occurs.
      */
-    void pause(int64_t timestamp)
+    void pause(std::int64_t timestamp)
     {
-        const auto current_timestamp = static_cast<uint64_t>(timestamp);
+        const auto current_timestamp = static_cast<std::uint64_t>(timestamp);
         for(const auto& entry : m_device_entries)
         {
             auto device_id   = entry.device->get_index();

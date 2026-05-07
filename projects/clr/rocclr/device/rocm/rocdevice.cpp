@@ -1232,14 +1232,6 @@ bool Device::populateOCLDeviceConstants() {
       }
     }
 
-    // For APU systems the SVM aperture can exceed actual physical RAM.
-    const size_t phys_mem = amd::Os::getPhysicalMemSize();
-    const uint apu_mem_percent =
-        ((phys_mem / Mi) > 1536 && IS_WINDOWS) ? 75 : 50;
-    const uint64_t apu_mem_limit = phys_mem * apu_mem_percent / 100;
-    info_.globalMemSize_ = std::min(info_.globalMemSize_,
-                                    static_cast<uint64_t>(apu_mem_limit));
-
     gpuvm_segment_max_alloc_ =
         uint64_t(info_.globalMemSize_ * std::min(GPU_SINGLE_ALLOC_PERCENT, 100u) / 100u);
     assert(gpuvm_segment_max_alloc_ > 0);
@@ -1272,17 +1264,14 @@ bool Device::populateOCLDeviceConstants() {
     }
   }
 
+  freeMem_ = info_.globalMemSize_;
+
   // Make sure the max allocation size is not larger than the available memory size.
   info_.maxMemAllocSize_ = std::min(info_.maxMemAllocSize_, info_.globalMemSize_);
   info_.maxMemAllocSize_ = amd::alignDown(info_.maxMemAllocSize_, sizeof(uint64_t));
 
   // Maximum system memory allocation size allowed
   info_.maxPhysicalMemAllocSize_ = amd::Os::getPhysicalMemSize();
-
-  // Mirror PAL: global memory should not exceed 4x max single alloc
-  info_.globalMemSize_ = std::min(4 * info_.maxMemAllocSize_, info_.globalMemSize_);
-
-  freeMem_ = info_.globalMemSize_;
 
   // make sure we don't run anything over 8 params for now
   info_.maxParameterSize_ = 1024;
@@ -1309,6 +1298,16 @@ bool Device::populateOCLDeviceConstants() {
   info_.maxWorkItemSizes_[1] = std::min(max_workgroup_size[1], max_work_item_size);
   info_.maxWorkItemSizes_[2] = std::min(max_workgroup_size[2], max_work_item_size);
   info_.preferredWorkGroupSize_ = settings().preferredWorkGroupSize_;
+
+  hsa_dim3_t grid_max_dim = {0, 0, 0};
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::agent_get_info(bkendDevice_, HSA_AGENT_INFO_GRID_MAX_DIM, &grid_max_dim)) {
+    return false;
+  }
+  assert(grid_max_dim.x != 0 && grid_max_dim.y != 0 && grid_max_dim.z != 0);
+  info_.maxGridDim_[0] = std::min(grid_max_dim.x, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+  info_.maxGridDim_[1] = std::min(grid_max_dim.y, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+  info_.maxGridDim_[2] = std::min(grid_max_dim.z, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
 
   info_.nativeVectorWidthChar_ = info_.preferredVectorWidthChar_ = 4;
   info_.nativeVectorWidthShort_ = info_.preferredVectorWidthShort_ = 2;
@@ -1726,7 +1725,7 @@ bool Device::populateOCLDeviceConstants() {
   // devices with no cluster support; max size is 0
   info_.clusterMaxSize_ = 0;
 
-  hsa_status_t hsaStatus = hsa_agent_get_info(
+  hsa_status_t hsaStatus = Hsa::agent_get_info(
       bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE),
       &info_.clusterMaxSize_);
 
@@ -3929,6 +3928,9 @@ cl_int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
     case (hsa_status_t)HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION:
       cl_error = CL_INVALID_MEM_OBJECT;
       break;
+    case (hsa_status_t)HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS:
+      cl_error = CL_OUT_OF_RESOURCES;
+      break;
     case HSA_STATUS_ERROR:
     default:
       cl_error = CL_DEVICE_NOT_AVAILABLE;
@@ -3967,12 +3969,17 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
               errorMsg, status);
     }
 
-    // Core dumps generally provide limited value for OOM, so do not let
-    // DumpCoreFile() be the reason to abort in that case. OOM should still
-    // honor HIP_SKIP_ABORT_ON_GPU_ERROR consistently.
+    // Core dumps generally provide limited value for OOM or register overflow,
+    // so do not let DumpCoreFile() be the reason to abort in those cases. These
+    // errors should still honor HIP_SKIP_ABORT_ON_GPU_ERROR consistently.
     const bool is_oom = (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+    // HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS is a dispatch-time
+    // failure (kernel exceeds hardware register limits), not a corruption.
+    // Treat it as recoverable rather than aborting.
+    const bool invalid_dispatch =
+        (status == (hsa_status_t)HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS);
     const bool should_abort =
-      is_oom
+      (is_oom || invalid_dispatch)
         ? !HIP_SKIP_ABORT_ON_GPU_ERROR
         : (amd::Os::DumpCoreFile() || !HIP_SKIP_ABORT_ON_GPU_ERROR);
 

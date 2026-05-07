@@ -48,7 +48,7 @@ __device__ void GDAContext::p(T *dest, T value, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     long L_offset{reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
-    ipcImpl_.ipcCopy(ipcImpl_.ipc_bases[local_pe] + L_offset, reinterpret_cast<void *>(&value), sizeof(T));
+    ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset, reinterpret_cast<void *>(&value), sizeof(T));
     return;
   }
   putmem_nbi(dest, &value, sizeof(T), pe);
@@ -71,7 +71,7 @@ __device__ T GDAContext::g(const T *source, int pe) {
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     const char *src_typed{reinterpret_cast<const char *>(source)};
     long L_offset{const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
-    ipcImpl_.ipcCopy(&ret, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T));
+    ipcImpl_.ipcCopy<MemcpyKind::Get>(&ret, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T));
     return ret;
   }
   LOGD_ERROR_ABORT("gda::g not implemented");
@@ -699,7 +699,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
     if (nelems != 0) {
       T* dst = (T*)((char*) dest + dest_displs[j] * sizeof(T));
       T* src = (T*)((char*) &tmp_buf[j * tmp_buf_off]);
-      memcpy_wg(dst, src, nelems);
+      memcpy_wg<MemcpyKind::Put>(dst, src, nelems);
     }
   }
 

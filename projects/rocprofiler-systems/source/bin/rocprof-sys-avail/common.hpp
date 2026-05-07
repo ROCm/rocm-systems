@@ -4,6 +4,7 @@
 #pragma once
 
 #include "defines.hpp"
+#include <cstdint>
 
 #include <timemory/components/types.hpp>
 #include <timemory/mpl/concepts.hpp>
@@ -68,7 +69,7 @@ extern bool              csv;
 extern bool              markdown;
 extern bool              case_insensitive;
 extern bool              regex_hl;
-extern int32_t           verbose_level;
+extern std::int32_t      verbose_level;
 extern str_vec_t         regex_keys;
 extern str_vec_t         category_regex_keys;
 extern str_set_t         category_view;
@@ -79,20 +80,20 @@ extern std::set<std::string> settings_exclude;
 
 struct format_options
 {
-    std::string delim          = "|";
-    bool        csv            = false;
-    bool        markdown       = false;
-    bool        alphabetical   = false;
-    bool        available_only = false;
-    bool        all_info       = false;
-    bool        force_brief    = false;
-    bool        expand_keys    = false;
-    bool        force_config   = false;
-    bool        print_advanced = false;
-    int32_t     max_width      = 0;
-    int32_t     num_cols       = 0;
-    int32_t     min_width      = 40;
-    int32_t     padding        = 4;
+    std::string  delim          = "|";
+    bool         csv            = false;
+    bool         markdown       = false;
+    bool         alphabetical   = false;
+    bool         available_only = false;
+    bool         all_info       = false;
+    bool         force_brief    = false;
+    bool         expand_keys    = false;
+    bool         force_config   = false;
+    bool         print_advanced = false;
+    std::int32_t max_width      = 0;
+    std::int32_t num_cols       = 0;
+    std::int32_t min_width      = 40;
+    std::int32_t padding        = 4;
     // Preset export metadata (used with -F json)
     std::string preset_name;
     std::string preset_description;

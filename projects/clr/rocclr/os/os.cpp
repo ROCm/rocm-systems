@@ -55,13 +55,13 @@ void* Os::loadLibrary(const char* libraryname) {
     char cszDllPath[1024] = {0};
     if (!GetModuleFileNameA(hm, cszDllPath, sizeof(cszDllPath))) return NULL;
 
-    LPSTR cszFileName;
-    char buffer[1024] = {0};
-    if (!GetFullPathNameA(cszDllPath, sizeof(buffer), buffer, &cszFileName)) return NULL;
-
-    std::string newPath;
-    newPath = cszDllPath;
-    newPath.replace(newPath.find(cszFileName), strlen(libraryname), libraryname);
+    std::string newPath(cszDllPath);
+    auto sep = newPath.rfind(fileSeparator());
+    if (sep != std::string::npos) {
+      newPath.replace(sep + 1, std::string::npos, libraryname);
+    } else {
+      newPath = libraryname;
+    }
     ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Loading lib: %s", newPath.c_str());
     handle = Os::loadLibrary_(newPath.c_str());
     if (handle != NULL) {

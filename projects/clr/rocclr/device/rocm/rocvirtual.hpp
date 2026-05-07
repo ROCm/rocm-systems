@@ -712,6 +712,7 @@ class VirtualGPU : public device::VirtualDevice {
   hsa_barrier_and_packet_t barrier_packet_ {};
   hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 
+  uint32_t skippedDispatches_;  //!< Count of consecutive dispatches that skipped the doorbell flush.
   uint32_t dispatch_id_;  //!< This variable must be updated atomically.
   Device& roc_device_;    //!< roc device object
   PrintfDbg* printfdbg_;
@@ -766,6 +767,8 @@ class VirtualGPU : public device::VirtualDevice {
   int fence_state_;                    //!< Fence scope
                                        //!< kUnknown/kFlushedToDevice/kFlushedToSystem
   std::atomic<bool> fence_dirty_;      //!< Fence modified flag
+  bool heap_init_fence_emitted_ = false;  //!< True once this queue has emitted system scope
+                                          //!< fence after hidden heap init.
 
   uint64_t last_write_index_ = kInvalidQueueIndex; //!< The last HW queue write index for any packet
   uint64_t last_packet_with_signal_index_ = kInvalidQueueIndex; //!< The last HW queue write index for a packet
@@ -775,7 +778,8 @@ class VirtualGPU : public device::VirtualDevice {
   //! SDMA engine affinity tracking for this VirtualGPU/stream
   uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations
 
-  void* hostcallBuffer_;  //!< Hostcall buffer
+  void* hostcallBuffer_;        //!< Hostcall buffer
+  size_t hostcallBufferSize_ = 0; //!< Byte size of hostcallBuffer_, for hostFree
 
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };

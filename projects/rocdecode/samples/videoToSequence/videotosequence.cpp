@@ -228,7 +228,7 @@ void ShowHelpAndExit(const char *option = NULL) {
     << "-d GPU device ID (0 for the first device, 1 for the second, etc.); optional; default: 0" << std::endl
     << "-b seq_info.batch_size - specify the number of sequences to be decoded; (default: all sequences till eof)" << std::endl
     << "-step - frame interval between each sequence; (default: sequence length)" << std::endl
-    << "-stride - distance between consective frames in a sequence; (default: 1)" << std::endl
+    << "-stride - distance between consecutive frames in a sequence; (default: 1)" << std::endl
     << "-l - Number of frames in each sequence; (default: 3)" << std::endl
     << "-crop crop rectangle for output (not used when using interopped decoded frame); optional; default: 0" << std::endl
     << "-seek_mode option for seeking (0: no seek 1: seek to prev key frame); optional; default: 0" << std::endl
