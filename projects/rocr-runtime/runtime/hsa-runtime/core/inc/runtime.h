@@ -789,6 +789,11 @@ class Runtime {
   // @brief Binds Error handlers to this node.
   void BindErrorHandlers();
 
+  // @brief Forward HSA_RAS_POISON_SIGBUS_DELAY_MS to amdgpu/KFD via
+  //        DRM_IOCTL_AMDGPU_USER_OPTIONS for each GPU agent. No-op if the
+  //        flag is unset or the host kernel does not support the option.
+  void ConfigureRasSigbusDelay();
+
   // @brief Acquire snapshot of system event handlers.
   // Returns a copy to avoid holding a lock during callbacks.
   std::vector<std::pair<AMD::callback_t<hsa_amd_system_event_callback_t>, void*>>

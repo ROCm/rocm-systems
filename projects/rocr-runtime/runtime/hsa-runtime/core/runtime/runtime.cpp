@@ -50,6 +50,7 @@
 #include <link.h>
 #include <dlfcn.h>
 #include <amdgpu_drm.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #endif
 
@@ -2087,6 +2088,47 @@ void Runtime::BindErrorHandlers() {
                         HwExceptionHandler, reinterpret_cast<void*>(hw_exception_signal_.get()));
 }
 
+
+// Forward declarations for RAS poison SIGBUS delay configuration
+static int (*fn_amdgpu_device_get_fd)(HsaAMDGPUDeviceHandle device_handle) = NULL;
+int fn_amdgpu_device_get_fd_nosupport(HsaAMDGPUDeviceHandle device_handle);
+
+void Runtime::ConfigureRasSigbusDelay() {
+  if (!flag_.ras_poison_sigbus_delay_set()) return;
+
+#if defined(__linux__)
+  if (fn_amdgpu_device_get_fd == nullptr ||
+      fn_amdgpu_device_get_fd == &fn_amdgpu_device_get_fd_nosupport) {
+    debug_warning(
+        "HSA_RAS_POISON_SIGBUS_DELAY_MS set but amdgpu_device_get_fd is "
+        "unavailable; option ignored");
+    return;
+  }
+
+  const uint32_t value = flag_.ras_poison_sigbus_delay_ms();
+  for (core::Agent* agent : gpu_agents_) {
+    AMD::GpuAgent* gpu = static_cast<AMD::GpuAgent*>(agent);
+    amdgpu_device_handle ldrm_dev = gpu->libDrmDev();
+    if (ldrm_dev == nullptr) continue;
+
+    int fd = fn_amdgpu_device_get_fd(ldrm_dev);
+    if (fd < 0) continue;
+
+    struct drm_amdgpu_user_options args = {};
+    args.op = AMDGPU_USER_OPTIONS_OP_KFD_SIGBUS_DELAY;
+    args.kfd_sigbus_delay.value = value;
+    if (ioctl(fd, DRM_IOCTL_AMDGPU_USER_OPTIONS, &args) != 0) {
+      // Kernel may be older than the patch; not fatal.
+      debug_warning(
+          "DRM_IOCTL_AMDGPU_USER_OPTIONS(KFD_SIGBUS_DELAY) failed; "
+          "host kernel may not support the RAS-poison opt-in.");
+      // Don't keep retrying for the rest of the agents on the same kernel.
+      return;
+    }
+  }
+#endif
+}
+
 bool Runtime::HwExceptionHandler(hsa_signal_value_t val, void* arg) {
   core::InterruptSignal* hw_exception_signal = reinterpret_cast<core::InterruptSignal*>(arg);
 
@@ -2450,6 +2492,10 @@ hsa_status_t Runtime::Load() {
   // Initialize libdrm helper function
   CheckVirtualMemApiSupport();
 
+  // Configure per-process RAS poison-consume SIGBUS opt-in (requires the
+  // amdgpu_device_get_fd helper resolved by CheckVirtualMemApiSupport).
+  ConfigureRasSigbusDelay();
+
   // Initialize IPC support mode
   InitIPCDmaBufSupport();
 
@@ -2607,9 +2653,6 @@ static std::vector<std::string> parse_tool_names(std::string tool_names) {
   if (name != "") names.push_back(name);
   return names;
 }
-
-
-static int (*fn_amdgpu_device_get_fd)(HsaAMDGPUDeviceHandle device_handle) = NULL;
 
 int fn_amdgpu_device_get_fd_nosupport(HsaAMDGPUDeviceHandle device_handle) {
   fprintf(stderr, "amdgpu_device_get_fd not available. Please update version of libdrm");
