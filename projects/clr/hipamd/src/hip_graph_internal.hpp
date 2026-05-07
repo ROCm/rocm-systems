@@ -2830,7 +2830,7 @@ class GraphMemAllocNode final : public GraphNode {
       size_ = aligned_size;
 
       // Remap is needed on relaunch when the original physical memory was
-      // reused by another consumer (hipMallocAsync or another graph). In that
+      // reused by another consumer (another graph on different stream). In that
       // case AllocateMemory returns new physical memory and the VA must be
       // remapped from the old physical address to the new one.
       const bool remap_needed = relaunch && (dptr != *phys_ptr_ref_);

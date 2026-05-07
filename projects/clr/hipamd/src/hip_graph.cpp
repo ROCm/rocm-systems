@@ -1616,9 +1616,13 @@ hipError_t hipGraphExecDestroy(hipGraphExec_t pGraphExec) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::GraphExec* ge = reinterpret_cast<hip::GraphExec*>(pGraphExec);
+  {
+    // Erase from the set before releasing, so that concurrent
+    // hipDeviceGraphMemTrim cannot retain a dangling pointer.
+    std::scoped_lock lock(GraphExec::graphExecSetLock_);
+    GraphExec::graphExecSet_.erase(ge);
+  }
   ge->release();
-  std::scoped_lock lock(GraphExec::graphExecSetLock_);
-  GraphExec::graphExecSet_.erase(ge);
   HIP_RETURN(hipSuccess);
 }
 
@@ -2953,9 +2957,14 @@ hipError_t hipDeviceGraphMemTrim(int device) {
       retained_graph_execs.push_back(ge);
     }
   }
-  // Phase 2: Release all idle graph-cached VA mappings and decrement refcounts
-  // outside graphExecSetLock_.
+  // Phase 2: Release idle graph-cached VA mappings and decrement refcounts
+  // outside graphExecSetLock_. Skip graph execs that are currently executing:
+  // GraphExec::Run() retains the object for the duration of GPU work, so
+  // refcount > 2 (1 owner + 1 trim-retain + 1+ in-flight) means active.
   for (auto* ge : retained_graph_execs) {
+    if (ge->referenceCount() > 2) {
+      continue;
+    }
     for (auto* node : ge->GetNodes()) {
       if (node->GetType() != hipGraphNodeTypeMemAlloc) {
         continue;
