@@ -776,13 +776,15 @@ hsa_status_t GpuAgent::VisitRegion(
 
 core::Queue* GpuAgent::CreateInterceptibleQueue(void (*callback)(hsa_status_t status,
                                                                  hsa_queue_t* source, void* data),
-                                                void* data, bool metadata_prefetch, const uint32_t in_size) {
+                                                void* data, bool metadata_prefetch,
+                                                hsa_amd_queue_create_flag_t create_flags,
+                                                const uint32_t in_size) {
   // Disabled intercept of internal queues pending tools updates.
   core::Queue* queue = nullptr;
   uint32_t size = std::max(in_size, minAqlSize_);
   size = std::min(size, maxAqlSize_);
 
-  QueueCreate(size, HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_CREATE_SYSTEM_MEM, callback, data, 0, 0,
+  QueueCreate(size, HSA_QUEUE_TYPE_MULTI, create_flags, callback, data, 0, 0,
               metadata_prefetch, &queue);
   if (queue != nullptr)
     core::Runtime::runtime_singleton_->InternalQueueCreateNotify(core::Queue::Convert(queue),
@@ -859,7 +861,7 @@ core::Blit* GpuAgent::CreateBlitKernel(core::Queue* queue) {
 void GpuAgent::InitDma() {
   // Setup lazy init pointers on queues and blits.
   auto queue_lambda = [this](HSA::hsa_amd_queue_priority_internal_t priority = HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL) {
-    auto queue = CreateInterceptibleQueue(false);
+    auto queue = CreateInterceptibleQueue(false, HSA_AMD_QUEUE_CREATE_SYSTEM_MEM);
     if (queue == nullptr)
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
                                "Internal queue creation failed.");
@@ -979,7 +981,13 @@ void GpuAgent::InitGWS() {
   gws_queue_.queue_.reset([this]() {
     if (properties_.NumGws == 0) return (core::Queue*)nullptr;
     const uint32_t defaultGWSQueueSize = 0x4000; // 16KB
-    std::unique_ptr<core::Queue> queue(CreateInterceptibleQueue(true, defaultGWSQueueSize));
+    bool dev_mem_queue_descriptor = core::Runtime::runtime_singleton_->flag().dev_mem_queue_descriptor();
+    bool dev_mem_ring_buf = core::Runtime::runtime_singleton_->flag().dev_mem_queue_buf();
+    hsa_amd_queue_create_flag_t create_flags = HSA_AMD_QUEUE_CREATE_SYSTEM_MEM;
+    if (dev_mem_queue_descriptor) create_flags |= HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR;
+    if (dev_mem_ring_buf) create_flags |= HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF;
+
+    std::unique_ptr<core::Queue> queue(CreateInterceptibleQueue(true, create_flags, defaultGWSQueueSize));
     if (queue == nullptr)
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
                                "Internal queue creation failed.");

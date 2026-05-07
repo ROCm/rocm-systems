@@ -745,7 +745,10 @@ hsa_status_t hsa_queue_create(
   uint64_t queue_create_flags = 0;
 
   if (core::Runtime::runtime_singleton_->flag().dev_mem_queue_buf())
-    queue_create_flags = HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF;
+    queue_create_flags |= HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF;
+
+  if (core::Runtime::runtime_singleton_->flag().dev_mem_queue_descriptor())
+    queue_create_flags |= HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR;
 
   core::Queue* cmd_queue = nullptr;
   status = agent->QueueCreate(size, type, queue_create_flags, callback, data, private_segment_size,

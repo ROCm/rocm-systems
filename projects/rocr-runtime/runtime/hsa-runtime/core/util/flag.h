@@ -263,6 +263,9 @@ class Flag {
     var = os::GetEnvVar("HSA_ALLOCATE_QUEUE_DEV_MEM");
     dev_mem_queue_buf_ = (var == "1") ? true : false;
 
+    var = os::GetEnvVar("HSA_ENABLE_DEVICE_MEM_QUEUE_DESCRIPTOR");
+    dev_mem_queue_descriptor_ = (var == "1") ? true : false;
+
     var = os::GetEnvVar("HSA_WAIT_ANY_DEBUG");
     wait_any_ = (var == "1") ? true : false;
 
@@ -447,7 +450,13 @@ class Flag {
 
   size_t counted_queue_size() const { return counted_queue_size_; }
 
+  bool enable_device_mem_ring_buf() const { return enable_device_mem_ring_buf_; }
+
+  bool enable_device_mem_queue_descriptor() const { return enable_device_mem_queue_descriptor_; }
+
   bool dev_mem_queue_buf() const { return dev_mem_queue_buf_; }
+
+  bool dev_mem_queue_descriptor() const { return dev_mem_queue_descriptor_; }
 
   uint32_t signal_abort_timeout() const { return signal_abort_timeout_; }
 
@@ -530,7 +539,8 @@ class Flag {
   bool enable_mwaitx_;
   bool enable_ipc_mode_legacy_;
   bool wait_any_;
-  bool dev_mem_queue_buf_;
+  bool dev_mem_queue_buf_ = false;
+  bool dev_mem_queue_descriptor_ = false;
   uint32_t signal_abort_timeout_;
   int  async_events_thread_priority_;
   bool enable_3d_swizzle_ = false;
