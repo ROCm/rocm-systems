@@ -249,11 +249,11 @@ public:
     Token next();
     bool valid() { return !lookahead.empty() || cur_len < BUFFER_SIZE; }
 
+    size_t cur_len = 0;
 private:
     void patch_time();
 
     std::deque<Token> lookahead{};
-    size_t cur_len = 0;
 };
 
 }; // namespace gfx9

@@ -373,7 +373,14 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse
     void* userdata
 )
 {
-    return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata);
+    try
+    {
+        return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata);
+    }
+    catch (...)
+    {
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA;
+    }
 }
 
 // V2 API: handle-based with built-in code object management

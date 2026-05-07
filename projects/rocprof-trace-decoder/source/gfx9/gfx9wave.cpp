@@ -500,7 +500,7 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
             case TOKEN_REG_CS_PRIV: csregister.UpdateRegCS(token.fields.regcs); break;
             case TOKEN_REG:
                 {
-                std::cout << "Parsed " << generator.cur_len << " of " << BUFFER_SIZE << std::endl;
+                std::cout << "Parsed " << generator.cur_len << " of " << generator.BUFFER_SIZE << std::endl;
                 if (csregister.IsUserdata3(token.fields.reg.regaddr))
                     csregister.HandleRealtimeClock(token.time, token.fields.reg.regdata);
                 else if (csregister.UpdateRegNoCS(token.fields.reg))
