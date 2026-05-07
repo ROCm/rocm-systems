@@ -3,13 +3,13 @@
 
 #pragma once
 #include "core/trace_cache/cache_type_traits.hpp"
+#include <cstdint>
 
 #include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
-#include <stdint.h>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -37,7 +37,7 @@ constexpr auto PERCENTAGE = "%";
 
 template <typename TypeIdentifierEnum>
 constexpr size_t header_size = sizeof(TypeIdentifierEnum) + sizeof(size_t);
-using buffer_array_t         = std::array<uint8_t, buffer_size>;
+using buffer_array_t         = std::array<std::uint8_t, buffer_size>;
 
 const auto tmp_directory = std::string{ "/tmp/" };
 
@@ -77,7 +77,7 @@ get_size(Type&& val)
     {
         static_assert(!type_traits::is_optional_v<typename DecayedType::value_type>,
                       "Nested std::optional is not supported");
-        return sizeof(uint8_t) + (val.has_value() ? get_size(val.value()) : 0);
+        return sizeof(std::uint8_t) + (val.has_value() ? get_size(val.value()) : 0);
     }
     else
     {
@@ -94,7 +94,7 @@ get_size(Type&& val, Types&&... vals)
 
 template <typename Type>
 __attribute__((always_inline)) inline void
-store_value(const Type& value, uint8_t* buffer, size_t& position)
+store_value(const Type& value, std::uint8_t* buffer, size_t& position)
 {
     using DecayedType = std::decay_t<Type>;
     static_assert(type_traits::is_supported_type_v<DecayedType>,
@@ -106,10 +106,10 @@ store_value(const Type& value, uint8_t* buffer, size_t& position)
                  type_traits::is_vector_v<DecayedType> ||
                  type_traits::is_span_v<DecayedType>)
     {
-        const size_t total_size          = get_size(value);
-        const size_t header_size         = sizeof(size_t);
-        const size_t data_size           = total_size - header_size;
-        *reinterpret_cast<size_t*>(dest) = data_size;
+        const size_t total_size  = get_size(value);
+        const size_t header_size = sizeof(size_t);
+        const size_t data_size   = total_size - header_size;
+        std::memcpy(dest, &data_size, sizeof(size_t));
         std::memcpy(dest + sizeof(size_t), value.data(), data_size);
         position += total_size;
     }
@@ -126,14 +126,14 @@ store_value(const Type& value, uint8_t* buffer, size_t& position)
     }
     else
     {
-        *reinterpret_cast<DecayedType*>(dest) = value;
+        std::memcpy(dest, &value, sizeof(DecayedType));
         position += sizeof(DecayedType);
     }
 }
 
 template <typename... Types>
 __attribute__((always_inline)) inline void
-store_value(uint8_t* buffer, const Types&... values)
+store_value(std::uint8_t* buffer, const Types&... values)
 {
     size_t position = 0;
     (store_value(values, buffer, position), ...);
@@ -141,7 +141,7 @@ store_value(uint8_t* buffer, const Types&... values)
 
 template <typename Type>
 __attribute__((always_inline)) inline static void
-parse_value(uint8_t*& data_pos, Type& arg)
+parse_value(std::uint8_t*& data_pos, Type& arg)
 {
     using DecayedType = std::decay_t<Type>;
     static_assert(type_traits::is_supported_type_v<DecayedType>,
@@ -149,7 +149,8 @@ parse_value(uint8_t*& data_pos, Type& arg)
 
     if constexpr(type_traits::is_string_view_v<DecayedType>)
     {
-        const size_t string_size = *reinterpret_cast<const size_t*>(data_pos);
+        size_t string_size = 0;
+        std::memcpy(&string_size, data_pos, sizeof(size_t));
         data_pos += sizeof(size_t);
         arg = std::string_view{ reinterpret_cast<const char*>(data_pos), string_size };
         data_pos += string_size;
@@ -158,12 +159,19 @@ parse_value(uint8_t*& data_pos, Type& arg)
                       type_traits::is_span_v<DecayedType>)
     {
         using ContainerType     = std::decay_t<decltype(arg)>;
-        const size_t item_size  = sizeof(typename ContainerType::value_type);
-        const size_t total_size = *reinterpret_cast<const size_t*>(data_pos);
+        using ItemType          = typename ContainerType::value_type;
+        const size_t item_size  = sizeof(ItemType);
+        size_t       total_size = 0;
+        std::memcpy(&total_size, data_pos, sizeof(size_t));
         data_pos += sizeof(size_t);
-        arg.reserve(total_size / item_size);
-        std::copy_n(reinterpret_cast<const typename ContainerType::value_type*>(data_pos),
-                    total_size / item_size, std::back_inserter(arg));
+        const size_t item_count = total_size / item_size;
+        arg.reserve(item_count);
+        for(size_t i = 0; i < item_count; ++i)
+        {
+            ItemType item;
+            std::memcpy(&item, data_pos + i * item_size, item_size);
+            arg.push_back(std::move(item));
+        }
         data_pos += total_size;
     }
     else if constexpr(type_traits::is_optional_v<DecayedType>)
@@ -183,14 +191,14 @@ parse_value(uint8_t*& data_pos, Type& arg)
     }
     else
     {
-        arg = *reinterpret_cast<const DecayedType*>(data_pos);
+        std::memcpy(&arg, data_pos, sizeof(DecayedType));
         data_pos += sizeof(DecayedType);
     }
 }
 
 template <typename Type, typename... Types>
 __attribute__((always_inline)) inline static void
-parse_value(uint8_t*& data_pos, Type& arg, Types&... args)
+parse_value(std::uint8_t*& data_pos, Type& arg, Types&... args)
 {
     parse_value(data_pos, arg);
     parse_value(data_pos, args...);

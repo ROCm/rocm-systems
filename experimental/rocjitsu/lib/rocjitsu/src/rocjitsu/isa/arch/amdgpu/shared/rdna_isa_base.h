@@ -52,6 +52,7 @@ struct RdnaIsaBase {
   static constexpr uint32_t MAX_SGPRS_PER_WF = 106;   ///< SGPRs per wavefront.
   static constexpr uint32_t MAX_VGPRS_PER_WF = 256;   ///< VGPRs per wavefront.
   static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 0; ///< No AccVGPR file on any RDNA ISA.
+  static constexpr bool SRAM_ECC = false;             ///< RDNA does not alter D16 for ECC.
   static constexpr uint8_t WAITCNT_LGKMCNT_MASK = 0;  ///< 0 = no monolithic S_WAITCNT.
 
   using Context = amdgpu::Wavefront;

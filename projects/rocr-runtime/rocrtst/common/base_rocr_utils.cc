@@ -366,6 +366,49 @@ std::string LocateKernelFile(std::string filename, hsa_agent_t agent) {
   throw std::runtime_error("Could not open kernel file: " + filename);
 }
 
+// Locate platform configuration file
+std::string LocateConfigFile() {
+  // Priority 1: Environment variable
+  char* envPath = getenv("ROCRTST_PLATFORM_CONFIG");
+  if (envPath != nullptr) {
+    if (access(envPath, F_OK) == 0) {
+      std::cerr <<
+        "Using platform config file from ROCRTST_PLATFORM_CONFIG: " <<
+                                                            envPath << "\n";
+      return envPath;
+    } else {
+      std::cerr << "ROCRTST_PLATFORM_CONFIG is set to " << envPath
+          << " but file cannot be accessed. Ignoring environment variable.\n";
+    }
+  }
+
+  // Priority 2: Current directory (for development)
+  if (access("./config/platform_config.yaml", F_OK) == 0) {
+    return "./config/platform_config.yaml";
+  }
+
+  // Priority 3: Installed location (matches hsaco pattern)
+  char* path = realpath("/proc/self/exe", nullptr);
+  if (path) {
+    std::string exeDir(path);
+    free(path);
+    size_t last_slash = exeDir.rfind('/');
+    if (last_slash != std::string::npos) {
+      exeDir = exeDir.substr(0, last_slash);
+    }
+
+    std::string installPath =
+        exeDir + "/../share/rocrtst/platform_config.yaml";
+    if (access(installPath.c_str(), F_OK) == 0) {
+      return installPath;
+    }
+  }
+
+  // Fallback: return install path based on executable location
+  std::string exeDir = GetExecutableDir();
+  return exeDir + "/../share/rocrtst/platform_config.yaml";
+}
+
 // Load the specified kernel code from the specified file, inspect and fill
 // in BaseRocR member variables related to the kernel and executable.
 // Required Input BaseRocR member variables:

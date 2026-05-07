@@ -14,6 +14,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -28,12 +29,24 @@ enum InstFlags : uint64_t {
   COND_BRANCH = (1ULL << 1),
   /// @brief Indirect branch (target from register).
   INDIRECT_BRANCH = (1ULL << 2),
+  /// @brief Indirect call (target from register, returns to fallthrough).
+  INDIRECT_CALL = (1ULL << 3),
   /// @brief Terminates the program.
-  PROGRAM_TERMINATOR = (1ULL << 3),
+  PROGRAM_TERMINATOR = (1ULL << 4),
   /// @brief Executes immediately without scheduling latency.
-  IMMEDIATELY_EXECUTED = (1ULL << 4),
+  IMMEDIATELY_EXECUTED = (1ULL << 5),
   /// @brief Memory operation (load or store).
-  MEMORY_OP = (1ULL << 5)
+  MEMORY_OP = (1ULL << 6),
+  /// @brief Wait-counter instruction (s_waitcnt, s_wait_loadcnt, s_wait_storecnt, etc.).
+  WAITCNT = (1ULL << 7),
+  /// @brief Barrier instruction (s_barrier, s_barrier_signal, s_barrier_wait).
+  BARRIER = (1ULL << 8),
+  /// @brief Matrix FMA instruction (v_mfma_*, v_smfmac_*).
+  MFMA = (1ULL << 9),
+  /// @brief AccVGPR move instruction (v_accvgpr_write, v_accvgpr_read, v_accvgpr_mov).
+  ACCVGPR = (1ULL << 10),
+  /// @brief Destination update is conditional and must not kill the old value.
+  PREDICATED_DEF = (1ULL << 11)
 };
 
 class BasicBlock;
@@ -144,19 +157,69 @@ public:
   /// @returns Destination operand count.
   int num_dst_operands() const { return num_dst_; }
 
+  /// @brief Access a source operand by index.
+  /// @param i  Operand index (0-based, must be < num_src_operands()).
+  /// @returns Pointer to the operand, or nullptr if index out of range.
+  [[nodiscard]] const Operand *src_operand(int i) const {
+    return (i >= 0 && i < num_src_) ? src_operands_[i] : nullptr;
+  }
+
+  /// @brief Access a destination operand by index.
+  /// @param i  Operand index (0-based, must be < num_dst_operands()).
+  /// @returns Pointer to the operand, or nullptr if index out of range.
+  [[nodiscard]] const Operand *dst_operand(int i) const {
+    return (i >= 0 && i < num_dst_) ? dst_operands_[i] : nullptr;
+  }
+
   /// @brief Size of the instruction's encoding in bytes.
   /// @returns Encoding size in bytes.
   int size() const { return size_; }
 
-  /// @brief Whether this instruction is a branch.
-  /// @retval true The instruction has the BRANCH flag set.
-  /// @retval false The instruction is not a branch.
-  bool is_branch() const { return flags_ & BRANCH; }
+  /// @brief Whether this instruction is a direct branch.
+  /// @retval true The instruction has BRANCH or COND_BRANCH metadata.
+  /// @retval false The instruction is not a direct branch.
+  bool is_branch() const { return flags_ & (BRANCH | COND_BRANCH); }
 
   /// @brief Whether this instruction is a memory operation.
   /// @retval true The instruction has the MEMORY_OP flag set.
   /// @retval false The instruction is not a memory operation.
   bool is_memory_op() const { return flags_ & MEMORY_OP; }
+
+  uint64_t flags() const { return flags_; }
+
+  bool is_waitcnt() const { return flags_ & WAITCNT; }
+
+  bool is_barrier() const { return flags_ & BARRIER; }
+
+  bool is_mfma() const { return flags_ & MFMA; }
+
+  bool is_accvgpr() const { return flags_ & ACCVGPR; }
+
+  /// @brief Signed byte offset for a direct branch target.
+  ///
+  /// @details Generated ISA subclasses override this for direct branches whose
+  /// label operand is a signed instruction-count delta. Indirect branches and
+  /// non-branches return nullopt.
+  [[nodiscard]] virtual std::optional<int64_t> branch_offset_bytes() const { return std::nullopt; }
+
+  /// @brief Add registers implicitly read by this instruction.
+  ///
+  /// @details Used for encoded fields that affect execution but are not part of
+  /// the printed operand list, such as FLAT/GLOBAL `saddr` addressing fields.
+  virtual void implicit_uses(RegisterSet & /*uses*/) const {}
+
+  /// @brief Add registers implicitly written by this instruction.
+  virtual void implicit_defs(RegisterSet & /*defs*/) const {}
+
+  /// @brief Raw encoding words of this instruction.
+  /// @returns Pointer to the encoding words (size()/4 words), or nullptr if not set.
+  const uint32_t *raw_encoding() const { return raw_encoding_; }
+
+  /// @brief Encoding format ID (the encoding prefix from the machine instruction).
+  [[nodiscard]] uint16_t encoding_id() const { return encoding_id_; }
+
+  /// @brief Opcode within the encoding format.
+  [[nodiscard]] uint16_t opcode() const { return opcode_; }
 
   /// @brief Produce the disassembly string for this instruction.
   ///
@@ -200,6 +263,12 @@ protected:
   /// @brief Instruction property flags bitmask.
   uint64_t flags_ = 0;
   std::unique_ptr<DynamicInstState> data_;
+  /// @brief Pointer to the raw encoding words (set by encoding base class constructors).
+  const uint32_t *raw_encoding_ = nullptr;
+  /// @brief Encoding format ID (the encoding prefix from the machine instruction).
+  uint16_t encoding_id_ = 0;
+  /// @brief Opcode within the encoding format.
+  uint16_t opcode_ = 0;
 
 protected:
   std::string_view mnemonic_;

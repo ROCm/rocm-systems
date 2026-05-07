@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/categories.hpp"
 #include "core/concepts.hpp"
-#include "core/defines.hpp"
 
 #include <timemory/api.hpp>
 #include <timemory/api/macros.hpp>
@@ -102,6 +102,6 @@ using ::tim::type_mutex;   // NOLINT
 
 struct construct_on_thread
 {
-    int64_t index = threading::get_id();
+    std::int64_t index = threading::get_id();
 };
 }  // namespace rocprofsys

@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
 
 #include <timemory/components/base.hpp>
@@ -24,8 +24,6 @@ struct exit_gotcha : tim::component::base<exit_gotcha, void>
     using gotcha_data  = tim::component::gotcha_data;
     using exit_func_t  = void (*)(int);
     using abort_func_t = void (*)();
-
-    ROCPROFSYS_DEFAULT_OBJECT(exit_gotcha)
 
     // string id for component
     static std::string label() { return "exit_gotcha"; }

@@ -79,10 +79,10 @@ void VaapiVideoDecoder::ValidateOutputFormat() {
                 break; // already an 8-bit format, no adjustment needed
         }
         if (adjusted != decoder_create_info_.output_format) {
-            WarningLog(g_rocdec_logger, ("output_format (" + TOSTR(static_cast<uint32_t>(decoder_create_info_.output_format)) +
+            WarningLog(g_rocdec_logger, ("output_format (" + ROCDEC_TOSTR(static_cast<uint32_t>(decoder_create_info_.output_format)) +
                 ") bit depth exceeds content bit depth (bit_depth_minus_8 = " +
-                TOSTR(decoder_create_info_.bit_depth_minus_8) + "). Adjusting output_format to " +
-                TOSTR(static_cast<uint32_t>(adjusted)) + "."));
+                ROCDEC_TOSTR(decoder_create_info_.bit_depth_minus_8) + "). Adjusting output_format to " +
+                ROCDEC_TOSTR(static_cast<uint32_t>(adjusted)) + "."));
             decoder_create_info_.output_format = adjusted;
         }
     }
@@ -575,11 +575,31 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
             }
         }
             break;
-        case rocDecVideoChromaFormat_422:
-            surface_format = VA_RT_FORMAT_YUV422;
+        case rocDecVideoChromaFormat_422: {
+            if (decoder_create_info_.bit_depth_minus_8 == 2) {
+                surface_format = VA_RT_FORMAT_YUV422_10;
+                surf_attrib.value.value.i = VA_FOURCC_Y210;
+            } else if (decoder_create_info_.bit_depth_minus_8 == 4) {
+                surface_format = VA_RT_FORMAT_YUV422_12;
+                surf_attrib.value.value.i = VA_FOURCC_Y212;
+            } else {
+                surface_format = VA_RT_FORMAT_YUV422;
+                surf_attrib.value.value.i = VA_FOURCC_422H;
+            }
+        }
             break;
-        case rocDecVideoChromaFormat_444:
-            surface_format = VA_RT_FORMAT_YUV444;
+        case rocDecVideoChromaFormat_444: {
+            if (decoder_create_info_.bit_depth_minus_8 == 2) {
+                surface_format = VA_RT_FORMAT_YUV444_10;
+                surf_attrib.value.value.i = VA_FOURCC_Y410;
+            } else if (decoder_create_info_.bit_depth_minus_8 == 4) {
+                surface_format = VA_RT_FORMAT_YUV444_12;
+                surf_attrib.value.value.i = VA_FOURCC_Y412;
+            } else {
+                surface_format = VA_RT_FORMAT_YUV444;
+                surf_attrib.value.value.i = VA_FOURCC_444P;
+            }
+        }
             break;
         default:
             CriticalLog(g_rocdec_logger, "The surface type is not supported");

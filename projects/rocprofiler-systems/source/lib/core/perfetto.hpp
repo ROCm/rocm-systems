@@ -5,6 +5,7 @@
 
 #include "categories.hpp"
 #include "common.hpp"
+#include <cstdint>
 
 #include "config.hpp"
 
@@ -35,15 +36,15 @@ template <typename Tp>
 struct perfetto_counter_track
 {
     using category_type = Tp;
-    using track_map_t   = std::map<uint32_t, std::vector<::perfetto::CounterTrack>>;
-    using name_map_t    = std::map<uint32_t, std::vector<std::unique_ptr<std::string>>>;
-    using data_t        = std::pair<name_map_t, track_map_t>;
+    using track_map_t   = std::map<std::uint32_t, std::vector<::perfetto::CounterTrack>>;
+    using name_map_t = std::map<std::uint32_t, std::vector<std::unique_ptr<std::string>>>;
+    using data_t     = std::pair<name_map_t, track_map_t>;
 
     static auto   init() { (void) get_data(); }
-    static auto   exists(size_t _idx, int64_t _n = -1);
+    static auto   exists(size_t _idx, std::int64_t _n = -1);
     static size_t size(size_t _idx);
     static auto emplace(size_t _idx, const std::string& _v, const char* _units = nullptr,
-                        const char* _category = nullptr, int64_t _mult = 1,
+                        const char* _category = nullptr, std::int64_t _mult = 1,
                         bool _incr = false);
 
     static auto& at(size_t _idx, size_t _n) { return get_data().second.at(_idx).at(_n); }
@@ -58,7 +59,7 @@ private:
 
 template <typename Tp>
 auto
-perfetto_counter_track<Tp>::exists(size_t _idx, int64_t _n)
+perfetto_counter_track<Tp>::exists(size_t _idx, std::int64_t _n)
 {
     bool _v = get_data().second.count(_idx) != 0;
     if(_n < 0 || !_v) return _v;
@@ -78,7 +79,7 @@ template <typename Tp>
 auto
 perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
                                     const char* _units, const char* _category,
-                                    int64_t _mult, bool _incr)
+                                    std::int64_t _mult, bool _incr)
 {
     auto& _name_data  = get_data().first[_idx];
     auto& _track_data = get_data().second[_idx];
@@ -93,9 +94,15 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
     }
     auto        _index     = _track_data.size();
     auto&       _name      = _name_data.emplace_back(std::make_unique<std::string>(_v));
-    const char* _unit_name = (_units && strlen(_units) > 0) ? _units : nullptr;
+    const char* _name_cstr = _name->c_str();
+    const char* _unit_name = nullptr;
+    if(_units && strlen(_units) > 0)
+    {
+        auto& _unit_str = _name_data.emplace_back(std::make_unique<std::string>(_units));
+        _unit_name      = _unit_str->c_str();
+    }
     _track_data.emplace_back(
-        ::perfetto::CounterTrack{ ::perfetto::DynamicString{ _name->c_str() } }
+        ::perfetto::CounterTrack{ ::perfetto::DynamicString{ _name_cstr } }
             .set_unit_name(_unit_name)
             .set_category(_category)
             .set_unit_multiplier(_mult)

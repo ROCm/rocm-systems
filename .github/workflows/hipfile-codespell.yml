@@ -2,7 +2,7 @@
 # https://github.com/codespell-project/codespell
 # https://github.com/codespell-project/actions-codespell
 
-name: hipfile-codespell
+name: "hipFile codespell"
 
 on:
   push:

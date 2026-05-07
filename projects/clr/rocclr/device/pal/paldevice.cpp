@@ -37,6 +37,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <ctype.h>
 #include <fstream>
 #include <iostream>
@@ -290,7 +291,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
                                ? palProp.gfxipProperties.shaderCore.numAvailableCus / 2
                                : palProp.gfxipProperties.shaderCore.numAvailableCus;
   info_.maxPhysicalComputeUnits_ = info_.maxComputeUnits_;
-  info_.numberOfShaderEngines = palProp.gfxipProperties.shaderCore.numShaderEngines;
+  info_.numberOfShaderEngines_ = palProp.gfxipProperties.shaderCore.numShaderEngines;
 
   // SI parts are scalar.  Also, reads don't need to be 128-bits to get peak rates.
   // For example, float4 is not faster than float as long as all threads fetch the same
@@ -489,6 +490,10 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.maxWorkItemSizes_[1] = info_.maxWorkGroupSize_;
   info_.maxWorkItemSizes_[2] = info_.maxWorkGroupSize_;
   info_.preferredWorkGroupSize_ = settings().preferredWorkGroupSize_;
+
+  info_.maxGridDim_[0] = std::numeric_limits<int32_t>::max();
+  info_.maxGridDim_[1] = std::numeric_limits<uint16_t>::max();
+  info_.maxGridDim_[2] = std::numeric_limits<uint16_t>::max();
 
   info_.localMemType_ = CL_LOCAL;
   info_.localMemSize_ = settings().hwLDSSize_;

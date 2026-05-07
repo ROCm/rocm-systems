@@ -128,7 +128,7 @@ void TestBase::SetUp(uint64_t init_flags) {
 
   // allocate memory
   sockets_.resize(socket_count_);
-  err = amdsmi_get_socket_handles(&socket_count_, &sockets_[0]);
+  err = amdsmi_get_socket_handles(&socket_count_, sockets_.data());
   if (err != AMDSMI_STATUS_SUCCESS) {
     setup_failed_ = true;
   }
@@ -146,7 +146,7 @@ void TestBase::SetUp(uint64_t init_flags) {
     ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
 
     std::vector<amdsmi_processor_handle> processor_handles(device_count);
-    err = amdsmi_get_processor_handles(sockets_[i], &device_count, &processor_handles[0]);
+    err = amdsmi_get_processor_handles(sockets_[i], &device_count, processor_handles.data());
     if (err != AMDSMI_STATUS_SUCCESS) {
       setup_failed_ = true;
     }
