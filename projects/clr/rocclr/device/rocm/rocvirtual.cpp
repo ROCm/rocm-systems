@@ -4453,68 +4453,6 @@ void VirtualGPU::submitNativeFn(amd::NativeFnCommand& cmd) {}
 void VirtualGPU::submitMarker(amd::Marker& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
-
-  // IPC event record: first dispatch a NOP barrier with the IPC signal as
-  // completion_signal — this decrements the IPC signal when prior work completes.
-  // Then dispatch a regular barrier with an ActiveSignal so that normal
-  // tracking, command completion, and fence management all work without hacks.
-  if (vcmd.ipcCompletionSignal() != nullptr) {
-    if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-      gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
-    }
-    profilingBegin(vcmd);
-    hsa_signal_t ipc_s;
-    ipc_s.handle = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
-        vcmd.ipcCompletionSignal()->getHandle()));
-    const Settings& settings = dev().settings();
-
-    // NOP barrier with IPC signal as completion — fires when prior work finishes
-    if (settings.barrier_value_packet_) {
-      dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, false,
-                                hsa_signal_t{0}, 0, 0,
-                                HSA_SIGNAL_CONDITION_EQ, true, ipc_s);
-    } else {
-      dispatchBarrierPacket(kNopPacketHeader, true, ipc_s);
-    }
-
-    // Submit a barrier that allows tracking as IPC signals are not tracked
-    int32_t releaseFlags = vcmd.getCommandEntryScope();
-    if (releaseFlags == Device::CacheState::kCacheStateIgnore) {
-      if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
-        dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
-      } else {
-        dispatchBarrierPacket(kNopPacketHeader, false);
-      }
-    } else {
-      force_irq_ = IS_WINDOWS;
-      if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
-        dispatchBarrierValuePacket(kBarrierVendorPacketHeader, true);
-      } else {
-        dispatchBarrierPacket(kBarrierPacketHeader, false);
-      }
-      hasPendingDispatch_ = false;
-    }
-
-    profilingEnd();
-    return;
-  }
-
-  // IPC stream wait: dispatch a barrier that waits on the IPC dep_signal.
-  // Use getGpuHandle() which returns the GPU-accessible (memory_lock'd)
-  // pointer if the signal memory was CPU-only from dma-buf sys-mem import.
-  if (vcmd.ipcDepSignal() != nullptr) {
-    if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-      gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
-    }
-    profilingBegin(vcmd);
-    hsa_signal_t s;
-    s.handle = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
-        vcmd.ipcDepSignal()->getGpuHandle()));
-    WaitCompleteSignal(s);
-    profilingEnd();
-    return;
-  }
-
   if (vcmd.CpuWaitRequested()) {
     force_irq_ = IS_WINDOWS;
     // It should be safe to call flush directly if there are not pending dispatches without
@@ -4525,10 +4463,31 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     flush(vcmd.GetBatchHead());
   } else {
     profilingBegin(vcmd);
-    if (timestamp_ != nullptr) {
-      const Settings& settings = dev().settings();
-      int32_t releaseFlags = vcmd.getCommandEntryScope();
+    const Settings& settings = dev().settings();
+    hsa_signal_t ipc_s{0};
+    if (vcmd.ipcCompletionSignal() != nullptr) {
+      ipc_s.handle = static_cast<uint64_t>(
+          reinterpret_cast<uintptr_t>(vcmd.ipcCompletionSignal()->getGpuHandle()));
+    }
 
+    if (vcmd.ipcDepSignal() != nullptr) {
+      hsa_signal_t s;
+      s.handle = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
+          vcmd.ipcDepSignal()->getGpuHandle()));
+      WaitCompleteSignal(s);
+    } else if (timestamp_ != nullptr || ipc_s.handle != 0) {
+      // IPC event record: if ipc_s is non-zero, first dispatch a NOP barrier with
+      // the IPC signal as completion_signal; it fires when prior work completes.
+      if (ipc_s.handle != 0) {
+        if (settings.barrier_value_packet_) {
+          dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, false, hsa_signal_t{0}, 0,
+                                     0, HSA_SIGNAL_CONDITION_EQ, true, ipc_s);
+        } else {
+          dispatchBarrierPacket(kNopPacketHeader, true, ipc_s);
+        }
+      }
+
+      int32_t releaseFlags = vcmd.getCommandEntryScope();
       if (releaseFlags == Device::CacheState::kCacheStateIgnore) {
         if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
           dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
