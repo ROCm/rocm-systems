@@ -37,10 +37,10 @@ namespace
 {
 
 int
-iterate_args_callback(rocprofiler_callback_tracing_kind_t, int32_t, uint32_t arg_number,
-                      const void* const, int32_t, const char*                arg_type,
-                      const char* arg_name, const char* arg_value_str, int32_t,
-                      void* data)
+iterate_args_callback(rocprofiler_callback_tracing_kind_t, std::int32_t,
+                      std::uint32_t arg_number, const void* const, std::int32_t,
+                      const char* arg_type, const char* arg_name,
+                      const char* arg_value_str, std::int32_t, void* data)
 {
     auto* args = static_cast<function_args_t*>(data);
     if(arg_type && arg_name && arg_value_str)
@@ -162,8 +162,8 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
 {
     auto* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
-    const uint64_t begin_ts = user_data->value;
-    const auto     args_str = collect_args(record);
+    const std::uint64_t begin_ts = user_data->value;
+    const auto          args_str = collect_args(record);
 
     auto pop_and_write = [&](marker_range_stack_t& stack) {
         auto        range = stack.back();

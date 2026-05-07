@@ -280,7 +280,7 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        # HITS and REQ are per-SQ per-bank; summed HITS can exceed REQ → >100%. Use HITS+MISSES
+        # HITS and REQ are per-SQ per-bank; summed HITS can exceed REQ -> >100%. Use HITS+MISSES
         # as the outcome denominator (same pairing as Memory Chart / SoL).
         Icache Hit Rate:
           avg: AVG((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
@@ -357,9 +357,9 @@ Panel Config:
       LGKMCNT, etc.) to reach target values. Computed as 100 * SQ_WAIT_CNT_ANY /
       SQ_WAVE_CYCLES.
     Icache Hit Rate: |-
-      Instruction cache hit percentage using 100 × SQC_ICACHE_HITS / (SQC_ICACHE_HITS +
-      SQC_ICACHE_MISSES). Do not divide only by SQC_ICACHE_REQ — hits and requests are both
+      Instruction cache hit percentage using 100 * SQC_ICACHE_HITS / (SQC_ICACHE_HITS +
+      SQC_ICACHE_MISSES). Do not divide only by SQC_ICACHE_REQ - hits and requests are both
       per-SQ per-bank, and summed hits can exceed summed requests.
     Dcache Hit Rate: |-
-      Scalar data cache hit percentage: 100 × SQC_DCACHE_HITS / (SQC_DCACHE_HITS +
+      Scalar data cache hit percentage: 100 * SQC_DCACHE_HITS / (SQC_DCACHE_HITS +
       SQC_DCACHE_MISSES). Same rationale as Icache (HITS vs REQ can exceed 100%).

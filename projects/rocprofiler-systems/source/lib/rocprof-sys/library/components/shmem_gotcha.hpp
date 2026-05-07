@@ -185,12 +185,12 @@ struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
 
     static constexpr size_t gotcha_capacity = 120;
 
-    shmem_gotcha<SHMEMPolicy>()                                                = default;
-    shmem_gotcha<SHMEMPolicy>(const shmem_gotcha<SHMEMPolicy>&)                = default;
-    shmem_gotcha<SHMEMPolicy>& operator=(const shmem_gotcha<SHMEMPolicy>&)     = default;
-    shmem_gotcha<SHMEMPolicy>(shmem_gotcha<SHMEMPolicy>&&) noexcept            = default;
-    shmem_gotcha<SHMEMPolicy>& operator=(shmem_gotcha<SHMEMPolicy>&&) noexcept = default;
-    ~shmem_gotcha<SHMEMPolicy>() noexcept                                      = default;
+    shmem_gotcha()                                   = default;
+    shmem_gotcha(const shmem_gotcha&)                = default;
+    shmem_gotcha& operator=(const shmem_gotcha&)     = default;
+    shmem_gotcha(shmem_gotcha&&) noexcept            = default;
+    shmem_gotcha& operator=(shmem_gotcha&&) noexcept = default;
+    ~shmem_gotcha() noexcept                         = default;
 
     static std::string label() { return "shmem_gotcha"; }
 
