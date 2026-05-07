@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional, Tuple
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s: %(message)s"
@@ -20,26 +20,21 @@ logger = logging.getLogger(__name__)
 
 def parse_arguments() -> argparse.Namespace:
     """
-    Parse command-line arguments with all-or-nothing logic.
+    Parse command-line arguments.
     """
     parser = argparse.ArgumentParser(
-        description="Run ROCm Debug Agent tests with configurable paths.",
+        description="Run ROCm Debug Agent tests.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Environment Variables (used when CLI args are not provided):
-  THEROCK_BIN_DIR          Directory containing rocm-debug-agent-test
-  OUTPUT_ARTIFACTS_DIR     Directory containing run-test.py script
+Environment Variables:
+  OUTPUT_ARTIFACTS_DIR     ROCm tree root directory (optional)
+  ROCM_PATH                ROCm installation path (used with --try-rocm-path)
         """,
     )
     parser.add_argument(
-        "--test-bin",
-        type=Path,
-        help="Path to rocm-debug-agent-test binary.",
-    )
-    parser.add_argument(
-        "--test-script",
-        type=Path,
-        help="Path to run-test.py script.",
+        "--try-rocm-path",
+        action="store_true",
+        help="Use ROCM_PATH environment variable as ROCm tree root (fatal error if path cannot be resolved; takes priority over OUTPUT_ARTIFACTS_DIR).",
     )
     parser.add_argument(
         "--max-retries",
@@ -54,19 +49,7 @@ Environment Variables (used when CLI args are not provided):
         help="Base delay in seconds between retries (default: 5).",
     )
 
-    args = parser.parse_args()
-
-    # Check if any arguments are provided.
-    args_provided = [args.test_bin, args.test_script]
-    args_count = sum(arg is not None for arg in args_provided)
-
-    # Either all arguments or none.
-    if args_count not in (0, 2):
-        parser.error(
-            "Error: Either provide both arguments (--test-bin, --test-script) or none."
-        )
-
-    return args
+    return parser.parse_args()
 
 
 def set_core_dump_limit() -> None:
@@ -107,69 +90,82 @@ def validate_path(path: Path, path_type: str, must_exist: bool = True) -> Path:
         sys.exit(1)
 
 
-def get_default_paths() -> Dict[str, Path]:
+def get_rocm_tree_root(try_rocm_path: bool = False) -> Path:
     """
-    Get default paths from environment variables.
+    Determine the ROCm tree root directory.
+
+    Priority:
+    1. If try_rocm_path is True: Use ROCM_PATH environment variable if set
+       (fatal error if path can't be resolved)
+    2. If ROCM_PATH is not set: Use OUTPUT_ARTIFACTS_DIR environment variable if set
+    3. Derive from script location (go up 2 directory levels)
+
+    Args:
+        try_rocm_path: If True, use ROCM_PATH with fatal error on resolution failure.
 
     Returns:
-        Dictionary containing 'test_bin' and 'test_script' paths.
+        Path to ROCm tree root.
 
     Raises:
-        SystemExit: If environment variables are not defined or paths cannot be resolved.
+        SystemExit: If ROCm tree root cannot be determined.
     """
-    therock_bin_dir_str = os.getenv("THEROCK_BIN_DIR")
+    # Try ROCM_PATH first if requested.
+    if try_rocm_path:
+        rocm_path_str = os.getenv("ROCM_PATH")
+        if rocm_path_str is not None:
+            logger.info("Using ROCM_PATH as ROCm tree root.")
+            # Fatal error if path can't be resolved when --try-rocm-path is used
+            rocm_root = validate_path(Path(rocm_path_str), "ROCM_PATH", must_exist=True)
+            return rocm_root
+
+    # Check OUTPUT_ARTIFACTS_DIR.
     artifacts_dir_str = os.getenv("OUTPUT_ARTIFACTS_DIR")
-
-    # Check if environment variables are defined.
-    if therock_bin_dir_str is None:
-        logger.error("[X] Error: THEROCK_BIN_DIR environment variable is not defined.")
-        sys.exit(1)
-
-    if artifacts_dir_str is None:
-        logger.error(
-            "[X] Error: OUTPUT_ARTIFACTS_DIR environment variable is not defined."
+    if artifacts_dir_str is not None:
+        logger.info("Using OUTPUT_ARTIFACTS_DIR as ROCm tree root.")
+        rocm_root = validate_path(
+            Path(artifacts_dir_str), "OUTPUT_ARTIFACTS_DIR", must_exist=True
         )
+    else:
+        # Derive ROCm tree root from script location.
+        # Script is at <root>/.github/scripts/test_rocr-debug-agent.py
+        # Go up 2 levels: scripts/ -> .github/ -> root/
+        script_path = Path(__file__).resolve()
+        rocm_root = script_path.parent.parent.parent
+        logger.info(f"Derived ROCm tree root from script location: {rocm_root}")
+
+    return rocm_root
+
+
+def get_default_paths(try_rocm_path: bool = False) -> Tuple[Path, Path]:
+    """
+    Get default paths for test binary and script.
+
+    Args:
+        try_rocm_path: If True, try ROCM_PATH environment variable first.
+
+    Returns:
+        Tuple of (test_bin, test_script) paths.
+
+    Raises:
+        SystemExit: If paths cannot be resolved or don't exist.
+    """
+    rocm_root = get_rocm_tree_root(try_rocm_path)
+
+    # Both test binary and script are in <root>/tests/rocm-debug-agent/
+    test_dir = rocm_root / "tests" / "rocm-debug-agent"
+    test_bin = test_dir / "rocm-debug-agent-test"
+    test_script = test_dir / "run-test.py"
+
+    # Validate that the paths exist.
+    if not test_bin.exists():
+        logger.error(f"[X] Error: Test binary not found: {test_bin}")
         sys.exit(1)
-
-    # Resolve and validate paths.
-    therock_bin_dir = validate_path(Path(therock_bin_dir_str), "THEROCK_BIN_DIR")
-    artifacts_dir = validate_path(Path(artifacts_dir_str), "OUTPUT_ARTIFACTS_DIR")
-
-    # Try the old testing script location first (for backwards compatibility).
-    test_bin = therock_bin_dir / "rocm-debug-agent-test"
-    test_script = artifacts_dir / "src" / "rocm-debug-agent-test" / "run-test.py"
 
     if not test_script.exists():
-        # Fall back to the new testing script location (both binary and script
-        # in the same directory).
-        test_dir = artifacts_dir / "tests" / "rocm-debug-agent"
-        test_bin = test_dir / "rocm-debug-agent-test"
-        test_script = test_dir / "run-test.py"
-
-        if not test_script.exists():
-            logger.error("[X] Error: run-test.py not found.")
-            sys.exit(1)
-
-    return {
-        "test_bin": test_bin,
-        "test_script": test_script,
-    }
-
-
-def get_python_executable() -> str:
-    """
-    Validates and returns the Python executable path.
-
-    Returns:
-        Path to Python executable.
-
-    Raises:
-        SystemExit: If valid Python executable cannot be found.
-    """
-    if not sys.executable or not os.path.exists(sys.executable):
-        logger.error("[X] Error: Could not identify a valid Python executable path.")
+        logger.error(f"[X] Error: Test script not found: {test_script}")
         sys.exit(1)
-    return sys.executable
+
+    return test_bin, test_script
 
 
 def print_section(
@@ -247,11 +243,8 @@ def print_section(
 
 
 def run_tests(
-    python_executable: str,
     test_script: Path,
-    working_dir: Path,
     test_bin_dir: Path,
-    env_vars: Optional[Dict[str, str]] = None,
     max_retries: int = 3,
     retry_delay: int = 5,
 ) -> None:
@@ -259,30 +252,24 @@ def run_tests(
     Runs the testsuite with a retry mechanism.
 
     Args:
-        python_executable: Path to Python interpreter.
         test_script: Path to test script.
-        working_dir: Working directory for test execution.
         test_bin_dir: Directory containing test binaries.
-        env_vars: Environment variables for test execution.
         max_retries: Maximum number of retry attempts.
         retry_delay: Base delay in seconds between retries.
 
     Raises:
         SystemExit: If all retry attempts fail.
     """
-    if env_vars is None:
-        env_vars = os.environ.copy()
-
-    cmd = [python_executable, str(test_script), str(test_bin_dir)]
+    cmd = [sys.executable, str(test_script), str(test_bin_dir)]
 
     for attempt in range(1, max_retries + 1):
         print_section(f"Running tests (Attempt {attempt}/{max_retries})")
 
-        logger.info(f"Exec [{working_dir}]$ {shlex.join(cmd)}")
+        logger.info(f"Exec [{test_bin_dir}]$ {shlex.join(cmd)}")
 
         start_time = time.perf_counter()
         try:
-            subprocess.run(cmd, cwd=str(working_dir), check=True, env=env_vars)
+            subprocess.run(cmd, cwd=str(test_bin_dir), check=True)
 
             duration = time.perf_counter() - start_time
 
@@ -317,29 +304,13 @@ def main() -> None:
     args = parse_arguments()
 
     print_section("Path discovery")
-    # Determine paths to use.
-    if args.test_bin is not None:
-        logger.info("Using paths from command-line arguments.")
-        rocr_debug_agent_test_bin = validate_path(args.test_bin, "--test-bin")
-        rocr_debug_agent_test_script = validate_path(args.test_script, "--test-script")
-    else:
-        # Use default logic.
-        logger.info("Using default paths from environment variables.")
-        defaults = get_default_paths()
-        rocr_debug_agent_test_bin = defaults["test_bin"]
-        rocr_debug_agent_test_script = defaults["test_script"]
+    # Discover paths using automatic logic.
+    test_bin, test_script = get_default_paths(try_rocm_path=args.try_rocm_path)
+    test_bin_dir = test_bin.parent
 
-    # Derive the test binary directory.
-    test_bin_dir = rocr_debug_agent_test_bin.parent
-
-    logger.info(f"Test Binary: {rocr_debug_agent_test_bin}")
-    logger.info(f"Test Script: {rocr_debug_agent_test_script}")
+    logger.info(f"Test Binary: {test_bin}")
+    logger.info(f"Test Script: {test_script}")
     logger.info(f"Test Bin Dir: {test_bin_dir}")
-
-    # Setup Python executable.
-    python_executable = get_python_executable()
-
-    logger.info(f"Located python executable: {python_executable}")
 
     print_section("Disabling core file generation")
 
@@ -348,9 +319,7 @@ def main() -> None:
 
     # Run tests.
     run_tests(
-        python_executable=python_executable,
-        test_script=rocr_debug_agent_test_script,
-        working_dir=test_bin_dir,
+        test_script=test_script,
         test_bin_dir=test_bin_dir,
         max_retries=args.max_retries,
         retry_delay=args.retry_delay,
