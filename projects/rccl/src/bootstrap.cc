@@ -325,8 +325,13 @@ static ncclResult_t socketSendRecv(struct ncclSocket* sendSock, void* sendData, 
 static ncclResult_t socketDoubleSendRecv(struct ncclSocketOp ops[4]) {
   // ops synchronously exchange size then asynchronously exchange data in send->recv->send->recv order
   int senderRecvSize1, senderRecvSize2;
-  NCCLCHECK(ncclSocketSendRecv(ops[0].sock, &ops[0].size, sizeof(int), ops[1].sock, &senderRecvSize1, sizeof(int)));
-  NCCLCHECK(ncclSocketSendRecv(ops[2].sock, &ops[2].size, sizeof(int), ops[3].sock, &senderRecvSize2, sizeof(int)));
+  struct ncclSocketOp sizeOps[4] = {
+    {NCCL_SOCKET_SEND, ops[0].sock, &ops[0].size, sizeof(int), 0},
+    {NCCL_SOCKET_RECV, ops[1].sock, &senderRecvSize1, sizeof(int), 0},
+    {NCCL_SOCKET_SEND, ops[2].sock, &ops[2].size, sizeof(int), 0},
+    {NCCL_SOCKET_RECV, ops[3].sock, &senderRecvSize2, sizeof(int), 0}
+  };
+  NCCLCHECK(ncclSocketMultiOp(sizeOps, 4));
   if (senderRecvSize1 > ops[1].size || senderRecvSize2 > ops[3].size) {
     WARN("Message truncated : received %d,%d bytes instead of %d,%d", senderRecvSize1, senderRecvSize2, ops[1].size, ops[3].size);
     return ncclInternalError;
