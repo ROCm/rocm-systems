@@ -2266,7 +2266,195 @@ int main() {
     }
   }
 
-  // Clean up resources allocated at amdsmi_init. It will invalidate sockets
+  // =========================================================================
+  // Version 2: Recommended Partition Workflow (accelerator partition profiles)
+  //
+  // Demonstrates the full recommended workflow for changing partition settings
+  // on GPU 0. The workflow is:
+  //   1. View current settings
+  //   2. View available modes (run BEFORE any partition change)
+  //   3. Set memory partition mode (only to a supported mode from step 2)
+  //   4. Reload driver (required; may reset accelerator partition to default)
+  //   5. Re-initialize and verify
+  //   6. Set accelerator partition (only to a profile valid for active memory
+  //      partition, as seen in step 2)
+  //   7. Verify
+  //
+  // NOTE: This section modifies GPU 0's partition configuration and reloads
+  //       the driver. All GPU activity must be stopped before running.
+  // =========================================================================
+
+  // Re-initialize to get current handle state after any prior changes.
+  ret = amdsmi_shut_down();
+  CHK_AMDSMI_RET(ret)
+  ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+  CHK_AMDSMI_RET(ret)
+
+  // Helper: get the first socket and its processors
+  auto get_first_socket_processors =
+      [](std::vector<amdsmi_processor_handle>& out_handles) -> amdsmi_status_t {
+    uint32_t sock_count = 0;
+    amdsmi_status_t r = amdsmi_get_socket_handles(&sock_count, nullptr);
+    if (r != AMDSMI_STATUS_SUCCESS || sock_count == 0) return r;
+    std::vector<amdsmi_socket_handle> socks(sock_count);
+    r = amdsmi_get_socket_handles(&sock_count, socks.data());
+    if (r != AMDSMI_STATUS_SUCCESS) return r;
+    uint32_t dev_count = 0;
+    r = amdsmi_get_processor_handles(socks[0], &dev_count, nullptr);
+    if (r != AMDSMI_STATUS_SUCCESS || dev_count == 0) return r;
+    out_handles.resize(dev_count);
+    return amdsmi_get_processor_handles(socks[0], &dev_count, out_handles.data());
+  };
+
+  {
+    std::vector<amdsmi_processor_handle> handles;
+    ret = get_first_socket_processors(handles);
+    CHK_AMDSMI_RET(ret)
+    amdsmi_processor_handle gpu0 = handles[0];
+    const char* err_str = nullptr;
+
+    std::cout << "\n=== Version 2: Recommended Partition Workflow ===\n";
+    std::cout << "GPU count: " << handles.size() << "\n\n";
+
+    // ------------------------------------------------------------------
+    // Step 1: View current partition settings
+    // ------------------------------------------------------------------
+    std::cout << "--- Step 1: Current partition settings ---\n";
+
+    amdsmi_accelerator_partition_profile_t cur_acc_profile = {};
+    uint32_t cur_partition_ids[8] = {};
+    ret = amdsmi_get_gpu_accelerator_partition_profile(gpu0, &cur_acc_profile, cur_partition_ids);
+    amdsmi_status_code_to_string(ret, &err_str);
+    std::cout << "amdsmi_get_gpu_accelerator_partition_profile: " << err_str << "\n";
+    if (ret == AMDSMI_STATUS_SUCCESS) {
+      std::cout << "  Current accelerator profile type: " << cur_acc_profile.profile_type << "\n";
+      std::cout << "  Current profile index: " << cur_acc_profile.profile_index << "\n";
+      std::cout << "  Num partitions: " << cur_acc_profile.num_partitions << "\n";
+    }
+
+    char cur_mem[AMDSMI_MAX_STRING_LENGTH] = {};
+    ret = amdsmi_get_gpu_memory_partition(gpu0, cur_mem,
+                                          static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+    amdsmi_status_code_to_string(ret, &err_str);
+    std::cout << "amdsmi_get_gpu_memory_partition: " << err_str << "\n";
+    if (ret == AMDSMI_STATUS_SUCCESS) {
+      std::cout << "  Current memory partition: " << cur_mem << "\n";
+    }
+
+    // ------------------------------------------------------------------
+    // Step 2: View available modes -- run BEFORE any partition change.
+    //         Only set modes that appear as supported here.
+    // ------------------------------------------------------------------
+    std::cout << "\n--- Step 2: Available partition modes ---\n";
+
+    amdsmi_memory_partition_config_t mem_config = {};
+    ret = amdsmi_get_gpu_memory_partition_config(gpu0, &mem_config);
+    amdsmi_status_code_to_string(ret, &err_str);
+    std::cout << "amdsmi_get_gpu_memory_partition_config: " << err_str << "\n";
+    if (ret == AMDSMI_STATUS_SUCCESS) {
+      std::cout << "  Supported memory modes (NPS caps):\n";
+      std::cout << "    NPS1: " << mem_config.partition_caps.nps_flags.nps1_cap << "\n";
+      std::cout << "    NPS2: " << mem_config.partition_caps.nps_flags.nps2_cap << "\n";
+      std::cout << "    NPS4: " << mem_config.partition_caps.nps_flags.nps4_cap << "\n";
+      std::cout << "    NPS8: " << mem_config.partition_caps.nps_flags.nps8_cap << "\n";
+    }
+
+    amdsmi_accelerator_partition_profile_config_t acc_config = {};
+    ret = amdsmi_get_gpu_accelerator_partition_profile_config(gpu0, &acc_config);
+    amdsmi_status_code_to_string(ret, &err_str);
+    std::cout << "amdsmi_get_gpu_accelerator_partition_profile_config: " << err_str << "\n";
+    if (ret == AMDSMI_STATUS_SUCCESS) {
+      std::cout << "  Available accelerator profiles (" << acc_config.num_profiles << "):\n";
+      for (uint32_t p = 0; p < acc_config.num_profiles; p++) {
+        const auto& prof = acc_config.profiles[p];
+        std::cout << "    Index " << prof.profile_index << ": type=" << prof.profile_type
+                  << ", num_partitions=" << prof.num_partitions
+                  << ", NPS caps (nps1/2/4/8)=" << prof.memory_caps.nps_flags.nps1_cap << "/"
+                  << prof.memory_caps.nps_flags.nps2_cap << "/"
+                  << prof.memory_caps.nps_flags.nps4_cap << "/"
+                  << prof.memory_caps.nps_flags.nps8_cap << "\n";
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // Step 3: Set memory partition mode (must be supported per step 2)
+    // ------------------------------------------------------------------
+    std::cout << "\n--- Step 3: Set memory partition ---\n";
+    // Use NPS1 as target; change to another supported mode as needed.
+    amdsmi_memory_partition_type_t target_mem = AMDSMI_MEMORY_PARTITION_NPS1;
+    ret = amdsmi_set_gpu_memory_partition(gpu0, target_mem);
+    amdsmi_status_code_to_string(ret, &err_str);
+    std::cout << "amdsmi_set_gpu_memory_partition(NPS1): " << err_str << "\n";
+
+    // ------------------------------------------------------------------
+    // Step 4: Reload driver (mandatory; may reset accelerator partition)
+    // ------------------------------------------------------------------
+    if (ret == AMDSMI_STATUS_SUCCESS) {
+      std::cout << "\n--- Step 4: Reload driver ---\n";
+      std::cout << "Reloading driver, this may take some time...\n";
+      amdsmi_status_t reload_ret = amdsmi_gpu_driver_reload();
+      amdsmi_status_code_to_string(reload_ret, &err_str);
+      std::cout << "amdsmi_gpu_driver_reload: " << err_str << "\n";
+    }
+
+    // ------------------------------------------------------------------
+    // Step 5: Re-initialize and verify
+    // ------------------------------------------------------------------
+    std::cout << "\n--- Step 5: Re-initialize and verify ---\n";
+    amdsmi_shut_down();
+    amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+
+    handles.clear();
+    ret = get_first_socket_processors(handles);
+    CHK_AMDSMI_RET(ret)
+    gpu0 = handles[0];
+    std::cout << "GPU count after memory partition change: " << handles.size() << "\n";
+
+    char new_mem[AMDSMI_MAX_STRING_LENGTH] = {};
+    ret = amdsmi_get_gpu_memory_partition(gpu0, new_mem,
+                                          static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+    amdsmi_status_code_to_string(ret, &err_str);
+    std::cout << "amdsmi_get_gpu_memory_partition: " << err_str << "\n";
+    if (ret == AMDSMI_STATUS_SUCCESS) {
+      std::cout << "  New memory partition: " << new_mem << "\n";
+    }
+
+    // ------------------------------------------------------------------
+    // Step 6: Set accelerator partition (only valid profiles for the
+    //         active memory partition, as seen in step 2)
+    // ------------------------------------------------------------------
+    std::cout << "\n--- Step 6: Set accelerator partition ---\n";
+    // Use profile index 0 (typically SPX); change to desired index as needed.
+    uint32_t target_acc_index = 0;
+    ret = amdsmi_set_gpu_accelerator_partition_profile(gpu0, target_acc_index);
+    amdsmi_status_code_to_string(ret, &err_str);
+    std::cout << "amdsmi_set_gpu_accelerator_partition_profile(index=" << target_acc_index
+              << "): " << err_str << "\n";
+
+    // ------------------------------------------------------------------
+    // Step 7: Verify
+    // ------------------------------------------------------------------
+    std::cout << "\n--- Step 7: Verify accelerator partition ---\n";
+    amdsmi_accelerator_partition_profile_t new_acc_profile = {};
+    uint32_t new_partition_ids[8] = {};
+    ret = amdsmi_get_gpu_accelerator_partition_profile(gpu0, &new_acc_profile, new_partition_ids);
+    amdsmi_status_code_to_string(ret, &err_str);
+    std::cout << "amdsmi_get_gpu_accelerator_partition_profile: " << err_str << "\n";
+    if (ret == AMDSMI_STATUS_SUCCESS) {
+      std::cout << "  New accelerator profile type: " << new_acc_profile.profile_type << "\n";
+      std::cout << "  New profile index: " << new_acc_profile.profile_index << "\n";
+      std::cout << "  Num partitions: " << new_acc_profile.num_partitions << "\n";
+    }
+
+    handles.clear();
+    ret = get_first_socket_processors(handles);
+    if (ret == AMDSMI_STATUS_SUCCESS) {
+      std::cout << "  GPU count after accelerator partition change: " << handles.size() << "\n";
+    }
+
+    std::cout << "\n=== End Version 2: Recommended Partition Workflow ===\n\n";
+  }
+
   // and devices pointers
   ret = amdsmi_shut_down();
   CHK_AMDSMI_RET(ret)
