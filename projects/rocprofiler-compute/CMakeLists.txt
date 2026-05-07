@@ -893,7 +893,7 @@ if(INSTALL_TESTS)
         PATTERN "__pycache__" EXCLUDE
     )
     install(
-        PROGRAMS tools/test_rocprofiler_compute.py
+        PROGRAMS therock_test_runner.py
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
         COMPONENT tests
     )
