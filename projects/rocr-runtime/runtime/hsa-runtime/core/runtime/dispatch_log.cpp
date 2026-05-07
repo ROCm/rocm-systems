@@ -621,8 +621,13 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     if ((end - start) > qs.ring_records) {
       if (!initial_sync) {
         const uint64_t lost = (end - start) - qs.ring_records;
+        // force_emit propagated so the disable-edge final drain
+        // (drain_one_queue invoked with force_emit=true) emits the drop
+        // event even after the user has disabled the tracepoint.
+        // Without this, post-disable record batches would arrive with a
+        // silently-dropped gap and no consumer-visible explanation.
         rocm_trace_emit_hsa_kernel_dispatch_drop(
-            queue_id_to_wire(qs.queue_id), lost);
+            queue_id_to_wire(qs.queue_id), lost, force_emit);
       }
       start = end - qs.ring_records;
       // Overrun moved us forward — quarantine is no longer relevant
@@ -759,8 +764,13 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
               // i again.
               --i;
             } else {
+              // force_emit propagated for the same reason as the overrun
+              // path above: the stale-zero-prefix sweep can fire from
+              // inside the disable-edge final drain, and we must not
+              // silently drop the gap notification when the user has
+              // already disabled the tracepoint.
               rocm_trace_emit_hsa_kernel_dispatch_drop(
-                  queue_id_to_wire(qs.queue_id), stale_count);
+                  queue_id_to_wire(qs.queue_id), stale_count, force_emit);
               qs.next_idx = stale_end;
               if (qs.rptr_ptr) {
                 __atomic_store_n(qs.rptr_ptr, stale_end, __ATOMIC_RELEASE);

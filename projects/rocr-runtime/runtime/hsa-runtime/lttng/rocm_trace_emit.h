@@ -283,14 +283,23 @@ static inline void rocm_trace_emit_hsa_kernel_dispatch_record(
  * Per-queue ENABLE failures still use stderr WARNING per spec §5;
  * those are configuration / substrate problems, not record-loss events.
  *
- * force_emit not supported here: drop events would always be observed
- * via the tracepoint-enabled gate, since they would only fire while
- * the drainer is actively consuming a ring (i.e. while the tracepoint
- * is enabled). */
-static inline void rocm_trace_emit_hsa_kernel_dispatch_drop(uint32_t queue_id,
-                                                            uint64_t bytes_lost) {
+ * force_emit=true bypasses the per-tracepoint lttng_ust_tracepoint_enabled()
+ * guard but NOT the rocm_trace_disabled() kill switch. The bypass is
+ * REQUIRED for the disable-edge final drain (Phase A spec §4): drop events
+ * can fire from inside the final drain pass (overrun detection at
+ * drain_one_queue start, and stale-zero-prefix sweep), and by the time
+ * final drain runs the user has already disabled the tracepoint (that
+ * disablement is what triggered the disable edge). Without the bypass,
+ * the consumer would receive the post-disable record batch with a
+ * silently-dropped gap and no kernel_dispatch_drop event explaining it.
+ * Steady-state drainer passes always pass force_emit=false so the
+ * normal per-tracepoint enabled gate applies. */
+static inline void rocm_trace_emit_hsa_kernel_dispatch_drop(
+    uint32_t queue_id, uint64_t bytes_lost,
+    bool     force_emit /* bypasses the tracepoint-enabled check */) {
     if (rocm_trace_disabled()) return;
-    if (lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_drop)) {
+    if (force_emit ||
+        lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_drop)) {
         lttng_ust_do_tracepoint(rocm_hsa, kernel_dispatch_drop,
                                 queue_id, bytes_lost);
     }
@@ -337,8 +346,8 @@ static inline void rocm_trace_emit_hsa_kernel_dispatch_record(
     uint32_t a, uint32_t b, uint32_t c, const uint8_t* d, size_t e, bool f) {
     (void)a; (void)b; (void)c; (void)d; (void)e; (void)f;
 }
-static inline void rocm_trace_emit_hsa_kernel_dispatch_drop(uint32_t a, uint64_t b) {
-    (void)a; (void)b;
+static inline void rocm_trace_emit_hsa_kernel_dispatch_drop(uint32_t a, uint64_t b, bool c) {
+    (void)a; (void)b; (void)c;
 }
 static inline void rocm_trace_emit_hsa_clock_sync(uint64_t a, uint64_t b, uint64_t c) {
     (void)a; (void)b; (void)c;
