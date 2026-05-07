@@ -59,7 +59,7 @@ jobs:
     if: ${{ needs.setup.outputs.should_build == 'true' }}
     runs-on: azure-linux-scale-rocm
     container:
-      # CUDA 13.1.2 Ubuntu 24.04 development image — update the digest when bumping
+      # CUDA 13.1.2 Ubuntu 24.04
       image: nvidia/cuda@sha256:08d6facb6a72f918beb3ffe5b57cff72402a203f44428831262e95c7466d4188
     env:
       BUILD_DIR: ${{ github.workspace }}/build
@@ -84,10 +84,8 @@ jobs:
         run: |
           apt-get update -q
           apt-get install -y --no-install-recommends \
-            cmake ninja-build llvm-dev libnuma \
-            libelf-dev libdrm-dev \
-            pkg-config
 
+          cmake ninja-build llvm-dev libnuma libelf-dev libdrm-dev pkg-config
       - name: Build hipconfig
         run: |
           cmake -B "${BUILD_DIR}/hipcc" -G Ninja \
@@ -109,7 +107,7 @@ jobs:
             -DHIPNV_DIR="${GITHUB_WORKSPACE}/projects/hipother/hipnv" \
             -DHIPCC_BIN_DIR="${BUILD_DIR}/hipcc-install/bin" \
             -DCMAKE_INSTALL_PREFIX="${BUILD_DIR}/clr-install" \
-            "${GITHUB_WORKSPACE}/projects/clr/hipamd"
+            "${GITHUB_WORKSPACE}/projects/clr/"
 
       - name: Build clr
         run: cmake --build "${BUILD_DIR}/clr" --parallel
