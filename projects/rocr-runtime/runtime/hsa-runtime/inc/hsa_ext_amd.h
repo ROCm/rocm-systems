@@ -639,6 +639,13 @@ enum {
    * by the requested operation.
    */
   HSA_STATUS_ERROR_XNACK_DISABLED = 48,
+
+  /**
+   * The kernel dispatch packet parameters exceed hardware limits for this
+   * agent (e.g. register usage, work-group dimensions, or other dispatch
+   * constraints enforced by the command processor).
+   */
+  HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS = 49,
 };
 
 /** @} */
