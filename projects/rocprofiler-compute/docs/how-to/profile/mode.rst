@@ -1187,7 +1187,11 @@ Iteration multiplexing feature comes with some caveats to be considered when pro
 
 * **Minimum number of kernel dispatches required**
 
-  When using iteration multiplexing it is recommended to filter by kernel(s) of interest using ``-k`` (see :ref:`profiling-kernel-filtering`) and make sure these kernels are dispatched enough times (50 recommended) to cover all counter subsets (currently around 15); a warning is thrown for kernels with insufficient dispatch counts to warn the user about missing counter data for those kernels, and it is not possible to calculate some metrics for these kernels.
+  When using iteration multiplexing it is recommended to filter by kernel(s) of interest using ``-k`` (see :ref:`profiling-kernel-filtering`) and make sure these kernels are dispatched enough times (50 recommended) to cover all counter subsets (currently around 15).
+
+* **Kernels with missing counter data are excluded from metrics**
+
+  If a kernel does not have enough dispatches to cover all counter sets, its counter data cannot be fully imputed and is excluded from metrics calculations. A warning at analysis time lists any affected kernels. Their execution times remain visible in the Top Stats section so their runtime impact is still apparent. To get more complete kernel coverage for metrics calculations, you may consider disabling iteration multiplexing to use application replay, or increasing the number of iterations for these kernels in the workload.
 
 * **Non-deterministic workloads**
 
