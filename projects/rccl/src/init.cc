@@ -741,6 +741,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   comm->doneEvent = doneEvent;
   comm->lastStream = nullptr;
+  comm->lastStreamValid = false;
   CUDACHECK(cudaGetDevice(&comm->cudaDev));
 
   // RCCL: create persistent stream for calloc
