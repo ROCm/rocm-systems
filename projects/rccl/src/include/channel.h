@@ -8,6 +8,8 @@
 #define NCCL_CHANNEL_H_
 #include "comm.h"
 #include "utils.h"
+#include "param.h"
+RCCL_PARAM_DECLARE(PxnOptQpUsage);  // RCCL_PXN_OPT_QP_USAGE: uses batch stride 8 instead of 1 to reduce QP usage when p2p-batching is disabled
 
 #include <algorithm>
 
@@ -21,7 +23,10 @@ inline uint8_t ncclP2pChannelBaseForRound(struct ncclComm* comm, int p2pRound, i
   if (comm->nNodes > 1) {
     int nodeDelta = p2pRound/comm->maxLocalRanks;
     int localDelta = p2pRound%comm->maxLocalRanks;
-    int batchSize = (comm->nNodes > 2 && p2pBatchEnable) ? NCCL_MAX_DEV_WORK_P2P_PER_BATCH : 1;
+    int fallbackBatch = (rcclParamPxnOptQpUsage() == 1) ? 8 : 1;
+    int batchSize = (comm->nNodes > 2 && p2pBatchEnable)
+        ? NCCL_MAX_DEV_WORK_P2P_PER_BATCH
+        : fallbackBatch;
     base = nodeDelta*divUp(comm->maxLocalRanks, batchSize);
     base += localDelta/batchSize;
   } else {
