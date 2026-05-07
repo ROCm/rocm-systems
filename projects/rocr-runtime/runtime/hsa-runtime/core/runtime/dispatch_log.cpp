@@ -1295,8 +1295,10 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
     volatile uint64_t* wptr_p   = nullptr;
     volatile uint64_t* rptr_p   = nullptr;
     volatile uint64_t* signal_p = nullptr;
+    bool ph2_fresh_allocation   = true;  // default-fresh; only consulted when path A wins
     hsa_status_t dl_status =
-        aql_queue->GetDispatchLogPointers(&wptr_p, &rptr_p, &signal_p);
+        aql_queue->GetDispatchLogPointers(&wptr_p, &rptr_p, &signal_p,
+                                          &ph2_fresh_allocation);
     if (dl_status == HSA_STATUS_SUCCESS) {
       qs->wptr_ptr   = wptr_p;
       qs->rptr_ptr   = rptr_p;
@@ -1305,48 +1307,60 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
     // else: legacy sentinel-scan mode; null pointers tell drain_one_queue
     // to use the fallback scan path.
 
-    // next_idx initialization (code-quality C2). Snapshot the current
-    // value of *signal_ptr (Path A only) and adopt it as our monotonic
-    // floor. Two cases this correctly covers:
+    // next_idx initialization (code-quality C2 + C3 round 2).
     //
-    //   1. Fresh queue (the common case). SetProfiling(true) just
-    //      allocated and zeroed the host signal word, so observed=0,
-    //      qs->next_idx=0. The first FW post-enable record write will
-    //      jump signal from 0 to (scratch_wptr_persisted + 1) and the
-    //      drain_one_queue Path A initial-sync logic
-    //      (initial_sync == (next_idx == 0)) handles the persisted
-    //      scratch wptr exactly as before. NO behavior change.
+    // The Path A drainer treats next_idx as the monotonic floor of
+    // already-emitted records. The choice of starting value depends on
+    // whether SetProfiling(true) just freshly allocated and zeroed the
+    // host signal word, or whether it hit the "buffer already wired"
+    // no-op path on a re-enable after a failed disable. We get this
+    // bit out of band from AqlQueue::GetDispatchLogPointers via
+    // ph2_fresh_allocation (set by AqlQueue::SetProfiling).
     //
-    //   2. Re-enable after a failed disable. If the previous disable's
-    //      QueueProfilingRelease -> AqlQueue::SetProfiling(false) failed
-    //      its KFD CLEAR, AqlQueue keeps the dispatch_record_buffer_
-    //      live, leaves the profiling bit set, and FW continues writing
-    //      records into the buffer (and advancing *signal_ptr) during
-    //      the disabled window. On a subsequent enable, SetProfiling
-    //      sees dispatch_record_buffer_ != nullptr and is a no-op — it
-    //      does NOT re-zero the signal word. Without this snapshot the
-    //      new drainer would start at next_idx=0 with observed already
-    //      huge, treat it as init-sync (initial_sync==true), and either
-    //      silently drop the entire ring's worth of stale-or-real
-    //      records or emit pre-zeroed slots as records. Snapshotting
-    //      the FW signal here causes the drainer to skip everything FW
-    //      wrote during the disabled window — which is the only safe
-    //      behavior, since we have no way to distinguish records the
-    //      consumer would still want from records belonging to a
-    //      lifecycle that already ended.
+    //   1. Fresh allocation (ph2_fresh_allocation=true; the common
+    //      case). SetProfiling(true) just allocated and zeroed the host
+    //      signal word, so observed=0 and next_idx must also be 0. The
+    //      first FW post-enable record write will jump signal from 0 to
+    //      (scratch_wptr_persisted + 1) and the drain_one_queue Path A
+    //      initial-sync logic (initial_sync == (next_idx == 0)) handles
+    //      the persisted scratch wptr exactly as before.
     //
-    // Path B (sentinel-scan fallback, signal_ptr==nullptr) is not
-    // affected by this hazard: it has no out-of-band write counter,
-    // and its existing per-slot record_type sentinel walk handles
-    // both fresh and re-enable cases correctly.
-    if (qs->signal_ptr != nullptr) {
+    //      Critically: we MUST NOT snapshot *signal_ptr on a fresh
+    //      allocation. A fresh queue may already be actively dispatching
+    //      between the SetProfiling success and our read here, and FW
+    //      can publish records (advancing *signal_ptr) in that window.
+    //      Snapshotting would adopt that value into next_idx, the first
+    //      drain pass would see observed <= next_idx and return without
+    //      emitting, and those legitimate first-window records would be
+    //      silently dropped (regression introduced by the original C2
+    //      fix; caught in code-quality round 2).
+    //
+    //   2. Re-enable after a failed disable (ph2_fresh_allocation=false).
+    //      AqlQueue kept the dispatch_record_buffer_ live, FW continued
+    //      writing records and advancing *signal_ptr through the
+    //      disabled window, and SetProfiling(true) hit the no-op path —
+    //      so the host signal word is NOT zero. Snapshot it and adopt
+    //      it as our floor; this skips records FW wrote during the
+    //      disabled window, which is the only safe behavior since those
+    //      records belong to a lifecycle that already ended from the
+    //      consumer's point of view.
+    //
+    // Path B (sentinel-scan fallback, signal_ptr==nullptr) does NOT
+    // get the same fix: the existing per-slot record_type sentinel walk
+    // correctly handles a freshly-zeroed buffer but does NOT distinguish
+    // stale records left by a previous lifecycle from new records on a
+    // re-enable after a failed disable. That hazard is not addressed
+    // here; it only matters on older kernels (KFD MINOR < 20 or older
+    // libhsakmt) which can fall back to Path B. Documented limitation;
+    // pursue separately if it bites in practice.
+    if (qs->signal_ptr != nullptr && !ph2_fresh_allocation) {
       qs->next_idx = __atomic_load_n(qs->signal_ptr, __ATOMIC_ACQUIRE);
       // Publish the snapshot to *rptr_ptr too so FW's backpressure view
       // matches our monotonic floor. SetProfiling on a re-enable after
       // a failed disable does not re-zero the rptr word either, so it
       // could otherwise lag far behind signal and report false
-      // backpressure to FW. On a fresh queue both words are 0 and this
-      // is a no-op store.
+      // backpressure to FW. (On the fresh-allocation branch both words
+      // are already 0 by SetProfiling, so no rptr publish is needed.)
       if (qs->rptr_ptr) {
         __atomic_store_n(qs->rptr_ptr, qs->next_idx, __ATOMIC_RELEASE);
       }

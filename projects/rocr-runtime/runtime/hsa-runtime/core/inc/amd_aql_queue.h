@@ -246,9 +246,23 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @returns HSA_STATUS_SUCCESS with non-null out-params if the new
   /// interface is active for this queue; HSA_STATUS_ERROR_NOT_INITIALIZED
   /// otherwise.
+  ///
+  /// @param[out] fresh_allocation Optional. If non-null, set to @c true
+  /// when the most recent successful @c SetProfiling(true) actually
+  /// allocated and zeroed the dispatch-record buffer + host-VA counter
+  /// words (the common case). Set to @c false when the most recent
+  /// @c SetProfiling(true) hit the "buffer already wired" no-op path —
+  /// this happens when a prior @c SetProfiling(false) failed its KFD
+  /// CLEAR and intentionally leaked the buffer to avoid FW
+  /// use-after-free (see amd_aql_queue.cpp:1854-1875). The dispatch_log
+  /// drainer needs this to distinguish a fresh queue (signal word is
+  /// genuinely 0) from a re-enable on a buffer where FW continued to
+  /// write records during the disabled window (signal word may be
+  /// non-zero from the previous lifecycle).
   hsa_status_t GetDispatchLogPointers(volatile uint64_t** wptr_ptr,
                                       volatile uint64_t** rptr_ptr,
-                                      volatile uint64_t** signal_ptr) const;
+                                      volatile uint64_t** signal_ptr,
+                                      bool* fresh_allocation = nullptr) const;
 
   /// @brief Update signal value using Relaxed semantics
   void StoreRelaxed(hsa_signal_value_t value) override;
@@ -441,6 +455,21 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   void* dispatch_log_wptr_buf_   = nullptr;   // FW writes here per record
   void* dispatch_log_rptr_buf_   = nullptr;   // host writes here on consume
   void* dispatch_log_signal_buf_ = nullptr;   // FW writes monotonic counter
+
+  // Tracks whether the most recent SetProfiling(true) actually allocated
+  // a fresh dispatch_record_buffer_ + host-VA counter set (true) or hit
+  // the no-op "buffer already wired" path (false). The latter happens
+  // when an earlier SetProfiling(false) failed its KFD CLEAR and
+  // quarantined the buffer (see SetProfiling failure-leak path). The
+  // dispatch_log drainer reads this via GetDispatchLogPointers to decide
+  // whether to start next_idx at 0 (fresh: host signal word is zero) or
+  // to snapshot the current FW *signal_ptr (re-enable: FW kept writing
+  // during the disabled window and the signal word is already non-zero).
+  // Default true so that the first SetProfiling(true) on a never-enabled
+  // queue is treated as fresh even if the alloc fails before the success
+  // path runs (the value is not consulted in that case but the default
+  // matches reality).
+  bool dispatch_log_freshly_allocated_ = true;
 
   // Shared event used for queue errors
   static __forceinline HsaEvent*& queue_event() {

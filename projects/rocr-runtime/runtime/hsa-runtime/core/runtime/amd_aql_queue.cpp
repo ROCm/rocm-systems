@@ -1664,6 +1664,18 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
     agent_->CheckClockTicks();
   }
 
+  // Code-quality C3 (round 2): track whether this enable call is taking
+  // the fresh-allocation path or the no-op "buffer already wired" path.
+  // The dispatch_log drainer needs to distinguish these to avoid silently
+  // dropping records produced on a fresh queue between SetProfiling
+  // success and the drainer's signal-snapshot read. We set the flag
+  // BEFORE the allocation gate so the no-op case is recorded even though
+  // we early-exit below; the success path inside the allocation block
+  // overwrites it with true.
+  if (enabled) {
+    dispatch_log_freshly_allocated_ = (dispatch_record_buffer_ == nullptr);
+  }
+
   if (enabled && !dispatch_record_buffer_) {
     // Ring size: 256K records (4 MiB at the FW 16-byte stride). Was 64K
     // previously; bumped to 256K because empirical workloads can sustain
@@ -1924,7 +1936,8 @@ hsa_status_t AqlQueue::GetProfilingDispatchRecords(void** buffer_base,
 
 hsa_status_t AqlQueue::GetDispatchLogPointers(volatile uint64_t** wptr_ptr,
                                               volatile uint64_t** rptr_ptr,
-                                              volatile uint64_t** signal_ptr) const {
+                                              volatile uint64_t** signal_ptr,
+                                              bool* fresh_allocation) const {
   // Phase-2 host-VA pointer set is populated only when:
   //   1. SetProfiling(true) was called AND
   //   2. The new KFD_IOC_PROFILER_DISPATCH_LOG sub-op succeeded
@@ -1939,6 +1952,14 @@ hsa_status_t AqlQueue::GetDispatchLogPointers(volatile uint64_t** wptr_ptr,
   *wptr_ptr   = static_cast<volatile uint64_t*>(dispatch_log_wptr_buf_);
   *rptr_ptr   = static_cast<volatile uint64_t*>(dispatch_log_rptr_buf_);
   *signal_ptr = static_cast<volatile uint64_t*>(dispatch_log_signal_buf_);
+  // Code-quality C3 (round 2): expose whether the most recent
+  // SetProfiling(true) actually allocated and zeroed the buffer set, or
+  // hit the no-op "buffer already wired" path (re-enable after a failed
+  // disable). The drainer uses this to choose between next_idx=0 (fresh)
+  // and next_idx=snapshot(*signal_ptr) (re-enable).
+  if (fresh_allocation != nullptr) {
+    *fresh_allocation = dispatch_log_freshly_allocated_;
+  }
   return HSA_STATUS_SUCCESS;
 }
 
