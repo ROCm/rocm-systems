@@ -372,17 +372,23 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
     // PAL recommends Local heap for UVD/VCN engine for best performance
     InfoLog(g_rocdec_logger, "PAL: Creating command allocator...");
     {
+        // Use device-preferred heaps for the VCN engine (matches DXCP pattern)
+        Pal::DeviceProperties dev_props_for_alloc = {};
+        device_->GetProperties(&dev_props_for_alloc);
+        const auto& eng_props = dev_props_for_alloc.engineProperties[eng];
+
         Pal::CmdAllocatorCreateInfo aci = {};
         aci.flags.threadSafe = 1;
+
+        // Initialize all allocator types from the device's preferred heaps for this engine
+        for (uint32_t i = 0; i < Pal::CmdAllocatorTypeCount; ++i) {
+            aci.allocInfo[i].allocHeap = eng_props.preferredCmdAllocHeaps[i];
+            aci.allocInfo[i].suballocSize = 64 * 1024;
+            aci.allocInfo[i].allocSize    = 256 * 1024;
+        }
+        // VCN command data always goes on local heap
         aci.allocInfo[Pal::CommandDataAlloc].allocHeap = Pal::GpuHeapLocal;
-        aci.allocInfo[Pal::CommandDataAlloc].suballocSize = 64 * 1024;
-        aci.allocInfo[Pal::CommandDataAlloc].allocSize = 256 * 1024;
         aci.allocInfo[Pal::EmbeddedDataAlloc].allocHeap = Pal::GpuHeapLocal;
-        aci.allocInfo[Pal::EmbeddedDataAlloc].suballocSize = 64 * 1024;
-        aci.allocInfo[Pal::EmbeddedDataAlloc].allocSize = 256 * 1024;
-        aci.allocInfo[Pal::GpuScratchMemAlloc].allocHeap = Pal::GpuHeapInvisible;
-        aci.allocInfo[Pal::GpuScratchMemAlloc].suballocSize = 64 * 1024;
-        aci.allocInfo[Pal::GpuScratchMemAlloc].allocSize = 256 * 1024;
 
         size_t sz = device_->GetCmdAllocatorSize(aci, &res);
         if (Util::IsErrorResult(res)) {
@@ -404,12 +410,15 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
     }
 
     // Create command buffer
-    // NOTE: pCmdAllocator must be nullptr at creation; it is supplied at Reset() time
+    // Pass the allocator at creation time (internalCmdMgr pattern).
+    // videoCmdList uses nullptr and provides it at Reset() — both are valid per PAL docs.
+    // We use non-null here since it ensures PAL validates the engine/queue combination with
+    // an actual allocator context, which avoids ErrorInvalidOrdinal on some PAL builds.
     {
         Pal::CmdBufferCreateInfo cbci = {};
         cbci.engineType = eng;
         cbci.queueType = Pal::QueueTypeVideoDecode;
-        cbci.pCmdAllocator = nullptr;
+        cbci.pCmdAllocator = cmd_allocator_.Get();
 
         InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: CmdBuffer create - engineType=") + ROCDEC_TOSTR((int)cbci.engineType) +
                 " queueType=" + ROCDEC_TOSTR((int)cbci.queueType) +
