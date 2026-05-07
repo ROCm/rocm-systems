@@ -20,9 +20,23 @@
 *.out
 *.app
 
+# Misc local working artifacts
 *.swp
 .vscode
-__pycache__
 build
 third_party
 Testing
+tmp
+
+# python
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+
+# agents
+.claude
+
+CMakePresets.json

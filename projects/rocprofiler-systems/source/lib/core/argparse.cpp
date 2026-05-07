@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "argparse.hpp"
 #include "common/environment.hpp"
@@ -27,6 +8,7 @@
 #include "exception.hpp"
 #include "gpu.hpp"
 #include "state.hpp"
+#include <cstdint>
 
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/filepath.hpp>
@@ -508,6 +490,24 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.processed_environs.emplace("periods");
     }
 
+    if(_data.environ_filter("selected_regions", _data))
+    {
+        _parser
+            .add_argument(
+                { "--selected-regions" },
+                "Comma-separated list of roctx region names. When set, only "
+                "activity inside matching roctx regions is traced (matched against "
+                "roctxRangeStartA message)")
+            .count(1)
+            .dtype("string")
+            .action([&](parser_t& p) {
+                update_env(_data, "ROCPROFSYS_SELECTED_REGIONS",
+                           p.get<std::string>("selected-regions"));
+            });
+
+        _data.processed_environs.emplace("selected_regions");
+    }
+
     if(_data.environ_filter("rank_filter_id", _data))
     {
         _parser
@@ -683,7 +683,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("KB")
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB",
-                           p.get<int64_t>("trace-buffer-size"));
+                           p.get<std::int64_t>("trace-buffer-size"));
             });
 
         _data.processed_environs.emplace("trace_buffer_size");
@@ -979,8 +979,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 update_env(
                     _data, "ROCPROFSYS_SAMPLING_TIDS",
-                    fmt::format("{}",
-                                fmt::join(p.get<std::vector<int64_t>>("tids"), ", ")));
+                    fmt::format(
+                        "{}", fmt::join(p.get<std::vector<std::int64_t>>("tids"), ", ")));
             });
 
         _data.processed_environs.emplace("tids");
@@ -1321,7 +1321,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
 parser_data&
 add_extended_arguments(parser_t& _parser, parser_data& _data)
 {
-    auto _category_count_map = std::unordered_map<std::string, uint32_t>{};
+    auto _category_count_map = std::unordered_map<std::string, std::uint32_t>{};
     auto _settings           = std::vector<std::shared_ptr<tim::vsettings>>{};
     for(auto& itr : *rocprofsys::settings::instance())
     {

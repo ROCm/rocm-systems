@@ -14,6 +14,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace rocjitsu {
@@ -38,6 +39,11 @@ public:
   /// @param[in] elf_path Path to a standalone device ELF file.
   explicit AmdGpuCodeObject(const std::string &elf_path);
 
+  /// @brief Construct from raw ELF bytes in memory.
+  /// @param[in] elf_bytes Pointer to the ELF image.
+  /// @param[in] elf_size Size of the ELF image in bytes.
+  AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size);
+
   /// @brief Construct from a region within an already-open ELF file (used by AmdGpuExecutable).
   /// @param[in] size Size of the embedded ELF in bytes.
   /// @param[in] elf_file Open file stream positioned at the start of the embedded ELF.
@@ -55,13 +61,17 @@ public:
   /// @returns Reference to the target triple string.
   const std::string &target_triple() const { return target_triple_; }
 
+  uint64_t kernel_descriptor_offset(const std::string &kernel_name) const override;
+
 private:
   void load_sections(std::ifstream &elf_file);
+  void parse_symbols();
 
   rj_code_target_id_t target_id_ = ROCJITSU_CODE_TARGET_INVALID;
   std::string offload_kind_;
   std::string target_triple_;
   int64_t fatbin_offset_ = 0;
+  std::unordered_map<std::string, uint64_t> kd_offsets_; ///< kernel_name -> .kd symbol offset
 };
 
 } // namespace rocjitsu

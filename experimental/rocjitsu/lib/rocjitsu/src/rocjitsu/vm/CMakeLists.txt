@@ -4,7 +4,6 @@
 rj_add_object_library(rocjitsu_vm
     soc.cpp
     virtual_machine.cpp
-    driver.cpp
     rj_vm.cpp
 )
 

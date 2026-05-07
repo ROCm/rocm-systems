@@ -760,7 +760,8 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
         setFlag(HSA_EXTENSION_IMAGES);
       }
 
-      if (aqlprofile_lib_ != nullptr) {
+      if (os::LibHandle lib = os::LoadLib(kAqlProfileLib)) {
+        os::CloseLib(lib);
         setFlag(HSA_EXTENSION_AMD_AQLPROFILE);
       }
 
@@ -823,6 +824,13 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t Runtime::GetSignalEventId(hsa_signal_t signal, uint32_t *event_id) {
+  core::Signal* coreSignal = core::Signal::Convert(signal);
+  *event_id = coreSignal->EopEvent() ? coreSignal->EopEvent()->EventId : 0;
+
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1495,7 +1503,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       hflags.ui32.IPCHandle = 1;
       hflags.ui32.SysMem = isDmabufSysmem;
       hflags.ui32.UpdateMetadata = 0;
-      HsaHandleImportResult res;
+      HsaHandleImportResult res = {};
       HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
       if (status != HSAKMT_STATUS_SUCCESS) {
         fprintf(stderr, "IPC Client Import: Invalid IPC handle! expected %u, got %u\n",
@@ -1539,11 +1547,9 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       len = Min(len, importSize - fragOffset);
     }
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
-    if (allocation_map_.find(importAddress) == allocation_map_.end()) {
-      allocation_map_[importAddress] =
-          AllocationRegion(nullptr, len, len, core::MemoryRegion::AllocateNoFlags);
-      allocation_map_[importAddress].thunk_bo = thunk_bo;
-    }
+    allocation_map_.try_emplace(
+        importAddress, nullptr, len, len, core::MemoryRegion::AllocateNoFlags);
+    allocation_map_[importAddress].thunk_bo = thunk_bo;
   };
 
   auto importMemory = [&](unsigned int numNodes, HSAuint32 *nodes, bool isSysMem) {
@@ -1976,6 +1982,7 @@ void Runtime::AsyncEventsPool::free(AsyncEventItem* ptr) {
       }
     }
     assert(valid && "Object does not belong to pool.");
+    (void)valid;
   }
   free_list_.push_back(ptr);
 }
@@ -2339,7 +2346,6 @@ Runtime::Runtime()
       ipc_sock_server_fd_(os::INVALID_SOCKET_VALUE),
       ipc_sock_server_thread_(nullptr) {
   virtual_mem_api_supported_ = false;
-  aqlprofile_lib_ = nullptr;
   ipc_dmabuf_supported_ = false;
   xnack_enabled_ = false;
   g_use_interrupt_wait = true;
@@ -2403,9 +2409,6 @@ hsa_status_t Runtime::Load() {
   // Load extensions
   LoadExtensions();
 
-  // Probe aqlprofile availability once and cache the result
-  aqlprofile_lib_ = os::LoadLib(kAqlProfileLib);
-
   // Initialize per GPU scratch, blits, and trap handler
   for (core::Agent* agent : gpu_agents_) {
     hsa_status_t status =
@@ -2447,16 +2450,6 @@ void Runtime::Unload() {
 
   UnloadTools();
   UnloadExtensions();
-
-  // Close the aqlprofile probe handle. Skip the dlclose when
-  // running under Valgrind due to a Valgrind bug, see below:
-  // http://valgrind.org/docs/manual/faq.html#faq.unhelpful
-  if (aqlprofile_lib_ != nullptr) {
-    if (!flag_.running_valgrind()) {
-      os::CloseLib(aqlprofile_lib_);
-    }
-    aqlprofile_lib_ = nullptr;
-  }
 
   amd::hsa::loader::Loader::Destroy(loader_.get());
   loader_.reset();
@@ -3346,6 +3339,7 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
     attrib.value = op->node_id;
     HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(op->base, op->size, 1, &attrib));
     assert(error == HSAKMT_STATUS_SUCCESS && "KFD Prefetch failed.");
+    (void)error;
 
     removePrefetchRanges(op);
 
@@ -3416,6 +3410,7 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
     HSAKMT_STATUS error =
         HSAKMT_CALL(hsaKmtSVMGetAttr(reinterpret_cast<void*>(range.first), range.second, 1, &attrib));
     assert(error == HSAKMT_STATUS_SUCCESS && "KFD prefetch query failed.");
+    (void)error;
 
     if (attrib.value == -1) return nullptr;
     if (prefetch_node == -2) prefetch_node = attrib.value;
@@ -3931,10 +3926,12 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
     /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation */
     bool result = rocr::os::UncommitMemory(va, size);
     assert(result && "Failed to remap VA to anonymous");
+    (void)result;
   }
   else {
     hsa_status_t status = targetAgent->driver().DestroyImportedShareableHandle(&shareable_handle);
     assert(status == HSA_STATUS_SUCCESS);
+    (void)status;
   }
 }
 

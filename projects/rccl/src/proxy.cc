@@ -609,11 +609,6 @@ static ncclResult_t SaveProxy(struct ncclComm* comm, struct ncclChannel* channel
   return ncclSuccess;
 }
 
-ncclResult_t mscclSaveProxy(struct ncclComm* comm, struct ncclChannel* channel, int type, int peer, struct ncclProxyOp* op, int connIndex) {
-  NCCLCHECK(SaveProxy(comm, channel, type, peer, op, connIndex, nullptr));
-  return ncclSuccess;
-}
-
 // justInquire != nullptr means don't actually do anything, just assertain need of
 // ncclProxySaveOp for this op.
 ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool* justInquire) {
@@ -1516,7 +1511,7 @@ static ncclResult_t proxyConnInit(struct ncclProxyLocalPeer* peer, struct ncclPr
 }
 
 static ncclResult_t proxyQueryFd(struct ncclProxyState* proxyState, int rank, void *opId, int rmtFd) {
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
   struct ncclIpcSocket ipcSock = { 0 };
   uint64_t hash = (uint64_t) opId;
   ncclResult_t ret = ncclSuccess;
@@ -1539,7 +1534,7 @@ static ncclResult_t proxyGetFd(struct ncclProxyState* proxyState, int rank, void
    uint64_t handle
 #endif
 ) {
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
   // cuMem API support
   ncclResult_t ret = ncclSuccess;
   struct ncclIpcSocket ipcSock = { 0 };
@@ -1977,6 +1972,9 @@ ncclResult_t ncclProxyCreate(struct ncclComm* comm) {
     proxyState->profilerContext = comm->profilerContext;
     proxyState->directMode = comm->directMode;
     memcpy(proxyState->buffSizes, comm->buffSizes, sizeof(comm->buffSizes));
+    // [RCCL] Host side mirrors of device side NCCL_LL128_LINEELEMS & NCCL_LL128_DATAELEMS 
+    proxyState->ll128LineElems = comm->ll128LineElems;
+    proxyState->ll128DataElems = comm->ll128DataElems;
 
     PTHREADCHECK(pthread_create(&comm->proxyState->thread, NULL, ncclProxyService, comm->proxyState), "pthread_create");
     ncclSetThreadName(comm->proxyState->thread, "NCCL Service %2d", comm->cudaDev);

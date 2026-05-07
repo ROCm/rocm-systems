@@ -23,9 +23,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.parser import (
-    PC_SAMPLING_NOT_ISSUE_PREFIX,
-    CodeTransformer,
+from utils.metrics.aggregation import (
     to_avg,
     to_concat,
     to_int,
@@ -33,11 +31,15 @@ from utils.parser import (
     to_median,
     to_min,
     to_mod,
-    to_noise_clamp,
     to_quantile,
     to_round,
     to_std,
     to_sum,
+)
+from utils.metrics.expression import CodeTransformer
+from utils.metrics.noise_clamper import to_noise_clamp
+from utils.parser import (
+    PC_SAMPLING_NOT_ISSUE_PREFIX,
 )
 from utils.roofline_calc import (
     CACHE_HIERARCHY,
@@ -45,7 +47,8 @@ from utils.roofline_calc import (
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
 )
-from utils.utils_common import BUILD_IN_VARS, get_uuid, get_version
+from utils.utils_common import get_uuid, get_version
+from utils.utils_counter_defs import BUILD_IN_VARS
 
 
 class db_analysis(OmniAnalyze_Base):
@@ -310,6 +313,7 @@ class db_analysis(OmniAnalyze_Base):
                 raw_pmc = self.iteration_multiplex_impute_counters(
                     raw_pmc,
                     policy=self._profiling_config["iteration_multiplexing"],
+                    workload_dir=Path(workload_path),
                 )
 
             pmc_df_per_workload[workload_path] = raw_pmc["pmc_perf"]

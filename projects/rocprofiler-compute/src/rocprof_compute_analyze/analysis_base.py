@@ -23,6 +23,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.metrics.expression import build_metric_value_string
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     is_workload_empty,
@@ -70,46 +71,6 @@ def test_df_column_equality(df: pd.DataFrame) -> bool:
     return df.eq(df.iloc[:, 0], axis=0).all(1).all()
 
 
-def detect_missing_counters(
-    df: pd.DataFrame,
-    workload_dir: Path,
-    join_type: str,
-) -> None:
-    """Detect missing counter values in joined dataframe.
-
-    Args:
-        df: Joined dataframe to check
-        workload_dir: Path to workload directory
-        join_type: Type of join performed ('kernel' or 'grid')
-    """
-    group_labels = ["Kernel_Name"]
-    if join_type == "grid":
-        group_labels.append("Grid_Size")
-
-    # Old workloads have *.txt, new workloads have pmc_perf_*.yaml
-    num_files = len(list(workload_dir.glob("perfmon/*.txt"))) + len(
-        list(workload_dir.glob("perfmon/pmc_perf_*.yaml"))
-    )
-    kernels_with_missing_counters = []
-    for _, groups in df.groupby(group_labels):
-        if groups["Dispatch_ID"].nunique() < num_files:
-            kernel_name = groups.iloc[0]["Kernel_Name"]
-            kernels_with_missing_counters.append(kernel_name)
-
-    if kernels_with_missing_counters:
-        kernels_with_missing_counters = list(set(kernels_with_missing_counters))
-        console_warning(
-            "join_prof",
-            (
-                f"Insufficient number of kernel calls for kernels: "
-                f"{', '.join(kernels_with_missing_counters)} "
-                f"to collect all counters using iteration multiplexing. "
-                f"Please use kernel filtering and exclude the above kernels "
-                f"or turn off iteration multiplexing."
-            ),
-        )
-
-
 class OmniAnalyze_Base:
     def __init__(
         self, args: argparse.Namespace, supported_archs: dict[str, str]
@@ -144,9 +105,9 @@ class OmniAnalyze_Base:
 
     @demarcate
     def iteration_multiplex_impute_counters(
-        self, df: pd.DataFrame, policy: str
+        self, df: pd.DataFrame, policy: str, workload_dir: Path
     ) -> pd.DataFrame:
-        return impute_counters_iteration_multiplex(df, policy)
+        return impute_counters_iteration_multiplex(df, policy, workload_dir)
 
     @demarcate
     def generate_configs(
@@ -194,7 +155,7 @@ class OmniAnalyze_Base:
         target_filter = normalization_filter or args.normal_unit
 
         for arch_config in self._arch_configs.values():
-            parser.build_metric_value_string(
+            build_metric_value_string(
                 arch_config.dfs,
                 arch_config.dfs_type,
                 target_filter,
@@ -445,7 +406,6 @@ class OmniAnalyze_Base:
         # Load profiling config from THIS workload directory (not args)
         profiling_config = file_io.load_profiling_config(str(workload_dir))
         format_rocprof = profiling_config.get("format_rocprof_output", "rocpd")
-        iteration_multiplexing = profiling_config.get("iteration_multiplexing", None)
         join_type = profiling_config.get("join_type", "grid")
         kokkos_trace = profiling_config.get("kokkos_trace", False)
 
@@ -453,6 +413,11 @@ class OmniAnalyze_Base:
         if format_rocprof == "rocpd":
             # Vertically concat (by rows) results_*.csv into pmc_perf.csv
             result_files = list(workload_dir.glob("results_*.csv"))
+
+            console_warning(
+                "Reading intermediate results_*.csv files is deprecated and "
+                "will be removed in a future release."
+            )
 
             with open(output_file, "w", newline="") as outfile:
                 writer = None
@@ -468,10 +433,6 @@ class OmniAnalyze_Base:
                             writer.writerow(row)
 
             console_debug(f"Created file: {output_file}")
-
-            if iteration_multiplexing is not None:
-                df = pd.read_csv(output_file)
-                detect_missing_counters(df, workload_dir, join_type)
 
             return None
 
@@ -646,11 +607,6 @@ class OmniAnalyze_Base:
         # finally, join the drop key
         if "key" in df.columns:
             df = df.drop(columns=["key"])
-
-        console_debug("join_prof", "Checking for missing counter values...")
-
-        if iteration_multiplexing is not None:
-            detect_missing_counters(df, workload_dir, join_type)
 
         # save to file
         df.to_csv(output_file, index=False)

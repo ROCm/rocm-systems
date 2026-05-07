@@ -1,34 +1,26 @@
 sets:
-- title: Compute Throughput Utilization
-  set_option: compute_thruput_util
-  description: Placeholder
-  metric:
-  - 11.2.2: SALU Utilization
-  - 11.2.3: VALU Utilization
-  - 11.2.5: VMEM Utilization
-  - 11.2.6: Branch Utilization
 - title: Compute Throughput FLOPS
   set_option: compute_thruput_flops
   description: Placeholder
   metric:
-  - 2.1.0: VALU FLOPs (FP16)
-  - 2.1.1: VALU FLOPs (FP32)
+  - 2.1.0: VALU FLOPs
+  - 2.1.1: VALU FLOPs (F64)
 - title: Memory Throughput
   set_option: mem_thruput
   description: Placeholder
   metric:
   - 2.1.7: LDS Bank Conflicts
-  - 2.1.18: Theoretical LDS Bandwidth
-  - 17.1.0: Utilization
+  - 3.4.5: LDS Estimated Bandwidth
+  - 3.6.0: GL1 Cache Utilization
+  - 3.8.0: GL2 Cache Utilization
 - title: Launch Stats
   set_option: launch_stats
   description: Placeholder
   metric:
-  - 7.1.0: Grid Size
-  - 7.1.1: Workgroup Size
-  - 7.1.2: Total Wavefronts
-  - 7.1.5: VGPRs
-  - 7.1.6: AGPRs
-  - 7.1.7: SGPRs
-  - 7.1.8: LDS Allocation
-  - 7.1.9: Scratch Allocation
+  - 7.2.0: Grid Size
+  - 7.2.1: Workgroup Size
+  - 7.3.0: Dispatched Waves
+  - 7.2.2: VGPRs
+  - 7.2.3: SGPRs
+  - 7.2.4: LDS Allocation
+  - 7.2.5: Scratch Allocation

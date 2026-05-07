@@ -18,8 +18,8 @@ release(cstring, AMD_LOG_LEVEL_FILE, "",                                      \
         "Set output file for AMD_LOG_LEVEL, Default is stderr")               \
 release(size_t, AMD_LOG_LEVEL_SIZE, 2048,                                     \
         "The max size of AMD_LOG generated in MB if printed to a file")       \
-release(bool, AMD_LOG_ASYNC, false,                                           \
-        "Enable async logging with in-memory buffer and background thread")   \
+release(bool, AMD_LOG_ASYNC, true,                                            \
+        "Async logging with in-memory buffer and background thread (set 0 to disable)")\
 debug(uint, DEBUG_GPU_FLAGS, 0,                                               \
         "The debug options for GPU device")                                   \
 release(size_t, CQ_THREAD_STACK_SIZE, 256*Ki, /* @todo: that much! */         \
@@ -233,6 +233,8 @@ release(cstring, HIPRTC_COMPILE_OPTIONS_APPEND, "",                           \
         "Set compile options needed for hiprtc compilation")                  \
 release(cstring, HIPRTC_LINK_OPTIONS_APPEND, "",                              \
         "Set link options needed for hiprtc compilation")                     \
+release(cstring, GPU_CLR_PROFILE_OUTPUT, "",                                  \
+        "Enable built-in HIP profiling and write Chrome trace JSON to this path on exit") \
 release(bool, HIP_VMEM_MANAGE_SUPPORT, true,                                  \
         "Virtual Memory Management Support")                                  \
 release(uint, DEBUG_HIP_GRAPH_DOT_PRINT, 0,                               \
@@ -253,9 +255,9 @@ release(bool, DEBUG_CLR_SYSMEM_POOL, false,                                   \
         "Use sysmem pool implementation in runtime for amd commands")         \
 release(bool, DEBUG_CLR_KERNARG_HDP_FLUSH_WA, false,                          \
         "Toggle kernel arg copy workaround")                                  \
-release(uint, DEBUG_HIP_DYNAMIC_QUEUES, 2,                                    \
-        "Dynamic queue management: 0=off, 1=Queue depth heuristic,"           \
-        "2= Queue Depth + Pipe distribution")                                 \
+release(uint, DEBUG_HIP_DYNAMIC_QUEUES, 1,                                    \
+        "Dynamic queue management: 0=off, 1=Depth heuristic,"                 \
+        " 2=1 + dedicated null-stream queue")                                 \
 release(bool, DEBUG_HIP_IGNORE_STREAM_PRIORITY, false,                        \
         "Ignore priority streams")                                            \
 release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
@@ -264,8 +266,13 @@ release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
         "Force use of SPIRV instead of device specific code object.")         \
 release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 8,                               \
         "Forces the minimum batch size for CPU sync")                         \
-release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                               \
-        "1 = Disable Image support for ROC path")  // clang-format on
+release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                                 \
+        "1 = Disable Image support for ROC path")                             \
+release(bool, DEBUG_CLR_ENABLE_PREFETCH_METADATA, true,                       \
+        "Enable metadata prefetch for some Aql packets")                      \
+release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
+        "Number of consecutive dispatches that may skip the doorbell flush.")
+ 
 
 namespace amd {
 

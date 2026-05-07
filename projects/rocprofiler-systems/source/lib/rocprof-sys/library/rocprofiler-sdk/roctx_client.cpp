@@ -33,22 +33,14 @@ namespace rocprofsys
 namespace rocprofiler_sdk
 {
 
-template <typename MarkerWriterPolicy>
-thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
-    roctx_client<MarkerWriterPolicy>::m_pushed_ranges{};
-
-template <typename MarkerWriterPolicy>
-thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
-    roctx_client<MarkerWriterPolicy>::m_started_ranges{};
-
 namespace
 {
 
 int
-iterate_args_callback(rocprofiler_callback_tracing_kind_t, int32_t, uint32_t arg_number,
-                      const void* const, int32_t, const char*                arg_type,
-                      const char* arg_name, const char* arg_value_str, int32_t,
-                      void* data)
+iterate_args_callback(rocprofiler_callback_tracing_kind_t, std::int32_t,
+                      std::uint32_t arg_number, const void* const, std::int32_t,
+                      const char* arg_type, const char* arg_name,
+                      const char* arg_value_str, std::int32_t, void* data)
 {
     auto* args = static_cast<function_args_t*>(data);
     if(arg_type && arg_name && arg_value_str)
@@ -87,15 +79,6 @@ collect_args(rocprofiler_callback_tracing_record_t record)
 }
 
 }  // namespace
-
-template <typename MarkerWriterPolicy>
-roctx_client<MarkerWriterPolicy>::roctx_client(const roctx_client_config& roctx_cfg)
-: m_config{ roctx_cfg }
-, m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory,
-            roctx_cfg.perfetto_annotations }
-, m_controller{ std::make_shared<control::trace_control>(
-      roctx_cfg.selected_trace_regions) }
-{}
 
 template <typename MarkerWriterPolicy>
 void
@@ -179,8 +162,8 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
 {
     auto* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
-    const uint64_t begin_ts = user_data->value;
-    const auto     args_str = collect_args(record);
+    const std::uint64_t begin_ts = user_data->value;
+    const auto          args_str = collect_args(record);
 
     auto pop_and_write = [&](marker_range_stack_t& stack) {
         auto        range = stack.back();

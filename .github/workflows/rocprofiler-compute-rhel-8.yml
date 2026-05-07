@@ -73,7 +73,7 @@ jobs:
 
       - name: Install ROCm Packages
         timeout-minutes: 30
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
         with:
           retry_wait_seconds: 30
           timeout_minutes: 30
@@ -90,7 +90,7 @@ jobs:
             yum install -y rocm-dev
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           sparse-checkout: |
             projects/rocprofiler-compute
