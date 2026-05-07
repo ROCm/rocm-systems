@@ -382,38 +382,6 @@ __builtin_amdgcn_wmma_<C,D format>_16x16x16_<A,B format>_w32_gfx12
 - Lane ID builtins
 - Wavefront size detection
 
-## MI350 (CDNA4/gfx950) Specific Features
-
-*ISA/marketing background only—not every bullet is a standalone test in this sample; see the **Feature Compatibility Matrix** for what runs.*
-
-The following features are new or enhanced in MI350 compared to MI300:
-
-1. **New WMMA Instructions**
-   - `V_WMMA_F32_16x16x128_F8F6F4` (FP4/FP6/FP8 mixed precision)
-   - `V_WMMA_F32_32x16x128_F4`
-   - `V_WMMA_F64_16X16X4_F64` (MI430/XCD-HPC only)
-   - Sparse WMMA (`V_SWMMAC_*`)
-
-2. **New FP8/FP6/FP4 Scaled Conversions**
-   - `__builtin_amdgcn_cvt_scalef32_pk_f16_fp8`
-   - `__builtin_amdgcn_cvt_scalef32_pk_bf8_f16`
-
-3. **New Atomic Operations**
-   - `GLOBAL_ATOMIC_ADD_F64`, `BUFFER_ATOMIC_ADD_F64`
-   - `GLOBAL_ATOMIC_MIN_NUM_F64`, `GLOBAL_ATOMIC_MAX_NUM_F64`
-   - `CSUB`, `CONDSUB`
-
-4. **Architectural Enhancements**
-   - Dual VALU issue (2 VALU instructions per cycle)
-   - 1024 VGPRs per Wave32
-   - Wave32 only for WMMA (dropped Wave64 WMMA support)
-
-5. **Async LDS-Global Transfers**
-   - `global_load_async_to_lds_b8/b32/b64/b128` - Async load from global to LDS
-   - `global_store_async_from_lds_b8/b32/b64/b128` - Async store from LDS to global
-   - Tracked with ASYNCcount for synchronization
-
-
 ### Strix / Strix Halo / Krackan (RDNA 3.5 / gfx1150 / gfx1151 / gfx1152) Specific Features
 
 *Background on RDNA 3.5 APUs; coverage here is limited to paths the matrix marks as tested (e.g. WMMA/TEX), not every fixed-function block.*
