@@ -17,21 +17,11 @@ if(NOT CMAKE_HIP_COMPILER)
     endif()
 endif()
 
-project(rocprofiler-sdk-samples-thread-trace LANGUAGES CXX HIP)
+project(rocprofiler-sdk-samples-thread-trace-rare-scan LANGUAGES CXX HIP)
 
 find_package(rocprofiler-sdk REQUIRED)
 find_package(rocprofiler-sdk-roctx REQUIRED)
 find_package(rocprof-trace-decoder REQUIRED)
-find_package(
-    amd_comgr
-    REQUIRED
-    CONFIG
-    HINTS
-    ${rocm_version_DIR}
-    ${ROCM_PATH}
-    PATHS
-    ${rocm_version_DIR}
-    ${ROCM_PATH})
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -49,20 +39,30 @@ endforeach()
 set_source_files_properties(
     main.cpp PROPERTIES LANGUAGE HIP COMPILE_FLAGS "${CMAKE_HIP_FLAGS_RELWITHDEBINFO}")
 
-add_executable(thread-trace-sample)
-target_sources(thread-trace-sample PRIVATE main.cpp agent.cpp)
+add_executable(thread-trace-rare-scan-sample)
+target_sources(thread-trace-rare-scan-sample PRIVATE main.cpp agent.cpp)
 
 target_link_libraries(
-    thread-trace-sample
+    thread-trace-rare-scan-sample
     PUBLIC rocprofiler-sdk::samples-build-flags
     PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-common-library
-            rocprofiler-sdk-roctx::rocprofiler-sdk-roctx amd_comgr
+            rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
             rocprof-trace-decoder::rocprof-trace-decoder)
 
-add_test(NAME thread-trace-sample COMMAND $<TARGET_FILE:thread-trace-sample>)
+add_test(NAME thread-trace-rare-scan-sample
+         COMMAND $<TARGET_FILE:thread-trace-rare-scan-sample>)
+
+set(IS_DISABLED ON)
+rocprofiler_sdk_sqtt_triple_buffer_disabled(_TB_DISABLED)
+if(NOT _TB_DISABLED)
+    set(IS_DISABLED OFF)
+endif()
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV)
+# Keep the test fast by default; the sample itself supports RUN_SECONDS=N.
+list(APPEND PRELOAD_ENV "RUN_SECONDS=3")
 
 set_tests_properties(
-    thread-trace-sample PROPERTIES TIMEOUT 60 ENVIRONMENT "${PRELOAD_ENV}" LABELS
-                                   "samples;thread-trace")
+    thread-trace-rare-scan-sample
+    PROPERTIES TIMEOUT 60 ENVIRONMENT "${PRELOAD_ENV}" LABELS
+               "samples;thread-trace;triple-buffer" DISABLED ${IS_DISABLED})

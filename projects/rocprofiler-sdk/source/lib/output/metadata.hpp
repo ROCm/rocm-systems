@@ -28,7 +28,7 @@
 #include "kernel_symbol_info.hpp"
 #include "pc_sample_transform.hpp"
 
-#include "lib/att-tool/att_lib_wrapper.hpp"
+#include "lib/common/codeobj_load_info.hpp"
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/demangle.hpp"
 #include "lib/common/logging.hpp"
@@ -103,7 +103,7 @@ using instruction_t      = rocprofiler::sdk::codeobj::disassembly::Instruction;
 using att_dispatch_agent_key_t =
     std::pair<rocprofiler_dispatch_id_t, uint64_t>;  // (dispatch_id, agent_handle)
 using att_filenames_map_t         = std::map<att_dispatch_agent_key_t, std::vector<std::string>>;
-using code_object_load_info_vec_t = std::vector<rocprofiler::att_wrapper::CodeobjLoadInfo>;
+using code_object_load_info_vec_t = std::vector<rocprofiler::tool::CodeobjLoadInfo>;
 template <typename Tp>
 using synced_map = common::Synchronized<Tp, true>;
 template <typename Tp>

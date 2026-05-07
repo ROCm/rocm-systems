@@ -20,8 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// output_directory: "@CMAKE_CURRENT_BINARY_DIR@/roctracer-roctx-trace"
-
 #pragma once
 
 #include "lib/att-tool/att_lib_wrapper.hpp"

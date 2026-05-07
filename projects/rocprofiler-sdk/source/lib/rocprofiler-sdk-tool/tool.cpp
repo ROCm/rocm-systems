@@ -28,7 +28,9 @@
 #include "helper.hpp"
 #include "stream_stack.hpp"
 
-#include "lib/att-tool/att_lib_wrapper.hpp"
+#ifndef ROCPROFILER_DISABLE_TRACE_DECODER
+#    include "lib/att-tool/att_lib_wrapper.hpp"
+#endif
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -1623,6 +1625,7 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
 void
 att_shader_data_callback(rocprofiler_agent_id_t                       agent,
                          int64_t                                      se_id,
+                         uint64_t /* chunk_index */,
                          void*                                        se_data,
                          size_t                                       data_size,
                          rocprofiler_thread_trace_shader_data_flags_t flags,
@@ -3129,7 +3132,8 @@ generate_output(cleanup_mode _cleanup_mode)
 
     if(tool::get_config().advanced_thread_trace)
     {
-        auto decoder = rocprofiler::att_wrapper::ATTDecoder(tool::get_config().att_library_path);
+#ifndef ROCPROFILER_DISABLE_TRACE_DECODER
+        auto decoder = rocprofiler::att_wrapper::ATTDecoder();
         ROCP_FATAL_IF(!decoder.valid()) << "Decoder library not found!";
 
         auto codeobj     = tool_metadata->get_code_object_load_info();
@@ -3159,6 +3163,7 @@ generate_output(cleanup_mode _cleanup_mode)
 
             decoder.parse(in_path, out_path, att_files, codeobj, perf, formats);
         }
+#endif
     }
 
     run_cleanup();

@@ -758,7 +758,23 @@ public:
                                        Primitives::COPY_DATA_SEL_COUNT_1DW_PRM,
                                        false);
 
-        builder.BuildWriteWaitIdlePacket(cmd_buffer);
+        // Embed a periodic GPU-clock low-32 marker into the trace stream so the decoder can
+        // correlate shader-clock with GPU realtime-clock between Begin/End anchors. gfx9 only;
+        // other architectures inject realtime tokens via different in-trace mechanisms.
+        if(Primitives::GFXIP_LEVEL == 9)
+        {
+            rocprof_trace_decoder_packet_header_t header{};
+            header.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP_LO32;
+            header.type   = 0;
+            header.data20 = 0;
+
+            builder.BuildWriteUConfigRegPacket(
+                cmd_buffer,
+                builder.get_addr(Primitives::SQ_THREAD_TRACE_USERDATA_3),
+                header.u32All);
+            builder.BuildClockLo32IntoUserdata(cmd_buffer, Primitives::SQ_THREAD_TRACE_USERDATA_3);
+        }
+
         builder.BuildCacheFlushPacket(cmd_buffer, size_t(&control), sizeof(TraceControl));
         SetGRBMToBroadcast(cmd_buffer);
     }
@@ -796,10 +812,8 @@ public:
                                : Primitives::SQ_THREAD_TRACE_BUF0_BASE_HI_ADDR;
 
             WriteConfigPacket(cmd_buffer, reg_lo, buff1_lo);
-            builder.BuildWriteWaitIdlePacket(cmd_buffer);
             WriteConfigPacket(cmd_buffer, reg_hi, buff1_hi);
         }
-        builder.BuildCacheFlushPacket(cmd_buffer, size_t(prev), config->data_buffer_size);
 
         SetGRBMToBroadcast(cmd_buffer);
     }

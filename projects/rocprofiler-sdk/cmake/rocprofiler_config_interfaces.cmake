@@ -397,3 +397,20 @@ else()
                                INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCJPEG=0)
 
 endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# rocprof-trace-decoder
+#
+# ----------------------------------------------------------------------------------------#
+
+if(NOT ROCPROFILER_DISABLE_TRACE_DECODER)
+    if(NOT TARGET rocprof-trace-decoder::rocprof-trace-decoder)
+        if(ROCPROF_TRACE_DECODER_DIR)
+            find_package(rocprof-trace-decoder REQUIRED CONFIG HINTS
+                         ${ROCPROF_TRACE_DECODER_DIR} NO_DEFAULT_PATH)
+        else()
+            find_package(rocprof-trace-decoder REQUIRED CONFIG)
+        endif()
+    endif()
+endif()

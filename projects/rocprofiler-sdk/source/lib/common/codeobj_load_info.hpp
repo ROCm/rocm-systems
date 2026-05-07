@@ -22,6 +22,19 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/experimental/thread-trace/agent.h>
-#include <rocprofiler-sdk/experimental/thread-trace/core.h>
-#include <rocprofiler-sdk/experimental/thread-trace/dispatch.h>
+#include <cstddef>
+#include <string>
+
+namespace rocprofiler
+{
+namespace tool
+{
+struct CodeobjLoadInfo
+{
+    std::string name{};
+    size_t      id{0};
+    size_t      addr{0};
+    size_t      size{0};
+};
+}  // namespace tool
+}  // namespace rocprofiler

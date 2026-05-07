@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
-#include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 
@@ -33,27 +32,6 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
-DL::DL(const char* libpath)
-{
-    if(libpath == nullptr) return;
-
-    auto path = common::filesystem::path(libpath) / "librocprof-trace-decoder.so";
-
-    handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
-    if(!handle) return;
-
-    att_parse_data_fn =
-        reinterpret_cast<ParseFn*>(dlsym(handle, "rocprof_trace_decoder_parse_data"));
-    att_info_fn = reinterpret_cast<InfoFn*>(dlsym(handle, "rocprof_trace_decoder_get_info_string"));
-    att_status_fn =
-        reinterpret_cast<StatusFn*>(dlsym(handle, "rocprof_trace_decoder_get_status_string"));
-};
-
-DL::~DL()
-{
-    if(handle) dlclose(handle);
-}
-
 AQLProfileDL::AQLProfileDL()
 {
 #if defined(ROCPROFILER_BUILD_AQLPROFILE) && ROCPROFILER_BUILD_AQLPROFILE

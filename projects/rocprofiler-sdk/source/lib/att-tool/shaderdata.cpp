@@ -24,7 +24,7 @@
 
 #include "outputfile.hpp"
 
-#include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
+#include <rocprof_trace_decoder/trace_decoder_types.h>
 #include <nlohmann/json.hpp>
 
 namespace rocprofiler
