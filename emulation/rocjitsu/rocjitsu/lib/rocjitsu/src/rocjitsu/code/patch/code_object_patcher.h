@@ -6,6 +6,7 @@
 #include "rocjitsu/code/rj_code.h"
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -35,8 +36,8 @@ public:
   ///
   /// KernelDescriptorTranslator owns the resource/ABI decision. The patcher
   /// owns the byte-level descriptor update, cave placement, and entry redirect.
-  void apply_kernel_descriptor_translation(const KdTranslation &translation,
-                                           rj_code_arch_t target_arch);
+  [[nodiscard]] bool apply_kernel_descriptor_translation(const KdTranslation &translation,
+                                                         rj_code_arch_t target_arch);
 
   /// @brief Append descriptor-derived instructions and return their .text offset.
   ///
@@ -45,9 +46,9 @@ public:
   /// cave at a 256-byte-aligned launch address and appends a branch into the
   /// original kernel entry. The caller then redirects the kernel descriptor to
   /// the returned offset.
-  [[nodiscard]] uint64_t append_kernel_entry_prologue(uint64_t entry_text_offset,
-                                                      std::span<const uint32_t> prologue_words,
-                                                      rj_code_arch_t arch);
+  [[nodiscard]] std::optional<uint64_t>
+  append_kernel_entry_prologue(uint64_t entry_text_offset, std::span<const uint32_t> prologue_words,
+                               rj_code_arch_t arch);
 
   /// @brief Redirect one kernel descriptor from @p old_entry_text_offset to @p
   /// new_entry_text_offset.

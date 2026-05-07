@@ -49,6 +49,7 @@
 #include "rocjitsu/code/dbt/generated/legalization_rdna4_to_cdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/instruction_builder.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -136,6 +137,11 @@ TEST(EncodingTranslator, Sop2PreservesRegisters) {
   EXPECT_EQ(dst.ssrc1, 20);
   EXPECT_EQ(dst.sdst, 30);
   EXPECT_EQ(dst.op, 7);
+}
+
+TEST(InstructionBuilder, Sop2SetsEncodingPrefix) {
+  const uint32_t word = build_s_lshl_b32(1, 2, 3, ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ((word >> 30) & 0x3u, 0x2u);
 }
 
 TEST(EncodingTranslator, SoppPreservesSimm16) {
@@ -366,7 +372,6 @@ TEST(WaitcntTranslator, EncodeVmcnt0EmitsLoadcntAndStorecnt) {
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/executable.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -374,6 +379,57 @@ TEST(WaitcntTranslator, EncodeVmcnt0EmitsLoadcntAndStorecnt) {
 namespace {
 
 std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
+
+struct MutableKernelDescriptorImage {
+  std::vector<uint8_t> image;
+  uint64_t text_offset = 0;
+  uint64_t text_size = 0;
+  uint64_t kd_file_off = 0;
+  bool valid = false;
+};
+
+MutableKernelDescriptorImage mutable_vector_add_descriptor(rj_code_arch_t guest_arch,
+                                                           rj_code_arch_t host_arch) {
+  MutableKernelDescriptorImage fixture;
+  rocjitsu::Executable exec(kernel_path("vector_add"));
+  if (!exec.is_valid() || exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950) == 0)
+    return fixture;
+
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  if (co == nullptr || co->text_sections().empty())
+    return fixture;
+
+  fixture.image.resize(co->image_size());
+  std::memcpy(fixture.image.data(), co->image_data(), fixture.image.size());
+  fixture.text_offset = co->text_sections()[0]->sectionOffset();
+  fixture.text_size = co->text_sections()[0]->size();
+
+  rocjitsu::KernelDescriptorTranslator translator(guest_arch, host_arch);
+  const auto translations =
+      translator.translate_image(fixture.image, fixture.text_offset, fixture.text_size,
+                                 rocjitsu::KernelDescriptorTranslationOptions{});
+  if (translations.empty())
+    return fixture;
+
+  fixture.kd_file_off = translations[0].descriptor_file_offset;
+  fixture.valid =
+      fixture.kd_file_off + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t) <= fixture.image.size();
+  return fixture;
+}
+
+rocr::llvm::amdhsa::kernel_descriptor_t *
+mutable_kernel_descriptor(MutableKernelDescriptorImage &fixture) {
+  return reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(fixture.image.data() +
+                                                                     fixture.kd_file_off);
+}
+
+std::vector<rocjitsu::KdTranslation>
+translate_mutable_descriptor(const MutableKernelDescriptorImage &fixture, rj_code_arch_t guest_arch,
+                             rj_code_arch_t host_arch) {
+  rocjitsu::KernelDescriptorTranslator translator(guest_arch, host_arch);
+  return translator.translate_image(fixture.image, fixture.text_offset, fixture.text_size,
+                                    rocjitsu::KernelDescriptorTranslationOptions{});
+}
 
 } // namespace
 
@@ -423,8 +479,7 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGri
                                                   ROCJITSU_CODE_ARCH_RDNA4);
   const auto original_translations =
       translator.translate_image(image, original_text->sectionOffset(), original_text->size(),
-                                 rocjitsu::default_kernel_descriptor_translation_options(
-                                     ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4));
+                                 rocjitsu::KernelDescriptorTranslationOptions{});
   ASSERT_FALSE(original_translations.empty());
   const uint64_t kd_file_off = original_translations[0].descriptor_file_offset;
   ASSERT_LE(kd_file_off + sizeof(kernel_descriptor_t), image.size());
@@ -441,10 +496,8 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGri
   ASSERT_FALSE(mutated.text_sections().empty());
   const auto *text = mutated.text_sections()[0];
 
-  const auto translations =
-      translator.translate_image(image, text->sectionOffset(), text->size(),
-                                 rocjitsu::default_kernel_descriptor_translation_options(
-                                     ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto translations = translator.translate_image(
+      image, text->sectionOffset(), text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
   const auto translated = std::find_if(translations.begin(), translations.end(),
                                        [kd_file_off](const auto &translation) {
                                          return translation.descriptor_file_offset == kd_file_off;
@@ -467,6 +520,93 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGri
   };
   EXPECT_EQ(translated->prologue_words, expected)
       << "CDNA workgroup_id SGPRs must be rebuilt from RDNA4 TTMP9 and packed TTMP7";
+}
+
+TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesXOnlyWorkgroupId) {
+  using namespace rocr::llvm::amdhsa;
+
+  auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(fixture.valid);
+
+  auto *kd = mutable_kernel_descriptor(fixture);
+  kd->compute_pgm_rsrc2 = 0;
+  AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 12);
+  AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+
+  const auto translations =
+      translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto translated =
+      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
+        return translation.descriptor_file_offset == fixture.kd_file_off;
+      });
+  ASSERT_NE(translated, translations.end());
+
+  constexpr uint16_t ttmp_base = 108;
+  const std::vector<uint32_t> expected = {
+      rocjitsu::build_s_mov_b32(12, ttmp_base + 9, ROCJITSU_CODE_ARCH_RDNA4),
+      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  EXPECT_EQ(translated->prologue_words, expected);
+}
+
+TEST(KernelDescriptorTranslator, Cdna4ToRdna4SkipsPrologueWhenNoWorkgroupIdsAreEnabled) {
+  using namespace rocr::llvm::amdhsa;
+
+  auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(fixture.valid);
+
+  auto *kd = mutable_kernel_descriptor(fixture);
+  kd->compute_pgm_rsrc2 = 0;
+  AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 12);
+  const int64_t original_entry = kd->kernel_code_entry_byte_offset;
+
+  const auto translations =
+      translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto translated =
+      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
+        return translation.descriptor_file_offset == fixture.kd_file_off;
+      });
+  ASSERT_NE(translated, translations.end());
+  EXPECT_TRUE(translated->prologue_words.empty());
+
+  rocjitsu::AmdGpuCodeObject mutated(fixture.image.data(), fixture.image.size());
+  ASSERT_TRUE(mutated.is_valid());
+  rocjitsu::CodeObjectPatcher patcher(mutated);
+  EXPECT_TRUE(patcher.apply_kernel_descriptor_translation(*translated, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_TRUE(patcher.cave_body().empty());
+
+  const auto patched_image = patcher.emit();
+  const auto *patched_kd =
+      reinterpret_cast<const kernel_descriptor_t *>(patched_image.data() + fixture.kd_file_off);
+  EXPECT_EQ(patched_kd->kernel_code_entry_byte_offset, original_entry);
+}
+
+TEST(KernelDescriptorTranslator, CdnaAccVgprExpansionGrowsUnifiedVgprAllocationForRdna4) {
+  using namespace rocr::llvm::amdhsa;
+
+  for (rj_code_arch_t guest_arch :
+       {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    auto fixture = mutable_vector_add_descriptor(guest_arch, ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(fixture.valid);
+
+    auto *kd = mutable_kernel_descriptor(fixture);
+    kd->compute_pgm_rsrc1 = 0;
+    kd->compute_pgm_rsrc3 = 0;
+    AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 7);
+    AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 15);
+
+    const auto translations =
+        translate_mutable_descriptor(fixture, guest_arch, ROCJITSU_CODE_ARCH_RDNA4);
+    const auto translated =
+        std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
+          return translation.descriptor_file_offset == fixture.kd_file_off;
+        });
+    ASSERT_NE(translated, translations.end());
+    EXPECT_EQ(translated->accvgpr_base, 64u);
+    EXPECT_EQ(translated->guest_vgpr_count, 64u);
+    EXPECT_EQ(translated->target_vgpr_count, 128u);
+    EXPECT_EQ(translated->target_vgpr_granulated, 31u);
+  }
 }
 
 TEST(KernelDescriptorTranslator, RdnaWave64UsesAmdhsaDescriptorVgprEncoding) {
@@ -534,8 +674,7 @@ TEST(BinaryTranslatorE2E, DescriptorPrologueRedirectsEntryWithoutOverwritingOrig
                                                        ROCJITSU_CODE_ARCH_RDNA4);
   const auto original_infos = original_parser.translate_image(
       {original_image, co->image_size()}, original_text->sectionOffset(), original_text->size(),
-      rocjitsu::default_kernel_descriptor_translation_options(ROCJITSU_CODE_ARCH_CDNA4,
-                                                              ROCJITSU_CODE_ARCH_RDNA4));
+      rocjitsu::KernelDescriptorTranslationOptions{});
   ASSERT_FALSE(original_infos.empty());
   const rocjitsu::KdTranslation *original_info = &original_infos[0];
   const uint64_t kd_file_off = original_info->descriptor_file_offset;
@@ -551,11 +690,9 @@ TEST(BinaryTranslatorE2E, DescriptorPrologueRedirectsEntryWithoutOverwritingOrig
   const auto *translated_image = reinterpret_cast<const uint8_t *>(translated_co.image_data());
   rocjitsu::KernelDescriptorTranslator translated_parser(ROCJITSU_CODE_ARCH_RDNA4,
                                                          ROCJITSU_CODE_ARCH_RDNA4);
-  const auto translated_infos =
-      translated_parser.translate_image({translated_image, translated_co.image_size()},
-                                        translated_text->sectionOffset(), translated_text->size(),
-                                        rocjitsu::default_kernel_descriptor_translation_options(
-                                            ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_RDNA4));
+  const auto translated_infos = translated_parser.translate_image(
+      {translated_image, translated_co.image_size()}, translated_text->sectionOffset(),
+      translated_text->size(), rocjitsu::KernelDescriptorTranslationOptions{});
   const auto translated_info = std::find_if(
       translated_infos.begin(), translated_infos.end(),
       [kd_file_off](const auto &info) { return info.descriptor_file_offset == kd_file_off; });
@@ -603,18 +740,45 @@ TEST(CodeObjectPatcher, KernelEntryPrologueIs256ByteAligned) {
   rocjitsu::KernelDescriptorTranslator parser(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
   const auto infos =
       parser.translate_image({image, co->image_size()}, text->sectionOffset(), text->size(),
-                             rocjitsu::default_kernel_descriptor_translation_options(
-                                 ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4));
+                             rocjitsu::KernelDescriptorTranslationOptions{});
   ASSERT_FALSE(infos.empty());
 
   patcher.set_cave_start(infos[0].entry_text_offset + sizeof(uint32_t));
   const std::array<uint32_t, 1> prologue = {rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4)};
-  const uint64_t prologue_entry = patcher.append_kernel_entry_prologue(
+  const auto prologue_entry = patcher.append_kernel_entry_prologue(
       infos[0].entry_text_offset, prologue, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(prologue_entry.has_value());
 
-  EXPECT_EQ(prologue_entry % 256, infos[0].entry_text_offset % 256)
+  EXPECT_EQ(*prologue_entry % 256, infos[0].entry_text_offset % 256)
       << "Kernel descriptor entry points are hardware launch addresses; the cave prologue must "
          "preserve the original entry's .text-relative alignment residue";
+}
+
+TEST(CodeObjectPatcher, KernelEntryPrologueRejectsOutOfRangeBranch) {
+  Executable exec(kernel_path("vector_add"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+
+  rocjitsu::CodeObjectPatcher patcher(*co);
+  ASSERT_FALSE(co->text_sections().empty());
+  const auto *image = reinterpret_cast<const uint8_t *>(co->image_data());
+  const auto *text = co->text_sections()[0];
+  rocjitsu::KernelDescriptorTranslator parser(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto infos =
+      parser.translate_image({image, co->image_size()}, text->sectionOffset(), text->size(),
+                             rocjitsu::KernelDescriptorTranslationOptions{});
+  ASSERT_FALSE(infos.empty());
+
+  patcher.set_cave_start(infos[0].entry_text_offset + 200000);
+  const std::array<uint32_t, 1> prologue = {rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4)};
+  const auto prologue_entry = patcher.append_kernel_entry_prologue(
+      infos[0].entry_text_offset, prologue, ROCJITSU_CODE_ARCH_RDNA4);
+
+  EXPECT_FALSE(prologue_entry.has_value());
+  EXPECT_EQ(patcher.cave_body_size(), 0u);
 }
 
 TEST(BinaryTranslatorE2E, OutputDecodesAsValidRdna4) {

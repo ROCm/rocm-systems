@@ -246,6 +246,8 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
       continue;
     if (shdr[i].sh_offset + shdr[i].sh_size > image.size() || shdr[i].sh_entsize == 0)
       continue;
+    if (shdr[i].sh_entsize != sizeof(Elf64_Sym))
+      continue;
 
     const char *strtab = nullptr;
     size_t strtab_size = 0;
@@ -258,7 +260,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
     }
 
     const auto *symtab = reinterpret_cast<const Elf64_Sym *>(image.data() + shdr[i].sh_offset);
-    const size_t nsyms = shdr[i].sh_size / sizeof(Elf64_Sym);
+    const size_t nsyms = shdr[i].sh_size / shdr[i].sh_entsize;
     for (size_t j = 0; j < nsyms; ++j) {
       if (!kernel_descriptor_symbol(symtab[j], strtab, strtab_size))
         continue;
