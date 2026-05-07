@@ -44,10 +44,14 @@ jobs:
       - name: Install ROCm SDK (HIP headers + device libs)
         run: |
           pip install --index-url https://repo.amd.com/rocm/whl/gfx950-dcgpu/ rocm-sdk-core
-          ROCM_SDK_CORE=$(python3 -c "import importlib; print(importlib.import_module('_rocm_sdk_core').__path__[0])")
-          echo "ROCM_PATH=$ROCM_SDK_CORE" >> $GITHUB_ENV
-          printf '#!/bin/bash\nSCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"\nexec clang++ -x hip --offload-arch=gfx950 -I"$SCRIPT_DIR/include" --rocm-path="$SCRIPT_DIR/lib/llvm" "$@"\n' > "$ROCM_SDK_CORE/bin/hipcc"
-          chmod +x "$ROCM_SDK_CORE/bin/hipcc"
+          CORE=$(python3 -c "import importlib; print(importlib.import_module('_rocm_sdk_core').__path__[0])")
+          echo "ROCM_PATH=$CORE" >> $GITHUB_ENV
+          ln -sf libhsa-runtime64.so.1 "$CORE/lib/libhsa-runtime64.so"
+          printf '#!/bin/bash\nexec clang++ -x hip --offload-arch=gfx950 -I"%s/include" --rocm-path="%s/lib/llvm" "$@"\n' "$CORE" "$CORE" > "$CORE/bin/hipcc"
+          chmod +x "$CORE/bin/hipcc"
+          ln -sf "$CORE/lib/llvm/amdgcn" "$CORE/amdgcn"
+          printf '#!/bin/bash\nexec clang++ -x hip --offload-arch=gfx950 "$@"\n' > "$CORE/bin/amdclang++"
+          chmod +x "$CORE/bin/amdclang++"
 
       - name: Configure
         env:
