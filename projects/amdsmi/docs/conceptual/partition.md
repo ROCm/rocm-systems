@@ -2,7 +2,7 @@
 myst:
   html_meta:
     "description lang=en": "AMD SMI conceptual guide for GPU accelerator and memory partitioning."
-    "keywords": "system, management, interface, partition, compute, memory, NPS, SPX, DPX, TPX, QPX, CPX, XCC, accelerator, amd-smi"
+    "keywords": "system, management, instinct, accelerator, interface, partition, compute, memory, NPS, SPX, DPX, TPX, QPX, CPX, XCC, amd-smi"
 ---
 
 # GPU partitioning
@@ -614,94 +614,48 @@ AMD SMI provides tools to query and configure accelerator and memory partitionin
 ::::{tab-item} C/C++
 The AMD SMI library provides APIs to query and set both compute and memory partition modes.
 
-The general workflow is:
-
-1. Query the current partition settings with `amdsmi_get_gpu_accelerator_partition_profile()`
-   and `amdsmi_get_gpu_memory_partition()`.
-2. Query available modes **before making any changes** with
-   `amdsmi_get_gpu_memory_partition_config()` and
-   `amdsmi_get_gpu_accelerator_partition_profile_config()`. Only set modes listed as supported.
-3. Set the memory partition mode with `amdsmi_set_gpu_memory_partition()` or `amdsmi_set_gpu_memory_partition_mode()`.
-4. Reload the driver to apply the memory partition change. All GPU activity must be stopped
-   first. The reload may reset the accelerator partition to a default mode.
-5. Re-initialize and verify: confirm the new memory partition mode and device count.
-6. Set the accelerator partition by profile index with
-   `amdsmi_set_gpu_accelerator_partition_profile()` (use only indexes valid for the active
-   memory partition, as seen in step 2).
-7. Verify: confirm the accelerator partition mode and device count.
-
 ```{code-block} cpp
 #include "amd_smi/amdsmi.h"
-#include <cstdio>
 
+// Partition changes alter device topology -- AMD SMI must re-initialize after
+// each change to obtain a valid handle list reflecting the new device count.
 int main() {
     amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+    // ... enumerate sockets and processor handles ...
 
-    // Get all GPU handles
-    uint32_t socket_count = 0;
-    amdsmi_get_socket_handles(&socket_count, nullptr);
-    amdsmi_socket_handle socket = {};
-    amdsmi_get_socket_handles(&socket_count, &socket);
+    // Steps 1-2: Query current settings and available modes (always run first)
+    amdsmi_get_gpu_accelerator_partition_profile(gpu, &cur_profile, partition_ids);
+    amdsmi_get_gpu_memory_partition(gpu, cur_mem, sizeof(cur_mem));
+    amdsmi_get_gpu_memory_partition_config(gpu, &mem_config);            // supported NPS modes
+    amdsmi_get_gpu_accelerator_partition_profile_config(gpu, &acc_config); // supported profiles
 
-    uint32_t gpu_count = 0;
-    amdsmi_get_processor_handles(socket, &gpu_count, nullptr);
-    amdsmi_processor_handle gpus[gpu_count];
-    amdsmi_get_processor_handles(socket, &gpu_count, gpus);
+    // Step 3: Set memory partition (use a mode reported as supported in step 2)
+    amdsmi_set_gpu_memory_partition_mode(gpu, AMDSMI_MEMORY_PARTITION_NPS4);
 
-    // Step 1: Query current partition settings
-    amdsmi_accelerator_partition_profile_t cur_profile = {};
-    uint32_t cur_partition_ids[8] = {};
-    amdsmi_get_gpu_accelerator_partition_profile(gpus[0], &cur_profile, cur_partition_ids);
-
-    char cur_mem[256];
-    amdsmi_get_gpu_memory_partition(gpus[0], cur_mem, sizeof(cur_mem));
-    printf("Current: accelerator type=%u, memory=%s\n", cur_profile.profile_type, cur_mem);
-
-    // Step 2: Query available modes before making any changes
-    amdsmi_memory_partition_config_t mem_config = {};
-    amdsmi_get_gpu_memory_partition_config(gpus[0], &mem_config);
-
-    amdsmi_accelerator_partition_profile_config_t acc_config = {};
-    amdsmi_get_gpu_accelerator_partition_profile_config(gpus[0], &acc_config);
-    for (uint32_t i = 0; i < acc_config.num_profiles; i++) {
-        printf("Accelerator profile index %u: type=%u, memory_caps=0x%x\n",
-               acc_config.profiles[i].profile_index,
-               acc_config.profiles[i].profile_type,
-               acc_config.profiles[i].memory_caps.memory_partition_caps);
-    }
-
-    // Step 3: Set memory partition mode (must be a supported mode from step 2)
-    amdsmi_set_gpu_memory_partition(gpus[0], AMDSMI_MEMORY_PARTITION_NPS1);
-
-    // Step 4: Reload the driver to apply the memory partition change.
-    // All GPU activity must be stopped first.
+    // Step 4: Reload the driver -- required to apply the memory partition change.
+    // Stop all GPU workloads first. The reload may reset the accelerator partition.
     amdsmi_gpu_driver_reload();
 
-    // Step 5: Re-initialize and verify
+    // Step 5: Re-initialize to pull in the updated topology (new device count/handles)
     amdsmi_shut_down();
     amdsmi_init(AMDSMI_INIT_AMD_GPUS);
-    amdsmi_get_socket_handles(&socket_count, &socket);
-    amdsmi_get_processor_handles(socket, &gpu_count, nullptr);
-    amdsmi_get_processor_handles(socket, &gpu_count, gpus);
-    printf("GPU count after memory partition change: %u\n", gpu_count);
+    // ... re-enumerate sockets and processor handles ...
 
-    amdsmi_get_gpu_memory_partition(gpus[0], cur_mem, sizeof(cur_mem));
-    printf("New memory partition: %s\n", cur_mem);
+    // Step 6: Set accelerator partition by profile index (must be valid for active NPS mode)
+    amdsmi_set_gpu_accelerator_partition_profile(gpu, target_profile_index);
 
-    // Step 6: Set accelerator partition (use a profile index valid for active memory partition)
-    uint32_t target_profile_index = 0;  // e.g. SPX; verify against acc_config from step 2
-    amdsmi_set_gpu_accelerator_partition_profile(gpus[0], target_profile_index);
-
-    // Step 7: Verify accelerator partition and device count
-    amdsmi_get_gpu_accelerator_partition_profile(gpus[0], &cur_profile, cur_partition_ids);
-    printf("New accelerator partition type: %u\n", cur_profile.profile_type);
+    // Step 7: Re-initialize again -- accelerator partition changes the logical device count
+    amdsmi_shut_down();
+    amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+    // ... re-enumerate and verify partition settings and device count ...
 
     amdsmi_shut_down();
     return 0;
 }
 ```
 
-For a complete working example see
+For a complete, self-contained example including enumeration, capability discovery, and
+re-initialization handling, see
 [`example/amd_smi_partition_example.cc`](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_partition_example.cc).
 
 **Compute partition:**

@@ -30,6 +30,30 @@
 #include "amd_smi/amdsmi.h"
 
 // ---------------------------------------------------------------------------
+// NOTE: Partition changes alter device topology -- AMD SMI must re-initialize
+//
+// Changing either memory partition (NPS mode) or accelerator (compute)
+// partition changes the number of logical devices visible to the OS and to
+// AMD SMI. AMD SMI builds its internal device table at amdsmi_init(); it does
+// not update live. After any partition change, callers must call
+// amdsmi_shut_down() followed by amdsmi_init() to pull in the updated
+// topology; any amdsmi_processor_handle obtained before re-initialization is
+// invalid and must not be used.
+//
+//   Memory partition (NPS mode):
+//     Requires amdsmi_gpu_driver_reload() to take effect. The driver reload
+//     tears down and rebuilds all kernel device objects, which also destroys
+//     any existing handles. amdsmi_shut_down() + amdsmi_init() is therefore
+//     mandatory before querying or changing anything further.
+//
+//   Accelerator (compute) partition:
+//     Takes effect immediately without a driver reload, but still changes the
+//     logical device count (e.g. SPX: 1 handle per physical GPU vs. DPX: 2).
+//     amdsmi_shut_down() + amdsmi_init() is required to get the correct
+//     post-change handle list before issuing any further queries or sets.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // Partition name converters
 // ---------------------------------------------------------------------------
 
@@ -114,13 +138,20 @@ static void print_separator(std::string_view title = "") {
 // ---------------------------------------------------------------------------
 
 // Scoped amdsmi session. Calls amdsmi_init on construction and amdsmi_shut_down
-// on destruction. Create a new instance after a driver reload to re-enumerate
-// devices (old handles are invalidated by the reload).
+// on destruction. Re-enumerate (new instance) after any partition change that
+// alters device topology:
+//   - Memory partition change requires a driver reload, which destroys all
+//     kernel device objects and invalidates every amdsmi_processor_handle.
+//   - Accelerator partition change changes the number of visible logical
+//     devices (e.g. SPX: 1 per GPU -> DPX: 2 per GPU), so the handle list
+//     built at amdsmi_init is stale even without a driver reload.
+// Treat every amdsmi_processor_handle as valid only within the session that
+// obtained it.
 struct AmdsmiSession {
   bool ok = false;
 
-  explicit AmdsmiSession() {
-    auto ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+  explicit AmdsmiSession(uint64_t init_flags = AMDSMI_INIT_AMD_GPUS) {
+    auto ret = amdsmi_init(init_flags);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       std::cout << "amdsmi_init failed: " << status_str(ret) << '\n';
       return;
@@ -457,10 +488,15 @@ int main() {
   }  // ~AmdsmiSession() -> amdsmi_shut_down()
 
   // -----------------------------------------------------------------------
-  // Phase 2: Re-enumerate, display current state, and capture the accelerator
-  // profiles that are compatible with the *current* NPS mode.
-  // Accelerator-partition structs are plain data (no handles) and survive
-  // across amdsmi_shut_down / amdsmi_init boundaries.
+  // Phase 2: Re-enumerate to get fresh handles and accurate device count after
+  // the driver reload (triggered by the memory partition change). Display the
+  // current state and capture the accelerator profiles compatible with the
+  // active NPS mode.
+  //
+  // Accelerator-partition structs (amdsmi_accelerator_partition_profile_t) are
+  // plain data with no embedded handles, so they remain valid across
+  // amdsmi_shut_down / amdsmi_init boundaries and can be saved here for use
+  // in Phase 3.
   // -----------------------------------------------------------------------
   std::vector<amdsmi_accelerator_partition_profile_t> profiles_to_test;
   {
@@ -496,7 +532,12 @@ int main() {
   // -----------------------------------------------------------------------
   // Phase 3: For each accelerator profile compatible with the current NPS mode:
   //   a) Open a session, set the profile on every device, close the session.
-  //   b) Open a new session, display the updated device count and partition info.
+  //   b) Open a NEW session to re-enumerate before reading anything.
+  //      Accelerator partition changes alter the number of logical devices
+  //      visible to the OS (e.g. SPX: N handles -> DPX: 2*N handles), so the
+  //      handle list from step (a) is immediately stale. A new amdsmi_init
+  //      is required to get the correct post-change device count and handles
+  //      before displaying topology or issuing further queries.
   // -----------------------------------------------------------------------
   for (const auto& target : profiles_to_test) {
     // a) Set accelerator partition on all devices.
