@@ -83,9 +83,8 @@ jobs:
       - name: Install system dependencies
         run: |
           apt-get update -q
-          apt-get install -y --no-install-recommends \
+          apt-get install -y --no-install-recommends cmake ninja-build llvm-dev libnuma libelf-dev libdrm-dev pkg-config
 
-          cmake ninja-build llvm-dev libnuma libelf-dev libdrm-dev pkg-config
       - name: Build hipconfig
         run: |
           cmake -B "${BUILD_DIR}/hipcc" -G Ninja \
