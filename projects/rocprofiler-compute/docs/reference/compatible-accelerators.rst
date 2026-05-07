@@ -51,5 +51,5 @@ ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD GPU
       * - Platform
         - Status
       
-      * - AMD RDNA3.5 (gfx1151), e.g. AMD Ryzen™ AI Max+ / Strix Halo integrated graphics
+      * - AMD Ryzen™ AI Max / Ryzen™ AI Max+ 300 Series integrated graphics (Strix/Halo, Gorgon/Halo)
         - Supported ✅ (see :doc:`/conceptual/rdna/rdna-performance-model`)
