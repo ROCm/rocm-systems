@@ -126,6 +126,6 @@ jobs:
     needs: [AIS_CI_Pre-check, build_AIS_CI_image]
     uses: ./.github/workflows/hipfile-build-nvidia.yml
     with:
-      ci_image: ${{ needs.build_AIS_CI_image.outputs.ci_image }}
+      ci_image: ${{ needs.build_AIS_CI_image.outputs.ci_image_nvidia }}
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
