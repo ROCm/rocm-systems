@@ -53,6 +53,7 @@ CallbackState* callback_state = nullptr;
 void
 tool_fini(void* tool_data)
 {
+std::cout << "Stopping again!" << std::endl;
     // Stop contexts to ensure no more callbacks are dispatched before static destruction
     rocprofiler_stop_context(tracing_ctx);
     rocprofiler_stop_context(agent_ctx);
@@ -88,6 +89,7 @@ dispatch_tracing_callback(rocprofiler_callback_tracing_record_t record,
     {
         if(dispatch_id == begin_dispatch)
         {
+std::cout << "Starting!" << std::endl;
             ROCPROFILER_CALL(rocprofiler_start_context(agent_ctx), "context start");
             callback_state->isprofiling.store(true);
         }
@@ -112,7 +114,9 @@ dispatch_tracing_callback(rocprofiler_callback_tracing_record_t record,
     if(!callback_state->isprofiling.compare_exchange_strong(_exp, false, std::memory_order_relaxed))
         return;
 
+std::cout << "Stopping" << std::endl;
     ROCPROFILER_CALL(rocprofiler_stop_context(agent_ctx), "context stop");
+std::cout << "Stop done!" << std::endl;
 }
 
 rocprofiler_status_t

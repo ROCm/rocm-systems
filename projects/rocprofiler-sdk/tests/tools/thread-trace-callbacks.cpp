@@ -76,6 +76,7 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
                      rocprofiler_thread_trace_shader_data_flags_t /* flags */,
                      rocprofiler_user_data_t /* userdata */)
 {
+std::cout << "Received " << data_size << std::endl;
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          trace_events,
                     uint64_t                                       trace_size,
@@ -102,6 +103,7 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
     };
 
     DECODER_CALL(rocprof_trace_decoder_parse(decoder, se_data, data_size, parse, nullptr));
+std::cout << "Decode done " << std::endl;
 }
 
 void
