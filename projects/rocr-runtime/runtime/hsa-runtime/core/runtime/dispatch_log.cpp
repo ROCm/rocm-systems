@@ -176,6 +176,45 @@ struct queue_drain_state {
   //     are re-detectable.
   uint64_t next_idx = 0;
 
+  // Stale-zero quarantine state (Path A; debate stage code-quality C8/C9).
+  //
+  // Path A stops at any record_type==0 slot inside [next_idx, observed)
+  // because we cannot cheaply distinguish (a) a pre-zeroed stale slot
+  // (FW per-pipe scratch wptr persisted across queue lifecycles, leaving
+  // the host buffer's prefix never written for THIS lifecycle) from
+  // (b) a slot whose producing XCC has not finished publishing the
+  // record body yet (multi-XCC publish race documented in the Path A
+  // header comment). Stopping is safe for case (b) — next pass will
+  // re-read once FW commits — but case (a) wedges forever (signal will
+  // never advance past the prefix). The quarantine breaks the wedge:
+  //
+  //   - On every Path A pass that stops at a zero slot, drain records
+  //     stall_first_seen (steady_clock::time_point) the FIRST time it
+  //     stops at THIS (observed, next_idx) coordinate, and sets
+  //     pending_zero_stall=true so the worker's signal-equal fast-skip
+  //     does not idle us forever waiting for a publish that may never
+  //     come.
+  //   - If a subsequent pass observes (observed, next_idx) unchanged
+  //     AND (now - stall_first_seen) >= kStaleZeroQuarantineMs, the
+  //     drainer declares the slot stale, emits a one-record
+  //     kernel_dispatch_drop event so consumers see the gap, advances
+  //     next_idx by 1 past the stale slot, and clears the quarantine.
+  //   - Forward progress clears the quarantine state via:
+  //       - reaching `end` without hitting another zero, or
+  //       - the overrun-skip path advancing past the stalled slot.
+  //     If a subsequent pass partially advances and then stalls at a
+  //     DIFFERENT (observed, next_idx) coordinate, the snapshot is
+  //     re-armed at the new coordinate (timer restarts) — that's the
+  //     intended behavior because the new stall is a distinct event.
+  //
+  // Mutated only under drain_mu, except pending_zero_stall which is
+  // also read by the worker loop (acquire load) outside the mutex to
+  // decide whether to fast-skip on signal-equal.
+  std::chrono::steady_clock::time_point stall_first_seen{};
+  uint64_t                              stall_observed = 0;
+  uint64_t                              stall_idx      = 0;
+  std::atomic<bool>                     pending_zero_stall{false};
+
   // Phase-2 host-VA pointer set. Populated by
   // enable_dispatch_log_for_queue_locked from
   // AqlQueue::GetDispatchLogPointers when the running kernel supports
@@ -407,6 +446,17 @@ constexpr size_t kSlotStride = 16;
 // batching.
 constexpr uint32_t kBatchMax = 256;
 
+// Stale-zero quarantine threshold (debate stage code-quality C8). Path A
+// stops at the first record_type==0 inside [next_idx, observed) to handle
+// either a pre-zeroed stale slot OR a multi-XCC publish-race in-flight
+// slot. After this many milliseconds of being stalled at the SAME
+// (observed, next_idx) coordinate with no forward progress, the drainer
+// declares the slot stale, emits a kernel_dispatch_drop event for it,
+// and advances past it. 100 ms aligns with the wait_for_idle bound and
+// is ~100x the worker's max sleep cadence (1 ms), so a real in-flight
+// XCC publish would commit well before this fires in practice.
+constexpr int64_t kStaleZeroQuarantineMs = 100;
+
 bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   std::lock_guard<std::mutex> lk(qs.drain_mu);
 
@@ -452,19 +502,22 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   //   3. Opens the door to hsa_signal_wait on signal_addr instead of
   //      polling, deferred to a future optimization.
   //
-  // Multi-XCC hazard for init-sync (C7): because XCCs publish without
-  // atomics, observing signal=N does NOT prove that every slot in
-  // [0, N) has been written — XCC A can publish its higher slot's
-  // signal value before XCC B has finished publishing its lower slot's
-  // record body. The FW interface spec
+  // Multi-XCC hazard (C7/C9): because XCCs publish without atomics,
+  // observing signal=N does NOT prove that every slot in [0, N) has
+  // been written — XCC A can publish its higher slot's signal value
+  // before XCC B has finished publishing its lower slot's record body.
+  // The FW interface spec
   // (specs/2026-05-01-mec-firmware-dispatch-log-interface.md §3.5)
   // assumes a single producer per queue and says nothing about XCC
   // interleaving; on multi-XCC systems this assumption is empirically
   // violated. To avoid permanently dropping a slot that just hasn't
-  // been written yet, init-sync stops at the first zero record_type
-  // (see the loop body below) and leaves qs.next_idx pointing AT
-  // that slot, so the next drain pass re-evaluates it once FW has
-  // had a chance to commit.
+  // been written yet, the loop below stops at the first zero
+  // record_type in [next_idx, observed) regardless of init-sync vs.
+  // steady-state, and leaves qs.next_idx pointing AT that slot, so
+  // the next drain pass re-evaluates it once FW has had a chance to
+  // commit. This also covers the original C7 init-sync case (a slot
+  // pre-zeroed by SetProfiling that hasn't been written for THIS
+  // queue lifecycle yet).
   //
   // Backward-publish protection (still needed because signal races too):
   // qs.next_idx is our host-side monotonic floor. If FW publishes a
@@ -512,35 +565,37 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     //      5002, silently dropping the records at slots 5000 and 5001
     //      with no kernel_dispatch_drop event.
     //
-    // Fix: make init-sync independent of `observed` magnitude and
-    // independent of whether the host fell behind. We treat the first
-    // non-zero signal observation specially:
-    //   - Compute the candidate scan window [start, end). For a fresh
-    //     buffer, the meaningful window is the suffix of FW-written
-    //     slots ending at end-1; older slots are pre-zeroed and stale.
-    //   - During init-sync only, validate each slot's record_type
-    //     during emit. The first zero record_type STOPS the scan
-    //     and leaves qs.next_idx pointing at that slot so the next
-    //     drain pass will re-evaluate it. This is conservative under
-    //     the multi-XCC hazard: a zero slot in our window may be
-    //     either (a) a pre-zeroed stale slot, or (b) a slot whose
-    //     XCC hasn't published the record body yet even though a
-    //     higher-index slot's signal was already observed. We can't
-    //     distinguish (a) from (b) cheaply, so we wait. The cost is
-    //     one extra drain pass to consume the records; the benefit
-    //     is no permanently-dropped records.
-    //   - Do NOT emit kernel_dispatch_drop during init-sync — the
-    //     pre-zeroed gap represents records that never existed for
-    //     this queue lifecycle, not records the host fell behind on.
+    // Code-quality C8/C9: the C7-era fix gated zero-rt-stop on
+    // initial_sync only, leaving steady-state Path A still emitting
+    // zero-body slots as records under the multi-XCC race (C9), and
+    // also wedging init-sync forever on a stale-zero prefix because
+    // forward progress required signal to lap the ring (C8). Unified
+    // fix:
+    //   - Zero-rt-stop applies on EVERY pass (init-sync and steady-
+    //     state) — the multi-XCC hazard is the same in both regimes.
+    //     A zero slot in [next_idx, observed) means STOP, leave
+    //     qs.next_idx at that slot, return.
+    //   - Stale-zero quarantine: track (stall_observed, stall_idx,
+    //     stall_first_seen). If a subsequent pass sees the same
+    //     coordinate AND has been stalled for kStaleZeroQuarantineMs,
+    //     declare the slot stale, emit a one-record
+    //     kernel_dispatch_drop event for visibility, advance next_idx
+    //     by 1, clear the quarantine. This guarantees forward progress
+    //     without silently dropping in-flight publishes.
+    //   - The worker loop honors qs.pending_zero_stall.load() and
+    //     skips its signal-equal fast-skip while quarantine is armed,
+    //     so the next pass actually runs at the polling cadence
+    //     instead of sleeping until *signal_ptr advances (which it
+    //     never will, in the stale case).
     //
-    // Single-producer caveat: if a future FW spec rev guarantees a
-    // single globally-ordered producer (or adds an atomic publish
-    // barrier across XCCs), this pessimistic stop-at-zero can be
-    // relaxed back to "skip and continue". Until then, stopping is
-    // the only way to avoid the drop documented in C7.
+    // initial_sync is still tracked here for one purpose: suppressing
+    // the kernel_dispatch_drop emit on the overrun-skip path. On the
+    // very first observation, "we fell behind by more than a ring lap"
+    // is meaningless — we never had a chance to catch up, and the
+    // skipped slots are pre-zeroed and never carried real records for
+    // THIS queue lifecycle. Steady-state is the only regime where
+    // overrun represents a real consumer-visible drop.
     const bool initial_sync = (qs.next_idx == 0);
-    bool init_sync_stopped_at_zero = false;
-    uint64_t init_sync_resume_idx = 0;
 
     // Overrun detection. If FW lapped us, log a drop event and skip
     // the unrecoverable region. The records we DO read after the skip
@@ -556,6 +611,9 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
             queue_id_to_wire(qs.queue_id), lost);
       }
       start = end - qs.ring_records;
+      // Overrun moved us forward — quarantine is no longer relevant
+      // (the slot we were stalled on has been overwritten by FW).
+      qs.pending_zero_stall.store(false, std::memory_order_release);
     }
 
     // Batched LTTng emit (see batch_buf / flush_batch declared above the
@@ -569,10 +627,16 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
       // and the next pass will pick up where we stopped (FW state
       // unchanged — the wptr-bound scan never mutates the slot). Flush
       // any pending batch first so we don't lose records already read.
+      // Also clear any armed stale-zero quarantine so the worker does
+      // not tight-loop calling drain (which would immediately bail
+      // here again) while tracing is disabled — a fresh quarantine
+      // snapshot will be re-armed on the next pass that observes the
+      // same zero slot once tracing re-enables.
       if (!force_emit && rocm_trace_disabled()) {
         flush_batch();
         qs.next_idx = i;  // record progress so far
         if (qs.rptr_ptr) __atomic_store_n(qs.rptr_ptr, i, __ATOMIC_RELEASE);
+        qs.pending_zero_stall.store(false, std::memory_order_release);
         return any;
       }
 
@@ -580,40 +644,76 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
       auto* rec = reinterpret_cast<mec_dispatch_record_16*>(
           static_cast<char*>(qs.ring_base) + slot * kSlotStride);
 
-      // Init-sync validation (C7): STOP at the first zero record_type
-      // during init-sync. FW writes record_type ∈ {1, 2}; a slot with
-      // rt==0 in our scan window [next_idx, observed) during init-sync
-      // is either:
+      // Zero-rt-stop (C8/C9 unified): STOP at the first zero
+      // record_type in [next_idx, observed) on EVERY pass. FW writes
+      // record_type ∈ {1, 2}; a zero slot in our window is either:
       //   (a) a pre-zeroed stale slot (slot was never written for
-      //       this queue lifecycle), OR
+      //       this queue lifecycle — only possible while next_idx
+      //       has not yet advanced past the FW per-pipe scratch
+      //       wptr that was inherited at queue create), OR
       //   (b) a slot whose XCC has not finished publishing yet
       //       (XCC A's signal=N publish raced ahead of XCC B's
       //       slot[<N] body publish; spec §3.5 assumes single-
       //       producer ordering that does NOT hold across XCCs
       //       without an inter-XCC publish barrier).
-      // We can't distinguish (a) from (b) cheaply, so we stop and
-      // let the next pass re-evaluate. Leaving qs.next_idx at the
-      // zero slot's index means we re-scan from there next time;
-      // by then either FW has published (case b → emit it) or it
-      // stays zero (case a → we keep stopping until either signal
-      // grows past it via the overrun-skip path or the queue is
-      // destroyed). Cost: one extra drain pass to consume the
-      // window after FW commits. Benefit: no permanently-dropped
-      // records in case (b), no emit-all-zero record in either case.
+      // Both (a) and (b) can occur in steady state too — case (a)
+      // appears once at first observation; case (b) can appear at
+      // any time on multi-XCC queues. We can't distinguish (a) from
+      // (b) cheaply, so we stop, leave qs.next_idx pointing at the
+      // zero slot's index, and let the next pass re-evaluate. By
+      // then either:
+      //   - FW has published (case b → emit it next pass), or
+      //   - the slot is still zero AND the (observed, next_idx)
+      //     coordinate has not changed for kStaleZeroQuarantineMs
+      //     (case a → quarantine fires below, drops the slot, and
+      //     advances by 1).
       //
-      // Out of scope: steady-state (non-init-sync) passes still
-      // memcpy zero slots and emit them as records — the same
-      // multi-XCC hazard exists there but the historical behavior
-      // is preserved here to limit the C7 change to its claim.
       // Acquire ordering so the body loads (via memcpy below)
       // cannot be reordered above this check.
-      if (initial_sync) {
-        uint32_t rt = __atomic_load_n(&rec->record_type, __ATOMIC_ACQUIRE);
-        if (rt == 0) {
-          init_sync_stopped_at_zero = true;
-          init_sync_resume_idx = i;
-          break;
+      uint32_t rt = __atomic_load_n(&rec->record_type, __ATOMIC_ACQUIRE);
+      if (rt == 0) {
+        flush_batch();
+        // Quarantine update: same coordinate as last stall? If yes,
+        // check timeout; if no, snapshot now and arm.
+        const auto now = std::chrono::steady_clock::now();
+        if (qs.pending_zero_stall.load(std::memory_order_acquire) &&
+            qs.stall_observed == observed &&
+            qs.stall_idx      == i) {
+          const auto stalled_for_ms =
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  now - qs.stall_first_seen).count();
+          if (stalled_for_ms >= kStaleZeroQuarantineMs) {
+            // Slot declared stale (case a). Emit one-record drop
+            // event for consumer visibility, advance past it, and
+            // disarm the quarantine. Note we do NOT continue the
+            // scan in this pass — the next pass will pick up at
+            // i+1 and re-evaluate the rest of [i+1, observed).
+            // This keeps the per-pass cost bounded and avoids
+            // back-to-back stale-slot fires within a single pass.
+            rocm_trace_emit_hsa_kernel_dispatch_drop(
+                queue_id_to_wire(qs.queue_id), 1);
+            qs.next_idx = i + 1;
+            if (qs.rptr_ptr) {
+              __atomic_store_n(qs.rptr_ptr, i + 1, __ATOMIC_RELEASE);
+            }
+            qs.pending_zero_stall.store(false, std::memory_order_release);
+            return true;  // forward progress: drop event emitted
+          }
+        } else {
+          qs.stall_observed   = observed;
+          qs.stall_idx        = i;
+          qs.stall_first_seen = now;
+          qs.pending_zero_stall.store(true, std::memory_order_release);
         }
+        // Quarantine armed but not yet expired: park next_idx at the
+        // zero slot and return. Next worker iteration will re-enter
+        // drain (worker honors pending_zero_stall and skips its
+        // signal-equal fast-skip).
+        qs.next_idx = i;
+        if (qs.rptr_ptr) {
+          __atomic_store_n(qs.rptr_ptr, i, __ATOMIC_RELEASE);
+        }
+        return any;
       }
 
       // FW publish-ordering contract (per f32_mec.uc Q6): record body
@@ -636,20 +736,11 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     }
     flush_batch();
 
-    // C7: if init-sync hit a zero hole, leave qs.next_idx pointing AT
-    // that slot so the next drain pass re-evaluates it. We must NOT
-    // advance past the hole — under the multi-XCC hazard the slot may
-    // simply not have been published yet by its producing XCC, and
-    // skipping it would permanently drop the record. Note this also
-    // means we do NOT publish `end` to qs.rptr_ptr in this case, since
-    // we have not actually consumed [resume_idx, end).
-    if (init_sync_stopped_at_zero) {
-      qs.next_idx = init_sync_resume_idx;
-      if (qs.rptr_ptr) {
-        __atomic_store_n(qs.rptr_ptr, init_sync_resume_idx, __ATOMIC_RELEASE);
-      }
-      return any;
-    }
+    // Reached `end` without hitting a zero — full forward progress.
+    // Disarm any prior stale-zero quarantine (we successfully consumed
+    // the slot we were stalled on, or the consumer caught up another
+    // way).
+    qs.pending_zero_stall.store(false, std::memory_order_release);
     qs.next_idx = end;
     // Publish our consumer position back to FW (informational; FW does
     // not enforce backpressure today but reads on connect/dequeue).
@@ -809,7 +900,17 @@ void per_queue_drain_loop(std::shared_ptr<queue_drain_state> qs) {
     // skip the drain call entirely when no new records exist.
     if (qs->signal_ptr != nullptr) {
       const uint64_t cur = __atomic_load_n(qs->signal_ptr, __ATOMIC_ACQUIRE);
-      if (cur == last_signal) {
+      // Stale-zero quarantine override (debate stage code-quality C8):
+      // when drain_one_queue parked next_idx on a zero slot inside
+      // [next_idx, observed), pending_zero_stall is armed. Forward
+      // progress in that state requires us to keep CALLING drain (so
+      // the quarantine timer fires once kStaleZeroQuarantineMs has
+      // elapsed) even though *signal_ptr has not advanced. Honor the
+      // armed flag by bypassing the signal-equal fast-skip; we still
+      // adaptive-sleep below if drain returns no work.
+      const bool stalled =
+          qs->pending_zero_stall.load(std::memory_order_acquire);
+      if (cur == last_signal && !stalled) {
         // No new records — adaptive backoff
         ++idle_count;
         if (idle_count <= 3) {
@@ -823,8 +924,10 @@ void per_queue_drain_loop(std::shared_ptr<queue_drain_state> qs) {
         }
         continue;
       }
-      last_signal = cur;
-      idle_count = 0;
+      if (cur != last_signal) {
+        last_signal = cur;
+        idle_count = 0;
+      }
     }
 
     const bool any = drain_one_queue(*qs, /* force_emit = */ false);
