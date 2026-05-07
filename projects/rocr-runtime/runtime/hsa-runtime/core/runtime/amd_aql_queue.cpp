@@ -357,41 +357,43 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 
 AqlQueue::~AqlQueue() {
   // Tear down the MEC dispatch-record ring buffer (if SetProfiling(true) was
-  // ever called and the buffer is still around). Done early in the destructor
-  // because we need a valid agent_ + driver() to clear the per-queue KFD
-  // registration before the queue itself is gone.
+  // ever called and the buffer is still around). This is split into two
+  // phases:
+  //
+  //   Phase 1 (here, before Inactivate): best-effort KFD CLEAR so the
+  //     kernel drops its BO refs and FW stops writing to the buffer's MQD
+  //     slot. Phase 1 does NOT free any host memory — even if CLEAR
+  //     succeeds, FW may have an in-flight write queued up; we let
+  //     Inactivate() destroy the queue first so FW can no longer touch
+  //     host memory.
+  //
+  //   Phase 2 (after Inactivate, below): free the dispatch-record buffer
+  //     and the Phase-2 host-VA counter words. By this point the KFD
+  //     queue is gone and FW cannot reach host memory under any
+  //     interleaving — including the case where Phase-1 CLEAR returned
+  //     an error and the MQD still references our buffer. This closes
+  //     the C6 use-after-free window where, on CLEAR failure, FW could
+  //     write to host memory we had already returned to the allocator.
+  //
+  // We need a valid agent_ + driver() in Phase 1 because the per-queue
+  // KFD registration must be cleared before queue_id_ is destroyed.
   if (agent_ != nullptr && dispatch_record_buffer_ != nullptr) {
-    // Phase-2: release the dispatch_log BO refs (buffer + wptr + rptr +
+    // Phase 1a: release the dispatch_log BO refs (buffer + wptr + rptr +
     // signal) that the new KFD_IOC_PROFILER_DISPATCH_LOG SET path took
-    // when SetProfiling(true) registered them. Without this, the kernel
-    // still holds 4 BO refs at queue-destroy time and the host-side
-    // system_deallocator() below trips a "Memory in use" critical
-    // error on the dispatch_record_buffer_ BO. Best-effort: missing
-    // thunk / older kernel returns NOT_SUPPORTED and we proceed with
-    // the legacy clear below.
+    // when SetProfiling(true) registered them. Best-effort: missing
+    // thunk / older kernel returns NOT_SUPPORTED. We deliberately
+    // ignore the return — Phase 2 (after Inactivate) is what makes
+    // the host memory safe to free, not this CLEAR.
     if (dispatch_log_wptr_buf_ != nullptr) {
       (void)agent_->driver().SetDispatchLog(
           queue_id_, static_cast<uint32_t>(agent_->KfdGpuID()),
           /*buffer_base=*/nullptr, /*num_records=*/0,
           /*wptr_addr=*/nullptr, /*rptr_addr=*/nullptr, /*signal_addr=*/nullptr);
     }
+    // Phase 1b: legacy clear path.
     agent_->driver().SetQueueProfilingBuffer(queue_id_, nullptr, 0, nullptr);
-    agent_->system_deallocator()(dispatch_record_buffer_);
-    dispatch_record_buffer_ = nullptr;
-    dispatch_record_buffer_size_ = 0;
-    // Free the Phase-2 host-VA counter words.
-    if (dispatch_log_wptr_buf_) {
-      agent_->system_deallocator()(dispatch_log_wptr_buf_);
-      dispatch_log_wptr_buf_ = nullptr;
-    }
-    if (dispatch_log_rptr_buf_) {
-      agent_->system_deallocator()(dispatch_log_rptr_buf_);
-      dispatch_log_rptr_buf_ = nullptr;
-    }
-    if (dispatch_log_signal_buf_) {
-      agent_->system_deallocator()(dispatch_log_signal_buf_);
-      dispatch_log_signal_buf_ = nullptr;
-    }
+    // NB: Phase 2 (the actual deallocations) runs AFTER Inactivate()
+    // below — see the matching block immediately after Inactivate().
   }
 
   // Remove this queue from the agent's AQL queue registry and clear the
@@ -426,6 +428,28 @@ AqlQueue::~AqlQueue() {
   }
 
   Inactivate();
+
+  // C6 Phase 2: NOW the KFD queue is destroyed and FW can no longer write
+  // to host memory under any interleaving. Free the dispatch-record
+  // buffer and the Phase-2 host-VA counter words. This is the matching
+  // half of the Phase-1 CLEAR block at the top of the destructor.
+  if (agent_ != nullptr && dispatch_record_buffer_ != nullptr) {
+    agent_->system_deallocator()(dispatch_record_buffer_);
+    dispatch_record_buffer_ = nullptr;
+    dispatch_record_buffer_size_ = 0;
+  }
+  if (agent_ != nullptr && dispatch_log_wptr_buf_ != nullptr) {
+    agent_->system_deallocator()(dispatch_log_wptr_buf_);
+    dispatch_log_wptr_buf_ = nullptr;
+  }
+  if (agent_ != nullptr && dispatch_log_rptr_buf_ != nullptr) {
+    agent_->system_deallocator()(dispatch_log_rptr_buf_);
+    dispatch_log_rptr_buf_ = nullptr;
+  }
+  if (agent_ != nullptr && dispatch_log_signal_buf_ != nullptr) {
+    agent_->system_deallocator()(dispatch_log_signal_buf_);
+    dispatch_log_signal_buf_ = nullptr;
+  }
 
   if (queue_scratch_.main_queue_base) {
     tool::notify_event_scratch_free_start(public_handle(),
