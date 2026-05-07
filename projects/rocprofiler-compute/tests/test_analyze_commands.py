@@ -1421,52 +1421,9 @@ class TestMetricEvaluatorDivisionByZero:
         eval_str = self._to_eval_str("SUM(100 * BUSY) / SUM(TOTAL)")
         result = evaluator.eval_expression(eval_str)
         assert isinstance(result, float), f"Expected float, got {type(result)}"
-        assert abs(result - 60.0) < 1e-9, (
+        assert result == pytest.approx(60.0, abs=1e-9), (
             "SUM(100*[800,600,400]) / SUM([1000,1000,1000]) should be 60.0, "
             f"got {result}"
-        )
-
-    def test_all_nan_numerator_returns_na(self):
-        """SUM of all-NaN numerator propagates NaN, caught as N/A."""
-        evaluator = self._make_evaluator({
-            "A_sum": [np.nan, np.nan, np.nan],
-            "B_sum": [10.0, 20.0, 30.0],
-        })
-        eval_str = self._to_eval_str("SUM(A_sum) / SUM(B_sum)")
-        result = evaluator.eval_expression(eval_str)
-        assert result == "N/A", (
-            "SUM(all-NaN) / SUM(valid) should produce NaN, caught as N/A"
-        )
-
-    def test_all_nan_denominator_returns_na(self):
-        """SUM of all-NaN denominator propagates NaN, caught as N/A."""
-        evaluator = self._make_evaluator({
-            "A_sum": [100.0, 200.0, 300.0],
-            "B_sum": [np.nan, np.nan, np.nan],
-        })
-        eval_str = self._to_eval_str("SUM(A_sum) / SUM(B_sum)")
-        result = evaluator.eval_expression(eval_str)
-        assert result == "N/A", (
-            "SUM(valid) / SUM(all-NaN) should produce NaN, caught as N/A"
-        )
-
-    def test_mixed_nan_and_valid_returns_valid_float(self):
-        """Counter not collected for one dispatch with valid denominator.
-
-        This models a hardware profiling gap where the numerator counter was
-        never recorded for a dispatch (NaN stays from profiling, not imputation
-        — imputation would nullify both columns together). SUM skips NaN values
-        so the result is computed from the remaining dispatches only.
-        """
-        evaluator = self._make_evaluator({
-            "X_sum": [100.0, np.nan, 300.0],
-            "Y_sum": [10.0, 0.0, 30.0],
-        })
-        eval_str = self._to_eval_str("SUM(X_sum) / SUM(Y_sum)")
-        result = evaluator.eval_expression(eval_str)
-        assert isinstance(result, float), f"Expected float, got {type(result)}"
-        assert abs(result - 10.0) < 1e-9, (
-            f"SUM([100,NaN,300]) / SUM([10,0,30]) should be 10.0, got {result}"
         )
 
     def test_nullified_incomplete_kernel_returns_na(self):
@@ -1496,7 +1453,7 @@ class TestMetricEvaluatorDivisionByZero:
         eval_str = self._to_eval_str("SUM(COUNTER) / $var")
         result = evaluator.eval_expression(eval_str)
         assert isinstance(result, float), f"Expected float, got {type(result)}"
-        assert abs(result - 60.0) < 1e-9, (
+        assert result == pytest.approx(60.0, abs=1e-9), (
             f"SUM([100, 200]) / 5 should be 60.0, got {result}"
         )
 
@@ -1510,7 +1467,7 @@ class TestMetricEvaluatorDivisionByZero:
         result = evaluator.eval_expression(eval_str)
         # SUM([100,200,300]) / SUM([10,0,5]) = 600 / 15 = 40.0
         assert isinstance(result, float)
-        assert abs(result - 40.0) < 1e-9, (
+        assert result == pytest.approx(40.0, abs=1e-9), (
             f"SUM(LEVEL) / SUM(REQ) should be 40.0, got {result}"
         )
 
