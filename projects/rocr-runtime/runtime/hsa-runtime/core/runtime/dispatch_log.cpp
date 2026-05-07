@@ -1121,15 +1121,21 @@ hsa_status_t QueueProfilingRelease(core::Queue* q) {
   }
   owners->refcount -= 1;
   if (owners->refcount == 0) {
-    // 1->0 transition: AqlQueue::SetProfiling(false) frees the per-queue
-    // dispatch-record buffer and clears the KFD profiling-buffer
-    // registration via UPDATE_QUEUE.
+    // 1->0 transition: AqlQueue::SetProfiling(false) clears the KFD
+    // profiling-buffer registration via UPDATE_QUEUE (legacy
+    // SetQueueProfilingBuffer + new SetDispatchLog with addr=0); on
+    // success it then frees the per-queue dispatch-record buffer and
+    // host-VA counter words and clears the profiling bit.
     //
-    // C3: propagate libhsakmt teardown status. The host-side buffer is
-    // freed unconditionally (see SetProfiling), so we cannot recover the
-    // resources by retrying — a non-success status here is informational
-    // for the caller (e.g. test harnesses) and not a state-corruption
-    // signal.
+    // C3 + C6: propagate libhsakmt teardown status. On KFD clear failure,
+    // SetProfiling intentionally quarantines the live buffer (does NOT
+    // free it) and leaves the profiling bit SET to keep the FW contract
+    // intact while the MQD may still reference the BO; the buffer is
+    // only released by the AqlQueue dtor after KFD has destroyed the
+    // queue. A non-success status here therefore signals a quarantined
+    // resource that will not be retried — a subsequent enable on the
+    // same queue hits the "buffer already wired" no-op path in
+    // SetProfiling(true) and reuses the quarantined allocation.
     return q->SetProfiling(false);
   }
   return HSA_STATUS_SUCCESS;
@@ -1222,10 +1228,13 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   }
 
   // GetProfilingDispatchRecords reports buf_bytes = record_count * 16
-  // (the FW record-stride sized capacity). The kernel-side BO is
-  // oversized at count * 40 to satisfy host KFD ABI validation, but the
-  // FW writes — and the drainer reads — at the 16-byte FW record stride
-  // (kSlotStride). See dispatch_log.cpp:390 and the slot addressing at
+  // (the FW record-stride sized capacity). The kernel-side BO is also
+  // allocated at exactly count * 16 — the earlier *40 sizing was a
+  // workaround for an older pre-fix kernel that over-counted the stride
+  // in its BO-size validation; both that older kernel and the current
+  // kfd_process_queue_manager.c validation accept *16. FW writes — and
+  // the drainer reads — at the 16-byte FW record stride (kSlotStride).
+  // See dispatch_log.cpp:390 and the slot addressing at
   // dispatch_log.cpp:400-402.
   const uint32_t record_count = buf_bytes / static_cast<uint32_t>(sizeof(mec_dispatch_record_16));
   if (record_count == 0 || (record_count & (record_count - 1)) != 0) {
@@ -1458,7 +1467,12 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
 
   // e. Release profiling ref. On the 1->0 edge AqlQueue::SetProfiling(false)
   //    clears the KFD profiling-buffer registration (UPDATE_QUEUE with
-  //    addr=0) and frees the per-queue dispatch-record buffer.
+  //    addr=0). On success it then frees the per-queue dispatch-record
+  //    buffer and clears the profiling bit; on KFD clear failure
+  //    (C6 quarantine path) it leaves the buffer live and the profiling
+  //    bit set so the FW contract is preserved while the MQD may still
+  //    reference the BO — the dtor releases the quarantined allocation
+  //    after KFD has destroyed the queue.
   //    QueueProfilingRelease takes g_profiling_refcounts_mu, NOT g_queue_registry_mu.
   //    By this point the worker is joined so no thread can dereference
   //    the buffer.
@@ -1467,7 +1481,8 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
   //    BEFORE the registry erase. The release is the step that drives
   //    SetProfiling(false) on the underlying AqlQueue, which is the
   //    transition that makes the per-queue ring buffer cease to be
-  //    a profiling buffer; once that has returned, the queue is fully
+  //    a profiling buffer (or, on quarantine, ceases to be reachable
+  //    via this code path); once that has returned, the queue is fully
   //    quiesced from the dispatch_log perspective and erasing the
   //    registry slot is the final hand-off.
   QueueProfilingRelease(q);

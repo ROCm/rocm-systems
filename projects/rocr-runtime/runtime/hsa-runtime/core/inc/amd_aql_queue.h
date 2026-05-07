@@ -427,15 +427,21 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   struct metadata_prefetch_pkt_version barrier_version_;
 
   // MEC firmware-assisted dispatch profiling ring buffer.
-  // Allocated by SetProfiling(true), freed by SetProfiling(false) and the dtor.
-  // The buffer is allocated oversized at kRecordCount * 40 bytes purely to
-  // satisfy the host kernel's BO-size validation in
-  // kfd_process_queue_manager.c (`buf_byte_size = count * 40`). The active
-  // FW/drainer ring uses the 16-byte FW record stride
-  // (sizeof(mec_dispatch_record_16) == 16): FW writes records at 16-byte
-  // stride and the drainer reads them at 16-byte stride. The extra
-  // allocation tail beyond kRecordCount * 16 is unused/reserved and is
-  // not part of the ring.
+  // Allocated by SetProfiling(true). On a successful SetProfiling(false)
+  // the buffer is unwired from the MQD (UPDATE_QUEUE addr=0) and freed;
+  // on a failed SetProfiling(false) the buffer is intentionally
+  // quarantined (leaked, profiling bit left set, dispatch_record_buffer_
+  // remains non-null) until the AqlQueue dtor runs after KFD has
+  // destroyed the queue, so FW cannot use-after-free. The dtor's
+  // deallocate-if-non-null logic releases the quarantined allocation.
+  // The buffer is allocated at exactly kRecordCount * 16 bytes
+  // (sizeof(mec_dispatch_record_16) == 16, the FW record stride). The
+  // earlier *40 sizing was a workaround for an older pre-fix kernel
+  // whose BO-size validation in kfd_process_queue_manager.c over-counted
+  // the stride; both that older kernel and the current validation
+  // accept *16 (matches kfd_queue_buffer_get's strict mapping->last
+  // equality check). FW writes records at 16-byte stride and the
+  // drainer reads them at 16-byte stride.
   // The host-side wptr that the cpc_tracing precedent allocated has
   // been re-introduced: KFD MINOR >= 20 + KFD_IOC_PROFILER_VERSION >= 2
   // adds the KFD_IOC_PROFILER_DISPATCH_LOG sub-op and a v9 MQD slot
