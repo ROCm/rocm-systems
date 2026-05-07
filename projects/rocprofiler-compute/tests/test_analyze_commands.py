@@ -7,8 +7,12 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import common
+import numpy as np
 import pandas as pd
 import pytest
+
+from utils.metrics.expression import build_eval_string
+from utils.metrics.metric_evaluator import MetricEvaluator
 
 config = {}
 config["cleanup"] = True
@@ -1369,15 +1373,14 @@ class TestMetricEvaluatorDivisionByZero:
     """Test MetricEvaluator.eval_expression handles division-by-zero cases.
 
     The evaluator must gracefully handle all denominator-zero and NaN scenarios
-    that can arise from real counter data. These tests checks parser.py
-    eval_expression (None, NaN, inf detection).
+    that can arise from real counter data. These tests exercise
+    utils.metrics.metric_evaluator.MetricEvaluator.eval_expression
+    (None, NaN, inf detection).
     """
 
     @staticmethod
     def _make_evaluator(columns, sys_vars=None):
         """Build a MetricEvaluator with the given pmc_perf columns."""
-        from utils.parser import MetricEvaluator
-
         pmc_perf_df = pd.DataFrame(columns)
         raw_pmc_df = {"pmc_perf": pmc_perf_df}
         return MetricEvaluator(raw_pmc_df, sys_vars or {}, {})
@@ -1385,8 +1388,6 @@ class TestMetricEvaluatorDivisionByZero:
     @staticmethod
     def _to_eval_str(equation):
         """Transform a YAML-style equation through the full pipeline."""
-        from utils.parser import build_eval_string
-
         return build_eval_string(equation, "pmc_perf", config={})
 
     def test_all_zero_denominator_returns_na(self):
@@ -1427,8 +1428,6 @@ class TestMetricEvaluatorDivisionByZero:
 
     def test_all_nan_numerator_returns_na(self):
         """SUM of all-NaN numerator propagates NaN, caught as N/A."""
-        import numpy as np
-
         evaluator = self._make_evaluator({
             "A_sum": [np.nan, np.nan, np.nan],
             "B_sum": [10.0, 20.0, 30.0],
@@ -1441,8 +1440,6 @@ class TestMetricEvaluatorDivisionByZero:
 
     def test_all_nan_denominator_returns_na(self):
         """SUM of all-NaN denominator propagates NaN, caught as N/A."""
-        import numpy as np
-
         evaluator = self._make_evaluator({
             "A_sum": [100.0, 200.0, 300.0],
             "B_sum": [np.nan, np.nan, np.nan],
@@ -1454,9 +1451,13 @@ class TestMetricEvaluatorDivisionByZero:
         )
 
     def test_mixed_nan_and_valid_returns_valid_float(self):
-        """SUM skips NaN values; mixed NaN and valid produces correct result."""
-        import numpy as np
+        """Counter not collected for one dispatch with valid denominator.
 
+        This models a hardware profiling gap where the numerator counter was
+        never recorded for a dispatch (NaN stays from profiling, not imputation
+        — imputation would nullify both columns together). SUM skips NaN values
+        so the result is computed from the remaining dispatches only.
+        """
         evaluator = self._make_evaluator({
             "X_sum": [100.0, np.nan, 300.0],
             "Y_sum": [10.0, 0.0, 30.0],
@@ -1466,6 +1467,24 @@ class TestMetricEvaluatorDivisionByZero:
         assert isinstance(result, float), f"Expected float, got {type(result)}"
         assert abs(result - 10.0) < 1e-9, (
             f"SUM([100,NaN,300]) / SUM([10,0,30]) should be 10.0, got {result}"
+        )
+
+    def test_nullified_incomplete_kernel_returns_na(self):
+        """Incomplete kernel nullified by imputation: both columns all-NaN → N/A.
+
+        Since commit 9ac99865cd8, kernels with fewer dispatches than perfmon
+        files have every counter column set to NaN before metric evaluation.
+        SUM(all-NaN) / SUM(all-NaN) = NaN, which must be caught as N/A.
+        """
+        evaluator = self._make_evaluator({
+            "NUMERATOR": [np.nan, np.nan, np.nan],
+            "DENOMINATOR": [np.nan, np.nan, np.nan],
+        })
+        eval_str = self._to_eval_str("SUM(NUMERATOR) / SUM(DENOMINATOR)")
+        result = evaluator.eval_expression(eval_str)
+        assert result == "N/A", (
+            "Nullified incomplete kernel (both columns all-NaN) should produce "
+            "NaN, caught as N/A"
         )
 
     def test_system_variable_as_denominator(self):
