@@ -46,7 +46,7 @@ extern "C" {
 #define AMDCUID_LIB_VERSION_MINOR 3
 
 //! Patch version should be updated for each bug fix or non-API change
-#define AMDCUID_LIB_VERSION_PATCH 2
+#define AMDCUID_LIB_VERSION_PATCH 0
 
 /**
  * @brief Retrieve the version of the CUID library.
@@ -259,8 +259,7 @@ amdcuid_status_t amdcuid_get_handle_by_fd(int fd,
  * or removed.
  *
  * @return AMDCUID_STATUS_SUCCESS on success,
- *         AMDCUID_STATUS_PERMISSION_DENIED if insufficient permissions to
- * perform discovery, AMDCUID_STATUS_DEVICE_NOT_FOUND if no devices are found
+ *         AMDCUID_STATUS_DEVICE_NOT_FOUND if no devices are found
  * during discovery
  */
 amdcuid_status_t amdcuid_refresh();

@@ -30,7 +30,8 @@
 #include <unistd.h>
 
 cuid_hmac::cuid_hmac()
-    : ctx(nullptr), mac(nullptr), key(nullptr), key_len(32), valid(false) {
+    : ctx(nullptr), mac(nullptr), key(nullptr), key_len(key_length),
+      valid(false) {
   mac = EVP_MAC_fetch(NULL, "HMAC", NULL);
   if (!mac) {
     std::cerr << "Error creating EVP_MAC" << std::endl;
@@ -51,8 +52,13 @@ cuid_hmac::cuid_hmac()
     return;
   }
   key_file_stream.seekg(0, std::ios::end);
-  key_len = key_file_stream.tellg();
+  uint8_t key_file_len = key_file_stream.tellg();
   key_file_stream.seekg(0, std::ios::beg);
+  if (key_file_len != key_len) {
+    std::cerr << "Invalid key file length: expected " << key_len
+              << " bytes, got " << key_file_len << " bytes" << std::endl;
+    return;
+  }
   key = new uint8_t[key_len];
   key_file_stream.read(reinterpret_cast<char *>(key), key_len);
   key_file_stream.close();
@@ -61,7 +67,8 @@ cuid_hmac::cuid_hmac()
 }
 
 cuid_hmac::cuid_hmac(uint8_t key_data[key_length])
-    : ctx(nullptr), mac(nullptr), key(nullptr), key_len(32), valid(false) {
+    : ctx(nullptr), mac(nullptr), key(nullptr), key_len(key_length),
+      valid(false) {
   mac = EVP_MAC_fetch(NULL, "HMAC", NULL);
   if (!mac) {
     std::cerr << "Error creating EVP_MAC" << std::endl;
@@ -164,12 +171,16 @@ amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t key_data[key_length]) {
   if (geteuid() != 0) {
     return AMDCUID_STATUS_PERMISSION_DENIED;
   }
+  if (sizeof(key_data) != key_length) {
+    return AMDCUID_STATUS_INVALID_ARGUMENT;
+  }
 
   if (key) {
     delete[] key;
   }
   key = new uint8_t[key_length];
   std::memcpy(key, key_data, key_length);
+  key_len = key_length;
 
   // if key_file exists, delete it first
   if (std::remove(key_file_path.c_str()) != 0 && errno != ENOENT) {

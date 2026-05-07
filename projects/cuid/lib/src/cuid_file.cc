@@ -741,11 +741,20 @@ void CuidFile::get_grouped_entries(
 // ============================================================================
 
 // helper function to generate CUID files from a list of devices
-amdcuid_status_t
+static amdcuid_status_t
 generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
-                      const std::string &file) {
+                      const std::string &file, bool is_privileged) {
   // Create file handlers
-  CuidFile cuid_file(file, false);
+  CuidFile cuid_file(file, is_privileged);
+
+  // Initialize HMAC for derived CUID generation if privileged
+  cuid_hmac hmac;
+  if (is_privileged) {
+    hmac = cuid_hmac();
+  } else {
+    // For unprivileged file, HMAC is not used
+    hmac = nullptr;
+  }
 
   // Clear existing entries
   cuid_file.clear();
@@ -767,9 +776,7 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
     entry.last_update = now;
 
     amdcuid_status_t status;
-    if (geteuid() == 0) {
-      // Initialize HMAC for derived CUID generation
-      cuid_hmac hmac = cuid_hmac();
+    if (is_privileged) {
       if (!hmac.is_valid()) {
         std::cerr << "Error: Failed to initialize HMAC with key" << std::endl;
         return AMDCUID_STATUS_KEY_ERROR;
@@ -917,7 +924,7 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
 amdcuid_status_t CuidFileGenerator::generate_unpriv_from_devices(
     const std::vector<std::shared_ptr<CuidDevice>> &devices,
     const std::string &unpriv_file_path) {
-  return generate_from_devices(devices, unpriv_file_path);
+  return generate_from_devices(devices, unpriv_file_path, false);
 }
 
 amdcuid_status_t CuidFileGenerator::generate_priv_from_devices(
@@ -930,5 +937,5 @@ amdcuid_status_t CuidFileGenerator::generate_priv_from_devices(
     return AMDCUID_STATUS_PERMISSION_DENIED;
   }
 
-  return generate_from_devices(devices, priv_file_path);
+  return generate_from_devices(devices, priv_file_path, true);
 }

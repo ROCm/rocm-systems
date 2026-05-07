@@ -434,7 +434,7 @@ CuidDeviceManager::request_device(const std::string &device_path,
     amdcuid_id_t device_handle;
     status = CuidDaemonIpcClientUtils::request_add_device(
         device_path.c_str(), device_type, &device_handle);
-    if (status == AMDCUID_STATUS_SUCCESS && device_handle.bytes != nullptr) {
+    if (status == AMDCUID_STATUS_SUCCESS) {
       // Lookup device by handle and return it
       status = get_device_from_file_by_id(device_handle, device);
       if (status != AMDCUID_STATUS_SUCCESS) {

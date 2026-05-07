@@ -21,6 +21,7 @@
  */
 
 #include "cuid_util.h"
+#include <cctype>
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
@@ -646,4 +647,14 @@ std::string CuidUtilities::device_type_to_string(amdcuid_device_type_t type) {
   default:
     return "UNKNOWN";
   }
+}
+
+bool CuidUtilities::is_valid_bdf(const std::string &bdf) {
+  // Expected format: DDDD:BB:SS.F (e.g. "0000:03:00.0")
+  if (bdf.size() != 12)
+    return false;
+  auto is_hex = [](char c) { return std::isxdigit((unsigned char)c); };
+  return is_hex(bdf[0]) && is_hex(bdf[1]) && is_hex(bdf[2]) && is_hex(bdf[3]) &&
+         bdf[4] == ':' && is_hex(bdf[5]) && is_hex(bdf[6]) && bdf[7] == ':' &&
+         is_hex(bdf[8]) && is_hex(bdf[9]) && bdf[10] == '.' && is_hex(bdf[11]);
 }

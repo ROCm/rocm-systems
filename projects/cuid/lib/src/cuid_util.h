@@ -80,6 +80,8 @@ amdcuid_status_t uuid_string_to_uint8(const std::string &uuid_str,
                                       uint8_t *uuid);
 std::string device_type_to_string(amdcuid_device_type_t type);
 
+bool is_valid_bdf(const std::string &bdf);
+
 // GPU VF (SR-IOV Virtual Function) utilities
 int extract_render_minor(const std::string &path);
 uint16_t get_gpu_vf_id(const std::string &device_path);

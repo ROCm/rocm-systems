@@ -29,10 +29,14 @@
 #include "cuid_platform.h"
 #include "cuid_util.h"
 #include <algorithm>
+#include <cctype>
+#include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <dirent.h>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <mutex>
 #include <openssl/sha.h>
 #include <sstream>
@@ -170,7 +174,6 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id &id,
 
   // if not found, generate derived CUID
   amdcuid_primary_id primary;
-  //
   amdcuid_status_t primary_status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
   if (geteuid() == 0) {
     if (!hmac) {
@@ -178,13 +181,14 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id &id,
       // CUID generation for fully function CUID
       return AMDCUID_STATUS_INVALID_ARGUMENT;
     }
-    status = get_primary_cuid(primary);
+    primary_status = get_primary_cuid(primary);
 
-    if (status == AMDCUID_STATUS_SUCCESS) {
-      status = CuidUtilities::generate_derived_cuid(&primary, &id, hmac, false);
+    if (primary_status == AMDCUID_STATUS_SUCCESS) {
+      primary_status =
+          CuidUtilities::generate_derived_cuid(&primary, &id, hmac, false);
     }
   }
-  if (geteuid() != 0 || status != AMDCUID_STATUS_SUCCESS) {
+  if (geteuid() != 0 || primary_status != AMDCUID_STATUS_SUCCESS) {
     // If we can't get the primary ID (e.g. non-privileged user) or the
     // generation failed for some reason, fallback to using the temp generation
     // method
@@ -205,7 +209,14 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id &id,
       if (bdf_hex.empty()) {
         return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
       }
-      fingerprint = std::stoull(bdf_hex, nullptr, 16);
+      if (!CuidUtilities::is_valid_bdf(bdf)) {
+        return AMDCUID_STATUS_INVALID_FORMAT;
+      }
+      try {
+        fingerprint = std::stoull(bdf_hex, nullptr, 16);
+      } catch (...) {
+        return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
+      }
 
     } else {
       // for non-pci devices, use machine id
