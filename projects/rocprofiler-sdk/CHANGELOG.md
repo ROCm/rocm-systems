@@ -2,7 +2,7 @@
 
 Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projects/rocprofiler-sdk](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html)
 
-## Unreleased
+## ROCprofiler-SDK 1.3.0 for ROCm release 7.13
 
 ### Added
 
@@ -14,7 +14,24 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Supports all runtime types (HSA, HIP, ROCTX, RCCL, ROCDecode, ROCJpeg, and more) automatically.
   - No explicit late-start API calls required; works transparently.
 
+- KFD (Kernel Fusion Driver) event tracing support:
+  - Buffer service configurations for each KFD buffer tracing type.
+  - New type `tool_buffer_tracing_kfd_record_t` using `std::variant` to wrap 8 different KFD buffer tracing types.
+  - Each KFD event generates `rocpd_info_pmc`, `rocpd_event`, `rocpd_region`, and `rocpd_pmc_event` rows
+  - Fixed handling for special SVM location in KFD prefetch location reporting
+  - Fixed parsing for queue restore events to handle both correct format (character '0') and broken driver format (NULL character '\0')
+
 **rocprofv3 (CLI):**
+
+- Multi-pass counter collection support: Support for multiple `--pmc` flags to define separate counter groups for different profiling passes.
+  - Ability to combine command-line `--pmc` flags with input file counter groups.
+  - Each pass generates output in a separate `pass_n` subdirectory.
+  - Example: `rocprofv3 --pmc SQ_WAVES --pmc GRBM_COUNT -- <app>` creates two profiling passes.
+
+- KFD (Kernel Fusion Driver) event tracing support:
+  - KFD record dumping to `rocpd` with support for 8 main KFD event types.
+  - Support for `rocpd` to Perfetto conversion for KFD events.
+  - `--kfd-trace` flag to enable KFD event tracing.
 
 - ROCTx Support for ATT: Added ROCtx support to device thread trace when using `--att --selected-regions`.
   - Allows `roctxProfilerPause` and `roctxProfilerResume` to explicitly control when ATT data collection starts and stops.
@@ -40,6 +57,19 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Late-start now works by requesting `rocprofiler-register` to repropagate stored API tables.
   - Extensible design. Automatically supports new runtimes without SDK code changes.
   - Provides a proper separation of concerns. `rocprofiler-register` manages the table storage while SDK manages the table wrapping.
+- Counter dimension encoding changed from fixed-width to variable-width allocation per dimension type.
+- Dimension selection and reduction logic now uses explicit dimension masks and single-index selection.
+- HSA queue interception extended to handle AMD extended kernel dispatch packets.
+
+### Removed
+
+- Counter collection support for plain text (`.txt`) input files has been deprecated due to lack of schema validation and input sanitization. Only structured file formats (JSON and YAML) with schema validation are supported.
+
+
+### Resolved issues
+
+- Fixed rocpd OTF2 output to add `ACCELERATOR_DEVICE` as system tree node domain for AMD devices.
+- Fixed `rocprofv3` input file parsing where comment lines containing `pmc:` were incorrectly processed as valid counter collection directives, causing unintended profiling passes.
 
 **Internal APIs (non-public):**
 
@@ -308,54 +338,3 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Addressed OpenMP Tools task scheduling null pointer exception.
 - Fixed stream ID errors arising during process attachment.
 - Fixed issues arising during dynamic code object loading.
-
-## ROCprofiler-SDK 1.2.0 for ROCm release 7.3
-
-### Added
-
-- Multi-pass counter collection support in `rocprofv3`:
-  - Support for multiple `--pmc` flags to define separate counter groups for different profiling passes
-  - Ability to combine command-line `--pmc` flags with input file counter groups
-  - Each pass generates output in a separate `pass_n` subdirectory
-  - Example: `rocprofv3 --pmc SQ_WAVES --pmc GRBM_COUNT -- <app>` creates two profiling passes
-- KFD (Kernel Fusion Driver) event tracing support:
-  - Buffer service configurations for each KFD buffer tracing type
-  - New type `tool_buffer_tracing_kfd_record_t` using `std::variant` to wrap 8 different KFD buffer tracing types
-  - KFD record dumping to rocpd with support for 8 main KFD event types
-  - Each KFD event generates `rocpd_info_pmc`, `rocpd_event`, `rocpd_region`, and `rocpd_pmc_event` rows
-  - Support for rocpd to perfetto conversion for KFD events
-  - `rocprofv3` `--kfd-trace` flag to enable KFD event tracing
-  - Fixed handling for special SVM location in KFD prefetch location reporting
-  - Fixed parsing for queue restore events to handle both correct format (character '0') and broken driver format (NULL character '\0')
-
-### Changed
-
-- Version updated to 1.2.0 to support better library compatibility detection for downstream dependencies
-- Fixed rocpd OTF2 output to add ACCELERATOR_DEVICE as system tree node domain for AMD devices.
-
-### Resolved issues
-
-- Fixed `rocprofv3` input file parsing where comment lines containing `pmc:` were incorrectly processed as valid counter collection directives, causing unintended profiling passes.
-
-### Removed
-- Counter collection support for plain text (`.txt`) input files has been deprecated due to lack of schema validation and input sanitization. Only structured file formats (JSON and YAML) with schema validation are supported.
-
-## ROCprofiler-SDK 1.3.0
-
-### Added
-
-- gfx1250 PMC support, including counter definitions and mappings for CHA, CHC, GLARBC, GL1A, GL1C, GRBMA, and GRBMH new blocks.
-- gfx1250 ATT support with per-XCC trace configuration, buffer programming, token-mask updates, and trace readback for multi-XCC devices.
-  - Extended ATT waitcnt decode for async and tensor-related instructions, adding support for `s_wait_asynccnt` and `s_wait_tensorcnt`.
-- gfx1250 stochastic PC sampling support:
-  - gfx1250-specific parser with sample routing.
-  - New stochastic sample fields: `sampling_lock_error`, `async_cnt`, `tensor_cnt`, `xnack_cnt`, and chiplet-aware metadata.
-  - Memory dependency counters reveal per-wave memory latency.
-  - Updated public PC sampling API structs and serialization for the new fields.
-  - Kernel/IOCTL enablement and dedicated gfx1250 parser tests.
-
-### Changed
-
-- Counter dimension encoding changed from fixed-width to variable-width allocation per dimension type.
-- Dimension selection and reduction logic now uses explicit dimension masks and single-index selection.
-- HSA queue interception extended to handle AMD extended kernel dispatch packets.
