@@ -67,6 +67,7 @@ private:
     std::shared_ptr<tmp_file>                   m_tmp_file{ nullptr };
     std::unique_ptr<::perfetto::TracingSession> m_tracing_session{ nullptr };
     bool                                        m_use_annotations{ false };
+    bool                                        m_default_group_by_queue{ true };
 
     std::unordered_map<size_t, pmc_track_info> m_pmc_track_map;
     output_file_registry&                      m_output_registry;
