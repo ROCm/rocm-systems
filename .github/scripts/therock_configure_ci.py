@@ -134,6 +134,7 @@ SKIPPABLE_PATH_PATTERNS = [
     "projects/rocr-runtime/libhsakmt/src/dxg/*",
     "shared/*/docs/*",
     "shared/*/.gitignore",
+    "experimental/rocjitsu/*",
     "experimental/python/perfxpert/*",
     ".github/label*.yml",
     ".github/workflows/labeler.yml",

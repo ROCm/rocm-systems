@@ -120,6 +120,11 @@ class ConfigureCITest(unittest.TestCase):
         self.assertTrue(therock_configure_ci.is_path_skippable(".github/labeler.yml"))
         self.assertTrue(therock_configure_ci.is_path_skippable(".github/labels.yml"))
         self.assertTrue(therock_configure_ci.is_path_skippable(".github/workflows/labeler.yml"))
+        self.assertTrue(
+            therock_configure_ci.is_path_skippable(
+                "experimental/rocjitsu/lib/python/amdisa/codegen/_generator.py"
+            )
+        )
 
         # Test non-skippable patterns
         self.assertFalse(
@@ -155,6 +160,20 @@ class ConfigureCITest(unittest.TestCase):
         # Mock git diff to return only doc files
         mock_process = MagicMock()
         mock_process.stdout = "README.md\ndocs/guide.rst\nprojects/rocprim/docs/api.md"
+        mock_run.return_value = mock_process
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 0)
+
+    @patch("subprocess.run")
+    def test_rocjitsu_only_change_returns_empty_list(self, mock_run):
+        args = {"is_pull_request": True, "base_ref": "HEAD^"}
+
+        mock_process = MagicMock()
+        mock_process.stdout = (
+            "experimental/rocjitsu/lib/python/amdisa/codegen/_generator.py\n"
+            "experimental/rocjitsu/lib/python/amdisa/codegen/execute/vector_alu.py"
+        )
         mock_run.return_value = mock_process
 
         project_to_run = therock_configure_ci.retrieve_projects(args)
