@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "utility.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 
@@ -96,13 +97,16 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
     return _result;
 }
 
-template std::set<int64_t>
-parse_numeric_range<int64_t, std::set<int64_t>>(std::string, const std::string&, long);
-template std::vector<int64_t>
-parse_numeric_range<int64_t, std::vector<int64_t>>(std::string, const std::string&, long);
-template std::unordered_set<int64_t>
-parse_numeric_range<int64_t, std::unordered_set<int64_t>>(std::string, const std::string&,
+template std::set<std::int64_t>
+parse_numeric_range<std::int64_t, std::set<std::int64_t>>(std::string, const std::string&,
                                                           long);
+template std::vector<std::int64_t>
+parse_numeric_range<std::int64_t, std::vector<std::int64_t>>(std::string,
+                                                             const std::string&, long);
+template std::unordered_set<std::int64_t>
+parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(std::string,
+                                                                    const std::string&,
+                                                                    long);
 
 void
 trim_str(std::string& str)

@@ -4,8 +4,8 @@
 import csv
 from pathlib import Path
 
+import common
 import pytest
-import test_utils
 
 config = {}
 config["vseq"] = ["./tests/vsequential_access"]
@@ -45,7 +45,7 @@ def load_metrics(csv_file_path):
     return metrics_data
 
 
-_, soc = test_utils.gpu_soc()
+_, soc = common.gpu_soc()
 
 
 @pytest.mark.L1_cache
@@ -61,7 +61,7 @@ def test_L1_cache_counters(
 
     result = {}
     metrics = ["Read Req", "Write Req", "Cache Hit Rate"]
-    base = Path(test_utils.get_output_dir())
+    base = Path(common.get_output_dir())
 
     for app_name in app_names:
         workload_dir = f"{base}/{app_name}"
@@ -104,9 +104,9 @@ def test_L1_cache_counters(
             result[app_name][metric] = data[metric]["Avg"]
 
         # 4. clean local output
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-        test_utils.clean_output_dir(config["cleanup"], workload_dir_output)
-    test_utils.clean_output_dir(config["cleanup"], base)
+        common.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir_output)
+    common.clean_output_dir(config["cleanup"], base)
 
     # 5. check results are expected
 
