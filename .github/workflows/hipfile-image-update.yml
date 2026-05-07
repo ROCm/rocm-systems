@@ -105,8 +105,6 @@ jobs:
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
             --target base \
-            --label "org.opencontainers.image.description= \
-              Latest AIS CI Image for ${AIS_INPUT_PLATFORM} using ROCm ${{ matrix.rocm_versions }}." \
             --build-arg ROCM_VERSION=${{ matrix.rocm_versions }} \
             --cache-to=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE }}-cache" \
             ${{ steps.use-cache.outputs.CACHE_FROM_CMD }} \
@@ -119,8 +117,6 @@ jobs:
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
             --target nvidia \
-            --label "org.opencontainers.image.description= \
-              Latest NVIDIA AIS CI Image for ${AIS_INPUT_PLATFORM} using ROCm ${{ matrix.rocm_versions }}." \
             --build-arg ROCM_VERSION=${{ matrix.rocm_versions }} \
             --cache-to=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}-cache" \
             ${{ steps.use-cache.outputs.CACHE_FROM_CMD_NVIDIA }} \
