@@ -353,14 +353,15 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
     }
 
     // Create command allocator
+    // PAL recommends Local heap for UVD/VCN engine for best performance
     InfoLog(g_rocdec_logger, "PAL: Creating command allocator...");
     {
         Pal::CmdAllocatorCreateInfo aci = {};
         aci.flags.threadSafe = 1;
-        aci.allocInfo[Pal::CommandDataAlloc].allocHeap = Pal::GpuHeapGartUswc;
+        aci.allocInfo[Pal::CommandDataAlloc].allocHeap = Pal::GpuHeapLocal;
         aci.allocInfo[Pal::CommandDataAlloc].suballocSize = 64 * 1024;
         aci.allocInfo[Pal::CommandDataAlloc].allocSize = 256 * 1024;
-        aci.allocInfo[Pal::EmbeddedDataAlloc].allocHeap = Pal::GpuHeapGartUswc;
+        aci.allocInfo[Pal::EmbeddedDataAlloc].allocHeap = Pal::GpuHeapLocal;
         aci.allocInfo[Pal::EmbeddedDataAlloc].suballocSize = 64 * 1024;
         aci.allocInfo[Pal::EmbeddedDataAlloc].allocSize = 256 * 1024;
         aci.allocInfo[Pal::GpuScratchMemAlloc].allocHeap = Pal::GpuHeapInvisible;
