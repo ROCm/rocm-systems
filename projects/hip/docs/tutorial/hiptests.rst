@@ -36,12 +36,12 @@ HIP installation, and executable examples of how to write catch tests for your o
 * How to isolate failures cleanly
 * How to write reproducible GPU tests that don’t depend on timing or scheduling quirks
 
-Follow the instructions in :ref:`build-tests`, and run the tests using the ``ctest`` command from the ``build`` folder. The command runs over four thousand tests and returns results in the ``build/Testing/Temporary/LastTest.log`` file. You can also build and run individual tests as explained in the build instructions. 
+Follow the instructions in :ref:`build-tests`, and run the tests using the ``ctest`` command from the ``build`` folder. The command runs more than 4,000 tests and returns results in the ``build/Testing/Temporary/LastTest.log`` file. You can also build and run individual tests as explained in the build instructions. 
 
 Building and running HIP samples
 ================================
 
-The ROCm/hip-tests/samples folder is organized into a set of small utilities that show how to use HIP APIs. Each sample is a utility that illustrates a concept, pattern, or technique. The folder is divided into three major groups:
+The ROCm/hip-tests/samples folder is organized into a set of small utilities that demonstrate how to use HIP APIs. Each sample is a utility that illustrates a concept, pattern, or technique. The folder is divided into three major groups:
 
 * ``samples/0_Intro``: Includes basic HIP API usage and simple kernels.
 
@@ -58,7 +58,7 @@ The ROCm/hip-tests/samples folder is organized into a set of small utilities tha
 
 * ``samples/2_Cookbook``: Demonstrates more advanced examples and build techniques. The concepts covered by the Cookbook include a variety of operations such as matrix operations, memory‑access patterns, warp/wavefront shuffle and data exchange, streams, concurrency, and multi‑GPU, HIP events and timing, occupancy, architecture, and device‑specific behavior. The following is a brief description of the available modules. 
 
-  - ``samples/2_Cookbook/0_MatrixTranspose``: Demonstrates implementing and optimizing a matrix transpose kernel. Helps to understand coalesced vs. non‑coalesced memory access and shared‑memory tiling.
+  - ``samples/2_Cookbook/0_MatrixTranspose``: Demonstrates implementing and optimizing a matrix transpose kernel. Helps to understand coalesced versus non‑coalesced memory access and shared‑memory tiling.
   - ``samples/2_Cookbook/1_hipEvent``: Uses HIP event timing for profiling and benchmarking kernels for performance measurement.
   - ``samples/2_Cookbook/3_shared_memory``: Demonstrates how to use shared memory to accelerate memory‑bound kernels.
   - ``samples/2_Cookbook/4_shfl``: Demonstrates warp‑level shuffle operations used for reductions, scans, and warp‑synchronous algorithms.
