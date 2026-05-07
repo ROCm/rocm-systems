@@ -121,6 +121,7 @@ jobs:
                   inputs.ais_hipfile_pkg_dev_filename
                 )
               }}
+              ldconfig
             '
       - name: Create Python virtual environment and install build dependencies
         run: |
