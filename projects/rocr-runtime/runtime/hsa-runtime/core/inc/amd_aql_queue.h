@@ -207,9 +207,25 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Enables/Disables profiling overrides SetProfiling from core::Queue.
   /// @details Returns non-success if the dispatch-record buffer allocation,
   /// libhsakmt SetQueueProfilingBuffer registration, or the UPDATE_QUEUE
-  /// flush fails. On enable failure all partial state is unwound (allocation
-  /// freed, cached fields reset). On disable failure the host-side buffer
-  /// is still freed (the FW-side state is best-effort).
+  /// flush fails.
+  ///
+  /// On enable failure all partial state is unwound: any allocated buffer
+  /// is freed, cached fields are reset, and the AMD_QUEUE_PROPERTIES_ENABLE_
+  /// PROFILING bit is rolled back so the queue is left in the pre-call state.
+  ///
+  /// On a successful disable the KFD-side registrations are cleared, the
+  /// MQD republish via Suspend/Resume is performed, the profiling bit is
+  /// then cleared, and finally the host-side buffer (and Phase-2 host-VA
+  /// counter words) are freed.
+  ///
+  /// On a disable where the KFD clear (legacy or new dispatch_log sub-op)
+  /// fails, the host-side buffer is intentionally NOT freed — FW may still
+  /// hold the BO address in MQD, so freeing would risk a GPU
+  /// use-after-free. Instead the live buffer is quarantined: the profiling
+  /// bit is left set, dispatch_record_buffer_ stays non-null (also blocking
+  /// double-allocation on retry), and release is deferred to ~AqlQueue
+  /// which runs only after KFD has destroyed the queue. See
+  /// amd_aql_queue.cpp:1866-1886.
   hsa_status_t SetProfiling(bool enabled) override;
 
   /// @brief Get the per-queue MEC dispatch-record ring buffer info.

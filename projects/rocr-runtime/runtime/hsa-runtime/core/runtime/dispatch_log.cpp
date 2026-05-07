@@ -151,10 +151,15 @@ struct queue_drain_state {
 
   // NON-OWNING ring view. Buffer is owned by AqlQueue::dispatch_record_buffer_
   // (alloc'd by SetProfiling(true), freed by SetProfiling(false) or the
-  // AqlQueue dtor). FW writes 16-byte mec_dispatch_record entries at
-  // 16-byte stride; the drainer reads at the same stride. The host BO is
-  // allocated oversized at `ring_records * 40` to satisfy the deployed
-  // KFD's BO-size validation; bytes beyond `ring_records * 16` are unused.
+  // AqlQueue dtor — except in the disable-clear-failure quarantine path,
+  // where it is leaked until the AqlQueue dtor runs after KFD queue
+  // teardown; see amd_aql_queue.cpp:1866-1886). FW writes 16-byte
+  // mec_dispatch_record entries at 16-byte stride; the drainer reads at
+  // the same stride. The host BO is allocated at exactly
+  // `ring_records * 16`, matching both the FW write stride and the
+  // current kernel's BO-size validation (`count * 16`). The earlier
+  // `*40` over-allocation was a workaround for an older pre-fix kernel
+  // and has been removed (see amd_aql_queue.cpp:1690-1704).
   void*    ring_base    = nullptr;
   uint32_t ring_records = 0;     // power-of-2 slot count
   uint32_t ring_mask    = 0;     // ring_records - 1, for slot indexing
@@ -418,24 +423,21 @@ void for_each_known_queue_locked(F&& fn) {
 //      and process the START / END pairing as before.
 //
 // FW writes 16-byte mec_dispatch_record entries at 16-byte stride. The
-// host kernel BO size validation on the gbt350-installed KFD patch is
-// `count * 40` (kfd_process_queue_manager.c:633), which over-counts the
-// per-record stride — see upstream fix `kfd: validate dispatch record
-// buffer using 16-byte record size` (commit `03a8b58c3b96`,
-// 2026-04-08), which corrects the kernel side to `count * 16` to
-// match the firmware/SDK contract. We allocate `count * 40` so the
-// older host kernel's BO validation passes (forward-compatible with
-// the fix — bigger is fine), but FW writes records back-to-back at
-// 16-byte stride within that buffer. The drainer therefore reads at
-// 16-byte stride. The unused tail of the buffer (slots beyond
-// `count * 16` bytes) is never written by FW and never read by the
-// drainer.
+// host kernel BO size validation now uses `count * 16` for both the
+// legacy SetQueueProfilingBuffer path and the new dispatch_log sub-op
+// (kfd_process_queue_manager.c, post commit `03a8b58c3b96` "kfd:
+// validate dispatch record buffer using 16-byte record size",
+// 2026-04-08), matching the firmware/SDK 16-byte record stride. The
+// host therefore allocates `count * 16` exactly (see
+// amd_aql_queue.cpp:1690-1704); the earlier `count * 40`
+// over-allocation that worked around the older pre-fix kernel has
+// been removed. FW writes records back-to-back at 16-byte stride and
+// the drainer reads at the same 16-byte stride.
 // ============================================================================
 
 // Per-record stride at which FW writes records into the buffer. Matches
-// `sizeof(mec_dispatch_record)` and is independent of the host kernel's
-// BO-size validation constant (which is `count * 40` today on gbt350,
-// `count * 16` after the upstream fix lands).
+// `sizeof(mec_dispatch_record)` and the kernel's BO-size validation
+// constant (`count * 16`, post upstream fix `03a8b58c3b96`).
 constexpr size_t kSlotStride = 16;
 
 // Per-pass batch size: drainer accumulates up to this many records per
