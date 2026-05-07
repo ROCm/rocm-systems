@@ -1550,9 +1550,9 @@ main(int argc, char** argv)
         }
     };
 
-    if(!app_functions.empty())
+    if(app_functions && !app_functions->empty())
     {
-        for(auto* itr : app_functions)
+        for(auto* itr : *app_functions)
         {
             if(itr->getModule())
             {
