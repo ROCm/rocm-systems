@@ -26,8 +26,8 @@ src.%:
 pkg.%:
 	${MAKE} -C pkg $* BUILDDIR=${ABSBUILDDIR}
 
-nccl4py.%:
-	${MAKE} -C bindings/nccl4py $* BUILDDIR=${ABSBUILDDIR}
+nccl4py.clean:
+	${MAKE} -C bindings/nccl4py clean BUILDDIR=${ABSBUILDDIR}
 
 pkg.debian.prep: lic
 pkg.txz.prep: lic
