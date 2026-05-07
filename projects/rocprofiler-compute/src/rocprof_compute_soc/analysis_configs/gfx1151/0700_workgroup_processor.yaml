@@ -280,7 +280,7 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        # HITS and REQ are per-SQ per-bank; summed HITS can exceed REQ → >100%. Use HITS+MISSES
+        # HITS and REQ are per-SQ per-bank; summed HITS can exceed REQ -> >100%. Use HITS+MISSES
         # as the outcome denominator (same pairing as Memory Chart / SoL).
         Icache Hit Rate:
           avg: SUM(100 * SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)

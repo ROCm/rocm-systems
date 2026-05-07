@@ -8,7 +8,7 @@
 RDNA3
 ********
 
-ROCm Compute Profiler makes available an extensive list of metrics to better understand achieved application performance on RDNA3.5 architecture based AMD Ryzen™ APUs like AMD Ryzen AI Max Series - Strix Halo (gfx1151).
+ROCm Compute Profiler makes available an extensive list of metrics to better understand achieved application performance on RDNA3.5 architecture based AMD Ryzen™ APUs like AMD Ryzen™ AI Max / Ryzen™ AI Max+ 300 Series(gfx1151).
 
 To best use profiling data, it’s important to understand the role of various hardware blocks of AMD RDNA3 architecture. Refer to the following top-level block diagram to understand the hardware blocks of RDNA3 architecture.
 
@@ -27,8 +27,7 @@ For more details on AMD RDNA3 architecture, see page 5 of `RDNA3 shader instruct
    * For details on packaging, SIMD width, and generational differences between RDNA3, RDNA3.5, and later APUs, refer to :doc:`GPU hardware specifications <rocm:reference/gpu-arch-specs>` and the public architecture summaries.
 
 ROCm Compute Profiler includes analysis panels targeting RDNA3.5 parts reporting as
-gfx1151 - for example, integrated graphics on AMD Ryzen AI Max Series (Strix Halo)
-processors.
+gfx1151 - for example, integrated graphics on AMD Ryzen AI Max Series processors.
 
 Memory hierarchy in the tool
 ==============================
@@ -87,4 +86,4 @@ Additional reference material
 
 .. Note::
 
-   ROCm Compute Profiler currently has limited support for WMMA on Strix Halo.
+   ROCm Compute Profiler currently has limited support for WMMA on gfx1151.
