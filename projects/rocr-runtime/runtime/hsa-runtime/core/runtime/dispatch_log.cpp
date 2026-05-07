@@ -1275,11 +1275,17 @@ void on_queue_destroy(core::Queue* q) {
 }  // namespace rocr
 
 // =============================================================================
-// TEST-ONLY introspection API for standalone dispatch_log validation programs
-// (dlog_test1, dlog_test2, ...). NOT part of the public HSA ABI; symbol prefix
-// hsa_amd_dispatch_log_test_ to make grep-ability obvious.
+// TEST-ONLY introspection API for standalone dispatch_log validation programs.
+// NOT part of the public HSA ABI; symbol prefix hsa_amd_dispatch_log_test_ to
+// make grep-ability obvious.
 //
-// Usage from a test:
+// In-tree tests that exercise this API live under
+//   projects/rocr-runtime/runtime/hsa-runtime/test/lttng/
+//     - test_hsa_dispatch_log.sh           (LTTng end-to-end through HIP)
+//     - test_hsa_dispatch_log_test_api.sh  (focused API contract test)
+//
+// Usage pattern from a test that wants to bypass the LTTng emit path
+// and read the raw FW buffer directly:
 //   1. set HSA_DISPATCH_LOG_NO_DRAIN=1 in the env so the per-queue worker
 //      sleeps instead of draining (preserves raw FW buffer state for the
 //      test to inspect).
