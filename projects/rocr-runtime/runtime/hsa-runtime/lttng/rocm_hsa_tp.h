@@ -150,6 +150,15 @@ LTTNG_UST_TRACEPOINT_EVENT(
  *
  * Each event carries:
  *   - queue_id (one per batch — all records in a batch belong to one queue)
+ *   - gpu_id: KFD node_id of the GPU agent that owns this queue. This
+ *     field is the join key against `rocm_hsa:clock_sync`, whose
+ *     `gpu_id` field carries the same KFD node_id for the same agent.
+ *     Without this field, consumers have no way to map a queue's raw
+ *     gpu_ts values to a clock_sync entry, which would make offline
+ *     translation impossible — see the spec at
+ *     `2026-04-27-hsa-lttng-kernel-dispatch-tracing-design.md` §6 / §10
+ *     for the full record-format and consumer-side timestamp-translation
+ *     contract.
  *   - count: number of records in `records[]`
  *   - records: packed array of `count` × 16-byte FW records, exactly the
  *     mec_dispatch_record_16 struct layout (ts_lo, ts_hi, record_type,
@@ -178,15 +187,18 @@ LTTNG_UST_TRACEPOINT_EVENT(
  * or applies its own FW-version-specific record_type interpretation.
  *
  * gpu_ts is the raw hardware clock counter written by FW. It is NOT
- * translated to the host system clock domain. The consumer must use the
- * rocm_hsa:clock_sync tracepoint to correlate raw GPU timestamps with
- * the host system clock. */
+ * translated to the host system clock domain. The consumer joins on
+ * `gpu_id` against the most recent `rocm_hsa:clock_sync` event whose
+ * `gpu_id` matches, then linearly interpolates between consecutive
+ * clock_sync samples for that agent to translate gpu_ts into the
+ * host system-clock domain. */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, kernel_dispatch_record,
-    LTTNG_UST_TP_ARGS(uint32_t, queue_id, uint32_t, count,
+    LTTNG_UST_TP_ARGS(uint32_t, queue_id, uint32_t, gpu_id, uint32_t, count,
                       const uint8_t*, records, size_t, records_len),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_integer(uint32_t, queue_id, queue_id)
+        lttng_ust_field_integer(uint32_t, gpu_id, gpu_id)
         lttng_ust_field_integer(uint32_t, count, count)
         lttng_ust_field_sequence(uint8_t, records, records,
                                  size_t, records_len)

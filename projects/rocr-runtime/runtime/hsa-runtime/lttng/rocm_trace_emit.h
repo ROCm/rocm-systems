@@ -205,9 +205,10 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
 
 /* kernel_dispatch_record emit helper. Called ONLY by the firmware-dispatch-
  * log drainer thread (NOT the application thread) from
- * dispatch_log::drain_one_queue. Emits one event per FW-written 16-byte
- * record (no host-side START/END pairing — see rocm_hsa_tp.h
- * kernel_dispatch_record doc comment for the consumer-side join contract).
+ * dispatch_log::drain_one_queue. Emits one event per drain pass carrying
+ * a packed batch of 16-byte FW records (no host-side START/END pairing —
+ * see rocm_hsa_tp.h kernel_dispatch_record doc comment for the
+ * consumer-side join contract).
  *
  * force_emit=true bypasses the per-tracepoint lttng_ust_tracepoint_enabled()
  * guard but NOT the rocm_trace_disabled() kill switch. The bypass is
@@ -219,13 +220,14 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
  * would be unachievable. Steady-state drainer passes always pass
  * force_emit=false.
  *
- * gpu_ts is the raw FW-written GPU clock. It is NOT translated to the host
- * system clock domain by the drainer. The consumer must use the rocm_hsa:clock_sync
- * tracepoint to correlate this raw GPU timestamp with the system clock.
- * record_type is the raw FW-written tag, narrowed to uint8_t at
- * the call site (current FW values are 1 and 2; see drain_one_queue).
+ * Per-record `gpu_ts` (inside `records[]`) is the raw FW-written GPU clock
+ * counter. It is NOT translated to the host system clock domain by the
+ * drainer. Consumers join the per-event `gpu_id` against
+ * `rocm_hsa:clock_sync` events carrying the same `gpu_id` to translate
+ * raw GPU clocks into the host system clock. record_type is the raw
+ * FW-written tag (current FW values are 1 and 2; see drain_one_queue).
  *
- * parent_corr_id is always 0 because the drainer thread has no API context
+ * No parent_corr_id is emitted: the drainer thread has no API context
  * (real parent is recovered consumer-side via the
  * rocm_hsa:hsa_doorbell_ring join on (queue_id, dispatch_idx)).
  */
@@ -233,6 +235,13 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
  * laid out [ts_lo, ts_hi, record_type, dispatch_idx]) under one tracepoint
  * call. The drainer accumulates records during a drain pass and calls this
  * once per pass (or once per kBatchMax records, whichever is smaller).
+ *
+ * `gpu_id` is the KFD node_id of the GPU agent that owns the queue.
+ * Consumers join this against the `gpu_id` field on
+ * `rocm_hsa:clock_sync` to translate the per-record raw GPU clocks into
+ * the host system-clock domain. The drainer caches this value at queue
+ * enable time (see queue_drain_state.gpu_id) and passes it on every
+ * batch emit, so the per-emit cost is a single 32-bit field copy.
  *
  * `records` is a pointer to a contiguous packed array of `count` × 16
  * bytes; `records_len` is `count * 16` (the byte length the LTTng
@@ -244,14 +253,14 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
  * rates.
  */
 static inline void rocm_trace_emit_hsa_kernel_dispatch_record(
-    uint32_t queue_id, uint32_t count,
+    uint32_t queue_id, uint32_t gpu_id, uint32_t count,
     const uint8_t* records, size_t records_len,
     bool     force_emit /* bypasses the tracepoint-enabled check */) {
     if (rocm_trace_disabled()) return;
     if (force_emit ||
         lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_record)) {
         lttng_ust_do_tracepoint(rocm_hsa, kernel_dispatch_record,
-                                queue_id, count, records, records_len);
+                                queue_id, gpu_id, count, records, records_len);
     }
 }
 
@@ -314,8 +323,8 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t a, uint64_t b,
     (void)a; (void)b; (void)c; (void)d;
 }
 static inline void rocm_trace_emit_hsa_kernel_dispatch_record(
-    uint32_t a, uint32_t b, const uint8_t* c, size_t d, bool e) {
-    (void)a; (void)b; (void)c; (void)d; (void)e;
+    uint32_t a, uint32_t b, uint32_t c, const uint8_t* d, size_t e, bool f) {
+    (void)a; (void)b; (void)c; (void)d; (void)e; (void)f;
 }
 static inline void rocm_trace_emit_hsa_kernel_dispatch_drop(uint32_t a, uint64_t b) {
     (void)a; (void)b;

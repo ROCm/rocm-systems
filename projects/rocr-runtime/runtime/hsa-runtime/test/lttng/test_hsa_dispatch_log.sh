@@ -9,7 +9,11 @@
 #      HIP-or-AQL kernel dispatch (via square sample if available, falls
 #      back to skip with INFO) should produce one or more
 #      rocm_hsa:kernel_dispatch_record events, each carrying
-#      (queue_id, count, records[count*16]) per the batched schema.
+#      (queue_id, gpu_id, count, records[count*16]) per the batched
+#      schema. The gpu_id field is the KFD node_id of the GPU agent
+#      that owns the queue and is the join key against
+#      rocm_hsa:clock_sync.gpu_id for offline raw-gpu_ts -> system_ts
+#      translation (spec 2026-04-27 §6 / §10).
 #
 #   2. Clock-sync path. The clock_sync poller (started from
 #      Runtime::Load) should produce at least one rocm_hsa:clock_sync
@@ -158,10 +162,27 @@ if [ "$N_DLOG" -eq 0 ]; then
 else
     SAMPLE_DLOG=$(grep 'rocm_hsa:kernel_dispatch_record' "$LOG_DLOG" | head -1)
     echo "$SAMPLE_DLOG" | grep -q 'queue_id'    || fail "kernel_dispatch_record missing queue_id field"
+    # gpu_id is the join key against rocm_hsa:clock_sync.gpu_id; without
+    # it consumers cannot translate the batched raw gpu_ts values into
+    # the host system clock domain. Spec §6 / §10.
+    echo "$SAMPLE_DLOG" | grep -q 'gpu_id'      || fail "kernel_dispatch_record missing gpu_id field"
     echo "$SAMPLE_DLOG" | grep -q 'count'       || fail "kernel_dispatch_record missing count field"
     echo "$SAMPLE_DLOG" | grep -q 'records'     || fail "kernel_dispatch_record missing records[] sequence"
     echo "$SAMPLE_DLOG" | grep -q '_records_length' \
         || fail "kernel_dispatch_record missing records sequence length"
+
+    # Cross-check: every gpu_id observed on a kernel_dispatch_record event
+    # must also appear on at least one clock_sync event in the same trace,
+    # otherwise the timestamp-translation contract is unfulfilled.
+    DLOG_GPU_IDS=$(grep 'rocm_hsa:kernel_dispatch_record' "$LOG_DLOG" \
+        | sed -n 's/.*gpu_id = \([0-9]*\).*/\1/p' | sort -u)
+    CS_GPU_IDS=$(grep 'rocm_hsa:clock_sync' "$LOG_DLOG" \
+        | sed -n 's/.*gpu_id = \([0-9]*\).*/\1/p' | sort -u)
+    for gid in $DLOG_GPU_IDS; do
+        if ! echo "$CS_GPU_IDS" | grep -qx "$gid"; then
+            fail "kernel_dispatch_record gpu_id=$gid has no matching rocm_hsa:clock_sync event in trace; offline gpu_ts translation would be impossible"
+        fi
+    done
 
     # Schema invariant: records_length must be a multiple of 16
     # (each record is exactly mec_dispatch_record_16). babeltrace2

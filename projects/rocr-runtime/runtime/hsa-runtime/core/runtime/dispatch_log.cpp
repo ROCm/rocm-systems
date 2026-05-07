@@ -138,6 +138,17 @@ struct queue_drain_state {
   // rocm_trace_emit_* call sites, not here.
   uint64_t  queue_id = 0;
 
+  // KFD node_id of the GPU agent that owns this queue. Cached at queue
+  // enable time (read once from q->GetAgent()->node_id() in
+  // enable_dispatch_log_for_queue_locked) so the per-batch emit fast
+  // path doesn't have to chase the Queue* (which is deliberately not
+  // stored on this struct — see the dangling-Queue note below) for
+  // every flush. Carried on every kernel_dispatch_record event as the
+  // join key against rocm_hsa:clock_sync.gpu_id, so consumers can
+  // translate the raw per-record gpu_ts values into the host system
+  // clock domain. Spec §6 / §10 (queue_id→gpu_id mapping mechanism).
+  uint32_t  gpu_id = 0;
+
   // NON-OWNING ring view. Buffer is owned by AqlQueue::dispatch_record_buffer_
   // (alloc'd by SetProfiling(true), freed by SetProfiling(false) or the
   // AqlQueue dtor). FW writes 16-byte mec_dispatch_record entries at
@@ -410,6 +421,7 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     if (batch_count == 0) return;
     rocm_trace_emit_hsa_kernel_dispatch_record(
         queue_id_to_wire(qs.queue_id),
+        qs.gpu_id,
         batch_count, batch_buf,
         (size_t)batch_count * kSlotStride, force_emit);
     batch_count = 0;
@@ -973,6 +985,13 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
     // owned by AqlQueue, freed on SetProfiling(false) or AqlQueue dtor.
     qs = std::make_shared<queue_drain_state>();
     qs->queue_id         = queue_id_of(q);
+    // Cache gpu_id (KFD node_id) so the per-batch emit path doesn't
+    // need to re-walk the Queue* to fetch it. Safe to read q->GetAgent()
+    // here because the agent_is_gpu(q->GetAgent()) check above already
+    // verified the agent pointer is non-null and a GPU agent. The
+    // node_id is fixed for the lifetime of the agent. Narrows the
+    // 32-bit value through static_cast at the assignment.
+    qs->gpu_id           = static_cast<uint32_t>(q->GetAgent()->node_id());
     qs->ring_base        = buf;
     qs->ring_records     = record_count;
     qs->ring_mask        = record_count - 1;
