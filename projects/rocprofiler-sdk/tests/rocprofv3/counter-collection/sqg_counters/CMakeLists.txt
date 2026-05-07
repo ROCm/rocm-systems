@@ -17,14 +17,14 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 # Run vector-ops with the multi-pass SQG counter input. The SQG block on gfx11 has 8
-# hardware counter slots, so input.txt schedules 5 passes (8+8+8+8+4 = 36 distinct
-# SQG events) covering every newly-added SQG counter.
+# hardware counter slots, so input.txt schedules 5 passes (8+8+8+8+4 = 36 distinct SQG
+# events) covering every newly-added SQG counter.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-sqg-counters
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.txt
-        -T -d ${CMAKE_CURRENT_BINARY_DIR}/out_sqg_counters -o sqg --output-format csv
-        json -- $<TARGET_FILE:vector-ops>
+        -T -d ${CMAKE_CURRENT_BINARY_DIR}/out_sqg_counters -o sqg --output-format csv json
+        -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 120
     LABELS "integration-tests"
