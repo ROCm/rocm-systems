@@ -877,20 +877,9 @@ hsa_status_t XdnaDriver::InitDeviceHeap() {
 }
 
 hsa_status_t XdnaDriver::FreeDeviceHeap() {
-  hsa_status_t err = HSA_STATUS_SUCCESS;
-
-  if (dev_heap_aligned) {
-    if (munmap(dev_heap_aligned, dev_heap_size) != 0) {
-      err = HSA_STATUS_ERROR;
-    } else {
-      dev_heap_aligned = nullptr;
-    }
-  }
-
-  if (DestroyBOHandle(dev_heap_handle) != HSA_STATUS_SUCCESS) {
-    err = HSA_STATUS_ERROR;
-  }
-
+  hsa_status_t err = DestroyBOHandle(dev_heap_handle);
+  assert(err == HSA_STATUS_SUCCESS && "Failed to destroy device heap BO handle.");
+  dev_heap_aligned = nullptr;
   return err;
 }
 
