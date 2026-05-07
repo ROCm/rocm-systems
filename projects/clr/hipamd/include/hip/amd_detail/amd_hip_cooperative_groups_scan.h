@@ -82,6 +82,16 @@ namespace impl {
                  __hip_internal::void_t<decltype(scan_add<false>(T {}))>
     > : __hip_internal::true_type {
   };
+
+  template <typename T, typename = void>
+  struct has_scan_min : __hip_internal::false_type {
+  };
+
+  template <typename T>
+  struct has_scan_min<T,
+                 __hip_internal::void_t<decltype(scan_min<false>(T {}))>
+    > : __hip_internal::true_type {
+  };
 }
 
 template <typename TyGroup, typename TyVal, typename TyFn>
@@ -135,12 +145,21 @@ __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& o
       if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value &&
                     impl::has_scan_add<Val>::value) {
         return impl::scan_add<true>(val);
+      } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::less<Val>>::value &&
+                    impl::has_scan_min<Val>::value) {
+        return impl::scan_min<true>(val);
       }
     }
   } else if constexpr (__hip_internal::is_same<TyGroup, cooperative_groups::coalesced_group>::value) {
     // for the coalesced_group case we do need to check at runtime
     if (maskNumBits == warpSize) {
-      return impl::scan_add<true>(val);
+      if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value &&
+                    impl::has_scan_add<Val>::value) {
+        return impl::scan_add<true>(val);
+      } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::less<Val>>::value &&
+                    impl::has_scan_min<Val>::value) {
+        return impl::scan_min<true>(val);
+      }
     }
   }
 #endif
