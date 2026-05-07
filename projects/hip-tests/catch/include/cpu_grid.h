@@ -126,7 +126,7 @@ inline dim3 GenerateThreadDimensions() {
 }
 
 inline dim3 GenerateThreadDimensionsForShuffle() {
-  const auto multipliers = {0.5, 1.0, 2.0};
+  const auto multipliers = {1.0};
   return GenerateThreadDimensionsImpl(multipliers);
 }
 
@@ -158,7 +158,7 @@ inline dim3 GenerateBlockDimensions() {
 }
 
 inline dim3 GenerateBlockDimensionsForShuffle() {
-  const auto multipliers = {0.5, 1.0};
+  const auto multipliers = {1.0};
   return GenerateBlockDimensionsImpl(multipliers);
 }
 
