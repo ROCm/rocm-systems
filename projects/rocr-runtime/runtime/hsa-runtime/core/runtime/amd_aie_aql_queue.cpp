@@ -74,6 +74,7 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
     throw hsa_exception(HSA_STATUS_ERROR_INVALID_QUEUE_CREATION,
                         "Could not allocate a ring buffer for an AIE queue.");
   }
+  MAKE_NAMED_SCOPE_GUARD(ring_buf_guard, [&] { agent->system_deallocator()(ring_buf_); });
 
   // Populate hsa_queue_t fields.
   amd_queue_.hsa_queue.type = HSA_QUEUE_TYPE_SINGLE;
@@ -101,6 +102,8 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
   queue_id_ = queue_resource.QueueId;
 
   active_ = true;
+
+  ring_buf_guard.Dismiss();
 }
 
 AieAqlQueue::~AieAqlQueue() {
