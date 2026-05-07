@@ -596,11 +596,22 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
     }
 
     // Re-create physical allocation
+    // RCCL adaptation: mirror ncclCuMemAlloc's prop init so Resume's cuMemCreate
+    // matches the original allocation. Required on AMD because of ROCM-2550
+    // (hipMemMap SIGSEGV without gpuDirectRDMACapable=1) and to honor the
+    // HIP_VMM_UNCACHED_MEMORY build flag.
     CUmemAllocationProp prop = {};
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+    prop.type = hipMemAllocationTypeUncached;
+#else
     prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
     prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     prop.location.id = entry->cudaDev;
     prop.requestedHandleTypes = entry->handleType;
+#if defined(__HIP_PLATFORM_AMD__)
+    prop.allocFlags.gpuDirectRDMACapable = 1;
+#endif
 
     CUmemGenericAllocationHandle newHandle;
     CUCHECKGOTO(cuMemCreate(&newHandle, entry->size, &prop, 0), ret, fail);
