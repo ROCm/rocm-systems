@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #pragma once
-#include "trace_decoder_types.h"
+#include "../trace_decoder_types.h"
 
 enum WaveslotState
 {

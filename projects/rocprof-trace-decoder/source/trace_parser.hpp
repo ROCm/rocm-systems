@@ -26,6 +26,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -34,16 +35,48 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include "common.hpp"
+#include "rocprof_trace_decoder/cxx/common.hpp"
+#include "rocprof_trace_decoder/trace_decoder_instrument.h"
 #include "segment.hpp"
-#include "trace_decoder_instrument.h"
 
 inline bool bValid(pcinfo_t pc) { return pc.code_object_id != 0 || pc.address != 0; }
+
+enum sqtt_token_reg_t
+{
+    COMPUTE_DISPATCH_INITIATOR = 0x0,
+    COMPUTE_PGM_LO = 0xC,
+    COMPUTE_PGM_HI = 0xD,
+    COMPUTE_PGM_RSRC1 = 0x12,
+    COMPUTE_PGM_RSRC2 = 0x13,
+    COMPUTE_PGM_RSRC3 = 0x2D,
+    COMPUTE_NOWHERE = 0x7F
+};
+
+enum sqtt_event_type_t
+{
+    EVENT_CACHE_FLUSH_WR = 0x4,
+    EVENT_CACHE_FLUSH = 0x6,
+    EVENT_CACHE_CS_PARTIAL_FLUSH = 0x7,
+    EVENT_CACHE_FLUSH_INV_WR = 0x14,
+    EVENT_CACHE_FLUSH_INV = 0x16,
+    EVENT_BOTTOM_OF_PIPE_WR = 0x28,
+    EVENT_TT_FLUSH = 0x36,
+};
 
 struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
 {
     occupancy_info_t() = default;
-    occupancy_info_t(pcinfo_t pc, int64_t time, uint64_t cu, uint64_t simd, uint64_t slot, uint64_t start)
+    occupancy_info_t(
+        pcinfo_t pc,
+        int64_t time,
+        uint64_t cu,
+        uint64_t simd,
+        uint64_t slot,
+        uint64_t start,
+        uint64_t me = 0,
+        uint64_t pipe = 0,
+        uint64_t wg = 0
+    )
     {
         this->pc = pc;
         this->time = time;
@@ -52,9 +85,22 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         this->simd = (uint8_t) simd;
         this->wave_id = (uint8_t) slot;
         this->start = start;
+        this->me_id = me & 0x7;
+        this->pipe_id = pipe & 0xF;
+        this->workgroup_id = wg & 0x7F;
         this->_rsvd = 0;
     }
-    occupancy_info_t(pcinfo_t pc, int64_t time, int8_t cu, int8_t simd, int8_t slot, uint64_t start)
+    occupancy_info_t(
+        pcinfo_t pc,
+        int64_t time,
+        int8_t cu,
+        int8_t simd,
+        int8_t slot,
+        uint64_t start,
+        uint64_t me = 0,
+        uint64_t pipe = 0,
+        uint64_t wg = 0
+    )
     {
         this->pc = pc;
         this->time = time;
@@ -63,6 +109,9 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         this->simd = (uint8_t) simd;
         this->wave_id = (uint8_t) slot;
         this->start = start;
+        this->me_id = me & 0x7;
+        this->pipe_id = pipe & 0xF;
+        this->workgroup_id = wg & 0x7F;
         this->_rsvd = 0;
     }
 };
@@ -97,16 +146,27 @@ static_assert(sizeof(rocprofiler_thread_trace_decoder_inst_t) == sizeof(Instruct
 
 struct WaveDataInternal : public rocprofiler_thread_trace_decoder_wave_t
 {
-    WaveDataInternal(int cu, int simd, int slot, int64_t start, pcinfo_t addr, bool exbarw)
+    WaveDataInternal(
+        int cu,
+        int simd,
+        int slot,
+        int64_t start,
+        pcinfo_t addr,
+        bool exbarw,
+        uint8_t me = 0,
+        uint8_t pipe = 0,
+        uint8_t wg = 0
+    )
     {
         this->cu = (uint8_t) cu;
         this->simd = (uint8_t) simd;
         this->wave_id = (uint8_t) slot;
         this->contexts = (uint8_t) 0;
 
-        this->_rsvd1 = 0;
-        this->_rsvd2 = 0;
-        this->_rsvd3 = 0;
+        this->dispatcher = (uint8_t) (((me & 0x7) << 4) | (pipe & 0xF));
+        this->workgroup_id = wg;
+        this->reserved = 0;
+        this->size = sizeof(rocprofiler_thread_trace_decoder_wave_t);
 
         this->begin_time = start;
         this->end_time = 0;
@@ -180,6 +240,26 @@ public:
 std::unique_ptr<SQTTParser> AnalyseBinary_internal(
     CppReturnInfo& info, const uint8_t* buffer, uint64_t BUFFER_SIZE, int gfx9_target_cu, class Stitcher& stitch
 );
+
+// Token iteration architectures recognised by IterateTokens_internal.
+enum class TraceArch
+{
+    UNKNOWN = 0,
+    GFX9,
+    GFX10,
+    GFX11,
+    GFX12,
+    MI400
+};
+
+// Token-walking helper IterateTokens_internal lives in iterate_tokens.hpp
+// (header-only template) so the visitor inlines and we don't drag the
+// per-arch token generator headers into every TU that includes this file.
+
+// Sniffs only the buffer header to identify the trace architecture, without
+// constructing any token generator. Mirrors the dispatch in
+// AnalyseBinary_internal / IterateTokens_internal.
+TraceArch DetectArch_internal(const uint8_t* buffer, uint64_t buffer_size);
 
 /*
 void applyGenerator(
@@ -278,8 +358,6 @@ public:
         return data.char1 == '\0' && data.char2 == 'R' && data.char3 == 'O' && data.char4 == 'C';
     }
 
-    static constexpr size_t COMPUTE_PGM_LO = 0xC;
-    static constexpr size_t COMPUTE_PGM_HI = 0xD;
     static constexpr size_t USERDATA_ADDR_0 = 0xC340;
     static constexpr size_t USERDATA_ADDR_1 = 0xC341;
     static constexpr size_t USERDATA_ADDR_2 = 0xC342;
@@ -371,10 +449,10 @@ public:
     template <typename TokenType> pcinfo_t get_wave_start(const TokenType& token)
     {
         constexpr uint64_t BITMASK = (1ul << 48) - 1;
-        return table.ToPcV2((wave_start_addr.at_reg(token) << 8) & BITMASK);
+        return ToPcV2(table, (wave_start_addr.at_reg(token) << 8) & BITMASK);
     }
 
-    pcinfo_t get_wave_start_delayed(uint64_t addr) { return table_from_start.ToPcV2(addr); }
+    pcinfo_t get_wave_start_delayed(uint64_t addr) { return ToPcV2(table_from_start, addr); }
 };
 
 template <typename WaveArray> struct AnalysisReturnData

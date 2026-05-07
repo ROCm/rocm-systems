@@ -67,7 +67,7 @@ struct Regfields
 {
     uint32_t regdata;
     uint16_t regaddr;
-    int8_t pipe, me;
+    int8_t pipe, me, disable;
 };
 
 struct Reg : public Regfields
@@ -78,6 +78,7 @@ struct Reg : public Regfields
         me = (get_bits(7, 8) + 1) & 0x1;
         regaddr = get_bits(16, 31);
         regdata = get_bits(32, 63);
+        disable = !(get_bits(15, 15));
     }
 };
 
@@ -89,6 +90,7 @@ struct RegCs : public Regfields
         me = (get_bits(7, 8) + 1) & 0x1;
         regaddr = get_bits(9, 15);
         regdata = get_bits(16, 47);
+        disable = 0;
     }
 };
 
@@ -254,6 +256,17 @@ private:
 
     std::deque<Token> lookahead{};
     size_t cur_len = 0;
+};
+
+enum sqtt_misc_type_t
+{
+    MISC_TYPE_TIME = 0,
+    MISC_TYPE_TIME_RESET,
+    MISC_TYPE_PACKET_LOST,
+    MISC_TYPE_RESERVED,
+    MISC_TYPE_TT_STALL_BEGIN,
+    MISC_TYPE_TT_STALL_END,
+    MISC_TYPE_SAVE_CONTEXT
 };
 
 }; // namespace gfx9

@@ -26,10 +26,10 @@
 #include <stdint.h>
 
 // Define mappings of CU -> {SA, WGP} on gfx10 and above. The last bit of CU defines the SA.
-#define ROCPROFILER_TRACE_DECODER_CU_SA_SHIFT 0x7
-#define ROCPROFILER_TRACE_DECODER_CU_SA_MASK 0x80
+#define ROCPROFILER_TRACE_DECODER_CU_SA_SHIFT  0x7
+#define ROCPROFILER_TRACE_DECODER_CU_SA_MASK   0x80
 #define ROCPROFILER_TRACE_DECODER_CU_WGP_SHIFT 0x0
-#define ROCPROFILER_TRACE_DECODER_CU_WGP_MASK 0x7F
+#define ROCPROFILER_TRACE_DECODER_CU_WGP_MASK  0x7F
 
 /**
  * @defgroup THREAD_TRACE Thread Trace Service
@@ -55,8 +55,8 @@ typedef enum rocprofiler_thread_trace_decoder_info_t
  */
 typedef struct rocprofiler_thread_trace_decoder_pc_t
 {
-    uint64_t address;         ///< Address (code_object_id == 0), or ELF vaddr (code_object_id != 0)
-    uint64_t code_object_id;  ///< Zero if no code object was found.
+    uint64_t address;        ///< Address (code_object_id == 0), or ELF vaddr (code_object_id != 0)
+    uint64_t code_object_id; ///< Zero if no code object was found.
 } rocprofiler_thread_trace_decoder_pc_t;
 
 /**
@@ -64,13 +64,13 @@ typedef struct rocprofiler_thread_trace_decoder_pc_t
  */
 typedef struct rocprofiler_thread_trace_decoder_perfevent_t
 {
-    int64_t  time;     ///< Shader clock timestamp in which these counters were read.
-    uint16_t events0;  ///< Counter0 (bank==0) or Counter4 (bank==1).
-    uint16_t events1;  ///< Counter1 (bank==0) or Counter5 (bank==1).
-    uint16_t events2;  ///< Counter2 (bank==0) or Counter6 (bank==1).
-    uint16_t events3;  ///< Counter3 (bank==0) or Counter7 (bank==1).
-    uint8_t  CU;       ///< Shader compute unit ID these counters were collected from.
-    uint8_t  bank;     ///< Selects counter group [0,3] or [4,7]
+    int64_t time;     ///< Shader clock timestamp in which these counters were read.
+    uint16_t events0; ///< Counter0 (bank==0) or Counter4 (bank==1).
+    uint16_t events1; ///< Counter1 (bank==0) or Counter5 (bank==1).
+    uint16_t events2; ///< Counter2 (bank==0) or Counter6 (bank==1).
+    uint16_t events3; ///< Counter3 (bank==0) or Counter7 (bank==1).
+    uint8_t CU;       ///< Shader compute unit ID these counters were collected from.
+    uint8_t bank;     ///< Selects counter group [0,3] or [4,7]
 } rocprofiler_thread_trace_decoder_perfevent_t;
 
 /**
@@ -78,14 +78,18 @@ typedef struct rocprofiler_thread_trace_decoder_perfevent_t
  */
 typedef struct rocprofiler_thread_trace_decoder_occupancy_t
 {
-    rocprofiler_thread_trace_decoder_pc_t pc;        ///< Wave start address (kernel entry point)
-    uint64_t                              time;      ///< Timestamp of event
-    uint8_t                               reserved;  ///< Reserved
-    uint8_t                               cu;        ///< Compute unit ID (gfx9) or WGP ID (gfx10+).
-    uint8_t                               simd;      ///< SIMD ID [0,3] within compute unit
-    uint8_t                               wave_id;   ///< Wave slot ID within SIMD
-    uint32_t                              start : 1;  ///< 1 if wave_start, 0 if a wave_end
-    uint32_t                              _rsvd : 31;
+    rocprofiler_thread_trace_decoder_pc_t pc; ///< Wave start address (kernel entry point)
+    uint64_t time;                            ///< Timestamp of event
+    uint8_t reserved;                         ///< Reserved
+    uint8_t cu;                               ///< Compute unit ID (gfx9) or WGP ID (gfx10+).
+    uint8_t simd;                             ///< SIMD ID [0,3] within compute unit
+    uint8_t wave_id;                          ///< Wave slot ID within SIMD
+    uint32_t start : 1;                       ///< 1 if wave_start, 0 if a wave_end
+    // The following fields are only valid for wave_start
+    uint32_t me_id        : 3; ///< MicroEngine ID
+    uint32_t pipe_id      : 4;
+    uint32_t workgroup_id : 7;
+    uint32_t _rsvd        : 17;
 } rocprofiler_thread_trace_decoder_occupancy_t;
 
 /**
@@ -106,8 +110,8 @@ typedef enum rocprofiler_thread_trace_decoder_wstate_type_t
  */
 typedef struct rocprofiler_thread_trace_decoder_wave_state_t
 {
-    int32_t type;      ///< one of rocprofiler_thread_trace_decoder_waveslot_state_type_t
-    int32_t duration;  ///< state duration in cycles
+    int32_t type;     ///< one of rocprofiler_thread_trace_decoder_waveslot_state_type_t
+    int32_t duration; ///< state duration in cycles
 } rocprofiler_thread_trace_decoder_wave_state_t;
 
 /**
@@ -116,18 +120,18 @@ typedef struct rocprofiler_thread_trace_decoder_wave_state_t
 typedef enum rocprofiler_thread_trace_decoder_inst_category_t
 {
     ROCPROFILER_THREAD_TRACE_DECODER_INST_NONE = 0,
-    ROCPROFILER_THREAD_TRACE_DECODER_INST_SMEM,     ///< Scalar memory op
-    ROCPROFILER_THREAD_TRACE_DECODER_INST_SALU,     ///< Scalar ALU op
-    ROCPROFILER_THREAD_TRACE_DECODER_INST_VMEM,     ///< Vector memory op
-    ROCPROFILER_THREAD_TRACE_DECODER_INST_FLAT,     ///< Flat addressing vmem or lds
-    ROCPROFILER_THREAD_TRACE_DECODER_INST_LDS,      ///< Local Data Share op
-    ROCPROFILER_THREAD_TRACE_DECODER_INST_VALU,     ///< Vector ALU op
-    ROCPROFILER_THREAD_TRACE_DECODER_INST_JUMP,     ///< Branch taken
-    ROCPROFILER_THREAD_TRACE_DECODER_INST_NEXT,     ///< Branch not taken
-    ROCPROFILER_THREAD_TRACE_DECODER_INST_IMMED,    ///< Internal operation
-    ROCPROFILER_THREAD_TRACE_DECODER_INST_CONTEXT,  ///< Wave context switch
-    ROCPROFILER_THREAD_TRACE_DECODER_INST_MESSAGE,  ///< MSG types
-    ROCPROFILER_THREAD_TRACE_DECODER_INST_BVH,      ///< Raytrace op
+    ROCPROFILER_THREAD_TRACE_DECODER_INST_SMEM,    ///< Scalar memory op
+    ROCPROFILER_THREAD_TRACE_DECODER_INST_SALU,    ///< Scalar ALU op
+    ROCPROFILER_THREAD_TRACE_DECODER_INST_VMEM,    ///< Vector memory op
+    ROCPROFILER_THREAD_TRACE_DECODER_INST_FLAT,    ///< Flat addressing vmem or lds
+    ROCPROFILER_THREAD_TRACE_DECODER_INST_LDS,     ///< Local Data Share op
+    ROCPROFILER_THREAD_TRACE_DECODER_INST_VALU,    ///< Vector ALU op
+    ROCPROFILER_THREAD_TRACE_DECODER_INST_JUMP,    ///< Branch taken
+    ROCPROFILER_THREAD_TRACE_DECODER_INST_NEXT,    ///< Branch not taken
+    ROCPROFILER_THREAD_TRACE_DECODER_INST_IMMED,   ///< Internal operation
+    ROCPROFILER_THREAD_TRACE_DECODER_INST_CONTEXT, ///< Wave context switch
+    ROCPROFILER_THREAD_TRACE_DECODER_INST_MESSAGE, ///< MSG types
+    ROCPROFILER_THREAD_TRACE_DECODER_INST_BVH,     ///< Raytrace op
     ROCPROFILER_THREAD_TRACE_DECODER_INST_LAST
 } rocprofiler_thread_trace_decoder_inst_category_t;
 
@@ -141,10 +145,10 @@ typedef enum rocprofiler_thread_trace_decoder_inst_category_t
  */
 typedef struct rocprofiler_thread_trace_decoder_inst_t
 {
-    uint32_t category : 8;   ///< One of rocprofiler_thread_trace_decoder_inst_category_t
-    uint32_t stall    : 24;  ///< Stall duration, in clock cycles.
-    int32_t  duration;       ///< Total instruction duration, in clock cycles.
-    int64_t  time;           ///< When the wave first attempted to execute this instruction.
+    uint32_t category : 8;  ///< One of rocprofiler_thread_trace_decoder_inst_category_t
+    uint32_t stall    : 24; ///< Stall duration, in clock cycles.
+    int32_t duration;       ///< Total instruction duration, in clock cycles.
+    int64_t time;           ///< When the wave first attempted to execute this instruction.
     rocprofiler_thread_trace_decoder_pc_t pc;
 } rocprofiler_thread_trace_decoder_inst_t;
 
@@ -157,22 +161,23 @@ typedef struct rocprofiler_thread_trace_decoder_inst_t
  */
 typedef struct rocprofiler_thread_trace_decoder_wave_t
 {
-    uint8_t cu;        ///< CU id (gfx9) or wgp id (gfx10+). This is always the target_cu.
-    uint8_t simd;      ///< SIMD ID [0,3].
-    uint8_t wave_id;   ///< Wave slot ID within SIMD.
-    uint8_t contexts;  ///< Counts how many CWSR events have occured during the wave lifetime.
+    uint8_t cu;       ///< CU id (gfx9) or wgp id (gfx10+). This is always the target_cu.
+    uint8_t simd;     ///< SIMD ID [0,3].
+    uint8_t wave_id;  ///< Wave slot ID within SIMD.
+    uint8_t contexts; ///< Counts how many CWSR events have occured during the wave lifetime.
 
-    uint32_t _rsvd1;
-    uint32_t _rsvd2;
-    uint32_t _rsvd3;
+    uint8_t dispatcher;   ///< [0:3] PIPE_ID, [4:6] ME_ID
+    uint8_t workgroup_id; ///< Workgroup ID
+    uint16_t reserved;    ///< Reserved
+    uint64_t size;        ///< Size of this struct
 
-    int64_t begin_time;  ///< Wave begin time. Should match occupancy event wave start.
-    int64_t end_time;    ///< Wave end time. Should match occupancy event wave end.
+    int64_t begin_time; ///< Wave begin time. Should match occupancy event wave start.
+    int64_t end_time;   ///< Wave end time. Should match occupancy event wave end.
 
-    uint64_t                                       timeline_size;      ///< timeline_array size
-    uint64_t                                       instructions_size;  ///< instructions_array size
-    rocprofiler_thread_trace_decoder_wave_state_t* timeline_array;     ///< wave state change events
-    rocprofiler_thread_trace_decoder_inst_t*       instructions_array;  ///< Instructions executed
+    uint64_t timeline_size;                                        ///< timeline_array size
+    uint64_t instructions_size;                                    ///< instructions_array size
+    rocprofiler_thread_trace_decoder_wave_state_t* timeline_array; ///< wave state change events
+    rocprofiler_thread_trace_decoder_inst_t* instructions_array;   ///< Instructions executed
 } rocprofiler_thread_trace_decoder_wave_t;
 
 /**
@@ -185,8 +190,8 @@ typedef struct rocprofiler_thread_trace_decoder_wave_t
  */
 typedef struct rocprofiler_thread_trace_decoder_realtime_t
 {
-    int64_t  shader_clock;    ///< Clock timestamp in gfx clock units
-    uint64_t realtime_clock;  ///< Clock timestamp in realtime units
+    int64_t shader_clock;    ///< Clock timestamp in gfx clock units
+    uint64_t realtime_clock; ///< Clock timestamp in realtime units
     uint64_t reserved;
 } rocprofiler_thread_trace_decoder_realtime_t;
 
@@ -197,7 +202,7 @@ typedef struct rocprofiler_thread_trace_decoder_realtime_t
 typedef enum rocprofiler_thread_trace_decoder_shaderdata_flags_t
 {
     ROCPROFILER_THREAD_TRACE_DECODER_SHADERDATA_FLAGS_IMM = 0,
-    ROCPROFILER_THREAD_TRACE_DECODER_SHADERDATA_FLAGS_PRIV  ///< Generated by the trap handler
+    ROCPROFILER_THREAD_TRACE_DECODER_SHADERDATA_FLAGS_PRIV ///< Generated by the trap handler
 
     /// @var ROCPROFILER_THREAD_TRACE_DECODER_SHADERDATA_FLAGS_IMM
     /// @brief Value comes from s_ttracedata_imm.
@@ -209,12 +214,12 @@ typedef enum rocprofiler_thread_trace_decoder_shaderdata_flags_t
  */
 typedef struct rocprofiler_thread_trace_decoder_shaderdata_t
 {
-    int64_t  time;
-    uint64_t value;    ///< Value written from M0/IMM
-    uint8_t  cu;       ///< CU id (gfx9) or wgp id (gfx10+).
-    uint8_t  simd;     ///< SIMD ID [0,3].
-    uint8_t  wave_id;  ///< Wave slot ID within SIMD.
-    uint8_t  flags;    ///< bitmask of rocprofiler_thread_trace_decoder_shaderdata_flags_t
+    int64_t time;
+    uint64_t value;  ///< Value written from M0/IMM
+    uint8_t cu;      ///< CU id (gfx9) or wgp id (gfx10+).
+    uint8_t simd;    ///< SIMD ID [0,3].
+    uint8_t wave_id; ///< Wave slot ID within SIMD.
+    uint8_t flags;   ///< bitmask of rocprofiler_thread_trace_decoder_shaderdata_flags_t
     uint32_t reserved;
 } rocprofiler_thread_trace_decoder_shaderdata_t;
 
@@ -224,12 +229,45 @@ typedef struct rocprofiler_thread_trace_decoder_shaderdata_t
  */
 typedef struct rocprofiler_thread_trace_decoder_inst_other_simd_t
 {
-    uint64_t size;      ///< Size of this struct.
-    int64_t  time;      ///< Issue time.
-    uint16_t cycles;    ///< Execution duration, not including stall.
-    uint8_t  wgp;       ///< WGP ID. This is always the target cu.
-    uint8_t  category;  ///< One of rocprofiler_thread_trace_decoder_inst_category_t
+    uint64_t size;    ///< Size of this struct.
+    int64_t time;     ///< Issue time.
+    uint16_t cycles;  ///< Execution duration, not including stall.
+    uint8_t wgp;      ///< WGP ID. This is always the target cu.
+    uint8_t category; ///< One of rocprofiler_thread_trace_decoder_inst_category_t
 } rocprofiler_thread_trace_decoder_inst_other_simd_t;
+
+typedef enum rocprofiler_thread_trace_decoder_event_type_t
+{
+    ROCPROF_TRACE_DECODER_EVENT_NONE = 0,
+    ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH,
+    ROCPROF_TRACE_DECODER_EVENT_BOTTOM_OF_PIPE,
+    ROCPROF_TRACE_DECODER_EVENT_SAVE_CONTEXT,
+    ROCPROF_TRACE_DECODER_EVENT_DISPATCH_BEGIN,
+    ROCPROF_TRACE_DECODER_EVENT_DISPATCH_END,
+    ROCPROF_TRACE_DECODER_EVENT_CACHE_FLUSH,
+    ROCPROF_TRACE_DECODER_EVENT_PACKET_LOSS,
+    ROCPROF_TRACE_DECODER_EVENT_TT_STALL_BEGIN,
+    ROCPROF_TRACE_DECODER_EVENT_TT_STALL_END,
+    ROCPROF_TRACE_DECODER_EVENT_TT_FLUSH,
+    ROCPROF_TRACE_DECODER_EVENT_REG_PGM_LO,
+    ROCPROF_TRACE_DECODER_EVENT_REG_PGM_HI,
+    ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC1,
+    ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC2,
+    ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC3,
+    ROCPROF_TRACE_DECODER_EVENT_REG_NOWHERE,
+    ROCPROF_TRACE_DECODER_EVENT_LAST
+} rocprofiler_thread_trace_decoder_event_type_t;
+
+typedef struct rocprofiler_thread_trace_decoder_event_t
+{
+    uint64_t size; ///< Size of this struct
+    int64_t time;  ///< Time of event. Note: Behaves differently for quick_scan
+    rocprofiler_thread_trace_decoder_event_type_t type;
+    uint8_t me_id;
+    uint8_t pipe_id;
+    uint16_t reserved;
+    uint64_t payload; ///< Reg data for EVENT_REG_ types
+} rocprof_trace_decoder_event_t;
 
 /**
  * @brief Defines the type of payload received by rocprofiler_thread_trace_decoder_callback_t
@@ -239,11 +277,11 @@ typedef enum rocprofiler_thread_trace_decoder_record_type_t
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_GFXIP = 0,  ///< Record is gfxip_major, type uint64_t
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY,  ///< rocprofiler_thread_trace_decoder_occupancy_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_PERFEVENT,  ///< rocprofiler_thread_trace_decoder_perfevent_t*
-    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE,   ///< rocprofiler_thread_trace_decoder_wave_t*
-    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO,   ///< rocprofiler_thread_trace_decoder_info_t*
-    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DEBUG,  ///< Debug
-    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA,  ///< rocprofiler_thread_trace_decoder_shaderdata_t*
-    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME,  ///< rocprofiler_thread_trace_decoder_realtime_t*
+    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE,       ///< rocprofiler_thread_trace_decoder_wave_t*
+    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO,       ///< rocprofiler_thread_trace_decoder_info_t*
+    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT,      ///< rocprofiler_thread_trace_decoder_event_t*
+    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, ///< rocprofiler_thread_trace_decoder_shaderdata_t*
+    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME,   ///< rocprofiler_thread_trace_decoder_realtime_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY,
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD,
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST
