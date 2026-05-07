@@ -1800,25 +1800,54 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
     // in MQD but the bit is already clear — undefined per the FW
     // contract.
     //
-    // 1. Clear KFD-side profiling-buffer registration. C3: capture
-    //    status so callers can observe a libhsakmt teardown failure,
-    //    but we still proceed with the host-side free — leaving the
-    //    host buffer alive after a teardown failure is strictly worse
-    //    (the buffer would leak with no path to reach it again).
-    hsa_status_t buf_status =
+    // 1. Clear KFD-side profiling-buffer registration. Capture status
+    //    of BOTH the legacy and the new sub-op clear: if EITHER returns
+    //    a failure status, we cannot prove the kernel committed the
+    //    addr=0 update to the per-queue MQD, which means FW may still
+    //    hold our buffer pointer in its MQD copy. In that case freeing
+    //    the host buffer is unsafe — FW could subsequently write into
+    //    freed host memory (use-after-free with GPU as the writer).
+    //    Code-quality C4: leak the buffer rather than risk that.
+    hsa_status_t leg_status =
         agent_->driver().SetQueueProfilingBuffer(queue_id_, nullptr, 0, nullptr);
 
     // Phase-2: also CLEAR the new sub-op if we registered host-VA pointers
     // on the enable side. This drops all 4 BO refs (buffer + 3 pointers)
     // kernel-side and zeros the new MQD slots (DW48-DW53) on the same
     // update_queue pass that follows. SetDispatchLog with buffer_addr=NULL
-    // issues KFD_DISPATCH_LOG_OP_CLEAR. Status is best-effort: if the new
-    // thunk is missing or fails, we still tear down the legacy path below.
+    // issues KFD_DISPATCH_LOG_OP_CLEAR. Code-quality C4: capture the
+    // status; failure here is treated as just as fatal as the legacy
+    // clear failure above — both paths can leave a stale MQD entry that
+    // FW continues to write into.
+    hsa_status_t dl_status = HSA_STATUS_SUCCESS;
     if (dispatch_log_wptr_buf_ != nullptr) {
-      (void)agent_->driver().SetDispatchLog(
+      dl_status = agent_->driver().SetDispatchLog(
           queue_id_, static_cast<uint32_t>(agent_->KfdGpuID()),
           /*buffer_base=*/nullptr, /*num_records=*/0,
           /*wptr_addr=*/nullptr, /*rptr_addr=*/nullptr, /*signal_addr=*/nullptr);
+    }
+
+    // Code-quality C4: if either KFD clear failed, do NOT free the host
+    // buffer or the host-VA counter words; the safest action is to
+    // quarantine the allocations until process exit (they will be
+    // released by the AqlQueue destructor's deallocate-if-non-null
+    // logic, which itself runs only after KFD has destroyed the queue
+    // — at which point FW can no longer write to the BO). Leaving
+    // dispatch_record_buffer_ non-null also prevents a subsequent
+    // re-enable from double-allocating, and forces any retry through
+    // the existing "buffer already wired" no-op path at line 1643.
+    if (leg_status != HSA_STATUS_SUCCESS || dl_status != HSA_STATUS_SUCCESS) {
+      std::fprintf(stderr,
+                   "[hsa-runtime] dispatch_log: KFD clear failed on disable "
+                   "(legacy=%d, dispatch_log=%d); leaking host buffer to avoid "
+                   "FW use-after-free until queue destroy\n",
+                   static_cast<int>(leg_status), static_cast<int>(dl_status));
+      // Do NOT clear the profiling bit either — the FW contract requires
+      // the bit stay set while MQD still references the buffer (C6).
+      // Returning the most informative status: legacy failure preempts
+      // dispatch_log failure since the legacy path is the one that
+      // unconditionally controls FW visibility of the buffer.
+      return (leg_status != HSA_STATUS_SUCCESS) ? leg_status : dl_status;
     }
 
     // 2. Flush MQD via UPDATE_QUEUE so FW observes addr=0.
@@ -1845,7 +1874,7 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
       agent_->system_deallocator()(dispatch_log_signal_buf_);
       dispatch_log_signal_buf_ = nullptr;
     }
-    return buf_status;
+    return HSA_STATUS_SUCCESS;
   }
 
   // Idempotent disable with no buffer (or never enabled): just reflect
