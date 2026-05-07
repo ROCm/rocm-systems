@@ -110,6 +110,7 @@ fail_lsaRankList:
 }
 
 static void symTeamDestroyAll(struct ncclComm* comm); // Further down
+static void symMemoryDropRef(struct ncclComm* comm, struct ncclDevrMemory* mem); // Further down
 
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
   struct ncclDevrState* devr = &comm->devrState;
@@ -136,10 +137,20 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
       CUDACHECKIGNORE(cudaStreamDestroy(stream));
     }
   }
-  CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
+  // Drain leaked windows so every per-peer slice is unmapped before VA free.
+  // Without this, on HIP cuMemAddressFree over a still-mapped range returns
+  // hipErrorInvalidValue, which then cascades into ibv_dealloc_pd EBUSY at teardown.
+  while (devr->memHead != nullptr) {
+    struct ncclDevrMemory* m = devr->memHead;
+    m->refCount = 1; // force drop on the next call
+    symMemoryDropRef(comm, m);
+  }
+  if (devr->lsaFlatBase != nullptr) {
+    CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
   // Returns error: invalid argument. Already unmapped by symMemoryDropRef
   // CUCHECKIGNORE(cuMemUnmap(flatAddr, devr->lsaSize*devr->bigSize));
-  CUCHECKIGNORE(cuMemAddressFree(flatAddr, devr->lsaSize*devr->bigSize));
+    CUCHECKIGNORE(cuMemAddressFree(flatAddr, devr->lsaSize*devr->bigSize));
+  }
   ncclShadowPoolDestruct(&devr->shadows);
   ncclSpaceDestruct(&devr->bigSpace);
   free(devr->lsaRankList);
@@ -836,7 +847,7 @@ ncclResult_t ncclDevrCommCreateInternal(
     memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
 #endif
     memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    memProp.requestedHandleTypes = ncclCuMemHandleType;
+    memProp.requestedHandleType = ncclCuMemHandleType;
     // We have to assume that if GIN is possible it might be requested in the future,
     // even on single node.
     memProp.allocFlags.gpuDirectRDMACapable = comm->sharedRes->ginState.ncclGin != nullptr ? 1 : 0;

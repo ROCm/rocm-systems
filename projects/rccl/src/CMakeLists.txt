@@ -412,6 +412,18 @@ foreach(SRC_FILE ${SRC_FILES})
 endforeach()
 
 set(NCCL_DEVICE_HEADER "${PROJECT_BINARY_DIR}/include/rccl/nccl_device.h")
+# Copy hip_compat.h as-is (no hipification — contains both CUDA and HIP paths)
+set(HIP_COMPAT_SRC "${RCCL_SOURCE_DIR}/src/include/nccl_device/hip_compat.h")
+set(HIP_COMPAT_DST "${HIPIFY_DIR}/src/include/nccl_device/hip_compat.h")
+add_custom_command(
+  OUTPUT ${HIP_COMPAT_DST}
+  COMMAND ${CMAKE_COMMAND} -E copy ${HIP_COMPAT_SRC} ${HIP_COMPAT_DST}
+  MAIN_DEPENDENCY ${HIP_COMPAT_SRC}
+  COMMENT "Copying hip_compat.h (no hipification)"
+)
+list(APPEND HIP_SOURCES ${HIP_COMPAT_DST})
+list(APPEND NCCL_DEVICE_HIP_FILES ${HIP_COMPAT_DST})
+
 add_custom_command(
   OUTPUT ${NCCL_DEVICE_HEADER}
   COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
