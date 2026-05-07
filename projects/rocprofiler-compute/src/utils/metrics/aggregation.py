@@ -155,3 +155,12 @@ def to_mod(
 
 def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
     return str(a) + str(b)
+
+
+def calc_pct_of_peak(value: object, peak: object) -> float | str:
+    """Return 100 * value / peak, or empty string on error / zero peak."""
+    try:
+        val_f, peak_f = float(value), float(peak)
+    except (ValueError, TypeError):
+        return ""
+    return (val_f / peak_f) * 100 if peak_f != 0 else ""

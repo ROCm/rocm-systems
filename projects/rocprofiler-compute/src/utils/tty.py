@@ -17,11 +17,11 @@ from utils.kernel_name_shortener import (
     kernel_name_shortener,
 )
 from utils.logger import console_error, console_log, console_warning
+from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
     NS_TO_MS,
     CallTreeNode,
     build_operator_summary,
-    calc_pct_of_peak,
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )

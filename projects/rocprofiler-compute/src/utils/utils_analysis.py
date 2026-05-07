@@ -21,15 +21,6 @@ from utils.logger import (
 NS_TO_MS = 1.0 / 1_000_000.0
 
 
-def calc_pct_of_peak(value: object, peak: object) -> Union[float, str]:
-    """Return 100 * value / peak, or empty string on error / zero peak."""
-    try:
-        val_f, peak_f = float(value), float(peak)
-    except (ValueError, TypeError):
-        return ""
-    return (val_f / peak_f) * 100 if peak_f != 0 else ""
-
-
 def get_bw_scale_and_unit(value: float) -> tuple[float, str]:
     """Return the divisor and suffix for a bandwidth value in Bytes/s."""
     if value >= 1e12:

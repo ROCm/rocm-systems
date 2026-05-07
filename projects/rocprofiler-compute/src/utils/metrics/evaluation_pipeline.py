@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from utils.logger import console_error, console_warning, demarcate
+from utils.metrics.aggregation import calc_pct_of_peak
 from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.metrics.expression import build_eval_string
@@ -20,7 +21,6 @@ from utils.metrics.noise_clamper import (
     get_noise_clamp_warnings,
     print_noise_clamp_summary,
 )
-from utils.utils_analysis import calc_pct_of_peak
 from utils.utils_common import SUPPORTED_FIELD, calc_builtin_var
 from utils.utils_counter_defs import get_build_in_vars
 
