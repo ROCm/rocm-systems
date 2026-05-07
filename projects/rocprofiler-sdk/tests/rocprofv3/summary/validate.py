@@ -213,7 +213,7 @@ def test_summary_data(json_data):
                     )
                     assert oitr.value.count == 2
         elif itr.domain == "HIP_API":
-            assert itr.stats.count >= 2130 and itr.stats.count <= 2165
+            assert itr.stats.count >= 2160 and itr.stats.count <= 2210
         elif itr.domain == "MEMORY_COPY":
             # two threads + two memory copies (H2D + D2H).
             # HIP may decompose memory copies into more than one HSA memory copy
@@ -236,20 +236,23 @@ def test_summary_data(json_data):
                 memory_allocation_allocate_count + memory_allocation_free_count
             )
             assert (
-                memory_allocation_allocate_and_free_count >= 10
-                and memory_allocation_allocate_and_free_count <= 30
+                memory_allocation_allocate_and_free_count >= 30
+                and memory_allocation_allocate_and_free_count <= 60
             )
             # check if hip-runtime memory management pools through virtual memory allocation count is equal to free count.
             assert (
                 memory_allocation_vmem_allocate_count == memory_allocation_vmem_free_count
             )
         elif itr.domain == "MARKER_API":
-            assert itr.stats.count == 1106
+            assert itr.stats.count == 1109
             expected = dict(
                 [
                     ["run", 2],
                     ["run/iteration", 1000],
                     ["run/iteration/sync", 100],
+                    ["run/hip-memcpy-batch", 1],
+                    ["run/hip-memcpy-batch/H2D", 1],
+                    ["run/hip-memcpy-batch/D2H", 1],
                 ]
             )
             for oitr in itr.stats.operations:

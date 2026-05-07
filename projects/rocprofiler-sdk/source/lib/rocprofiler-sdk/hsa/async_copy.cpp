@@ -377,9 +377,9 @@ get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
                   const void*      _src_address,
                   std::string_view _name)
 {
-    auto  _copy_meta      = copy_metadata{};
-    auto* _rocp_dst_agent = agent::get_rocprofiler_agent(_hsa_dst_agent);
-    auto* _rocp_src_agent = agent::get_rocprofiler_agent(_hsa_src_agent);
+    auto        _copy_meta      = copy_metadata{};
+    const auto* _rocp_dst_agent = agent::get_rocprofiler_agent(_hsa_dst_agent);
+    const auto* _rocp_src_agent = agent::get_rocprofiler_agent(_hsa_src_agent);
 
     if(_rocp_dst_agent && _rocp_src_agent)
     {
