@@ -661,7 +661,7 @@ void CSRegisterHandlerGFX9::HandleRealtimeClock(size_t time, size_t data)
     }
 
     userdata3_count--;
-    if (!userdata3_known) return;
+    if (!userdata3_known || userdata3_count < 0) return;
 
     if (userdata3_count < RT_LAST) userdata3_values[userdata3_count] = data;
     if (userdata3_count > 0) return;
