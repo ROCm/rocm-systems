@@ -13,6 +13,7 @@
 #include <cuda_runtime.h>
 
 #include "core.h"
+#include "mem_manager.h"
 
 
 // #define HIP_FABRIC_API
@@ -64,7 +65,7 @@ struct ncclIpcRegInfo {
   struct ncclIpcImpInfo impInfo;
 };
 
-ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int directMap, ncclIpcDesc *ipcDesc, void **ptr);
+ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int directMap, ncclIpcDesc *ipcDesc, void **ptr, struct ncclMemManager* manager = nullptr, ncclMemType_t memtype = ncclMemPersist);
 ncclResult_t ncclP2pFreeShareableBuffer(ncclIpcDesc *ipcDesc);
 ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_t size, ncclIpcDesc *ipcDesc, void **devMemPtr);
 ncclResult_t ncclIpcLocalRegisterBuffer(ncclComm* comm, const void* userbuff, size_t buffSize, int* peerRanks, int nPeers, ncclIpcRegType type, int* regBufFlag, uintptr_t* offsetOut, uintptr_t** peerRmtAddrsOut);

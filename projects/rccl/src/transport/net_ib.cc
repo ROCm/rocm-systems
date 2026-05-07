@@ -2096,9 +2096,9 @@ cumem_flush_hsa:
         }
 #else
 #if defined(HIP_UNCACHED_MEMORY)
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), hipDeviceMallocUncached), ret, fail);
+        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr, ncclMemPersist, hipDeviceMallocUncached), ret, fail);
 #else
-        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), hipDeviceMallocFinegrained), ret, fail);
+        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr, ncclMemPersist, hipDeviceMallocFinegrained), ret, fail);
 #endif
         if (useDmaBuf)
         {
@@ -2122,7 +2122,7 @@ peermem_flush:
 flush_reg_done:
         if (!gpuFlushRegistered) {
           if (rCommDev->gpuFlush.gpuFlushGpuMem) {
-            ncclCudaFree(rCommDev->gpuFlush.gpuFlushGpuMem);
+            ncclCudaFree(rCommDev->gpuFlush.gpuFlushGpuMem, /*manager=*/nullptr);
             rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
           }
           rCommDev->gpuFlush.gpuMr = nullptr;
@@ -3090,7 +3090,7 @@ ncclResult_t ncclIbCloseRecv(void* recvComm) {
       struct ncclIbRecvCommDev* commDev = comm->devs + i;
       if (comm->flushEnabled) {
         if (commDev->gpuFlush.gpuFlushGpuMem != nullptr) {
-          NCCLCHECK(ncclCudaFree(commDev->gpuFlush.gpuFlushGpuMem));
+          NCCLCHECK(ncclCudaFree(commDev->gpuFlush.gpuFlushGpuMem, /*manager=*/nullptr));
           commDev->gpuFlush.gpuFlushGpuMem = nullptr;
           if (commDev->gpuFlush.gpuMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.gpuMr));
           commDev->gpuFlush.gpuMr = nullptr;
