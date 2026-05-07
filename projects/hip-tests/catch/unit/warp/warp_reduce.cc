@@ -110,11 +110,12 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
         if constexpr (std::is_integral<T>::value) {
           // for integral types the result should match exactly
           if (result != expected) {
-            printMismatch(result, expected, input.ptr(), mask);
+            printMismatch(result, expected, input.ptr(), mask, lane);
             REQUIRE(result == expected);
           }
-        } else
-          compareFloatingPoint(result, expected, mask, input.ptr());
+        } else {
+          compareFloatingPoint(result, expected, mask, input.ptr(), lane);
+        }
       }
 
       lane++;

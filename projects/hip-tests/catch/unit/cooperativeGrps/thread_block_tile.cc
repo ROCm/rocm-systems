@@ -735,12 +735,17 @@ void aggregateForTypeAndOp(AggregationType aggType)
 
       mask &= h_extraMasks.host_ptr()[numAggregation];
       lastLane = 64 - __builtin_clzll(mask) - 1;
+
+      if (laneId > lastLane) {
+        continue;
+      }
+
       calculateExpected(expected, input, op, mask, aggType);
       resultLane = (aggType == AggregationType::Reduce)? lastLane : laneId;
 
-      if constexpr (std::is_integral<T>::value) {
-        // for integral types the result should match exactly
-        if ((1ull << laneId) & mask) {
+      if ((1ull << laneId) & mask) {
+        if constexpr (std::is_integral<T>::value) {
+          // for integral types the result should match exactly
           // for reduce, the result would be in the last lane whose first bit is on in the mask
           // for scans, the associated result is different in each lane
           if (result != expected[resultLane]) {
@@ -748,10 +753,10 @@ void aggregateForTypeAndOp(AggregationType aggType)
             INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
             REQUIRE(result == expected[resultLane]);
           }
+        } else {
+          INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
+          compareFloatingPoint(result, expected[resultLane], mask, h_input.host_ptr());
         }
-      } else {
-        INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
-        compareFloatingPoint(result, expected[resultLane], mask, h_input.host_ptr());
       }
     }
 
