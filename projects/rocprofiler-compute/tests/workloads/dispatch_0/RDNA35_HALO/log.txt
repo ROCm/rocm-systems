@@ -1,0 +1,70 @@
+Rocprofiler-Compute version: 3.7.0
+Profiler choice: rocprofiler-sdk
+Output directory: /home/rocprof/xuchen/rocm-systems/projects/rocprofiler-compute/tests/workloads/dispatch_0/RDNA35_HALO
+Target: RDNA35_HALO
+Command: ./tests/vcopy -n 1048576 -b 256 -i 3
+Kernel Selection: None
+Dispatch Selection: ['0']
+Filtered sections: All
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Collecting Performance Counters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Building native tool using command: cmake -S /home/rocprof/xuchen/rocm-systems/projects/rocprofiler-compute/src/lib -B /home/rocprof/xuchen/rocm-systems/projects/rocprofiler-compute/src/lib/_build
+-- HIP_PLATFORM using HIPCONFIG_EXEC: amd
+-- {fmt} version: 12.1.0
+-- Build type:
+-- Configuring done (0.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/rocprof/xuchen/rocm-systems/projects/rocprofiler-compute/src/lib/_build
+Generating native tool project using command: cmake --build /home/rocprof/xuchen/rocm-systems/projects/rocprofiler-compute/src/lib/_build --parallel
+[  0%] Built target gsl_assert
+[ 33%] Built target fmt
+[100%] Built target rocprofiler-compute-tool
+Searching /home/rocprof/xuchen/rocm-systems/projects/rocprofiler-compute/src by lib/_build/lib/librocprofiler-compute-tool.so for native collector
+Using native collector: /home/rocprof/xuchen/rocm-systems/projects/rocprofiler-compute/src/lib/_build/lib/librocprofiler-compute-tool.so
+Using native counter collection tool: /home/rocprof/xuchen/rocm-systems/projects/rocprofiler-compute/src/lib/_build/lib/librocprofiler-compute-tool.so
+[profiling] Iteration multiplexing: Disabled
+[Run 1/10][Approximate profiling time left: pending first measurement...]
+[profiling] Current input file: tests/workloads/dispatch_0/RDNA35_HALO/perfmon/pmc_perf_0.yaml
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.3.0 (1.3.0)
+   |-> [rocprofiler-sdk] W0506 23:16:06.473218 3530700 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.073337 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W0506 23:16:06.498604 3530700 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.519220 3530700 tool.cpp:2754] HSA version 1.18.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] vcopy testing on GCD 0
+   |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+   |-> [rocprofiler-sdk] Finished allocating vectors on the GPU
+   |-> [rocprofiler-sdk] Finished copying vectors to the GPU
+   |-> [rocprofiler-sdk] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprofiler-sdk] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprofiler-sdk] Launching the  kernel on the GPU
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprofiler-sdk] Releasing GPU memory
+   |-> [rocprofiler-sdk] Releasing CPU memory
+   |-> [rocprofiler-sdk] W0506 23:16:06.578696 3530700 simple_timer.cpp:55] [rocprofv3] './tests/vcopy -n 1048576 -b 256 -i 3' ::     0.080091 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.592820 3530700 generateRocpd.cpp:1042] writing SQL database for process 3530700 on node 2467700534
+   |-> [rocprofiler-sdk] E0506 23:16:06.593222 3530700 generateRocpd.cpp:1066] Opened result file: tests/workloads/dispatch_0/RDNA35_HALO/out/pmc_1/rocprof-apu3/3530700_results.db (UUID=000091ae-ad33-7d33-af35-d7985c26796e)
+   |-> [rocprofiler-sdk] W0506 23:16:06.665687 3530700 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.002854 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.665702 3530700 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.000002 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.666061 3530700 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.000356 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.666174 3530700 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.000103 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.669476 3530700 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     0.003299 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.670798 3530700 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.001316 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.670811 3530700 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000009 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.676078 3530700 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.005264 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.676088 3530700 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000004 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.676092 3530700 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000002 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.676097 3530700 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000004 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.677111 3530700 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc: kfd      ::     0.001012 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.677116 3530700 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event: kfd     ::     0.000000 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.677370 3530700 simple_timer.cpp:55] SQLite3 generation :: rocpd_flush_pending      ::     0.000251 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.677423 3530700 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000049 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.678967 3530700 simple_timer.cpp:55] SQLite3 generation :: total                    ::     0.086150 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.680361 3530700 simple_timer.cpp:55] [rocprofv3] output generation ::     0.100254 sec
+   |-> [rocprofiler-sdk] W0506 23:16:06.680393 3530700 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.101666 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
