@@ -3,6 +3,7 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
+#include <climits>
 #include "collectives.h"
 #include "comm.h"
 #include "gtest/gtest.h"
@@ -479,6 +480,50 @@ TEST(ProxyTests, ncclProxyClientQueryFdBlocking)
             TEST_INFO("Test 'ncclProxyClientQueryFdBlocking' PASSED");
         }
     );
+}
+
+// Regression tests for proxy connection pool bounds checking.
+// Bug 1: before the fix, the wire sent a raw void* that the server dereferenced directly.
+// These tests verify that ncclProxyGetConnection rejects every malformed integer ID that an
+// attacker could substitute for a legitimate connId received over the proxy socket.
+TEST(ProxyTests, ProxyConnectionPoolBoundsCheck)
+{
+    TEST_INFO("[ProxyTests] ProxyConnectionPoolBoundsCheck start");
+
+    // Build a minimal pool manually: 1 bank, 2 initialized slots (offset = 2).
+    // We bypass ncclProxyNewConnection so the test has no runtime dependencies.
+    struct ncclProxyConnection conns[NCCL_PROXY_CONN_POOL_SIZE] = {};
+    struct ncclProxyConnection* bank0 = conns;
+    struct ncclProxyConnectionPool pool;
+    pool.pools  = &bank0;
+    pool.banks  = 1;
+    pool.offset = 2; // slots 0 and 1 are valid
+
+    struct ncclProxyConnection* out = nullptr;
+
+    // Valid IDs must succeed.
+    EXPECT_EQ(ncclProxyGetConnection(&pool, 0, &out), ncclSuccess);
+    EXPECT_EQ(out, &conns[0]);
+    EXPECT_EQ(ncclProxyGetConnection(&pool, 1, &out), ncclSuccess);
+    EXPECT_EQ(out, &conns[1]);
+
+    // Negative ID — primary regression: wire attacker sends e.g. -1 to force arbitrary deref.
+    EXPECT_EQ(ncclProxyGetConnection(&pool, -1, &out), ncclInvalidArgument);
+    EXPECT_EQ(ncclProxyGetConnection(&pool, INT_MIN, &out), ncclInvalidArgument);
+
+    // ID at or past high-water mark — slot was allocated but never initialized.
+    EXPECT_EQ(ncclProxyGetConnection(&pool, 2, &out), ncclInvalidArgument);
+    EXPECT_EQ(ncclProxyGetConnection(&pool, NCCL_PROXY_CONN_POOL_SIZE - 1, &out), ncclInvalidArgument);
+
+    // ID whose bank index exceeds the number of allocated banks.
+    EXPECT_EQ(ncclProxyGetConnection(&pool, NCCL_PROXY_CONN_POOL_SIZE, &out), ncclInvalidArgument);
+    EXPECT_EQ(ncclProxyGetConnection(&pool, INT_MAX, &out), ncclInvalidArgument);
+
+    // Null pool (no banks allocated).
+    struct ncclProxyConnectionPool emptyPool = {nullptr, 0, 0};
+    EXPECT_EQ(ncclProxyGetConnection(&emptyPool, 0, &out), ncclInvalidArgument);
+
+    TEST_INFO("[ProxyTests] ProxyConnectionPoolBoundsCheck PASSED");
 }
 
 } // namespace RcclUnitTesting
