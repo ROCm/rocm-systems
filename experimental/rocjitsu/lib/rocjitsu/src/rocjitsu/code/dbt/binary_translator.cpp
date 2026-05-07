@@ -27,6 +27,7 @@
 #include <cstring>
 #include <memory>
 #include <span>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -446,6 +447,13 @@ void BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
   if (orig_bytes - translated_bytes == 4 && tr.word_count < 3) {
     uint32_t lit_word;
     std::memcpy(&lit_word, orig_text.data() + offset + translated_bytes, 4);
+    if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA4 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA4 &&
+        inst.mnemonic() == "s_mov_b32" && lit_word == 0x00027000u) {
+      // CDNA4 IREE kernels materialize the high word of a raw buffer descriptor
+      // with GFX9-era mode bits. RDNA4 expects the descriptor's high mode bits
+      // set, matching native gfx12 codegen for the same IREE dispatch.
+      lit_word = 0x31027000u;
+    }
     tr.words[tr.word_count++] = lit_word;
   }
 

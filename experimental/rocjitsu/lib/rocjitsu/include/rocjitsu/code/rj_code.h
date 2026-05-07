@@ -49,6 +49,28 @@ typedef enum rj_code_arch_e {
   ROCJITSU_CODE_ARCH_INVALID = ROCJITSU_CODE_ARCH_NUM_ARCHS
 } rj_code_arch_t;
 
+/// @brief AMDGPU ELF EF_AMDGPU_MACH values for exact code-object targets.
+///
+/// @details DBT usually infers the MACH value from the target architecture, but
+/// runtime integrations such as IREE need to target the exact HSA agent
+/// processor. For example, RDNA4 has both gfx1200 and gfx1201, and native HSA
+/// loaders reject exact-code-object processor mismatches.
+typedef enum rj_code_amdgpu_mach_e {
+  ROCJITSU_CODE_AMDGPU_MACH_NONE = 0x00,
+  ROCJITSU_CODE_AMDGPU_MACH_GFX908 = 0x30,
+  ROCJITSU_CODE_AMDGPU_MACH_GFX90A = 0x3f,
+  ROCJITSU_CODE_AMDGPU_MACH_GFX940 = 0x40,
+  ROCJITSU_CODE_AMDGPU_MACH_GFX941 = 0x4b,
+  ROCJITSU_CODE_AMDGPU_MACH_GFX942 = 0x4c,
+  ROCJITSU_CODE_AMDGPU_MACH_GFX950 = 0x4f,
+  ROCJITSU_CODE_AMDGPU_MACH_GFX1010 = 0x33,
+  ROCJITSU_CODE_AMDGPU_MACH_GFX1030 = 0x36,
+  ROCJITSU_CODE_AMDGPU_MACH_GFX1100 = 0x41,
+  ROCJITSU_CODE_AMDGPU_MACH_GFX1150 = 0x43,
+  ROCJITSU_CODE_AMDGPU_MACH_GFX1200 = 0x48,
+  ROCJITSU_CODE_AMDGPU_MACH_GFX1201 = 0x4e
+} rj_code_amdgpu_mach_t;
+
 /// @brief Type representing a single raw binary machine instruction word.
 typedef uint32_t rj_code_binary_inst_t;
 
@@ -160,6 +182,19 @@ RJ_API_EXPORT uint32_t rj_code_executable_num_code_objects(const rj_code_executa
 /// @brief Opaque handle to a code object (single AMD GPU HSA device ELF).
 typedef struct rj_code_object_t rj_code_object_t;
 
+/// @brief Create a code object from an in-memory AMDGPU HSA ELF image.
+/// @details Copies @p elf_bytes into the returned object. The caller may release
+/// or mutate its original buffer after this call returns.
+/// @param[in] elf_bytes Pointer to the ELF image bytes.
+/// @param[in] elf_size Size of @p elf_bytes in bytes.
+/// @param[out] obj Handle to the code object (refcount = 0; caller owns it).
+/// @returns ROCJITSU_STATUS_SUCCESS on success.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT if a required argument is NULL or empty.
+/// @retval ROCJITSU_STATUS_INVALID_CODE_OBJECT if the bytes are not a valid AMDGPU HSA ELF.
+RJ_API_EXPORT rj_status_t rj_code_object_create_from_memory(const void *elf_bytes,
+                                                            uint64_t elf_size,
+                                                            rj_code_object_t **obj);
+
 /// @brief Get a code object from an executable.
 /// @details Allocates a new handle and retains it (refcount = 1). Caller must call
 /// rj_code_object_destroy() then rj_code_object_release() when done.
@@ -191,6 +226,17 @@ RJ_API_EXPORT void rj_code_object_release(rj_code_object_t *obj);
 /// the code object is freed when the last release drops the reference count to 0.
 /// @param[in] obj Code object to destroy (may be NULL).
 RJ_API_EXPORT void rj_code_object_destroy(rj_code_object_t *obj);
+
+/// @brief Return the raw ELF image bytes owned by a code object.
+/// @details The returned pointer remains valid until @p obj is destroyed. This
+/// is intended for runtime integrations that need to hand translated bytes to an
+/// external loader without copying through a file.
+/// @param[in] obj Code object to query.
+/// @param[out] data Borrowed pointer to the ELF image bytes.
+/// @param[out] size Size of @p data in bytes.
+/// @returns ROCJITSU_STATUS_SUCCESS on success.
+RJ_API_EXPORT rj_status_t rj_code_object_image_data(const rj_code_object_t *obj,
+                                                    const uint8_t **data, uint64_t *size);
 
 /// @brief Opaque handle to a list of decoded instructions.
 typedef struct rj_code_inst_list_t rj_code_inst_list_t;
@@ -348,16 +394,29 @@ RJ_API_EXPORT const rj_code_inst_t *rj_code_inst_next(const rj_code_inst_t *inst
 typedef struct rj_code_dbt_options_t {
   rj_code_arch_t guest_arch;
   rj_code_arch_t host_arch;
+  /// @brief Optional exact EF_AMDGPU_MACH target for the translated ELF.
+  ///
+  /// @details Set to ROCJITSU_CODE_AMDGPU_MACH_NONE to use the host_arch
+  /// default. Runtime integrations should pass the exact HSA agent target when
+  /// available, such as ROCJITSU_CODE_AMDGPU_MACH_GFX1201 for gfx1201.
+  uint32_t target_mach;
 } rj_code_dbt_options_t;
 
 /// @brief Translate a code object from guest_arch to host_arch.
 /// @param[in]  source     Source code object to translate.
 /// @param[in]  options    Translation options.
 /// @param[out] translated Newly created translated code object (refcount = 0; caller owns it).
-/// @returns ROCJITSU_STATUS_SUCCESS on success.
+/// @returns ROCJITSU_STATUS_SUCCESS on success. Returns ROCJITSU_STATUS_ERROR if translation
+/// produced warnings, because warnings mean the output may contain untranslated instructions.
 [[nodiscard]] RJ_API_EXPORT rj_status_t rj_code_translate(const rj_code_object_t *source,
                                                           const rj_code_dbt_options_t *options,
                                                           rj_code_object_t **translated);
+
+/// @brief Return a thread-local diagnostic for the most recent failing C API call.
+///
+/// @details The returned pointer remains valid until the next rocjitsu C API call on the same
+/// thread. It may be NULL or point to an empty string when no detailed diagnostic is available.
+RJ_API_EXPORT const char *rj_code_last_error(void);
 
 /// @}
 

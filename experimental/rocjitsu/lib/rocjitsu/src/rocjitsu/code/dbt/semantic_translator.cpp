@@ -7,6 +7,7 @@
 #include "rocjitsu/code/dbt/semantic_translator.h"
 
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/dbt/encoding_translator.h"
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 #include "rocjitsu/code/dbt/translations/translations.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
@@ -242,11 +243,99 @@ constexpr uint16_t kOpMbcntLo = 0x31F;
 constexpr uint16_t kOpMbcntHi = 0x320;
 
 // VOP2 opcodes (GFX12)
+constexpr uint8_t kOpAddF32 = 3;
 constexpr uint8_t kOpLshlrevB32 = 24;
 constexpr uint8_t kOpXorB32 = 29;
 
+// VBUFFER opcodes (GFX12)
+constexpr uint8_t kOpBufferLoadB128 = 23;
+constexpr uint8_t kOpBufferStoreB128 = 29;
+
 // VOP3P opcodes (GFX12)
 constexpr uint8_t kOpWmmaF32_16x16x16_F16 = 64;
+
+/// @brief Lower CDNA4 v_pk_add_f32 to two RDNA4 v_add_f32_e32 instructions.
+/// @details This handles the plain packed f32 add form emitted by IREE's
+/// elementwise kernels: both sources are adjacent VGPR pairs and no source
+/// selectors, negation, or clamp modifiers are active.
+std::vector<uint32_t> lower_v_pk_add_f32(const Instruction &inst) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() < 8)
+    return {};
+
+  cdna4::Vop3pMachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+
+  if (src.clamp || src.op_sel || src.op_sel_hi != 3u || src.neg || src.neg_hi)
+    return {};
+  if (src.vdst >= 255u || src.src0 < 256u || src.src0 >= 511u || src.src1 < 256u ||
+      src.src1 >= 511u)
+    return {};
+
+  const uint8_t dst_lo = static_cast<uint8_t>(src.vdst);
+  const uint8_t dst_hi = static_cast<uint8_t>(src.vdst + 1);
+  const uint16_t dst_lo_src = static_cast<uint16_t>(256u + src.vdst);
+  const uint16_t dst_hi_src = static_cast<uint16_t>(dst_lo_src + 1);
+  const uint16_t src0_lo = src.src0;
+  const uint16_t src0_hi = static_cast<uint16_t>(src.src0 + 1);
+  const uint16_t src1_lo = src.src1;
+  const uint16_t src1_hi = static_cast<uint16_t>(src.src1 + 1);
+  const uint8_t src1_lo_vgpr = static_cast<uint8_t>(src.src1 - 256u);
+  const uint8_t src1_hi_vgpr = static_cast<uint8_t>(src.src1 - 255u);
+
+  const uint32_t low = build_vop2(kOpAddF32, dst_lo, src0_lo, src1_lo_vgpr);
+  const uint32_t high = build_vop2(kOpAddF32, dst_hi, src0_hi, src1_hi_vgpr);
+
+  // Preserve source values when one half of the packed destination aliases the
+  // other half's source. If both orders would clobber a needed source, this
+  // simple lowering is not valid and the caller should report it as unhandled.
+  const bool low_must_precede_high = (dst_hi_src == src0_lo || dst_hi_src == src1_lo);
+  const bool high_must_precede_low = (dst_lo_src == src0_hi || dst_lo_src == src1_hi);
+  if (low_must_precede_high && high_must_precede_low)
+    return {};
+  if (high_must_precede_low)
+    return {high, low};
+  return {low, high};
+}
+
+/// @brief Lower CDNA4 MUBUF dwordx4 with inline-zero soffset to RDNA4 VBUFFER.
+/// @details GFX9 MUBUF encodes scalar offset zero as inline constant 128.
+/// GFX12 VBUFFER represents the same "no scalar offset" state with the null
+/// SGPR sentinel. CDNA encodes the 128-bit resource descriptor base as srsrc/4,
+/// while RDNA4 encodes the real SGPR base.
+std::vector<uint32_t> lower_mubuf_dwordx4_inline_zero(const Instruction &inst, uint8_t target_op) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() < 8)
+    return {};
+
+  cdna4::MubufMachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+
+  constexpr uint8_t kCdna4InlineConst0 = 128;
+  if (src.soffset != kCdna4InlineConst0 || src.lds || src.acc)
+    return {};
+
+  rdna4::VbufferMachineInst dst{};
+  dst.encoding = 0x31;
+  dst.op = target_op;
+  auto coh = remap_gfx940_to_gfx12({uint8_t(src.sc0), uint8_t(src.sc1), uint8_t(src.nt)});
+  dst.scope = coh.scope;
+  dst.th = coh.th;
+  dst.ioffset = src.offset;
+  dst.offen = src.offen;
+  dst.idxen = src.idxen;
+  dst.vaddr = src.vaddr;
+  dst.vdata = src.vdata;
+  dst.rsrc = (src.srsrc * 4u) & 0x1FFu;
+  dst.soffset = 0x7C;
+  dst.nv = 0;
+  dst.tfe = 0;
+  dst.format = 0;
+
+  std::vector<uint32_t> words(3);
+  std::memcpy(words.data(), &dst, sizeof(dst));
+  return words;
+}
 
 /// @brief Lower v_mfma_f32_16x16x16_f16 to v_wmma_f32_16x16x16_f16 on RDNA4.
 ///
@@ -416,6 +505,12 @@ std::vector<uint32_t> expand_accvgpr_write(const Instruction &inst, uint32_t, ui
   return lower_accvgpr_write(inst, ROCJITSU_CODE_ARCH_RDNA4);
 }
 
+std::vector<uint32_t> expand_v_pk_add_f32(const Instruction &inst, uint32_t, uint64_t,
+                                          const LivenessAnalysis &, TranslationContext &,
+                                          const LaneLayout *, const LaneLayout *) {
+  return lower_v_pk_add_f32(inst);
+}
+
 std::vector<uint32_t>
 expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t arch, uint64_t offset,
                              const LivenessAnalysis &liveness, TranslationContext &context,
@@ -432,9 +527,13 @@ expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t arch, uint64_t of
 constexpr uint16_t kEncSopp = 0x17F;      // SOPP (0xBF8x → 0x17F)
 constexpr uint16_t kEncVop3 = 0x1A4;      // VOP3A (0xD2xx → 0x1A4)
 constexpr uint16_t kEncVop3pMfma = 0x1A7; // VOP3P-MFMA (0xD3xx → 0x1A7, also AccVGPR)
+constexpr uint16_t kEncMubuf = 0x1C0;     // MUBUF (0xE0xx → 0x1C0)
 
 // CDNA4 opcodes (from decoder: opcode_ = inst_.op)
 constexpr uint16_t kCdna4Op_s_waitcnt = 12;
+constexpr uint16_t kCdna4Op_buffer_load_dwordx4 = 23;
+constexpr uint16_t kCdna4Op_buffer_store_dwordx4 = 31;
+constexpr uint16_t kCdna4Op_v_pk_add_f32 = 50;
 constexpr uint16_t kCdna4Op_v_mfma_f32_16x16x16_f16 = 77;
 constexpr uint16_t kCdna4Op_v_accvgpr_read = 88;
 constexpr uint16_t kCdna4Op_v_accvgpr_write = 89;
@@ -445,6 +544,8 @@ const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
     {kEncSopp, kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt, nullptr,
      nullptr},
     {kEncVop3, kCdna4Op_v_lshl_add_u64, RuleAction::Expand, 0, 0, nullptr, expand_v_lshl_add_u64,
+     nullptr, nullptr},
+    {kEncVop3pMfma, kCdna4Op_v_pk_add_f32, RuleAction::Expand, 0, 0, nullptr, expand_v_pk_add_f32,
      nullptr, nullptr},
     {kEncVop3pMfma, kCdna4Op_v_mfma_f32_16x16x16_f16, RuleAction::Expand, 0, 0, nullptr,
      expand_mfma_f32_16x16x16_f16, &kMfmaF32_16x16x16_F16_Cdna4, &kWmmaF32_16x16x16_F16_Rdna4},
@@ -492,6 +593,20 @@ std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &in
                                                            TranslationContext &context) const {
   const uint16_t eid = inst.encoding_id();
   const uint16_t op = inst.opcode();
+
+  if (host_arch_ == ROCJITSU_CODE_ARCH_RDNA4 && (eid & 0x1F8u) == kEncMubuf) {
+    if (op == kCdna4Op_buffer_load_dwordx4) {
+      auto lowered = lower_mubuf_dwordx4_inline_zero(inst, kOpBufferLoadB128);
+      if (!lowered.empty())
+        return lowered;
+    }
+    if (op == kCdna4Op_buffer_store_dwordx4) {
+      auto lowered = lower_mubuf_dwordx4_inline_zero(inst, kOpBufferStoreB128);
+      if (!lowered.empty())
+        return lowered;
+    }
+  }
+
   TranslationRule key{eid, op, RuleAction::Expand, 0, 0, nullptr, nullptr, nullptr, nullptr};
   auto it = std::lower_bound(expand_rules_.begin(), expand_rules_.end(), key);
   if (it != expand_rules_.end() && it->src_encoding_id == eid && it->src_opcode == op &&

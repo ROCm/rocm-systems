@@ -1143,6 +1143,24 @@ TEST(WaitcntTranslator, EncodeVmcnt0EmitsLoadcntAndStorecnt) {
   EXPECT_TRUE(has_storecnt_dscnt);
 }
 
+TEST(CApi, CodeObjectCreateFromMemoryExposesImageBytes) {
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_text({0xBF800000u});
+
+  rj_code_object_t *obj = nullptr;
+  ASSERT_EQ(rj_code_object_create_from_memory(image.data(), image.size(), &obj),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(obj, nullptr);
+
+  const uint8_t *data = nullptr;
+  uint64_t size = 0;
+  EXPECT_EQ(rj_code_object_image_data(obj, &data, &size), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(data, nullptr);
+  EXPECT_EQ(size, image.size());
+  EXPECT_EQ(std::memcmp(data, image.data(), image.size()), 0);
+
+  rj_code_object_destroy(obj);
+}
+
 // --- End-to-end BinaryTranslator integration tests ---
 #ifdef HAS_DEVICE_KERNELS
 
@@ -1185,6 +1203,26 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToRdna4) {
   constexpr uint32_t kEfAmdgpuMachGfx1200 = 0x48;
   EXPECT_EQ(e_flags & 0xFF, kEfAmdgpuMachGfx1200)
       << "ELF e_flags should contain GFX1200 machine type";
+}
+
+TEST(BinaryTranslatorE2E, ExplicitRdna4MachCanTargetGfx1201) {
+  Executable exec(kernel_path("vector_add"));
+  ASSERT_TRUE(exec.is_valid()) << "Failed to load vector_add.o";
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4,
+                              ROCJITSU_CODE_AMDGPU_MACH_GFX1201);
+  auto result = translator.translate(*co);
+  ASSERT_FALSE(result.elf_bytes.empty()) << "Translation produced empty ELF";
+
+  ASSERT_GE(result.elf_bytes.size(), 48u);
+  uint32_t e_flags = 0;
+  std::memcpy(&e_flags, result.elf_bytes.data() + 48, sizeof(e_flags));
+  EXPECT_EQ(e_flags & 0xFF, ROCJITSU_CODE_AMDGPU_MACH_GFX1201)
+      << "ELF e_flags should contain the exact requested GFX1201 machine type";
 }
 
 TEST(KernelDescriptorTranslator, Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGridPayload) {

@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/decoder.h"
 
 #include <cstring>
+#include <limits>
 
 using namespace rocjitsu;
 
@@ -86,6 +87,27 @@ rj_status_t rj_code_executable_get_code_object(const rj_code_executable_t *exec,
   return ROCJITSU_STATUS_SUCCESS;
 }
 
+rj_status_t rj_code_object_create_from_memory(const void *elf_bytes, uint64_t elf_size,
+                                              rj_code_object_t **obj) {
+  if (!elf_bytes || elf_size == 0 || !obj)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  *obj = nullptr;
+
+  if (elf_size > static_cast<uint64_t>(std::numeric_limits<std::size_t>::max()))
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+
+  auto owned = std::make_unique<AmdGpuCodeObject>(static_cast<const uint8_t *>(elf_bytes),
+                                                  static_cast<std::size_t>(elf_size));
+  if (!owned->is_valid())
+    return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+
+  auto *handle = new rj_code_object_t{};
+  handle->co = owned.get();
+  handle->owned_co = std::move(owned);
+  *obj = handle;
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
 void rj_code_object_retain(rj_code_object_t *obj) {
   if (obj)
     obj->retain();
@@ -103,6 +125,15 @@ void rj_code_object_destroy(rj_code_object_t *obj) {
     return;
   if (obj->destroy())
     delete obj;
+}
+
+rj_status_t rj_code_object_image_data(const rj_code_object_t *obj, const uint8_t **data,
+                                      uint64_t *size) {
+  if (!obj || !obj->co || !data || !size)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  *data = reinterpret_cast<const uint8_t *>(obj->co->image_data());
+  *size = static_cast<uint64_t>(obj->co->image_size());
+  return ROCJITSU_STATUS_SUCCESS;
 }
 
 rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t target_id,

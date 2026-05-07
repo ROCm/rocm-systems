@@ -221,6 +221,7 @@ add_subdirectory(lib/rocjitsu)
 add_library(rocjitsu_shared SHARED)
 set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
 target_link_libraries(rocjitsu_shared PRIVATE
+    rocjitsu_analysis
     rocjitsu_code
     rocjitsu_isa
     rocjitsu_isa_cdna1 rocjitsu_isa_cdna2 rocjitsu_isa_cdna3 rocjitsu_isa_cdna4
