@@ -12,17 +12,19 @@ class HipFileException(Exception):
     Wraps both the ``hipFileOpError_t`` code and, when the error is
     ``HIP_DRIVER_ERROR``, the underlying ``hipError_t`` from the HIP
     runtime.
-
-    Parameters
-    ----------
-    hipfile_err : int
-        ``hipFileOpError_t`` value describing the failure.
-    hip_err : int
-        ``hipError_t`` value from the HIP runtime.  Only meaningful
-        when *hipfile_err* equals ``OpError.HIP_DRIVER_ERROR``.
     """
 
     def __init__(self, hipfile_err: int, hip_err: int) -> None:
+        """Initialize a ``HipFileException``.
+
+        Parameters
+        ----------
+        hipfile_err : int
+            ``hipFileOpError_t`` value describing the failure.
+        hip_err : int
+            ``hipError_t`` value from the HIP runtime.  Only meaningful
+            when *hipfile_err* equals ``OpError.HIP_DRIVER_ERROR``.
+        """
         self._hipfile_err = hipfile_err
         self._hip_err = hip_err
 

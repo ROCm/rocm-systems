@@ -36,8 +36,7 @@ class FileHandle:
             fh.read(buf, size, 0, 0)
     """
 
-    DEFAULT_MODE = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
-    """Default file creation mode (``0o644``)."""
+    DEFAULT_MODE = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH  # 0o644
 
     def __init__(
         self,
