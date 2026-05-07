@@ -74,6 +74,8 @@ public:
   ErrorCode Escape(void *pData, size_t dataSize,
                    bool hardwareAccess = false) const;
 
+  const thunk_proxy::DeviceInfo &DeviceInfo() const;
+
 private:
   Device(Platform *platform, LdaChain *lda_chain, u32 chainIndex,
          std::unique_ptr<thunk_proxy::DeviceContext> device_ctx);

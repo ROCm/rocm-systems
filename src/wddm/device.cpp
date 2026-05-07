@@ -67,9 +67,6 @@ WDDMDevice::WDDMDevice(Device *shared_dev,
                        D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id)
   : adapter_(adapter), adapter_luid_(adapter_luid), shared_dev_(shared_dev),
     node_id_(node_id) {
-  memset(&device_info_, 0, sizeof(device_info_));
-
-  ParseDeviceInfo();
   CreateDevice();
   SetPowerOptimization(false);
   CreatePagingQueue();
@@ -81,8 +78,6 @@ WDDMDevice::~WDDMDevice() {
   DestroyPagingQueue();
   SetPowerOptimization(true);
   DestroyDevice();
-
-  DestroyDeviceInfo();
 }
 
 static NTSTATUS WDDMQueryAdapter(D3DKMT_HANDLE adapter, KMTQUERYADAPTERINFOTYPE type,
@@ -187,7 +182,7 @@ uint64_t WDDMDevice::VramAvail(void) {
     usedVis = stats.QueryResult.SegmentInformation.BytesResident;
 
   // local invisible memory
-  if (device_info_.local_invisible_heap_size) {
+  if (shared_dev_->DeviceInfo().local_invisible_heap_size) {
     segmentId++;
     memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
     stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
@@ -345,7 +340,7 @@ bool WDDMDevice::Unlock(D3DKMT_HANDLE handle) {
 }
 
 bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
-  int ordinal = device_info_.EngineOrdinal(engine);
+  int ordinal = shared_dev_->DeviceInfo().EngineOrdinal(engine);
   if (ordinal < 0)
     return false;
 
@@ -362,7 +357,7 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
   if (IsHwsEnabled(engine))
     args.Flags.HwQueueSupported = 1;
   else
-    args.Flags.DisableGpuTimeout = device_info_.IsGpuTimeoutDisabled(engine);
+    args.Flags.DisableGpuTimeout = shared_dev_->DeviceInfo().IsGpuTimeoutDisabled(engine);
 
   NTSTATUS ret = DXCORE_CALL(D3DKMTCreateContextVirtual(&args));
   if (ret == STATUS_SUCCESS) {
@@ -477,13 +472,13 @@ void WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
 }
 
 void WDDMDevice::InitCmdbufInfo(void) {
-  if (device_info_.major == 9) {
+  if (shared_dev_->DeviceInfo().major == 9) {
     cmdbuf_aql_frame_size_ = 2 * sizeof(gfx9::AcquireMemTemplate);
-  } else if (device_info_.major >= 10) {
+  } else if (shared_dev_->DeviceInfo().major >= 10) {
     cmdbuf_aql_frame_size_ = 2 * sizeof(gfx10::AcquireMemTemplate);
   }
 
-  if (device_info_.major >= 11) {
+  if (shared_dev_->DeviceInfo().major >= 11) {
     cmdbuf_aql_frame_size_ += sizeof(SetScratchTemplate);
     cmdbuf_aql_frame_size_ += sizeof(DispatchProgramResourceRegs); // BuildComputeShaderParams
   }
@@ -543,25 +538,11 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
   return STATUS_SUCCESS;
 }
 
-bool WDDMDevice::ParseDeviceInfo() {
-  bool ret;
-
-  memset(&device_info_, 0, sizeof(device_info_));
-  ret = thunk_proxy::ParseAdapterInfo(adapter_, &device_info_);
-  if (!ret)
-    return false;
-
-  return true;
-}
-
-void WDDMDevice::DestroyDeviceInfo() {
-  free(device_info_.adapter_info);
-}
 
 void WDDMDevice::GetClockCounters(uint64_t *gpu, uint64_t *cpu) {
 
   uint32_t engine = GetComputeEngine();
-  int ordinal = device_info_.EngineOrdinal(engine);
+  int ordinal = shared_dev_->DeviceInfo().EngineOrdinal(engine);
 
   D3DKMT_QUERYCLOCKCALIBRATION args = {0};
 
@@ -659,7 +640,7 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
 
   D3DKMT_CREATEHWQUEUE createHwQueue = {0};
   createHwQueue.hHwContext = queue->context;
-  createHwQueue.Flags.DisableGpuTimeout = device_info_.IsGpuTimeoutDisabled(queue->queue_engine);
+  createHwQueue.Flags.DisableGpuTimeout = shared_dev_->DeviceInfo().IsGpuTimeoutDisabled(queue->queue_engine);
   createHwQueue.pPrivateDriverData = priv.data();
   createHwQueue.PrivateDriverDataSize = priv.size();
 

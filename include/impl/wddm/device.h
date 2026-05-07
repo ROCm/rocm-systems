@@ -95,60 +95,60 @@ public:
   Device *SharedDevice() const { return shared_dev_; }
 
   int NodeId() const { return node_id_; }
-  int Major() { return device_info_.major; }
-  int Minor() { return device_info_.minor; }
-  int Stepping() { return device_info_.stepping; }
-  bool IsDgpu() { return device_info_.is_dgpu; }
-  const char *ProductName() { return device_info_.product_name; }
-  uint64_t Uuid() { return device_info_.uuid; }
-  uint32_t GfxFamily() { return device_info_.family; }
-  uint32_t DeviceId() { return device_info_.device_id; }
-  uint32_t WavefrontSize() { return device_info_.wavefront_size; }
-  uint32_t ComputeUnitCount() { return device_info_.compute_unit_count; }
-  uint32_t MaxEngineClockMhz() { return device_info_.max_engine_clock_mhz; }
-  uint32_t WatchPointsNum() { return device_info_.watch_points_num; }
-  uint32_t PciBusAddr() { return device_info_.pci_bus_addr; }
+  int Major() { return shared_dev_->DeviceInfo().major; }
+  int Minor() { return shared_dev_->DeviceInfo().minor; }
+  int Stepping() { return shared_dev_->DeviceInfo().stepping; }
+  bool IsDgpu() { return shared_dev_->DeviceInfo().is_dgpu; }
+  const char *ProductName() { return shared_dev_->DeviceInfo().product_name; }
+  uint64_t Uuid() { return shared_dev_->DeviceInfo().uuid; }
+  uint32_t GfxFamily() { return shared_dev_->DeviceInfo().family; }
+  uint32_t DeviceId() { return shared_dev_->DeviceInfo().device_id; }
+  uint32_t WavefrontSize() { return shared_dev_->DeviceInfo().wavefront_size; }
+  uint32_t ComputeUnitCount() { return shared_dev_->DeviceInfo().compute_unit_count; }
+  uint32_t MaxEngineClockMhz() { return shared_dev_->DeviceInfo().max_engine_clock_mhz; }
+  uint32_t WatchPointsNum() { return shared_dev_->DeviceInfo().watch_points_num; }
+  uint32_t PciBusAddr() { return shared_dev_->DeviceInfo().pci_bus_addr; }
 
-  uint32_t MemoryBusWidth() { return device_info_.memory_bus_width; }
-  uint32_t MaxMemoryClockMhz() { return device_info_.max_memory_clock_mhz; }
-  uint32_t WavePerCu() { return device_info_.wave_per_cu; }
-  uint32_t SimdPerCu() { return device_info_.simd_per_cu; }
-  uint32_t MaxScratchSlotsPerCu() { return device_info_.max_scratch_slots_per_cu; }
-  uint32_t NumShaderEngine() { return device_info_.num_shader_engine; }
-  uint32_t ShaderArrayPerShaderEngine() { return device_info_.shader_array_per_shader_engine; }
-  uint32_t NumSdmaEngine() { return device_info_.sdma_schedid.size(); }
-  uint32_t Domain() { return device_info_.domain; }
-  uint32_t NumGws() { return device_info_.num_gws; }
-  uint32_t AsicRevision() { return device_info_.asic_revision; }
-  uint64_t LocalHeapSize() { return device_info_.local_visible_heap_size + device_info_.local_invisible_heap_size; }
-  uint64_t LocalVisibleHeapSize() { return device_info_.local_visible_heap_size; }
-  uint64_t LocalInvisibleHeapSize() { return device_info_.local_invisible_heap_size; }
-  uint64_t NonLocalHeapSize() { return device_info_.non_local_heap_size; }
-  uint64_t PrivateApertureBase() { return device_info_.private_aperture_base; }
-  uint64_t PrivateApertureSize() { return device_info_.private_aperture_size; }
-  uint64_t SharedApertureBase() { return device_info_.shared_aperture_base; }
-  uint64_t SharedApertureSize() { return device_info_.shared_aperture_size; }
-  uint32_t LdsSize() { return device_info_.lds_size; }
-  uint64_t GPUCounterFrequency() { return device_info_.gpu_counter_frequency; }
-  uint32_t GetSwsQueueSize(void) const { return device_info_.user_queue_size; }
-  uint32_t GetMecFwVersion() { return device_info_.mec_fw_version; }
-  uint32_t GetSdmaFwVersion() { return device_info_.sdma_fw_version; }
-  uint32_t GetL1CacheSize() { return device_info_.l1_cache_size; }
-  uint32_t GetL2CacheSize() { return device_info_.l2_cache_size; }
-  uint32_t GetL3CacheSize() { return device_info_.l3_cache_size; }
-  uint32_t Gl2CacheLineSize() { return device_info_.gl2_cacheline_size; }
-  bool SupportStateShadowingByCpFw(void) const { return device_info_.state_shadowing_by_cpfw; }
-  bool SupportPlatformAtomic(void) const { return device_info_.platform_atomic_support; }
+  uint32_t MemoryBusWidth() { return shared_dev_->DeviceInfo().memory_bus_width; }
+  uint32_t MaxMemoryClockMhz() { return shared_dev_->DeviceInfo().max_memory_clock_mhz; }
+  uint32_t WavePerCu() { return shared_dev_->DeviceInfo().wave_per_cu; }
+  uint32_t SimdPerCu() { return shared_dev_->DeviceInfo().simd_per_cu; }
+  uint32_t MaxScratchSlotsPerCu() { return shared_dev_->DeviceInfo().max_scratch_slots_per_cu; }
+  uint32_t NumShaderEngine() { return shared_dev_->DeviceInfo().num_shader_engine; }
+  uint32_t ShaderArrayPerShaderEngine() { return shared_dev_->DeviceInfo().shader_array_per_shader_engine; }
+  uint32_t NumSdmaEngine() { return shared_dev_->DeviceInfo().sdma_schedid.size(); }
+  uint32_t Domain() { return shared_dev_->DeviceInfo().domain; }
+  uint32_t NumGws() { return shared_dev_->DeviceInfo().num_gws; }
+  uint32_t AsicRevision() { return shared_dev_->DeviceInfo().asic_revision; }
+  uint64_t LocalHeapSize() { return shared_dev_->DeviceInfo().local_visible_heap_size + shared_dev_->DeviceInfo().local_invisible_heap_size; }
+  uint64_t LocalVisibleHeapSize() { return shared_dev_->DeviceInfo().local_visible_heap_size; }
+  uint64_t LocalInvisibleHeapSize() { return shared_dev_->DeviceInfo().local_invisible_heap_size; }
+  uint64_t NonLocalHeapSize() { return shared_dev_->DeviceInfo().non_local_heap_size; }
+  uint64_t PrivateApertureBase() { return shared_dev_->DeviceInfo().private_aperture_base; }
+  uint64_t PrivateApertureSize() { return shared_dev_->DeviceInfo().private_aperture_size; }
+  uint64_t SharedApertureBase() { return shared_dev_->DeviceInfo().shared_aperture_base; }
+  uint64_t SharedApertureSize() { return shared_dev_->DeviceInfo().shared_aperture_size; }
+  uint32_t LdsSize() { return shared_dev_->DeviceInfo().lds_size; }
+  uint64_t GPUCounterFrequency() { return shared_dev_->DeviceInfo().gpu_counter_frequency; }
+  uint32_t GetSwsQueueSize(void) const { return shared_dev_->DeviceInfo().user_queue_size; }
+  uint32_t GetMecFwVersion() { return shared_dev_->DeviceInfo().mec_fw_version; }
+  uint32_t GetSdmaFwVersion() { return shared_dev_->DeviceInfo().sdma_fw_version; }
+  uint32_t GetL1CacheSize() { return shared_dev_->DeviceInfo().l1_cache_size; }
+  uint32_t GetL2CacheSize() { return shared_dev_->DeviceInfo().l2_cache_size; }
+  uint32_t GetL3CacheSize() { return shared_dev_->DeviceInfo().l3_cache_size; }
+  uint32_t Gl2CacheLineSize() { return shared_dev_->DeviceInfo().gl2_cacheline_size; }
+  bool SupportStateShadowingByCpFw(void) const { return shared_dev_->DeviceInfo().state_shadowing_by_cpfw; }
+  bool SupportPlatformAtomic(void) const { return shared_dev_->DeviceInfo().platform_atomic_support; }
   uint32_t GetSdmaEngine(uint32_t idx) {
     assert(idx < NumSdmaEngine());
-    return device_info_.sdma_schedid[idx];
+    return shared_dev_->DeviceInfo().sdma_schedid[idx];
   }
-  uint32_t GetComputeEngine() { return device_info_.compute_schedid; }
+  uint32_t GetComputeEngine() { return shared_dev_->DeviceInfo().compute_schedid; }
 
   uint64_t VramAvail();
 
   void GetClockCounters(uint64_t *gpu, uint64_t *cpu);
-  uint32_t GetNumCpQueues() { return device_info_.num_cp_queues; }
+  uint32_t GetNumCpQueues() { return shared_dev_->DeviceInfo().num_cp_queues; }
 
   bool CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr);
   void DestroySyncobj(D3DKMT_HANDLE handle);
@@ -190,7 +190,7 @@ public:
   bool AllocUserQueueMemFromUMD(void) const { return false; }
 
   bool IsHwsEnabled(int engine) {
-    return device_info_.IsHwsEnabled(engine);
+    return shared_dev_->DeviceInfo().IsHwsEnabled(engine);
   }
 
   void UpdatePageFence(uint64_t fence_value);
@@ -201,13 +201,11 @@ public:
   LUID GetLuid() const { return adapter_luid_; }
   D3DKMT_HANDLE GetAdapter() const { return adapter_; }
 
-  const thunk_proxy::DeviceInfo& DeviceInfo() const { return device_info_; }
+  const thunk_proxy::DeviceInfo& DeviceInfo() const { return shared_dev_->DeviceInfo(); }
 
   ErrorCode CreateGpuMemory(const GpuMemoryCreateInfo &create_info, GpuMemory **gpu_mem, gpusize *gpu_va = nullptr);
 
 private:
-  bool ParseDeviceInfo(void);
-  void DestroyDeviceInfo(void);
   bool CreateDevice(void);
   bool DestroyDevice(void);
   bool CreatePagingQueue(void);
@@ -237,8 +235,6 @@ private:
   uint32_t cmdbuf_aql_frame_size_;
   static const uint32_t cmdbuf_aql_frame_num_;
   uint32_t node_id_;
-  // device info
-  thunk_proxy::DeviceInfo device_info_;
   std::vector<struct SegmentInfo> segment_infos_;
   //CmdUtil cmd_util;
 };

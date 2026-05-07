@@ -123,5 +123,9 @@ ErrorCode Device::EnumGpuProcesses(
   return device_ctx_->EnumGpuProcesses(out);
 }
 
+const thunk_proxy::DeviceInfo &Device::DeviceInfo() const {
+  return device_ctx_->GetDeviceInfo();
+}
+
 } // namespace thunk
 } // namespace wsl

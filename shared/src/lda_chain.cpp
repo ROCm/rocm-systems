@@ -90,6 +90,17 @@ ErrorCode LdaChain::QueryLinkedGpusInChain(vector<Device *> &devices,
   if (qaiCode != ErrorCode::Success)
     return qaiCode;
 
+  deviceInfos.resize(ChainedDeviceCount());
+  for (u32 chain = 0; chain < ChainedDeviceCount(); ++chain) {
+    if (!thunk_proxy::ParseAdapterInfo(
+            static_cast<D3DKMT_HANDLE>(AdapterHandle()),
+            &deviceInfos[chain])) {
+      for (auto &info : deviceInfos)
+        free(info.adapter_info);
+      return ErrorCode::InitializationFailed;
+    }
+  }
+
   auto code = ErrorCode::Success;
   for (u32 chain = 0; chain < ChainedDeviceCount() && code == ErrorCode::Success;
        ++chain) {
@@ -100,8 +111,7 @@ ErrorCode LdaChain::QueryLinkedGpusInChain(vector<Device *> &devices,
 
     switch (VendorId(chain)) {
     case ATI_VENDOR_ID: {
-      const thunk_proxy::DeviceInfo &info =
-          (chain < deviceInfos.size()) ? deviceInfos[chain] : deviceInfos[0];
+      const thunk_proxy::DeviceInfo &info = deviceInfos[chain];
 
       code = Device::Create(GetPlatform(), this,
                             static_cast<u32>(devices.size()),
