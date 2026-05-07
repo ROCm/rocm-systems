@@ -57,12 +57,17 @@ set(TTD_ALL_VERSIONS ON)
 option(BUILD_TESTS "Enable Building Tests for ROCProf Trace Decoder" OFF)
 option(BUILD_UNIT_TESTS "Enable Building Unit Tests for ROCProf Trace Decoder" ON)
 option(DISABLE_COMGR "Disable dependency on amd_comgr disassembly" OFF)
+option(BUILD_BENCH "Build the att-bench decode benchmark harness" OFF)
 
 add_subdirectory(source)
 
 if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(test)
+endif()
+
+if(BUILD_BENCH)
+    add_subdirectory(bench)
 endif()
 
 include(packaging)

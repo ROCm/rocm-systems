@@ -137,8 +137,9 @@ class Stitcher
 {
 public:
     Stitcher(std::shared_ptr<ICodeServicer> service, rocprof_trace_decoder_trace_callback_t _callback, void* cbdata);
+    virtual ~Stitcher() = default;
 
-    void stitch(class WaveDataInternal& wave);
+    virtual void stitch(class WaveDataInternal& wave);
     std::vector<assemblyLinePtr> raw_code;
     void setgfxip(uint64_t gfxip);
     uint64_t getgfxip() const

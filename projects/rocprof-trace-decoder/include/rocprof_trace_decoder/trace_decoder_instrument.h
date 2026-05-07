@@ -88,9 +88,10 @@ typedef union rocprof_trace_decoder_packet_header_t
 
 typedef enum rocprof_trace_decoder_packet_opcode_t
 {
-    ROCPROF_TRACE_DECODER_PACKET_OPCODE_CODEOBJ = 4, 
+    ROCPROF_TRACE_DECODER_PACKET_OPCODE_CODEOBJ = 4,
     ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP,
-    ROCPROF_TRACE_DECODER_PACKET_OPCODE_AGENT_INFO     ///< Agent info, passed in data20. No payload.
+    ROCPROF_TRACE_DECODER_PACKET_OPCODE_AGENT_INFO,    ///< Agent info, passed in data20. No payload.
+    ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP_LO32
 
     /// @var ROCPROF_TRACE_DECODER_PACKET_OPCODE_CODEOBJ
     /// @brief Followed by several rocprof_trace_decoder_codeobj_marker_t
@@ -103,6 +104,13 @@ typedef enum rocprof_trace_decoder_packet_opcode_t
     /// 1) Timestamp low 64bits
     /// 2) Timestamp high 64bits
     /// 3) Instant sync timestamp, low 32 bits.
+
+    /// @var ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP_LO32
+    /// @brief Periodic realtime timestamp emitted from query_status packets in double/triple
+    /// buffer mode. Notes: userdata--3--. Gfx9 only. Not necessary for gfx10+.
+    /// Followed by a single USERDATA3 write carrying the low 32 bits of the GPU clock counter.
+    /// The high 32 bits are extrapolated by the decoder from the most recent full RT_TIMESTAMP,
+    /// detecting wraps when the new low-32 is less than the previous low-32.
 } rocprof_trace_decoder_packet_opcode_t;
 
 typedef enum rocprof_trace_decoder_agent_info_type_t

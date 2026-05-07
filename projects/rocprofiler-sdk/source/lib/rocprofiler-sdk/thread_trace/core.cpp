@@ -65,9 +65,10 @@ constexpr uint64_t MIN_BUFFER_SIZE = 1 << 20;  // 1MB minimum to give the GPU ro
 
 struct cbdata_t
 {
-    rocprofiler_agent_id_t                          agent    = {.handle = 0};
-    rocprofiler_thread_trace_shader_data_callback_t cb_fn    = nullptr;
-    const rocprofiler_user_data_t*                  userdata = nullptr;
+    rocprofiler_agent_id_t                          agent       = {.handle = 0};
+    rocprofiler_thread_trace_shader_data_callback_t cb_fn       = nullptr;
+    const rocprofiler_user_data_t*                  userdata    = nullptr;
+    uint64_t                                        next_chunk  = 0;
 };
 
 // Keeps track of a single client registering for serialized thread trace
@@ -81,6 +82,7 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
 
     cb_data.cb_fn(cb_data.agent,
                   shader,
+                  cb_data.next_chunk++,
                   buffer,
                   size,
                   ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END,
@@ -129,8 +131,9 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
     const auto* agent =
         CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
 
-    size_t triple_buffer_size = params.triple_buffering ? params.buffer_size : 0ul;
-    queue                     = make_att_queue(*agent, triple_buffer_size);
+    size_t staging_size = (params.num_buffers > 1) ? params.buffer_size : 0ul;
+    size_t staging_n    = (params.num_buffers > 1) ? params.num_buffers : 0ul;
+    queue               = make_att_queue(*agent, staging_size, staging_n);
 
     factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(*agent, this->params, *core, *ext);
     control_packet = factory->construct_control_packet();
@@ -149,8 +152,8 @@ ThreadTracerAgent::~ThreadTracerAgent()
     ROCP_TRACE << "Destroying ATT Queue...";
     if(active_traces.load() < 1) return;
 
-    // This is handled in triple buffer case
-    if(worker_flag && params.triple_buffering)
+    // This is handled in multi-buffer case
+    if(worker_flag && params.num_buffers > 1)
         ROCP_INFO << "Thread tracer being destroyed with thread trace active";
     else
         ROCP_WARNING << "Thread tracer being destroyed with thread trace active";
@@ -209,7 +212,7 @@ void
 ThreadTracerAgent::iterate_data()
 {
     // Already executed by producer thread, skip
-    if(params.triple_buffering) return;
+    if(params.num_buffers > 1) return;
 
     auto lock = std::unique_lock{trace_resources_mut};
     iterate_data(control_packet->GetHandle(), params.callback_userdata);
@@ -259,9 +262,9 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
     control_packet_copy->populate_after();
 
     // Warmup the async copy so we dont wait too long for the flip.
-    if(params.triple_buffering)
+    if(params.num_buffers > 1)
     {
-        auto& buffer = queue->triple_buffer_memory;
+        auto& buffer = queue->cpu_buffers;
         auto  signal = signal_create();
         copy_data_sync(buffer.at(0),
                        buffer.at(1),
@@ -273,27 +276,30 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         signal_destroy(signal);
     }
 
-    // Submit the start packets without waiting: the producer thread (triple-buffer
+    // Submit the start packets without waiting: the producer thread (multi-buffer
     // path) and DeviceThreadTracer::start_context (single-buffer path) wait on the
     // returned signal so multiple agents can be launched in parallel.
     auto unique_signal = att_queue_submit_signal_last(*queue, control_packet_copy->before_krn_pkt);
     auto shared_signal = std::shared_ptr<hsa_signal_t>(std::move(unique_signal));
 
-    if(params.triple_buffering)
+    if(params.num_buffers > 1)
     {
         // Find unique shader engine ID from mask
-        uint64_t shader_engine_id = 0;
+        int64_t shader_engine_id = 0;
         for(uint64_t i = 0; (params.shader_engine_mask >> i) != 0; i++)
             if((params.shader_engine_mask >> i) % 2 == 1) shader_engine_id = i;
 
         auto buffer_packet = std::make_unique<rocprofiler::hsa::SQTTBufferingPackets>(
             control_packet_copy->GetHandle(), shader_engine_id);
         // Emit the optional buffer header first so consumers can prime state
-        // before the main payload arrives.
+        // before the main payload arrives. The header is chunk_index 0; the
+        // producer thread continues the sequence from 1.
+        uint64_t header_chunk_index = 0;
         if(buffer_packet->header != 0)
         {
             params.shader_cb_fn(agent_id,
-                                0,
+                                shader_engine_id,
+                                header_chunk_index++,
                                 &buffer_packet->header,
                                 sizeof(buffer_packet->header),
                                 ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
@@ -302,10 +308,11 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
 
         auto worker_data   = std::make_shared<triple_buffer_shared_data_t>();
         worker_data->queue = queue.get();  // non-owning; ThreadTracerAgent owns queue
+        worker_data->num_buffers = params.num_buffers;
 
-        // Initialize buffer memory pointers from the queue's triple buffer
-        for(size_t i = 0; i < worker_data->buffers.size(); i++)
-            worker_data->buffers.at(i).memory = worker_data->queue->triple_buffer_memory.at(i);
+        // Wire each slot to its CPU staging buffer. Slots default to FREE.
+        for(size_t i = 0; i < worker_data->num_buffers; i++)
+            worker_data->buffers[i].memory = worker_data->queue->cpu_buffers.at(i);
 
         auto producer_data             = triple_buffer_producer_data_t{};
         producer_data.producer_running = worker_flag;
@@ -314,11 +321,8 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         producer_data.copy_data_fn     = copy_data_sync;
         producer_data.shared           = worker_data;
         producer_data.buffer_packet    = std::move(buffer_packet);
-
-        auto consumer_data        = triple_buffer_consumer_data_t{};
-        consumer_data.callback_fn = params.shader_cb_fn;
-        consumer_data.userdata    = params.callback_userdata;
-        consumer_data.shared      = worker_data;
+        producer_data.shader_engine_id = shader_engine_id;
+        producer_data.first_chunk_index = header_chunk_index;
 
         // Other call sites (kfd, internal_threading) wrap each std::thread
         // creation in its own pre/post pair, so match that convention.
@@ -326,9 +330,21 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         producer = std::thread{producer_loop, std::move(producer_data)};
         internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
 
-        internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
-        consumer = std::thread{consumer_loop, std::move(consumer_data)};
-        internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
+        // One consumer thread per slot. Each thread owns a single slot and
+        // waits on its per-slot cv; callbacks run in parallel across slots.
+        consumers.reserve(params.num_buffers);
+        for(size_t i = 0; i < params.num_buffers; i++)
+        {
+            auto consumer_data        = triple_buffer_consumer_data_t{};
+            consumer_data.callback_fn = params.shader_cb_fn;
+            consumer_data.userdata    = params.callback_userdata;
+            consumer_data.shared      = worker_data;
+            consumer_data.slot_index  = i;
+
+            internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
+            consumers.emplace_back(consumer_loop, std::move(consumer_data));
+            internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
+        }
     }
     return shared_signal;
 }
@@ -341,13 +357,15 @@ ThreadTracerAgent::stop_thread_trace()
 
     if(active_traces.load() == 0) return nullptr;
 
-    if(params.triple_buffering)
+    if(params.num_buffers > 1)
     {
         int expected = WORKER_FLAG_RUNNING;
         worker_flag->compare_exchange_strong(expected, WORKER_FLAG_STOP);
 
         if(producer.joinable()) producer.join();
-        if(consumer.joinable()) consumer.join();
+        for(auto& t : consumers)
+            if(t.joinable()) t.join();
+        consumers.clear();
         active_traces.fetch_sub(1);
         worker_flag = nullptr;
         return nullptr;

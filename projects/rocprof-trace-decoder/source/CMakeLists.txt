@@ -81,14 +81,17 @@ set(TTD_PUBLIC_CXX_HEADERS
 #
 # Mutually exclusive backends, picked at configure time:
 #
-#   USE_LLVM_DISASM=ON  (default when LLVM is available)
+#   DISABLE_COMGR=OFF / USE_LLVM_DISASM=OFF  (default)
+#       Use amd_comgr. Default on ROCm because comgr hides its embedded
+#       LLVM behind hidden-visibility symbols, avoiding global-state
+#       collisions (e.g. duplicate LLVM CommandLine registrations) when
+#       the rest of the process also drags LLVM in transitively.
+#
+#   USE_LLVM_DISASM=ON
 #       Use LLVM-C's disassembler. Works on Linux/Windows/macOS without ROCm.
 #       LLVM_DIR may be passed to find_package(LLVM) for a custom build —
 #       useful when a new ASIC ships disasm support before the system LLVM
-#       picks it up.
-#
-#   DISABLE_COMGR=OFF / USE_LLVM_DISASM=OFF
-#       Use amd_comgr (legacy ROCm dependency).
+#       picks it up. Note: links LLVM PUBLIC, so consumers inherit it.
 #
 #   DISABLE_COMGR=ON and USE_LLVM_DISASM=OFF
 #       Build without disassembly. va2fo + symbol enumeration still work
@@ -98,7 +101,7 @@ if(NOT DEFINED DISABLE_COMGR)
     option(DISABLE_COMGR "Disable dependency on amd_comgr disassembly" OFF)
 endif()
 if(NOT DEFINED USE_LLVM_DISASM)
-    option(USE_LLVM_DISASM "Use LLVM-C disassembler instead of amd_comgr" ON)
+    option(USE_LLVM_DISASM "Use LLVM-C disassembler instead of amd_comgr" OFF)
 endif()
 
 set(TTD_DISASM_LINK_LIBS)
