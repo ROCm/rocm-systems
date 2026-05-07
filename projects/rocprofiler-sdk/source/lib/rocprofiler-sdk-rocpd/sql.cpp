@@ -146,7 +146,7 @@ get_version_triplet(std::string_view version_str)
 using kind_filename_map_t = std::unordered_map<rocpd_sql_schema_kind_t, std::string>;
 using version_file_map_t  = std::unordered_map<std::string, kind_filename_map_t>;
 
-const std::unordered_map<std::string_view, rocpd_sql_schema_kind_t>&
+const auto&
 yaml_kind_keys()
 {
     static const auto m = std::unordered_map<std::string_view, rocpd_sql_schema_kind_t>{
@@ -266,10 +266,10 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
         }
     }
 
-    // Since API changed, crude attempt to detect invalid schema versions from older API
-    if(ROCPD_VERSION_TRIPLET_TO_INT(
+    // Check the requested version is valid and catch invalid schema versions from older API
+    if(ROCPROFILER_SDK_COMPUTE_VERSION(
            schema_version.major, schema_version.minor, schema_version.patch) >
-       ROCPD_VERSION_TRIPLET_TO_INT(99, 99, 99))
+       ROCPROFILER_SDK_COMPUTE_VERSION(99, 99, 99))
     {
         ROCP_ERROR << fmt::format("[rocprofiler-sdk-rocpd] Schema version is invalid: '{}.{}.{}'.",
                                   schema_version.major,

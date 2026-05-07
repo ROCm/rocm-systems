@@ -79,12 +79,4 @@ typedef struct rocpd_version_triplet_t
     uint32_t patch;
 } rocpd_version_triplet_t;
 
-/**
- * @brief Encode a version triplet into a single integer for comparison.
- *
- * Encoding: (major * 10000) + (minor * 100) + patch. Each component is
- * assumed to be in the range [0, 99].
- */
-#define ROCPD_VERSION_TRIPLET_TO_INT(major, minor, patch) (major * 10000 + minor * 100 + patch)
-
 /** @} */

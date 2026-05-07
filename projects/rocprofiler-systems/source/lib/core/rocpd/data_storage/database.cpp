@@ -20,16 +20,16 @@
 #    include <rocprofiler-sdk-rocpd/rocpd.h>
 #    include <rocprofiler-sdk-rocpd/types.h>
 
-#    ifndef ROCPD_VERSION_TRIPLET_TO_INT
-#        define ROCPD_VERSION_TRIPLET_TO_INT(major, minor, patch)                        \
-            (major * 10000 + minor * 100 + patch)
+#    ifndef ROCPROSYS_COMPUTE_VERSION
+#        define ROCPROSYS_COMPUTE_VERSION(MAJOR, MINOR, PATCH)                           \
+            ((100 * 100 * MAJOR) + (100 * MINOR) + (PATCH))
 #    endif
 
 #    define ROCPROFSYS_ROCPD_COMPILE_VERSION                                             \
-        ROCPD_VERSION_TRIPLET_TO_INT(ROCPROFSYS_ROCPD_COMPILE_VERSION_MAJOR,             \
-                                     ROCPROFSYS_ROCPD_COMPILE_VERSION_MINOR,             \
-                                     ROCPROFSYS_ROCPD_COMPILE_VERSION_PATCH)
-#    define ROCPROFSYS_ROCPD_NEW_API_VERSION ROCPD_VERSION_TRIPLET_TO_INT(1, 3, 1)
+        ROCPROSYS_COMPUTE_VERSION(ROCPROFSYS_ROCPD_COMPILE_VERSION_MAJOR,                \
+                                  ROCPROFSYS_ROCPD_COMPILE_VERSION_MINOR,                \
+                                  ROCPROFSYS_ROCPD_COMPILE_VERSION_PATCH)
+#    define ROCPROFSYS_ROCPD_NEW_API_VERSION ROCPROSYS_COMPUTE_VERSION(1, 3, 1)
 #else
 #    include "core/rocpd/data_storage/schema/data_views.hpp"
 #    include "core/rocpd/data_storage/schema/marker_views.hpp"
@@ -147,7 +147,7 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
     std::uint32_t rt_major = 0, rt_minor = 0, rt_patch = 0;
     rocpd_get_version(&rt_major, &rt_minor, &rt_patch);
     const std::uint32_t runtime_version =
-        ROCPD_VERSION_TRIPLET_TO_INT(rt_major, rt_minor, rt_patch);
+        ROCPROSYS_COMPUTE_VERSION(rt_major, rt_minor, rt_patch);
 
     if(runtime_version != ROCPROFSYS_ROCPD_COMPILE_VERSION)
     {
@@ -163,7 +163,8 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
 #    if ROCPROFSYS_ROCPD_COMPILE_VERSION >= ROCPROFSYS_ROCPD_NEW_API_VERSION
     if(runtime_version >= ROCPROFSYS_ROCPD_NEW_API_VERSION)
     {
-        rocpd_version_triplet_t schema_version{ 0, 0, 0 };
+        // fixed to the schema version rocprof-sys supports
+        rocpd_version_triplet_t schema_version{ 3, 0, 1 };
         status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3, schema_kind,
                                        ROCPD_SQL_OPTIONS_NONE, schema_version, &info,
                                        load_schema_cb, nullptr, 0, &query);

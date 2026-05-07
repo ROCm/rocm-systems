@@ -349,7 +349,14 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         }))
         .def_readwrite("major", &rocpd_version_triplet_t::major)
         .def_readwrite("minor", &rocpd_version_triplet_t::minor)
-        .def_readwrite("patch", &rocpd_version_triplet_t::patch);
+        .def_readwrite("patch", &rocpd_version_triplet_t::patch)
+        .def("__str__",
+             [](const rocpd_version_triplet_t& v) {
+                 return fmt::format("{}.{}.{}", v.major, v.minor, v.patch);
+             })
+        .def("__repr__", [](const rocpd_version_triplet_t& v) {
+            return fmt::format("schema_version({}, {}, {})", v.major, v.minor, v.patch);
+        });
 
     py::class_<rocpd::RocpdImportData>(pyrocpd, "RocpdImportData", "RocPD database(s) instances")
         .def(py::init<>())
@@ -432,8 +439,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 auto* _out = static_cast<py::list*>(user_data);
                 for(uint64_t i = 0; i < num_versions; ++i)
                 {
-                    const auto& v = versions[i];
-                    _out->append(py::str(fmt::format("{}.{}.{}", v.major, v.minor, v.patch)));
+                    _out->append(py::cast(versions[i]));
                 }
                 return ROCPD_STATUS_SUCCESS;
             };
@@ -443,8 +449,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         },
         py::arg("engine")            = ROCPD_SQL_ENGINE_SQLITE3,
         py::arg("schema_path_hints") = py::none(),
-        "Return supported rocpd SQL schema versions (from versions.yml) as list of"
-        "strings.");
+        "Return supported rocpd SQL schema versions (from versions.yml) as a list of "
+        "schema_version objects. Call str() on each entry to get a \"major.minor.patch\" string.");
 
     // NOLINTBEGIN(performance-unnecessary-value-param)
 

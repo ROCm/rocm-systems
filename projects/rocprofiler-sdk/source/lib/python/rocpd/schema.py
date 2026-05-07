@@ -47,7 +47,11 @@ class RocpdSchema:
         )
 
         # version=0.0.0 means use the default schema version
-        schema_version = libpyrocpd.schema_version(version)
+        schema_version = (
+            version
+            if isinstance(version, libpyrocpd.schema_version)
+            else libpyrocpd.schema_version(str(version))
+        )
 
         self.tables = RocpdSchema.load_schema(
             libpyrocpd.sql_engine.sqlite3,
@@ -93,7 +97,7 @@ class RocpdSchema:
         connection.executescript(self.views)
 
     @staticmethod
-    def load_schema(engine, kind, options, version, variables=None, **kwargs):
+    def load_schema(engine, kind, options, version="0.0.0", variables=None, **kwargs):
 
         if variables is None:
             variables = libpyrocpd.schema_jinja_variables()

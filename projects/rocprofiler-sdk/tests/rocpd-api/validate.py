@@ -92,8 +92,8 @@ def test_load_all_schema_versions():
         assert "CREATE VIEW" in schema.views, "Schema views must contain CREATE VIEW"
         assert schema.metadata, "RocpdSchema.metadata must be non-empty"
         version_from_metadata = schema_version_from_metadata_sql(schema.metadata)
-        assert (
-            version_from_metadata == version
+        assert version_from_metadata == str(
+            version
         ), f"Schema version from metadata must match schema version. Requested: {version}, got: {version_from_metadata}"
 
 
