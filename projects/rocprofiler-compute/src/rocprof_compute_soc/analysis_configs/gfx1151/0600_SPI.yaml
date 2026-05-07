@@ -65,9 +65,9 @@ Panel Config:
       cycles when multiple shader engines are active in parallel.
     Compute Wave Dispatches: |-
       SPI counter SPI_CSN_WAVE (block SPI, event 50): compute (CSN) path wave count as stored in
-      pmc_perf (column SPI_CSN_WAVE). Same idea as WGP “Dispatched Waves” (SQ_WAVES_sum) but at
-      SPI; values may differ slightly. Normalized by CLI $denom: per_kernel → ÷1; per_wave →
-      ÷SQ_WAVES; per_cycle → ÷$GRBM_GUI_ACTIVE_PER_XCD; per_second → ÷kernel wall time (s).
+      pmc_perf (column SPI_CSN_WAVE). Same idea as WGP "Dispatched Waves" (SQ_WAVES_sum) but at
+      SPI; values may differ slightly. Normalized by CLI $denom: per_kernel -> /1; per_wave ->
+      /SQ_WAVES; per_cycle -> /$GRBM_GUI_ACTIVE_PER_XCD; per_second -> /kernel wall time (s).
     Wave Dispatch Rate: |-
-      SPI_CSN_WAVE / GRBM_GUI_ACTIVE — waves per GUI-active cycle (can exceed 1 when many SEs
+      SPI_CSN_WAVE / GRBM_GUI_ACTIVE - waves per GUI-active cycle (can exceed 1 when many SEs
       dispatch in parallel). Uses the same SPI_CSN_WAVE column as collection emits.
