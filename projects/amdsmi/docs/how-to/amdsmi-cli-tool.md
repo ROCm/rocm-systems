@@ -575,7 +575,7 @@ Set options for specified devices.
 ~$ amd-smi set --help
 usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-f %]
                    [-l LEVEL] [-P SETPROFILE] [-d SCLKMAX] [-C PARTITION] [-M PARTITION]
-                   [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-R STATUS]
+                   [-a MODE] [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-R STATUS]
                    [--cpu-pwr-limit PWR_LIMIT] [--cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH]
                    [--cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM] [--cpu-pwr-eff-mode MODE [UTIL PPT_LIMIT]]
                    [--cpu-gmi3-link-width MIN_LW MAX_LW] [--cpu-pcie-link-rate LINK_RATE]
@@ -607,7 +607,7 @@ Set Arguments:
                                                 Use `sudo amd-smi partition --accelerator` to find acceptable values.
   -M, --memory-partition PARTITION            Set one of the following the memory partition modes:
                                                 NPS1, NPS2, NPS4, NPS8
-  --compute-partition-mem-alloc-mode MODE     Set compute partition memory allocation mode (requires sudo):
+  -a, --compute-partition-mem-alloc-mode MODE Set compute partition memory allocation mode (requires sudo):
                                                 CAPPING - each XCP is capped to an even share of partition memory
                                                 ALL     - each XCP may use the full partition memory
   -o, --power-cap WATTS                       Set power capacity limit:

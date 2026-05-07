@@ -2577,6 +2577,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     metavar="PARTITION",
                 )
                 set_value_exclusive_group.add_argument(
+                    "-a",
                     "--compute-partition-mem-alloc-mode",
                     action="store",
                     choices=["CAPPING", "ALL"],

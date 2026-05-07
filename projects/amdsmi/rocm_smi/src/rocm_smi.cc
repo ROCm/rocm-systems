@@ -5927,9 +5927,6 @@ rsmi_status_t rsmi_dev_compute_partition_set(uint32_t dv_ind,
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
-  if (!amd::smi::is_sudo_user()) {
-    return RSMI_STATUS_PERMISSION;
-  }
   std::string currentComputePartition = "";
   std::string newComputePartitionStr = "";
 
