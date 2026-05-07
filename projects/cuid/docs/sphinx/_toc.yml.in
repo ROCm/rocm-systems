@@ -18,6 +18,13 @@ subtrees:
 - caption: API reference
   entries:
   - file: reference/amdcuid-c-api
+    entries:
+    - file: doxygen/docBin/html/amd__cuid_8h
+      title: amd_cuid.h file reference
+    - file: doxygen/docBin/html/annotated
+      title: Data structures
+    - file: doxygen/docBin/html/globals
+      title: Globals
 
 - caption: Conceptual
   entries:

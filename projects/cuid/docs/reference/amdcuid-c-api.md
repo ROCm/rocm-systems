@@ -9,8 +9,8 @@ myst:
 
 Here are the files, globals, and data structures defined in `amd_cuid.h`:
 
-- {doc}`Files <../doxygen/docBin/html/files>`
-
-- {doc}`Globals <../doxygen/docBin/html/globals>`
+- {doc}`amd_cuid.h file reference <../doxygen/docBin/html/amd__cuid_8h>`
 
 - {doc}`Data structures <../doxygen/docBin/html/annotated>`
+
+- {doc}`Globals <../doxygen/docBin/html/globals>`

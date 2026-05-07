@@ -2,21 +2,35 @@ defaults:
   numbered: false
 root: index
 subtrees:
+- entries:
+  - file: conceptual/what_is_cuid
+
 - caption: Install
   entries:
-  - file: install/install.md
-    title: Build and install from source
+  - file: install/install
 
-- caption: Reference
+- caption: How to
   entries:
-  - file: reference/amdcuid-c-api.md
-    title: C API
+  - file: how-to/cuid-cli-tool
+  - url: https://github.com/ROCm/rocm-systems/blob/develop/projects/cuid/example/main.cc
+    title: Sample program using CUID API
+
+- caption: API reference
+  entries:
+  - file: reference/amdcuid-c-api
     entries:
-    - file: doxygen/docBin/html/files
-      title: Files
-    - file: doxygen/docBin/html/globals
-      title: Globals
+    - file: doxygen/docBin/html/amd__cuid_8h
+      title: amd_cuid.h file reference
     - file: doxygen/docBin/html/annotated
       title: Data structures
-    - file: doxygen/docBin/html/functions_data_fields
-      title: Data fields
+    - file: doxygen/docBin/html/globals
+      title: Globals
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/cuid_file
+
+- caption: About
+  entries:
+  - file: license
+
