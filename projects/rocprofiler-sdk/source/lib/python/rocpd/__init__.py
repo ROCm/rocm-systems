@@ -84,8 +84,8 @@ def _preload_vendored_sqlite():
 
 _preload_vendored_sqlite()
 
-from . import libpyrocpd
-from .importer import RocpdImportData
+from . import libpyrocpd  # noqa: E402
+from .importer import RocpdImportData  # noqa: E402
 
 __all__ = [
     "connect",
