@@ -160,6 +160,39 @@ TEST(metrics, derived_load)
     }
 }
 
+// Verifies the gfx11 SQG counters added in branch users/ephoukong/SQG-counters
+// are loaded from config.yaml with the expected name/block/event/description.
+// Uses a subset-find against gfx1100 rather than asserting full size equality,
+// because the rest of gfx11 is not enumerated in metrics_test.h.
+TEST(metrics, sqg_counters_gfx11)
+{
+    auto loaded_metrics = counters::loadMetrics();
+    auto basic_test     = loadTestData(sqg_basic_gfx11);
+    ASSERT_EQ(loaded_metrics->arch_to_metric.count("gfx1100"), 1)
+        << "gfx1100 metrics not loaded from config.yaml";
+    ASSERT_EQ(basic_test.count("gfx1100"), 1);
+    const auto& gfx11_metrics = loaded_metrics->arch_to_metric.at("gfx1100");
+    auto find_by_name = [&gfx11_metrics](const std::string& n) -> std::optional<counters::Metric> {
+        for(const auto& m : gfx11_metrics)
+            if(m.name() == n) return m;
+        return std::nullopt;
+    };
+    auto equal = [](const auto& lhs, const auto& rhs) {
+        return std::tie(lhs.name(), lhs.block(), lhs.event(), lhs.description()) ==
+               std::tie(rhs.name(), rhs.block(), rhs.event(), rhs.description());
+    };
+    for(const auto& itr : basic_test.at("gfx1100"))
+    {
+        auto val = find_by_name(itr.name());
+        if(!val)
+        {
+            EXPECT_TRUE(val) << "failed to find SQG counter " << fmt::format("{}", itr);
+            continue;
+        }
+        EXPECT_TRUE(equal(itr, *val)) << fmt::format("\n\t{} \n\t\t!= \n\t{}", itr, *val);
+    }
+}
+
 TEST(metrics, check_agent_valid)
 {
     auto        mets      = counters::loadMetrics();

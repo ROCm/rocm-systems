@@ -2070,3 +2070,226 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
         "",
         "reduce(TCC_BUBBLE,sum)",
         "Number of 128-byte read requests sent to EA. Sum over all TCC instances."}}}};
+
+// Subset of base metrics expected on gfx11 architectures for the newly added
+// SQG (Shader Graphics) block. Layout matches `basic_gfx908`:
+// {name, block, event, expression, description}. Only the SQG counters added
+// in branch users/ephoukong/SQG-counters are listed; the rest of gfx11 is not
+// enumerated here. The TEST(metrics, sqg_counters_gfx11) consumer uses a
+// subset-find rather than full size equality.
+static const std::unordered_map<std::string, std::vector<std::vector<std::string>>>
+    sqg_basic_gfx11 = {
+        {"gfx1100",
+         {{"SQG_NONE",
+           "SQG",
+           "0",
+           "<None>",
+           "Do not count anything; perf counter is disabled (SQG_PERFCOUNTER0_SELECT "
+           "PERF_SEL). SQG_PERF_SEL_NONE."},
+          {"SQG_MSG_BUS_BUSY",
+           "SQG",
+           "1",
+           "<None>",
+           "Number of cycles the SQG message bus is busy (per shader engine). "
+           "SQG_PERF_SEL_MSG_BUS_BUSY."},
+          {"SQG_EXP_REQ0_BUS_BUSY",
+           "SQG",
+           "2",
+           "<None>",
+           "Number of cycles export request bus 0 is busy (per shader engine). "
+           "SQG_PERF_SEL_EXP_REQ0_BUS_BUSY."},
+          {"SQG_EXP_REQ1_BUS_BUSY",
+           "SQG",
+           "3",
+           "<None>",
+           "Number of cycles export request bus 1 is busy (per shader engine). "
+           "SQG_PERF_SEL_EXP_REQ1_BUS_BUSY."},
+          {"SQG_EXP_BUS0_BUSY",
+           "SQG",
+           "4",
+           "<None>",
+           "Number of cycles export bus 0 is busy (per shader engine). "
+           "SQG_PERF_SEL_EXP_BUS0_BUSY."},
+          {"SQG_EXP_BUS1_BUSY",
+           "SQG",
+           "5",
+           "<None>",
+           "Number of cycles export bus 1 is busy (per shader engine). "
+           "SQG_PERF_SEL_EXP_BUS1_BUSY."},
+          {"SQG_TTRACE_REQS",
+           "SQG",
+           "6",
+           "<None>",
+           "Number of thread-trace requests issued (per shader engine). "
+           "SQG_PERF_SEL_TTRACE_REQS."},
+          {"SQG_TTRACE_INFLIGHT_REQS",
+           "SQG",
+           "7",
+           "<None>",
+           "Number of in-flight thread-trace requests (per shader engine). "
+           "SQG_PERF_SEL_TTRACE_INFLIGHT_REQS."},
+          {"SQG_TTRACE_STALL",
+           "SQG",
+           "8",
+           "<None>",
+           "Number of cycles thread-trace was stalled (per shader engine). "
+           "SQG_PERF_SEL_TTRACE_STALL."},
+          {"SQG_TTRACE_LOST_PACKETS",
+           "SQG",
+           "9",
+           "<None>",
+           "Number of thread-trace packets dropped (per shader engine). "
+           "SQG_PERF_SEL_TTRACE_LOST_PACKETS."},
+          {"SQG_WAVES_INITIAL_PREFETCH",
+           "SQG",
+           "10",
+           "<None>",
+           "Number of waves that issued an initial instruction prefetch (per shader engine). "
+           "SQG_PERF_SEL_WAVES_INITIAL_PREFETCH."},
+          {"SQG_EVENTS",
+           "SQG",
+           "11",
+           "<None>",
+           "Number of perfcounter events received by SQG (per shader engine). "
+           "SQG_PERF_SEL_EVENTS."},
+          {"SQG_WAVES_RESTORED",
+           "SQG",
+           "12",
+           "<None>",
+           "Number of waves restored by context-switch (per shader engine). "
+           "SQG_PERF_SEL_WAVES_RESTORED."},
+          {"SQG_WAVES_SAVED",
+           "SQG",
+           "13",
+           "<None>",
+           "Number of waves saved by context-switch (per shader engine). "
+           "SQG_PERF_SEL_WAVES_SAVED."},
+          {"SQG_ACCUM_PREV",
+           "SQG",
+           "14",
+           "<None>",
+           "For SQG counter N, increment by the value of counter N-1. Used by derived "
+           "counters to accumulate over time. (per shader engine). SQG_PERF_SEL_ACCUM_PREV."},
+          {"SQG_CYCLES",
+           "SQG",
+           "15",
+           "<None>",
+           "Number of SQG clock cycles (per shader engine). SQG_PERF_SEL_CYCLES."},
+          {"SQG_BUSY_CYCLES",
+           "SQG",
+           "16",
+           "<None>",
+           "Number of clock cycles SQG is reporting that it is busy (per shader engine). "
+           "SQG_PERF_SEL_BUSY_CYCLES."},
+          {"SQG_WAVE_CYCLES",
+           "SQG",
+           "17",
+           "<None>",
+           "Sum of clock cycles spent by waves observed at the SQG (per shader engine). "
+           "Incremented by the number of valid waves each cycle. SQG_PERF_SEL_WAVE_CYCLES."},
+          {"SQG_MSG",
+           "SQG",
+           "18",
+           "<None>",
+           "Number of S_SENDMSG instructions issued by waves observed by SQG (per shader "
+           "engine). SQG_PERF_SEL_MSG."},
+          {"SQG_MSG_INTERRUPT",
+           "SQG",
+           "19",
+           "<None>",
+           "Number of S_SENDMSG interrupt messages issued (per shader engine). "
+           "SQG_PERF_SEL_MSG_INTERRUPT."},
+          {"SQG_WAVES",
+           "SQG",
+           "20",
+           "<None>",
+           "Number of waves dispatched and observed by SQG, summed across all graphics and "
+           "compute pipeline stages (per shader engine). SQG_PERF_SEL_WAVES."},
+          {"SQG_WAVES_32",
+           "SQG",
+           "21",
+           "<None>",
+           "Number of wave32 waves dispatched (per shader engine). SQG_PERF_SEL_WAVES_32."},
+          {"SQG_WAVES_64",
+           "SQG",
+           "22",
+           "<None>",
+           "Number of wave64 waves dispatched (per shader engine). SQG_PERF_SEL_WAVES_64."},
+          {"SQG_LEVEL_WAVES",
+           "SQG",
+           "23",
+           "<None>",
+           "Number of in-flight waves observed by SQG. Best used with accumulate() functions "
+           "as part of a derived counter (per shader engine). SQG_PERF_SEL_LEVEL_WAVES."},
+          {"SQG_ITEMS",
+           "SQG",
+           "24",
+           "<None>",
+           "Sum of work items processed by SQG-tracked waves. Useful for computing average "
+           "wave occupancy across pipeline stages (per shader engine). SQG_PERF_SEL_ITEMS."},
+          {"SQG_WAVE32_ITEMS",
+           "SQG",
+           "25",
+           "<None>",
+           "Number of work items contributed by wave32 waves (per shader engine). "
+           "SQG_PERF_SEL_WAVE32_ITEMS."},
+          {"SQG_WAVE64_ITEMS",
+           "SQG",
+           "26",
+           "<None>",
+           "Number of work items contributed by wave64 waves (per shader engine). "
+           "SQG_PERF_SEL_WAVE64_ITEMS."},
+          {"SQG_PS_QUADS",
+           "SQG",
+           "27",
+           "<None>",
+           "Number of pixel-shader quads processed (per shader engine). "
+           "SQG_PERF_SEL_PS_QUADS."},
+          {"SQG_WAVES_EQ_64",
+           "SQG",
+           "28",
+           "<None>",
+           "Number of waves that occupied exactly 64 lanes (per shader engine). "
+           "SQG_PERF_SEL_WAVES_EQ_64."},
+          {"SQG_WAVES_EQ_32",
+           "SQG",
+           "29",
+           "<None>",
+           "Number of waves that occupied exactly 32 lanes (per shader engine). "
+           "SQG_PERF_SEL_WAVES_EQ_32."},
+          {"SQG_WAVES_LT_64",
+           "SQG",
+           "30",
+           "<None>",
+           "Number of waves with fewer than 64 active lanes (per shader engine). "
+           "SQG_PERF_SEL_WAVES_LT_64."},
+          {"SQG_WAVES_LT_48",
+           "SQG",
+           "31",
+           "<None>",
+           "Number of waves with fewer than 48 active lanes (per shader engine). "
+           "SQG_PERF_SEL_WAVES_LT_48."},
+          {"SQG_WAVES_LT_32",
+           "SQG",
+           "32",
+           "<None>",
+           "Number of waves with fewer than 32 active lanes (per shader engine). "
+           "SQG_PERF_SEL_WAVES_LT_32."},
+          {"SQG_WAVES_LT_16",
+           "SQG",
+           "33",
+           "<None>",
+           "Number of waves with fewer than 16 active lanes (per shader engine). "
+           "SQG_PERF_SEL_WAVES_LT_16."},
+          {"SQG_WAVES_STARTED",
+           "SQG",
+           "34",
+           "<None>",
+           "Aggregated number of waves started over a period of time (per shader engine). "
+           "SQG_PERF_SEL_WAVES_STARTED."},
+          {"SQG_WAVES_ENDED",
+           "SQG",
+           "35",
+           "<None>",
+           "Aggregated number of waves ended over a period of time (per shader engine). "
+           "SQG_PERF_SEL_WAVES_ENDED."}}}};
