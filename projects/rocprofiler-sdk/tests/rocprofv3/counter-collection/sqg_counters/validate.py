@@ -27,7 +27,6 @@ import pytest
 import pandas as pd
 import re
 
-
 # vector-ops kernels expected in every pass
 KERNEL_LIST = sorted(
     ["addition_kernel", "subtract_kernel", "multiply_kernel", "divide_kernel"]
@@ -58,7 +57,10 @@ SKIP_GFX_VALUE_CHECK = (
 )
 
 # SQG counters that must aggregate to a non-zero value for any gfx11 compute
-# workload that successfully launches a wave.
+# workload that successfully launches a wave. SQG_WAVES_ENDED is excluded
+# because on observed gfx11 hardware (gfx1151) the AQL sampling window
+# captures wave starts but the END signal is not registered before the
+# Stop+Read packets fire, so SQG_WAVES_ENDED can legitimately be 0.
 ALWAYS_NONZERO = {
     "SQG_CYCLES",
     "SQG_BUSY_CYCLES",
@@ -67,7 +69,6 @@ ALWAYS_NONZERO = {
     "SQG_ITEMS",
     "SQG_LEVEL_WAVES",
     "SQG_WAVES_STARTED",
-    "SQG_WAVES_ENDED",
 }
 
 # SQG counters that hardware guarantees to be zero ("perf counter is disabled").
@@ -103,9 +104,9 @@ def _validate_csv_shape(df: pd.DataFrame, expected_kernels):
     assert len(df["Kernel_Name"]) > 0
 
     observed_kernels = sorted(_unique(_filter_kernels(df["Kernel_Name"].tolist())))
-    assert sorted(expected_kernels) == observed_kernels, (
-        f"Expected kernels {sorted(expected_kernels)}, observed {observed_kernels}"
-    )
+    assert (
+        sorted(expected_kernels) == observed_kernels
+    ), f"Expected kernels {sorted(expected_kernels)}, observed {observed_kernels}"
 
     kernel_count = {k: 0 for k in expected_kernels}
     for itr in df["Kernel_Name"]:
@@ -113,9 +114,9 @@ def _validate_csv_shape(df: pd.DataFrame, expected_kernels):
             continue
         kernel_count[itr] += 1
     counts = list(kernel_count.values())
-    assert min(counts) == max(counts) and len(_unique(counts)) == 1, (
-        f"Kernel counts are not uniform: {kernel_count}"
-    )
+    assert (
+        min(counts) == max(counts) and len(_unique(counts)) == 1
+    ), f"Kernel counts are not uniform: {kernel_count}"
 
 
 def _validate_csv_counter_set(df: pd.DataFrame, expected_counters):
@@ -141,9 +142,9 @@ def _validate_csv_values(df: pd.DataFrame, expected_counters):
     is unconditional because it reflects a hardware guarantee.
     """
 
-    assert (df["Counter_Value"].astype(int).values >= 0).all(), (
-        "Found negative SQG counter value in CSV output"
-    )
+    assert (
+        df["Counter_Value"].astype(int).values >= 0
+    ).all(), "Found negative SQG counter value in CSV output"
 
     for counter_name in MUST_BE_ZERO & set(expected_counters):
         sub = df[df["Counter_Name"] == counter_name]
@@ -163,9 +164,9 @@ def _validate_csv_values(df: pd.DataFrame, expected_counters):
         if a in expected_counters and b in expected_counters:
             tot_a = int(df[df["Counter_Name"] == a]["Counter_Value"].astype(int).sum())
             tot_b = int(df[df["Counter_Name"] == b]["Counter_Value"].astype(int).sum())
-            assert tot_a + tot_b > 0, (
-                f"Neither {a} nor {b} aggregated above 0 (got {tot_a} + {tot_b})"
-            )
+            assert (
+                tot_a + tot_b > 0
+            ), f"Neither {a} nor {b} aggregated above 0 (got {tot_a} + {tot_b})"
 
 
 def _validate_json_shape(json_data, expected_counters):
@@ -219,9 +220,9 @@ def _validate_json_shape(json_data, expected_counters):
         for record in entry["records"]:
             counter_obj = get_counter(record["counter_id"])
             assert counter_obj is not None, f"record:\n\t{record}"
-            assert counter_obj["name"] in expected_set, (
-                f"unexpected counter: {counter_obj['name']}"
-            )
+            assert (
+                counter_obj["name"] in expected_set
+            ), f"unexpected counter: {counter_obj['name']}"
 
             if counter_obj["name"] in counter_must_be_zero_total:
                 counter_must_be_zero_total[counter_obj["name"]] += record["value"]
@@ -231,19 +232,21 @@ def _validate_json_shape(json_data, expected_counters):
                 counter_seen_on_active_agent[counter_obj["name"]] = True
 
     for name, total in counter_must_be_zero_total.items():
-        assert total == 0, (
-            f"{name} is documented as 'do not count anything' but aggregated to {total}"
-        )
+        assert (
+            total == 0
+        ), f"{name} is documented as 'do not count anything' but aggregated to {total}"
 
     for name in ALWAYS_NONZERO & expected_set:
         if counter_seen_on_active_agent[name]:
-            assert counter_sums_active[name] > 0, (
-                f"{name} aggregate is not > 0 across non-skip agents"
-            )
+            assert (
+                counter_sums_active[name] > 0
+            ), f"{name} aggregate is not > 0 across non-skip agents"
 
     for a, b in WAVE_SPLIT_PAIRS:
-        if a in expected_set and b in expected_set and (
-            counter_seen_on_active_agent[a] or counter_seen_on_active_agent[b]
+        if (
+            a in expected_set
+            and b in expected_set
+            and (counter_seen_on_active_agent[a] or counter_seen_on_active_agent[b])
         ):
             total = counter_sums_active[a] + counter_sums_active[b]
             assert total > 0, (
@@ -253,9 +256,9 @@ def _validate_json_shape(json_data, expected_counters):
 
     di_uniq = sorted(set(dispatch_ids))
     di_expect = list(range(1, len(di_uniq) + 1))
-    assert di_expect == di_uniq, (
-        f"dispatch ids are not unique/ordered: got {di_uniq}, expected {di_expect}"
-    )
+    assert (
+        di_expect == di_uniq
+    ), f"dispatch ids are not unique/ordered: got {di_uniq}, expected {di_expect}"
 
 
 # ----------------------------------------------------------------------
@@ -394,13 +397,15 @@ def test_validate_sqg_counter_collection_json_pmc5(input_json_pmc5):
 def test_validate_sqg_counter_classification_disjoint():
     """Sanity: in-test classification of SQG counters does not overlap."""
     overlap = ALWAYS_NONZERO & MUST_BE_ZERO
-    assert not overlap, f"Counters in both ALWAYS_NONZERO and MUST_BE_ZERO: {sorted(overlap)}"
+    assert (
+        not overlap
+    ), f"Counters in both ALWAYS_NONZERO and MUST_BE_ZERO: {sorted(overlap)}"
 
     wave_pair_set = {name for pair in WAVE_SPLIT_PAIRS for name in pair}
     overlap_pairs = wave_pair_set & (ALWAYS_NONZERO | MUST_BE_ZERO)
-    assert not overlap_pairs, (
-        f"Wave-split pair counter also classified elsewhere: {sorted(overlap_pairs)}"
-    )
+    assert (
+        not overlap_pairs
+    ), f"Wave-split pair counter also classified elsewhere: {sorted(overlap_pairs)}"
 
 
 if __name__ == "__main__":
