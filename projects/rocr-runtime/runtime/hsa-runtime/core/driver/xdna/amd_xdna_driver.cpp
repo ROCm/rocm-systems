@@ -579,31 +579,16 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::FreeMemory(void *mem, size_t size) {
+hsa_status_t XdnaDriver::FreeMemory(void* mem, size_t size) {
   auto it = vmem_addr_mappings.find(mem);
-  if (it == vmem_addr_mappings.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  if (it == vmem_addr_mappings.end()) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
 
   auto& bo_handle = it->second;
-  if (bo_handle.unmap_vaddr) {
-    if (munmap(bo_handle.vaddr, bo_handle.size) != 0) {
-      return HSA_STATUS_ERROR;
-    }
-    bo_handle.unmap_vaddr = false;
-  }
-  bo_handle.vaddr = nullptr;
-  bo_handle.size = 0;
-
-  // Close the BO.
-  drm_gem_close close_args = {};
-  close_args.handle = bo_handle.handle;
-  if (xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_args) < 0) {
-    return HSA_STATUS_ERROR;
-  }
-  bo_handle.handle = AMDXDNA_INVALID_BO_HANDLE;
-
+  hsa_status_t err = DestroyBOHandle(bo_handle);
   vmem_addr_mappings.erase(it);
-
-  return HSA_STATUS_SUCCESS;
+  return err;
 }
 
 hsa_status_t XdnaDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
@@ -706,7 +691,9 @@ hsa_status_t XdnaDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
   drm_prime_handle import_params = {};
   import_params.handle = AMDXDNA_INVALID_BO_HANDLE;
   import_params.fd = dmabuf_fd;
-  if (xdna_ioctl(fd_, DRM_IOCTL_PRIME_FD_TO_HANDLE, &import_params) < 0) return HSA_STATUS_ERROR;
+  if (xdna_ioctl(fd_, DRM_IOCTL_PRIME_FD_TO_HANDLE, &import_params) < 0) {
+    return HSA_STATUS_ERROR;
+  }
 
   *handle = core::ShareableHandle{import_params.handle};
   return HSA_STATUS_SUCCESS;
@@ -731,6 +718,7 @@ hsa_status_t XdnaDriver::Map(core::ShareableHandle handle, void *mem,
   // Change permissions.
   void *mapped_ptr = mmap(mem, size, PermissionsToMmapFlags(perms),
                           MAP_FIXED | MAP_SHARED, params.fd, offset);
+  close(params.fd);
   if (mapped_ptr == MAP_FAILED) {
     return HSA_STATUS_ERROR;
   }
@@ -740,8 +728,9 @@ hsa_status_t XdnaDriver::Map(core::ShareableHandle handle, void *mem,
 
 hsa_status_t XdnaDriver::Unmap(core::ShareableHandle handle, void *mem,
                                size_t offset, size_t size) {
-  if (munmap(mem, size) != 0)
+  if (munmap(mem, size) != 0) {
     return HSA_STATUS_ERROR;
+  }
 
   return HSA_STATUS_SUCCESS;
 }
@@ -776,6 +765,7 @@ hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   void* mapped_ptr = mmap(va, size, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_SHARED, fd_,
                           get_bo_info_args.map_offset);
   if (mapped_ptr == MAP_FAILED) {
+    close(params.fd);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -839,6 +829,7 @@ hsa_status_t XdnaDriver::InitDeviceHeap() {
   if (dev_heap_handle.vaddr == MAP_FAILED) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
+  dev_heap_handle.unmap_vaddr = true;
   dev_heap_handle.size = size;
 
   void* addr_aligned = reinterpret_cast<void*>(
@@ -858,16 +849,21 @@ hsa_status_t XdnaDriver::InitDeviceHeap() {
 }
 
 hsa_status_t XdnaDriver::FreeDeviceHeap() {
+  hsa_status_t err = HSA_STATUS_SUCCESS;
+
   if (dev_heap_aligned) {
     if (munmap(dev_heap_aligned, dev_heap_size) != 0) {
-      return HSA_STATUS_ERROR;
+      err = HSA_STATUS_ERROR;
+    } else {
+      dev_heap_aligned = nullptr;
     }
-    dev_heap_aligned = nullptr;
   }
 
-  DestroyBOHandle(dev_heap_handle);
+  if (DestroyBOHandle(dev_heap_handle) != HSA_STATUS_SUCCESS) {
+    err = HSA_STATUS_ERROR;
+  }
 
-  return HSA_STATUS_SUCCESS;
+  return err;
 }
 
 hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) {
@@ -1142,10 +1138,17 @@ hsa_status_t XdnaDriver::IsModelEnabled(bool* enable) const {
   return HSA_STATUS_SUCCESS;
 }
 
-void XdnaDriver::DestroyBOHandle(BOHandle& handle) {
+hsa_status_t XdnaDriver::DestroyBOHandle(BOHandle& handle) {
+  if (!handle.IsValid()) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  hsa_status_t err = HSA_STATUS_SUCCESS;
+
+  // Unmap the memory.
   if (handle.unmap_vaddr) {
-    // Unmap the memory.
     if (munmap(handle.vaddr, handle.size) != 0) {
+      err = HSA_STATUS_ERROR;
       assert(false && "Failed to unmap BO memory.");
     }
     handle.unmap_vaddr = false;
@@ -1153,14 +1156,15 @@ void XdnaDriver::DestroyBOHandle(BOHandle& handle) {
   handle.vaddr = nullptr;
   handle.size = 0;
 
-  if (handle.IsValid()) {
-    drm_gem_close close_bo_args = {};
-    close_bo_args.handle = handle.handle;
-    if (xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_bo_args) < 0) {
-      assert(false && "Failed to close BO handle.");
-    }
-    handle.handle = AMDXDNA_INVALID_BO_HANDLE;
+  // Close the BO handle.
+  drm_gem_close close_bo_args = {};
+  close_bo_args.handle = handle.handle;
+  if (xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_bo_args) < 0) {
+    err = HSA_STATUS_ERROR;
   }
+  handle.handle = AMDXDNA_INVALID_BO_HANDLE;
+
+  return err;
 }
 
 XdnaDriver::BOHandle XdnaDriver::FindBOHandle(void* mem) const {
