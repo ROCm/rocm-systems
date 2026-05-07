@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <cstdlib>
 #include <fcntl.h>
 #include <random>
 #include <thread>
@@ -794,6 +795,31 @@ struct VmmPosixAllocation
     hipMemGenericAllocationHandle_t handle = 0;
 };
 
+inline void AllocateViaNcclCuMemAlloc(int dev, size_t requestedSize, VmmPosixAllocation* out)
+{
+    ASSERT_NE(out, nullptr);
+    ASSERT_EQ(hipSetDevice(dev), hipSuccess);
+
+    void*                      ptr    = nullptr;
+    hipMemGenericAllocationHandle_t handle = 0;
+    ncclResult_t               r      = ncclCuMemAlloc(&ptr, &handle, hipMemHandleTypePosixFileDescriptor,
+                                        requestedSize, /*manager=*/nullptr);
+    ASSERT_EQ(r, ncclSuccess);
+    ASSERT_NE(ptr, nullptr);
+    ASSERT_NE(reinterpret_cast<void*>(handle), nullptr);
+
+    out->ptr    = ptr;
+    out->pdev   = reinterpret_cast<hipDeviceptr_t>(ptr);
+    out->size   = requestedSize; // ncclCuMemAlloc aligns internally; size is only used for bookkeeping in tests
+    out->handle = handle;
+}
+
+inline void ReleaseViaNcclCuMemFree(const VmmPosixAllocation& a)
+{
+    ASSERT_NE(a.ptr, nullptr);
+    ASSERT_EQ(ncclCuMemFree(a.ptr, /*manager=*/nullptr), ncclSuccess);
+}
+
 // Allocates a chunk of device memory via the HIP VMM API with a POSIX-fd
 // shareable handle. Mirrors the prop layout of ncclCuMemAlloc:
 //   - Pinned + Device location
@@ -848,6 +874,38 @@ inline void ReleaseVmmPosixFd(const VmmPosixAllocation& a)
     ASSERT_EQ(hipMemAddressFree(a.pdev, a.size), hipSuccess);
 }
 } // namespace
+
+TEST(MemManagerRealMem, Track_RealCuMemAlloc_PosixFd)
+{
+    RUN_ISOLATED_TEST("MemManager_Track_RealCuMemAlloc_PosixFd", []() {
+        if(!ncclCuMemEnable()) {
+            GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 - ncclCuMemAlloc wrapper bypassed";
+        }
+
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+        int dev = 0;
+        ASSERT_EQ(hipGetDevice(&dev), hipSuccess);
+
+        VmmPosixAllocation va;
+        AllocateViaNcclCuMemAlloc(dev, /*requestedSize=*/65536, &va);
+
+        ncclComm* comm = new ncclComm();
+        comm->cudaDev  = dev;
+        ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+
+        // Note: ncclCuMemAlloc does not surface the aligned size. Use the same
+        // requestedSize for Track/Untrack to exercise the list bookkeeping.
+        ASSERT_EQ(ncclMemTrack(comm->memManager, va.ptr, /*size=*/65536, va.handle,
+                               hipMemHandleTypePosixFileDescriptor, ncclMemScratch),
+                  ncclSuccess);
+        ASSERT_EQ(ncclMemUntrack(comm->memManager, va.ptr, /*size=*/65536), ncclSuccess);
+
+        ASSERT_EQ(ncclMemManagerDestroy(comm), ncclSuccess);
+        delete comm;
+
+        ReleaseViaNcclCuMemFree(va);
+    });
+}
 
 TEST(MemManagerRealMem, Track_RealVmm_PosixFd)
 {
@@ -1211,6 +1269,334 @@ TEST_F(MemManagerStatsTest, SuspendedFlag_FlipsWithReleased)
 
     comm->memManager->released = 0;
     EXPECT_EQ(readStat(ncclStatGpuMemSuspended), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// Allocator round-trip: verify ncclCuMemAlloc/Free, ncclCudaCalloc/Free,
+// ncclCudaMalloc/Free and ncclCudaCallocAsync/Free keep ncclMemManager
+// bookkeeping consistent end-to-end. Real HIP allocations require process
+// isolation (RUN_ISOLATED_TEST).
+// VMM-dependent tests gate on ncclCuMemEnable() — the same RCCL helper used
+// throughout src/ to honor NCCL_CUMEM_ENABLE plus runtime CuMem support.
+// ---------------------------------------------------------------------------
+
+TEST(MemManagerAllocator, CuMemAlloc_Persist_TracksAndUntracks)
+{
+    RUN_ISOLATED_TEST("MemManagerAllocator_CuMemAlloc_Persist_TracksAndUntracks", []() {
+        if(!ncclCuMemEnable()) {
+            GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 or VMM unsupported by runtime";
+        }
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+        ncclComm* comm = new ncclComm();
+        comm->cudaDev  = 0;
+        ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+
+        constexpr size_t                kSize = 1u << 20; // 1 MiB
+        void*                           ptr   = nullptr;
+        hipMemGenericAllocationHandle_t handle{};
+        ASSERT_EQ(ncclCuMemAlloc(&ptr, &handle, hipMemHandleTypePosixFileDescriptor,
+                                 kSize, comm->memManager, ncclMemPersist),
+                  ncclSuccess);
+        ASSERT_NE(ptr, nullptr);
+
+        EXPECT_EQ(comm->memManager->numEntries, 1);
+        ASSERT_NE(comm->memManager->entries, nullptr);
+        EXPECT_EQ(comm->memManager->entries->ptr, ptr);
+        EXPECT_EQ(comm->memManager->entries->memType, ncclMemPersist);
+        EXPECT_GE(comm->memManager->totalPersist, kSize);
+        const size_t recordedSize = comm->memManager->entries->size;
+
+        ASSERT_EQ(ncclCuMemFree(ptr, comm->memManager), ncclSuccess);
+        EXPECT_EQ(comm->memManager->numEntries, 0);
+        EXPECT_EQ(comm->memManager->totalPersist, 0u);
+        EXPECT_GT(recordedSize, 0u);
+
+        ASSERT_EQ(ncclMemManagerDestroy(comm), ncclSuccess);
+        delete comm;
+    });
+}
+
+TEST(MemManagerAllocator, CuMemAlloc_Scratch_AccountedSeparately)
+{
+    RUN_ISOLATED_TEST("MemManagerAllocator_CuMemAlloc_Scratch_AccountedSeparately", []() {
+        if(!ncclCuMemEnable()) {
+            GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 or VMM unsupported by runtime";
+        }
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+        ncclComm* comm = new ncclComm();
+        comm->cudaDev  = 0;
+        ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+
+        constexpr size_t                kSize = 2u << 20;
+        void*                           ptr   = nullptr;
+        hipMemGenericAllocationHandle_t handle{};
+        ASSERT_EQ(ncclCuMemAlloc(&ptr, &handle, hipMemHandleTypePosixFileDescriptor,
+                                 kSize, comm->memManager, ncclMemScratch),
+                  ncclSuccess);
+
+        EXPECT_EQ(comm->memManager->numEntries, 1);
+        EXPECT_EQ(comm->memManager->entries->memType, ncclMemScratch);
+        EXPECT_GE(comm->memManager->totalScratch, kSize);
+        EXPECT_EQ(comm->memManager->totalPersist, 0u);
+        EXPECT_EQ(comm->memManager->totalOffload, 0u);
+
+        ASSERT_EQ(ncclCuMemFree(ptr, comm->memManager), ncclSuccess);
+        EXPECT_EQ(comm->memManager->totalScratch, 0u);
+
+        ASSERT_EQ(ncclMemManagerDestroy(comm), ncclSuccess);
+        delete comm;
+    });
+}
+
+TEST(MemManagerAllocator, CuMemAlloc_NullManager_NoTracking)
+{
+    RUN_ISOLATED_TEST("MemManagerAllocator_CuMemAlloc_NullManager_NoTracking", []() {
+        if(!ncclCuMemEnable()) {
+            GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 or VMM unsupported by runtime";
+        }
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+        ncclComm* comm = new ncclComm();
+        comm->cudaDev  = 0;
+        ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+
+        void*                           ptr = nullptr;
+        hipMemGenericAllocationHandle_t handle{};
+        ASSERT_EQ(ncclCuMemAlloc(&ptr, &handle, hipMemHandleTypePosixFileDescriptor,
+                                 1u << 20, /*manager=*/nullptr, ncclMemPersist),
+                  ncclSuccess);
+        EXPECT_EQ(comm->memManager->numEntries, 0);
+        EXPECT_EQ(comm->memManager->totalPersist, 0u);
+
+        ASSERT_EQ(ncclCuMemFree(ptr, /*manager=*/nullptr), ncclSuccess);
+        EXPECT_EQ(comm->memManager->numEntries, 0);
+
+        ASSERT_EQ(ncclMemManagerDestroy(comm), ncclSuccess);
+        delete comm;
+    });
+}
+
+TEST(MemManagerAllocator, CuMemAlloc_MultipleEntries_AllTracked)
+{
+    RUN_ISOLATED_TEST("MemManagerAllocator_CuMemAlloc_MultipleEntries_AllTracked", []() {
+        if(!ncclCuMemEnable()) {
+            GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 or VMM unsupported by runtime";
+        }
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+        ncclComm* comm = new ncclComm();
+        comm->cudaDev  = 0;
+        ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+
+        constexpr int                   kN          = 4;
+        constexpr size_t                kSize       = 256u << 10; // 256 KiB
+        void*                           ptrs[kN]    = {};
+        hipMemGenericAllocationHandle_t handles[kN] = {};
+
+        for(int i = 0; i < kN; ++i) {
+            ASSERT_EQ(ncclCuMemAlloc(&ptrs[i], &handles[i],
+                                     hipMemHandleTypePosixFileDescriptor, kSize,
+                                     comm->memManager, ncclMemPersist),
+                      ncclSuccess);
+        }
+        EXPECT_EQ(comm->memManager->numEntries, kN);
+        EXPECT_GE(comm->memManager->totalPersist, kN * kSize);
+
+        for(int i = 0; i < kN; ++i) {
+            ASSERT_EQ(ncclCuMemFree(ptrs[i], comm->memManager), ncclSuccess);
+        }
+        EXPECT_EQ(comm->memManager->numEntries, 0);
+        EXPECT_EQ(comm->memManager->totalPersist, 0u);
+
+        ASSERT_EQ(ncclMemManagerDestroy(comm), ncclSuccess);
+        delete comm;
+    });
+}
+
+TEST(MemManagerAllocator, CudaCalloc_DispatchesToCuMem_AndTracks)
+{
+    RUN_ISOLATED_TEST("MemManagerAllocator_CudaCalloc_Tracks", []() {
+        if(!ncclCuMemEnable()) {
+            GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 - ncclCudaCalloc bypasses manager";
+        }
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+        ncclComm* comm = new ncclComm();
+        comm->cudaDev  = 0;
+        ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+
+        constexpr size_t kElems = 1024;
+        int*             ptr    = nullptr;
+        ASSERT_EQ(ncclCudaCalloc(&ptr, kElems, comm->memManager, ncclMemPersist),
+                  ncclSuccess);
+        ASSERT_NE(ptr, nullptr);
+
+        EXPECT_EQ(comm->memManager->numEntries, 1);
+        EXPECT_GE(comm->memManager->totalPersist, kElems * sizeof(int));
+
+        ASSERT_EQ(ncclCudaFree(ptr, comm->memManager), ncclSuccess);
+        EXPECT_EQ(comm->memManager->numEntries, 0);
+
+        ASSERT_EQ(ncclMemManagerDestroy(comm), ncclSuccess);
+        delete comm;
+    });
+}
+
+TEST(MemManagerAllocator, CudaMalloc_DispatchesToCuMem_AndTracks)
+{
+    RUN_ISOLATED_TEST("MemManagerAllocator_CudaMalloc_Tracks", []() {
+        if(!ncclCuMemEnable()) {
+            GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 - ncclCudaMalloc bypasses manager";
+        }
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+        ncclComm* comm = new ncclComm();
+        comm->cudaDev  = 0;
+        ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+
+        constexpr size_t kBytes = 64 << 10; // 64 KiB
+        char*            ptr    = nullptr;
+        ASSERT_EQ(ncclCudaMalloc(&ptr, kBytes, comm->memManager, ncclMemScratch),
+                  ncclSuccess);
+
+        EXPECT_EQ(comm->memManager->numEntries, 1);
+        EXPECT_EQ(comm->memManager->entries->memType, ncclMemScratch);
+
+        ASSERT_EQ(ncclCudaFree(ptr, comm->memManager), ncclSuccess);
+        EXPECT_EQ(comm->memManager->numEntries, 0);
+
+        ASSERT_EQ(ncclMemManagerDestroy(comm), ncclSuccess);
+        delete comm;
+    });
+}
+
+TEST(MemManagerAllocator, CudaCallocAsync_DispatchesToCuMem_AndTracks)
+{
+    RUN_ISOLATED_TEST("MemManagerAllocator_CudaCallocAsync_Tracks", []() {
+        if(!ncclCuMemEnable()) {
+            GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 - ncclCudaCallocAsync bypasses manager";
+        }
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+        ncclComm* comm = new ncclComm();
+        comm->cudaDev  = 0;
+        ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+
+        hipStream_t stream;
+        ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
+
+        constexpr size_t kElems = 256;
+        uint64_t*        ptr    = nullptr;
+        ASSERT_EQ(ncclCudaCallocAsync(&ptr, kElems, stream, comm->memManager,
+                                      ncclMemPersist),
+                  ncclSuccess);
+        ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+
+        EXPECT_EQ(comm->memManager->numEntries, 1);
+        EXPECT_GE(comm->memManager->totalPersist, kElems * sizeof(uint64_t));
+
+        ASSERT_EQ(ncclCudaFree(ptr, comm->memManager), ncclSuccess);
+        EXPECT_EQ(comm->memManager->numEntries, 0);
+
+        ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+        ASSERT_EQ(ncclMemManagerDestroy(comm), ncclSuccess);
+        delete comm;
+    });
+}
+
+TEST(MemManagerAllocator, MixedMemTypes_BookkeepingIndependent)
+{
+    RUN_ISOLATED_TEST("MemManagerAllocator_MixedMemTypes_BookkeepingIndependent", []() {
+        if(!ncclCuMemEnable()) {
+            GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 or VMM unsupported by runtime";
+        }
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+        ncclComm* comm = new ncclComm();
+        comm->cudaDev  = 0;
+        ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+
+        constexpr size_t                kSize = 512u << 10; // 512 KiB
+        void*                           pPer  = nullptr;
+        void*                           pScr  = nullptr;
+        void*                           pOff  = nullptr;
+        hipMemGenericAllocationHandle_t hPer{};
+        hipMemGenericAllocationHandle_t hScr{};
+        hipMemGenericAllocationHandle_t hOff{};
+
+        ASSERT_EQ(ncclCuMemAlloc(&pPer, &hPer, hipMemHandleTypePosixFileDescriptor,
+                                 kSize, comm->memManager, ncclMemPersist),
+                  ncclSuccess);
+        ASSERT_EQ(ncclCuMemAlloc(&pScr, &hScr, hipMemHandleTypePosixFileDescriptor,
+                                 kSize, comm->memManager, ncclMemScratch),
+                  ncclSuccess);
+        ASSERT_EQ(ncclCuMemAlloc(&pOff, &hOff, hipMemHandleTypePosixFileDescriptor,
+                                 kSize, comm->memManager, ncclMemOffload),
+                  ncclSuccess);
+
+        EXPECT_EQ(comm->memManager->numEntries, 3);
+        EXPECT_GE(comm->memManager->totalPersist, kSize);
+        EXPECT_GE(comm->memManager->totalScratch, kSize);
+        EXPECT_GE(comm->memManager->totalOffload, kSize);
+
+        ASSERT_EQ(ncclCuMemFree(pScr, comm->memManager), ncclSuccess);
+        EXPECT_EQ(comm->memManager->totalScratch, 0u);
+        EXPECT_GE(comm->memManager->totalPersist, kSize); // unaffected
+        EXPECT_GE(comm->memManager->totalOffload, kSize); // unaffected
+        EXPECT_EQ(comm->memManager->numEntries, 2);
+
+        ASSERT_EQ(ncclCuMemFree(pPer, comm->memManager), ncclSuccess);
+        ASSERT_EQ(ncclCuMemFree(pOff, comm->memManager), ncclSuccess);
+        EXPECT_EQ(comm->memManager->numEntries, 0);
+        EXPECT_EQ(comm->memManager->totalPersist, 0u);
+        EXPECT_EQ(comm->memManager->totalOffload, 0u);
+
+        ASSERT_EQ(ncclMemManagerDestroy(comm), ncclSuccess);
+        delete comm;
+    });
+}
+
+TEST(MemManagerAllocator, AllocTrackerAndManager_AreIndependent)
+{
+    RUN_ISOLATED_TEST("MemManagerAllocator_AllocTrackerAndManager_AreIndependent", []() {
+        if(!ncclCuMemEnable()) {
+            GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 or VMM unsupported by runtime";
+        }
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+        ncclComm* comm = new ncclComm();
+        comm->cudaDev  = 0;
+        ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+
+        const uint64_t allocBefore     = __atomic_load_n(
+            &allocTracker[0].totalAlloc, __ATOMIC_RELAXED);
+        const uint64_t allocSizeBefore = __atomic_load_n(
+            &allocTracker[0].totalAllocSize, __ATOMIC_RELAXED);
+
+        constexpr size_t                kSize = 1u << 20;
+        void*                           ptr   = nullptr;
+        hipMemGenericAllocationHandle_t handle{};
+        ASSERT_EQ(ncclCuMemAlloc(&ptr, &handle, hipMemHandleTypePosixFileDescriptor,
+                                 kSize, comm->memManager, ncclMemPersist),
+                  ncclSuccess);
+
+        EXPECT_GT(__atomic_load_n(&allocTracker[0].totalAlloc, __ATOMIC_RELAXED),
+                  allocBefore);
+        EXPECT_GT(__atomic_load_n(&allocTracker[0].totalAllocSize, __ATOMIC_RELAXED),
+                  allocSizeBefore);
+        EXPECT_EQ(comm->memManager->numEntries, 1);
+
+        ASSERT_EQ(ncclCuMemFree(ptr, comm->memManager), ncclSuccess);
+
+        EXPECT_EQ(__atomic_load_n(&allocTracker[0].totalAlloc, __ATOMIC_RELAXED),
+                  allocBefore);
+        EXPECT_EQ(comm->memManager->numEntries, 0);
+
+        ASSERT_EQ(ncclMemManagerDestroy(comm), ncclSuccess);
+        delete comm;
+    });
 }
 
 } // namespace RcclUnitTesting

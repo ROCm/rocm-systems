@@ -13,6 +13,7 @@
 #include "bitops.h"
 #include "utils.h"
 #include "p2p.h"
+#include "mem_manager.h"
 #include <sys/mman.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -368,7 +369,7 @@ fail:
   return result;
 }
 
-static inline ncclResult_t ncclCuMemFreeAddr(void *ptr) {
+static inline ncclResult_t ncclCuMemFreeAddr(void *ptr, struct ncclMemManager* manager, int numSegments = 1) {
   if (ptr == NULL) return ncclSuccess;
   // Check if process is shutting down to avoid use-after-free in HIP runtime
   if (rcclShutdownFlag().load(std::memory_order_acquire)) {
@@ -376,26 +377,39 @@ static inline ncclResult_t ncclCuMemFreeAddr(void *ptr) {
     return ncclSuccess;
   }
   ncclResult_t result = ncclSuccess;
-  size_t size = 0;
-  // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
-  // base is dereferenced in cuMemGetAddressRange without checking for nullptr
-  CUdeviceptr base = nullptr;
-  CUCHECK(cuMemGetAddressRange(&base, &size, (CUdeviceptr)ptr));
-  CUCHECK(cuMemUnmap((CUdeviceptr)ptr, size));
-  CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, size));
+  size_t totalSize = 0;
+  for (int segment = 0; segment < numSegments; segment++) {
+    size_t segmentSize = 0;
+    // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
+    // base is dereferenced in cuMemGetAddressRange without checking for nullptr
+    CUdeviceptr base = nullptr;
+    // RCCL: cast through char* before pointer arithmetic
+    CUCHECK(cuMemGetAddressRange(&base, &segmentSize, (CUdeviceptr)((char*)ptr + totalSize)));
+    CUCHECK(cuMemUnmap((CUdeviceptr)((char*)ptr + totalSize), segmentSize));
+    totalSize += segmentSize;
+  }
+
+  // Untrack from memory manager
+  if (manager != nullptr) {
+    NCCLCHECK(ncclMemUntrack(manager, ptr, totalSize));
+  }
+
+  CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, totalSize));
 
   int dev;
-  size *= -1;
   CUDACHECK(hipGetDevice(&dev));
   if (dev < MAX_ALLOC_TRACK_NGPU) {
      __atomic_fetch_add(&allocTracker[dev].totalAlloc, -1, __ATOMIC_RELAXED);
-     __atomic_fetch_add(&allocTracker[dev].totalAllocSize, size, __ATOMIC_RELAXED);
+     __atomic_fetch_add(&allocTracker[dev].totalAllocSize, -(int64_t)totalSize, __ATOMIC_RELAXED);
   }
   INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
   return result;
 }
 
-static inline ncclResult_t ncclCuMemAlloc(void **ptr, CUmemGenericAllocationHandle *handlep, CUmemAllocationHandleType type, size_t size) {
+static inline ncclResult_t ncclCuMemAlloc(void **ptr, CUmemGenericAllocationHandle *handlep,
+                                          CUmemAllocationHandleType type, size_t size,
+                                          struct ncclMemManager* manager,
+                                          ncclMemType_t memType = ncclMemPersist) {
   ncclResult_t result = ncclSuccess;
   size_t granularity = 0;
   CUdevice currentDev;
@@ -466,7 +480,12 @@ restoreCapMode:
     if (result != ncclSuccess) goto fail;
   }
   TRACE(NCCL_ALLOC, "CuMem Alloc Size %zu pointer %p handle %p", size, *ptr, (void*)(uintptr_t)handle);
-  
+
+  /* Track allocation in memory manager */
+  if (manager != nullptr) {
+    NCCLCHECKGOTO(ncclMemTrack(manager, *ptr, size, handle, type, memType), result, fail);
+  }
+
   if (cudaDev < MAX_ALLOC_TRACK_NGPU) {
      __atomic_fetch_add(&allocTracker[cudaDev].totalAlloc, 1, __ATOMIC_RELAXED);
      __atomic_fetch_add(&allocTracker[cudaDev].totalAllocSize, size, __ATOMIC_RELAXED);
@@ -482,7 +501,7 @@ fail:
   return result;
 }
 
-static inline ncclResult_t ncclCuMemFree(void *ptr) {
+static inline ncclResult_t ncclCuMemFree(void *ptr, struct ncclMemManager* manager, int numSegments = 1) {
   if (ptr == NULL) return ncclSuccess;
   // Check if process is shutting down to avoid use-after-free in HIP runtime
   if (rcclShutdownFlag().load(std::memory_order_acquire)) {
@@ -490,23 +509,36 @@ static inline ncclResult_t ncclCuMemFree(void *ptr) {
     return ncclSuccess;
   }
   ncclResult_t result = ncclSuccess;
-  CUmemGenericAllocationHandle handle;
-  size_t size = 0;
-  CUCHECK(cuMemRetainAllocationHandle(&handle, ptr));
-  CUCHECK(cuMemRelease(handle));
-  CUdeviceptr base = nullptr;
-  CUCHECK(cuMemGetAddressRange(&base, &size, (CUdeviceptr)ptr));
-  TRACE(NCCL_ALLOC, "CuMem Free Size %zu pointer %p handle %p", size, ptr, (void*)(uintptr_t)handle);
-  CUCHECK(cuMemUnmap((CUdeviceptr)ptr, size));
-  CUCHECK(cuMemRelease(handle));
-  CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, size));
+  size_t totalSize = 0;
+  for (int segment = 0; segment < numSegments; segment++) {
+    CUmemGenericAllocationHandle handle;
+    size_t segmentSize = 0;
+    CUCHECK(cuMemRetainAllocationHandle(&handle, (void*)((char*)ptr + totalSize)));
+    CUCHECK(cuMemRelease(handle));
+    // ROCM-2696: Proper initialization of base and size is required for cuMemGetAddressRange
+    // base is dereferenced in cuMemGetAddressRange without checking for nullptr
+    CUdeviceptr base = nullptr;
+    // RCCL: cast through char* before pointer arithmetic 
+    CUCHECK(cuMemGetAddressRange(&base, &segmentSize, (CUdeviceptr)((char*)ptr + totalSize)));
+    TRACE(NCCL_ALLOC, "CuMem Free Size %zu pointer %p handle %p segment %d numSegments %d",
+          segmentSize, ptr, (void*)(uintptr_t)handle, segment, numSegments);
+    CUCHECK(cuMemUnmap((CUdeviceptr)((char*)ptr + totalSize), segmentSize));
+    CUCHECK(cuMemRelease(handle));
+    totalSize += segmentSize;
+  }
+
+  // Update tracking with total size after processing all segments
+  if (manager != nullptr) {
+    NCCLCHECK(ncclMemUntrack(manager, ptr, totalSize));
+  }
+
+  CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, totalSize));
 
   int dev;
-  size *= -1;
   CUDACHECK(hipGetDevice(&dev));
   if (dev < MAX_ALLOC_TRACK_NGPU) {
      __atomic_fetch_add(&allocTracker[dev].totalAlloc, -1, __ATOMIC_RELAXED);
-     __atomic_fetch_add(&allocTracker[dev].totalAllocSize, size, __ATOMIC_RELAXED);
+     __atomic_fetch_add(&allocTracker[dev].totalAllocSize, -(int64_t)totalSize, __ATOMIC_RELAXED);
   }
   INFO(NCCL_ALLOC, "ncclCuMemFree: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
   return result;
@@ -516,11 +548,13 @@ static inline ncclResult_t ncclCuMemFree(void *ptr) {
 
 extern int ncclCuMemEnable();
 
-static inline ncclResult_t ncclCuMemAlloc(void **ptr, void *handlep, int type, size_t size) {
+static inline ncclResult_t ncclCuMemAlloc(void **ptr, void *handlep, int type, size_t size,
+                                          struct ncclMemManager* manager,
+                                          ncclMemType_t memType = ncclMemPersist) {
   WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
-static inline ncclResult_t ncclCuMemFree(void *ptr) {
+static inline ncclResult_t ncclCuMemFree(void *ptr, struct ncclMemManager* manager, int numSegments = 1) {
   WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
@@ -530,7 +564,7 @@ static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocation
   return ncclInternalError;
 }
 
-static inline ncclResult_t ncclCuMemFreeAddr(void *ptr) {
+static inline ncclResult_t ncclCuMemFreeAddr(void *ptr, struct ncclMemManager* manager, int numSegments = 1) {
   WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
@@ -543,14 +577,17 @@ static inline ncclResult_t ncclCuMemMapAndSetAccess(void *ptr, size_t size,
 #endif
 
 template <typename T>
-ncclResult_t ncclCudaMallocDebug(const char *filefunc, int line, T** ptr, size_t nelem, unsigned int flags = hipDeviceMallocDefault) {
+ncclResult_t ncclCudaMallocDebug(T** ptr, size_t nelem, const char *filefunc, int line,
+                                 struct ncclMemManager* manager,
+                                 ncclMemType_t memType = ncclMemPersist,
+                                 unsigned int flags = hipDeviceMallocDefault) {
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   *ptr = nullptr;
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (nelem > 0) {
     if (ncclCuMemEnable()) {
-      NCCLCHECKGOTO(ncclCuMemAlloc((void **)ptr, NULL, ncclCuMemHandleType, nelem*ncclSizeOfT<T>()), result, finish);
+      NCCLCHECKGOTO(ncclCuMemAlloc((void **)ptr, NULL, ncclCuMemHandleType, nelem*ncclSizeOfT<T>(), manager, memType), result, finish);
     } else {
       CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), flags), result, finish);
     }
@@ -570,10 +607,13 @@ finish:
   INFO(NCCL_ALLOC, "%s:%d Cuda Alloc Size %ld pointer %p flags %d", filefunc, line, nelem*ncclSizeOfT<T>(), *ptr, flags);
   return result;
 }
-#define ncclCudaMalloc(...) ncclCudaMallocDebug( __FILE__, __LINE__, __VA_ARGS__)
+#define ncclCudaMalloc(ptr, nelem, ...) ncclCudaMallocDebug(ptr, nelem, __FILE__, __LINE__, ##__VA_ARGS__)
 
 template <typename T>
-ncclResult_t ncclCudaCallocDebug(const char *filefunc, int line, T** ptr, size_t nelem, unsigned int flags = hipDeviceMallocDefault) {
+ncclResult_t ncclCudaCallocDebug(T** ptr, size_t nelem, const char *filefunc, int line,
+                                 struct ncclMemManager* manager,
+                                 ncclMemType_t memType = ncclMemPersist,
+                                 unsigned int flags = hipDeviceMallocDefault) {
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   *ptr = nullptr;
@@ -588,7 +628,7 @@ ncclResult_t ncclCudaCallocDebug(const char *filefunc, int line, T** ptr, size_t
     if (sidestream == nullptr)
       CUDACHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
     if (ncclCuMemEnable()) {
-      NCCLCHECKGOTO(ncclCuMemAlloc((void **)ptr, NULL, ncclCuMemHandleType, nelem*ncclSizeOfT<T>()), result, finish);
+      NCCLCHECKGOTO(ncclCuMemAlloc((void **)ptr, NULL, ncclCuMemHandleType, nelem*ncclSizeOfT<T>(), manager, memType), result, finish);
     } else {
       CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), flags), result, finish);
     }
@@ -611,10 +651,13 @@ finish:
   INFO(NCCL_ALLOC, "%s:%d Cuda Alloc Size %ld pointer %p flags %d", filefunc, line, nelem*ncclSizeOfT<T>(), *ptr, flags);
   return result;
 }
-#define ncclCudaCalloc(...) ncclCudaCallocDebug(__FILE__, __LINE__, __VA_ARGS__)
+#define ncclCudaCalloc(ptr, nelem, ...) ncclCudaCallocDebug(ptr, nelem, __FILE__, __LINE__, ##__VA_ARGS__)
 
 template <typename T>
-ncclResult_t ncclCudaCallocAsyncDebug(const char *filefunc, int line, T** ptr, size_t nelem, hipStream_t stream, unsigned int flags = hipDeviceMallocDefault) {
+ncclResult_t ncclCudaCallocAsyncDebug(T** ptr, size_t nelem, hipStream_t stream, const char *filefunc, int line,
+                                      struct ncclMemManager* manager,
+                                      ncclMemType_t memType = ncclMemPersist,
+                                      unsigned int flags = hipDeviceMallocDefault) {
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   *ptr = nullptr;
@@ -623,11 +666,11 @@ ncclResult_t ncclCudaCallocAsyncDebug(const char *filefunc, int line, T** ptr, s
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (nelem > 0) {
     if (ncclCuMemEnable()) {
-      NCCLCHECKGOTO(ncclCuMemAlloc((void **)ptr, NULL, ncclCuMemHandleType, nelem*ncclSizeOfT<T>()), result, finish);
+      NCCLCHECKGOTO(ncclCuMemAlloc((void **)ptr, NULL, ncclCuMemHandleType, nelem*ncclSizeOfT<T>(), manager, memType), result, finish);
     } else {
       CUDACHECKGOTO(hipExtMallocWithFlags((void**)ptr, nelem*ncclSizeOfT<T>(), flags), result, finish);
     }
-    CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem*ncclSizeOfT<T>(), stream), result, finish); 
+    CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, nelem*ncclSizeOfT<T>(), stream), result, finish);
   }
 finish:
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
@@ -643,7 +686,7 @@ finish:
   INFO(NCCL_ALLOC, "%s:%d Cuda Alloc Size %ld pointer %p flags %d", filefunc, line, nelem*ncclSizeOfT<T>(), *ptr, flags);
   return result;
 }
-#define ncclCudaCallocAsync(...) ncclCudaCallocAsyncDebug(__FILE__, __LINE__, __VA_ARGS__)
+#define ncclCudaCallocAsync(ptr, nelem, stream, ...) ncclCudaCallocAsyncDebug(ptr, nelem, stream, __FILE__, __LINE__, ##__VA_ARGS__)
 
 template <typename T>
 ncclResult_t ncclCudaMemcpy(T* dst, T* src, size_t nelem) {
@@ -677,7 +720,7 @@ finish:
 }
 
 template <typename T>
-ncclResult_t ncclCudaFree(T* ptr) {
+ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegments = 1) {
   if (ptr == NULL) return ncclSuccess;
 
   // Check if process is shutting down. The atexit handler sets this flag
@@ -713,7 +756,7 @@ ncclResult_t ncclCudaFree(T* ptr) {
 
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (ncclCuMemEnable()) {
-    NCCLCHECKGOTO(ncclCuMemFree((void *)ptr), result, finish);
+    NCCLCHECKGOTO(ncclCuMemFree((void *)ptr, manager, numSegments), result, finish);
   } else {
     CUDACHECKGOTO(cudaFree(ptr), result, finish);
   }
