@@ -191,7 +191,7 @@ class FileHandle:
         file_offset : int
             Byte offset within the file to start reading from.
         buffer_offset : int
-            Byte offset within the GPU buffer to write to.
+            Byte offset within the GPU buffer to read into.
 
         Returns
         -------
@@ -230,13 +230,13 @@ class FileHandle:
         Parameters
         ----------
         buffer : Buffer
-            GPU buffer to read from.
+            GPU buffer to write from.
         size : int
             Number of bytes to write.
         file_offset : int
             Byte offset within the file to start writing to.
         buffer_offset : int
-            Byte offset within the GPU buffer to read from.
+            Byte offset within the GPU buffer to write from.
 
         Returns
         -------
