@@ -171,6 +171,7 @@ class webui_analysis(OmniAnalyze_Base):
                     run_workload.raw_pmc = self.iteration_multiplex_impute_counters(
                         run_workload.raw_pmc,
                         policy=self._profiling_config["iteration_multiplexing"],
+                        workload_dir=Path(self.dest_dir),
                     )
 
                 # Apply filters to workload data
@@ -466,6 +467,7 @@ class webui_analysis(OmniAnalyze_Base):
             workload.raw_pmc = self.iteration_multiplex_impute_counters(
                 workload.raw_pmc,
                 policy=self._profiling_config["iteration_multiplexing"],
+                workload_dir=Path(self.dest_dir),
             )
 
         kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(

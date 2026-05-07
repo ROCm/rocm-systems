@@ -624,10 +624,17 @@ def reverse_multi_index_df_pmc(
 def impute_counters_iteration_multiplex(
     df_multi_index: pd.DataFrame,
     policy: str,
+    workload_dir: Path,
 ) -> pd.DataFrame:
     """
     Perform data imputation for missing counter values due to iteration multiplexing.
     """
+    # Counter buckets configured for the workload. A kernel needs at least
+    # this many dispatches to cover every bucket.
+    num_perfmon_files = len(list(workload_dir.glob("perfmon/*.txt"))) + len(
+        list(workload_dir.glob("perfmon/pmc_perf_*.yaml"))
+    )
+
     non_counter_column_index = [
         "Dispatch_ID",
         "GPU_ID",
@@ -674,7 +681,19 @@ def impute_counters_iteration_multiplex(
             f"across {unique_occurences.ngroups} unique kernel configurations"
         )
 
+        incomplete_kernel_names: set[str] = set()
+
         for _, group in unique_occurences:
+            # Skip imputation entirely for undersampled kernels: nullify
+            # counters so metric evaluation excludes them. Non-counter columns
+            # are preserved for Top Stats (Block 1) timing.
+            if len(group) < num_perfmon_files:
+                group_copy = group.copy()
+                group_copy[counter_columns] = np.nan
+                incomplete_kernel_names.add(group_copy["Kernel_Name"].iloc[0])
+                group_dfs.append(group_copy)
+                continue
+
             # Identify counter buckets
             counter_groups: set[frozenset[str]] = set()
             for _, row in group.iterrows():
@@ -708,7 +727,11 @@ def impute_counters_iteration_multiplex(
                 .bfill()  # Propagate first valid value backward to start of subgroup
                 .ffill()  # Propagate forward to end of subgroup
             )
+
             group_dfs.append(group_copy)
+
+        if incomplete_kernel_names:
+            _warn_kernels_with_incomplete_coverage(incomplete_kernel_names)
 
         # Create a new dataframe by concatenating all groups
         result_dfs.append(
@@ -719,6 +742,30 @@ def impute_counters_iteration_multiplex(
 
     final_df = pd.concat(result_dfs, keys=coll_levels, axis=1, copy=False)
     return final_df
+
+
+def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) -> None:
+    """
+    Emit a warning listing kernels excluded from metrics due to missing counter data.
+    """
+    kernel_list = "\n\n".join(
+        f"  Kernel {i}: {name}"
+        for i, name in enumerate(sorted(incomplete_kernel_names), start=1)
+    )
+    console_warning(
+        "imputation",
+        (
+            f"Some kernels have missing counter data after imputation and "
+            f"have been excluded from metrics calculations:\n\n"
+            f"{kernel_list}\n\n"
+            f"Execution times for these kernels are still shown in Top Stats.\n"
+            f"To get more complete kernel coverage for metrics calculations, "
+            f"you may consider:\n"
+            f"  - disabling iteration multiplexing to use application replay\n"
+            f"  - increasing the number of iterations for these kernels in "
+            f"the workload"
+        ),
+    )
 
 
 def merge_counters_spatial_multiplex(df_multi_index: pd.DataFrame) -> pd.DataFrame:

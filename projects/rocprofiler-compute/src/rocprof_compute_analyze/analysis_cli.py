@@ -115,6 +115,7 @@ class cli_analysis(OmniAnalyze_Base):
                 workload.raw_pmc = self.iteration_multiplex_impute_counters(
                     workload.raw_pmc,
                     policy=self._profiling_config["iteration_multiplexing"],
+                    workload_dir=Path(path_info[0]),
                 )
 
             kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
