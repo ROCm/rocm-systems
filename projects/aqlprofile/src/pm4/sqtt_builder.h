@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <unordered_map>
 
+#include "core/hardware_config.hpp"
 #include "pm4/cmd_config.h"
 #include "pm4/primitives_provider.hpp"
 #include "trace_decoder_instrument.h"
@@ -117,15 +118,15 @@ class GpuSqttBuilder : public SqttBuilder {
   void DebugTrace(uint32_t value);
 
  public:
-  explicit GpuSqttBuilder(const AgentInfo* agent_info, CmdBuilder* builder,
-                          const PrimitivesProvider* prim)
+  explicit GpuSqttBuilder(const aql_profile::HardwareConfig& config, CmdBuilder* builder,
+                          const PrimitivesProvider* prim, uint32_t timestamp_freq_hz)
       : builder_(builder),
         prim_(prim),
-        xcc_number_(agent_info->xcc_num),
-        is_multi_xcc_(agent_info->xcc_num > 1),
-        se_number_total(agent_info->se_num),
-        timestamp_freq(agent_info->timestamp_freq),
-        cu_per_se(agent_info->cu_num / agent_info->se_num) {}
+        xcc_number_(config.xcc_count),
+        is_multi_xcc_(config.IsMultiXCC()),
+        se_number_total(config.se_count),
+        timestamp_freq(timestamp_freq_hz),
+        cu_per_se(config.cu_count / config.se_count) {}
 
   // Returns TT_CONTROL_UTC_ERR_MASK
   virtual size_t GetUTCErrorMask() const override { return prim_->GetTtControlUtcErrMask(); }

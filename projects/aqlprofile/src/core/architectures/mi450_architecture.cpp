@@ -32,6 +32,7 @@ namespace aql_profile {
 
 Mi450Architecture::Mi450Architecture(const AgentInfo* agent_info)
     : Gfx12Architecture(agent_info) {
+  config_.xcc_per_aid = 4;
   // Re-initialize the block table with the gfx1250-specific entries.
   // The base class constructor has already called InitializeBlockTable() for
   // gfx1200, so we override it here.

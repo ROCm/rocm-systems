@@ -54,9 +54,10 @@ Pm4FactoryAdapter::~Pm4FactoryAdapter() {
 void Pm4FactoryAdapter::InitializeBuilders(const AgentInfo* agent_info) {
   cmd_builder_ = architecture_->CreateCmdBuilder();
   prims_        = architecture_->CreatePrimitivesProvider();
-  pmc_builder_  = new pm4_builder::GpuPmcBuilder(agent_info, cmd_builder_, prims_, concurrent_mode_);
-  spm_builder_  = new pm4_builder::GpuSpmBuilder(agent_info, cmd_builder_, prims_);
-  sqtt_builder_ = new pm4_builder::GpuSqttBuilder(agent_info, cmd_builder_, prims_);
+  const auto& config = architecture_->GetConfig();
+  pmc_builder_  = new pm4_builder::GpuPmcBuilder(config, cmd_builder_, prims_, concurrent_mode_);
+  spm_builder_  = new pm4_builder::GpuSpmBuilder(cmd_builder_, prims_);
+  sqtt_builder_ = new pm4_builder::GpuSqttBuilder(config, cmd_builder_, prims_, agent_info->timestamp_freq);
 }
 
 gpu_id_t Pm4FactoryAdapter::MapToLegacyGpuId() const {

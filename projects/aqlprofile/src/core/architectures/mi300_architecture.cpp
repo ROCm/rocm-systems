@@ -41,6 +41,7 @@ void Mi300Architecture::InitializeConfig(const AgentInfo* agent_info) {
   config_.has_aid_aware_counters = true;
   config_.has_spm_core1 = false;
   config_.supports_spm_v2 = true;
+  config_.xcc_per_aid = 2;
   config_.sqtt_header_version = 5;
   config_.spm_sample_delay_max = 0x27;
 }

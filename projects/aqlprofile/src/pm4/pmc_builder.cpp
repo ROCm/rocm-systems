@@ -55,25 +55,27 @@ PrecExecBuilder::~PrecExecBuilder() {
 
 // GpuPmcBuilder
 
-GpuPmcBuilder::GpuPmcBuilder(const AgentInfo* agent_info, CmdBuilder* builder,
+GpuPmcBuilder::GpuPmcBuilder(const aql_profile::HardwareConfig& config, CmdBuilder* builder,
                               const PrimitivesProvider* prim, bool is_concurrent)
     : PmcBuilder(),
       builder_(builder),
       prim_(prim),
       is_concurrent_(is_concurrent),
-      se_number_(agent_info->se_num / agent_info->xcc_num),
-      xcc_number_(agent_info->xcc_num),
-      xcc_per_aid_(agent_info->xcc_per_aid),
-      is_multi_xcc_(agent_info->xcc_num > 1),
-      aid_count_(agent_info->xcc_num / agent_info->xcc_per_aid),
-      sarrays_per_se_(agent_info->shader_arrays_per_se) {
+      se_number_(config.se_count / config.xcc_count),
+      xcc_number_(config.xcc_count),
+      xcc_per_aid_(config.xcc_per_aid),
+      is_multi_xcc_(config.IsMultiXCC()),
+      aid_count_(config.aid_count),
+      sarrays_per_se_(config.sa_per_se_count) {
   this->wgp_per_sa_ =
-      (agent_info->cu_num / 2 + sarrays_per_se_ * se_number_ - 1) / (se_number_ * sarrays_per_se_);
-  this->wgp_per_sa_ /= agent_info->xcc_num;
+      (config.cu_count / 2 + sarrays_per_se_ * se_number_ - 1) / (se_number_ * sarrays_per_se_);
+  this->wgp_per_sa_ /= config.xcc_count;
   // Due to MI300 CP firmware issue we need to use mem_mapped_register mode to patch for GCEA
   // hang. Otherwise both perfcounters mode and mem_mapped_register mode should work.
   builder_->bUsePerfCounterMode = !is_multi_xcc_;
-  this->asymmetric_cu_patch = strncmp(agent_info->name, "gfx1250", 7) ? false : true;
+  // TODO: Temporary patch for gfx1250's asymmetric CU design, will remove
+  //       after CU mask support is added to agent_info
+  this->asymmetric_cu_patch = strncmp(config.gfxip.c_str(), "gfx1250", 7) == 0;
 }
 
 int GpuPmcBuilder::GetNumWGPs() {

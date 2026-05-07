@@ -69,6 +69,9 @@ struct HardwareConfig {
   // SPM configuration
   uint32_t spm_sample_delay_max;  // Maximum SPM sample delay
 
+  // Multi-die XCC partitioning
+  uint32_t xcc_per_aid;           // XCCs per AID (1 for single-AID, 2 for MI300, 4 for MI450)
+
   // SQTT configuration
   uint32_t sqtt_buffer_alignment; // SQTT buffer alignment requirement
   uint32_t sqtt_header_version;   // SQTT header version2 field (GFX9 only; 4=generic, 5=MI300, 6=MI350)
@@ -97,6 +100,7 @@ struct HardwareConfig {
         has_sqtt_status2_register(false),
         has_wptr_relative_addressing(false),
         needs_sqtt_header_packet(false),
+        xcc_per_aid(1),
         spm_sample_delay_max(0),
         sqtt_buffer_alignment(0x1000),
         sqtt_header_version(0) {}

@@ -69,16 +69,26 @@ void Mi450Factory::ConstructBuilders(const AgentInfo* agent_info) {
   auto* prims = new pm4_builder::Gfx12PrimitivesProvider();
   prims_ = prims;
 
+  HardwareConfig hw_config;
+  hw_config.se_count        = agent_info->se_num;
+  hw_config.sa_per_se_count = agent_info->shader_arrays_per_se;
+  hw_config.cu_count        = agent_info->cu_num;
+  hw_config.xcc_count       = agent_info->xcc_num;
+  hw_config.xcc_per_aid     = agent_info->xcc_per_aid;
+  hw_config.aid_count       = agent_info->xcc_num / agent_info->xcc_per_aid;
+  hw_config.gfxip           = agent_info->gfxip;
+
   Pm4Factory::pmc_builder_ = new pm4_builder::GpuPmcBuilder(
-      agent_info, Pm4Factory::cmd_builder_, prims, Pm4Factory::IsConcurrent());
+      hw_config, Pm4Factory::cmd_builder_, prims, Pm4Factory::IsConcurrent());
   if (Pm4Factory::pmc_builder_ == NULL) throw aql_profile_exc_msg("PmcBuilder allocation failed");
 
   Pm4Factory::spm_builder_ =
-      new pm4_builder::GpuSpmBuilder(agent_info, Pm4Factory::cmd_builder_, prims);
+      new pm4_builder::GpuSpmBuilder(Pm4Factory::cmd_builder_, prims);
   if (Pm4Factory::spm_builder_ == NULL) throw aql_profile_exc_msg("SpmBuilder allocation failed");
 
   Pm4Factory::sqtt_builder_ =
-      new pm4_builder::GpuSqttBuilder(agent_info, Pm4Factory::cmd_builder_, prims);
+      new pm4_builder::GpuSqttBuilder(hw_config, Pm4Factory::cmd_builder_, prims,
+                                      agent_info->timestamp_freq);
   if (Pm4Factory::sqtt_builder_ == NULL) throw aql_profile_exc_msg("SqttBuilder allocation failed");
 }
 

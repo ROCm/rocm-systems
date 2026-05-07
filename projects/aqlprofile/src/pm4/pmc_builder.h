@@ -31,10 +31,10 @@
 #include <utility>
 #include <vector>
 
+#include "core/hardware_config.hpp"
 #include "def/gpu_block_info.h"
 #include "pm4/cmd_config.h"
 #include "pm4/primitives_provider.hpp"
-#include "util/hsa_rsrc_factory.h"
 
 namespace pm4_builder {
 // MI300 UMC constants
@@ -144,7 +144,7 @@ class GpuPmcBuilder : public PmcBuilder {
   uint32_t GetInstanceIndex(uint32_t instance_index, const GpuBlockInfo* block_info);
 
  public:
-  explicit GpuPmcBuilder(const AgentInfo* agent_info, CmdBuilder* builder,
+  explicit GpuPmcBuilder(const aql_profile::HardwareConfig& config, CmdBuilder* builder,
                          const PrimitivesProvider* prim, bool is_concurrent);
 
   int GetNumWGPs() override;

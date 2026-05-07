@@ -67,8 +67,7 @@ class GpuSpmBuilder : public SpmBuilder {
   void DebugTrace(uint32_t value);
 
  public:
-  explicit GpuSpmBuilder(const AgentInfo* agent_info, CmdBuilder* builder,
-                         const PrimitivesProvider* prim)
+  explicit GpuSpmBuilder(CmdBuilder* builder, const PrimitivesProvider* prim)
       : SpmBuilder(), builder_(builder), prim_(prim) {}
 
   void Begin(CmdBuffer* cmd_buffer, const SpmConfig* config,
