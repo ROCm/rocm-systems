@@ -11,7 +11,8 @@ import pandas as pd
 from utils.rocpd_data import (
     COUNTERS_COLLECTION_QUERY,
     MARKER_API_TRACE_QUERY,
-    convert_dbs_to_csv,
+    dump_counter_collection_csv,
+    dump_marker_trace_csv,
 )
 from utils.utils_analysis import (
     build_call_trees_with_kernel_ids,
@@ -130,7 +131,7 @@ def test_marker_query_uses_stack_id():
     assert "\n    correlation_id" not in query_lower
 
 
-# ---- Test 2: convert_dbs_to_csv populates Correlation_Id from stack_id ----
+# ---- Test 2: dump_*_csv populates Correlation_Id from stack_id ----
 
 
 def create_rocpd_test_db(workload_dir):
@@ -182,7 +183,8 @@ def test_counter_csv_has_correlation_id_from_stack_id():
     marker_csv = str(Path(workload_dir) / "marker_api_trace.csv")
 
     db_path = create_rocpd_test_db(workload_dir)
-    convert_dbs_to_csv([db_path], counter_csv, marker_csv)
+    dump_counter_collection_csv([db_path], counter_csv)
+    dump_marker_trace_csv([db_path], marker_csv)
 
     df = pd.read_csv(counter_csv)
     assert "Correlation_Id" in df.columns
@@ -202,7 +204,8 @@ def test_marker_csv_has_correlation_id_from_stack_id():
     marker_csv = str(Path(workload_dir) / "marker_api_trace.csv")
 
     db_path = create_rocpd_test_db(workload_dir)
-    convert_dbs_to_csv([db_path], counter_csv, marker_csv)
+    dump_counter_collection_csv([db_path], counter_csv)
+    dump_marker_trace_csv([db_path], marker_csv)
 
     df = pd.read_csv(marker_csv)
     assert "Correlation_Id" in df.columns

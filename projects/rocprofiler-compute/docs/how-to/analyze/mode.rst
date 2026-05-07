@@ -14,13 +14,12 @@ choose.
 
 .. note::
 
-   Analyze mode merges separate counter collection files (pmc_perf_*.csv or results_*.csv) into a unified pmc_perf.csv for analysis.
-
-.. note::
-
-   Reading intermediate ``results_*.csv`` files produced by ``rocpd`` profiling is
-   deprecated and will be removed in a future release. The analyze step will read ``.db``
-   files directly.
+   For ``--format-rocprof-output rocpd`` (the default), analyze reads the
+   per-pass ``<workload>/<fbase>.db`` files directly via SQL; no
+   intermediate ``pmc_perf.csv`` is produced. For
+   ``--format-rocprof-output csv``, analyze still merges separate
+   ``pmc_perf_*.csv`` counter collection files into a unified
+   ``pmc_perf.csv`` during pre-processing.
 
 See the following sections to explore ROCm Compute Profiler's analysis and visualization
 options.

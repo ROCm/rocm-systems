@@ -1580,7 +1580,10 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     assert capture_subprocess_called_with_env["ROCPROF_COUNTER_COLLECTION"] == "0"
     assert capture_subprocess_called_with_env["ROCPROF_KERNEL_TRACE"] == "1"
     assert capture_subprocess_called_with_env["ROCPROF_OUTPUT_FORMAT"] == "format"
-    assert capture_subprocess_called_with_env["ROCPROF_OUTPUT_PATH"] == "path/out/pmc_1"
+    assert (
+        capture_subprocess_called_with_env["ROCPROF_OUTPUT_PATH"]
+        == f"{workload_dir_str}/out/pmc_perf_counters"
+    )
     assert (
         capture_subprocess_called_with_env["ROCPROF_COUNTERS"]
         == "pmc: COUNTER1 COUNTER2"
@@ -1719,7 +1722,7 @@ def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkey
         "utils.utils_profile.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
     )
 
-    result = utils_profile.process_rocprofv3_output(workload_dir, False)
+    result = utils_profile.process_rocprofv3_output(workload_dir, "pmc_1", False)
 
     assert len(result) == 1
     assert str(converted_file) in result
@@ -1765,7 +1768,7 @@ def test_process_rocprofv3_output_csv_format_conversion_error(tmp_path, monkeypa
         "utils.utils_profile.console_warning", lambda msg: warnings.append(msg)
     )
 
-    result = utils_profile.process_rocprofv3_output(workload_dir, False)
+    result = utils_profile.process_rocprofv3_output(workload_dir, "pmc_1", False)
 
     assert result == []
     assert len(warnings) == 1
@@ -1798,7 +1801,7 @@ def test_process_rocprofv3_output_csv_format_missing_agent_file(tmp_path, monkey
     monkeypatch.setattr("glob.glob", mock_glob)
 
     with pytest.raises(ValueError, match='has no corresponding "agent info" file'):
-        utils_profile.process_rocprofv3_output(workload_dir, False)
+        utils_profile.process_rocprofv3_output(workload_dir, "pmc_1", False)
 
 
 def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
@@ -1819,7 +1822,7 @@ def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
 
     monkeypatch.setattr("glob.glob", lambda pattern: [])
 
-    result = utils_profile.process_rocprofv3_output(workload_dir, False)
+    result = utils_profile.process_rocprofv3_output(workload_dir, "pmc_1", False)
 
     assert result == []
 
@@ -1870,7 +1873,7 @@ def test_process_rocprofv3_output_csv_format_multiple_counter_files(
         "utils.utils_profile.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
     )
 
-    result = utils_profile.process_rocprofv3_output(workload_dir, False)
+    result = utils_profile.process_rocprofv3_output(workload_dir, "pmc_1", False)
 
     assert len(result) == 2
     assert str(converted_file1) in result
@@ -1921,8 +1924,9 @@ def test_process_kokkos_trace_output_single_file(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
 
+    fbase = "single_test"
     workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
+    out_dir = tmp_path / "out" / fbase
     out_dir.mkdir(parents=True)
 
     sub1 = out_dir / "process1"
@@ -1932,8 +1936,6 @@ def test_process_kokkos_trace_output_single_file(tmp_path, monkeypatch):
     csv1.write_text(
         "marker_id,marker_name,start_time,end_time\n1,kokkos_begin,1000,1050\n2,kokkos_end,2000,2010\n"
     )
-
-    fbase = "single_test"
 
     utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
@@ -1959,8 +1961,9 @@ def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_common.console_warning", lambda *a, **k: None)
 
+    fbase = "test_workload"
     workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
+    out_dir = tmp_path / "out" / fbase
     out_dir.mkdir(parents=True)
 
     sub1 = out_dir / "process1"
@@ -1976,8 +1979,6 @@ def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
     csv2.write_text(
         "timestamp,marker_name,duration\n3000,kokkos_free,200\n4000,kokkos_parallel_reduce,800\n"
     )
-
-    fbase = "test_workload"
 
     utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
@@ -2009,11 +2010,10 @@ def test_process_kokkos_trace_output_no_files_found(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
 
-    workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
-    out_dir.mkdir(parents=True)
-
     fbase = "no_files"
+    workload_dir = str(tmp_path)
+    out_dir = tmp_path / "out" / fbase
+    out_dir.mkdir(parents=True)
 
     # With the csv_ops implementation, when there are no input files:
     # - concat_csv_files returns []
@@ -2037,8 +2037,9 @@ def test_process_kokkos_trace_output_mixed_file_states(tmp_path, monkeypatch):
     """
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
+    fbase = "mixed_test"
     workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
+    out_dir = tmp_path / "out" / fbase
     out_dir.mkdir(parents=True)
 
     sub1 = out_dir / "process1"
@@ -2056,8 +2057,6 @@ def test_process_kokkos_trace_output_mixed_file_states(tmp_path, monkeypatch):
 
     csv3 = sub3 / "headers_marker_api_trace.csv"
     csv3.write_text("timestamp,marker_name\n")
-
-    fbase = "mixed_test"
 
     original_read_csv = pd.read_csv
 
@@ -2159,8 +2158,9 @@ def test_process_kokkos_trace_output_csv_with_only_headers(tmp_path, monkeypatch
     """
     monkeypatch.setattr("utils.utils_common.console_debug", lambda *a, **k: None)
 
+    fbase = "headers_only"
     workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
+    out_dir = tmp_path / "out" / fbase
     out_dir.mkdir(parents=True)
 
     sub1 = out_dir / "process1"
@@ -2168,8 +2168,6 @@ def test_process_kokkos_trace_output_csv_with_only_headers(tmp_path, monkeypatch
 
     csv1 = sub1 / "headers_only_marker_api_trace.csv"
     csv1.write_text("timestamp,marker_name,duration,thread_id\n")
-
-    fbase = "headers_only"
 
     # With csv_ops, header-only files result in empty rows and the output
     # file isn't created, causing FileNotFoundError during copyfile
@@ -2190,8 +2188,9 @@ def test_process_kokkos_trace_output_large_files(tmp_path, monkeypatch):
     """
     monkeypatch.setattr("utils.utils_common.console_debug", lambda *a, **k: None)
 
+    fbase = "large_test"
     workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
+    out_dir = tmp_path / "out" / fbase
     out_dir.mkdir(parents=True)
 
     sub1 = out_dir / "process1"
@@ -2212,8 +2211,6 @@ def test_process_kokkos_trace_output_large_files(tmp_path, monkeypatch):
         content += f"{i},{marker_name},{i % 100},{i % 10}\n"
 
     csv1.write_text(content)
-
-    fbase = "large_test"
 
     utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
@@ -2239,8 +2236,9 @@ def test_process_kokkos_trace_output_unicode_content(tmp_path, monkeypatch):
     """
     monkeypatch.setattr("utils.utils_common.console_debug", lambda *a, **k: None)
 
+    fbase = "unicode_test"
     workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
+    out_dir = tmp_path / "out" / fbase
     out_dir.mkdir(parents=True)
 
     sub1 = out_dir / "process1"
@@ -2251,8 +2249,6 @@ def test_process_kokkos_trace_output_unicode_content(tmp_path, monkeypatch):
         "timestamp,marker_name,duration\n1000,kokkos_α_kernel,500\n2000,kokkos_β_operation,300\n",
         encoding="utf-8",
     )
-
-    fbase = "unicode_test"
 
     utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
@@ -2278,8 +2274,9 @@ def test_process_kokkos_trace_output_different_schemas(tmp_path, monkeypatch):
     """
     monkeypatch.setattr("utils.utils_common.console_debug", lambda *a, **k: None)
 
+    fbase = "schema_test"
     workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
+    out_dir = tmp_path / "out" / fbase
     out_dir.mkdir(parents=True)
 
     # Create subdirectories for glob to find
@@ -2293,8 +2290,6 @@ def test_process_kokkos_trace_output_different_schemas(tmp_path, monkeypatch):
     csv2 = sub2 / "schema2_marker_api_trace.csv"
     csv1.touch()
     csv2.touch()
-
-    fbase = "schema_test"
 
     # Mock csv_ops to avoid disk I/O and test concatenation behavior
     mock_rows = [
@@ -2340,8 +2335,9 @@ def test_process_kokkos_trace_output_permission_error(tmp_path, monkeypatch):
     """
     monkeypatch.setattr("utils.utils_common.console_debug", lambda *a, **k: None)
 
+    fbase = "permission_test"
     workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
+    out_dir = tmp_path / "out" / fbase
     out_dir.mkdir(parents=True)
 
     sub1 = out_dir / "process1"
@@ -2349,8 +2345,6 @@ def test_process_kokkos_trace_output_permission_error(tmp_path, monkeypatch):
 
     csv1 = sub1 / "test_marker_api_trace.csv"
     csv1.write_text("timestamp,marker_name\n1000,kokkos_malloc\n")
-
-    fbase = "permission_test"
 
     def mock_write_permission_error(path, rows, fieldnames=None):
         raise PermissionError("Permission denied")

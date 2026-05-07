@@ -305,15 +305,20 @@ Examples:
     │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
     │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
     ├── profiling_config.yaml
-    ├── results_pmc_perf_0.csv
-    ├── results_pmc_perf_1.csv
-    ├── results_pmc_perf_2.csv
-    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv
+    ├── pmc_perf_0.db
+    ├── pmc_perf_1.db
+    ├── pmc_perf_2.db
+    ├── pmc_perf_SQ_LEVEL_WAVES.db
     ├── roofline.csv
     └── sysinfo.csv
 
-The output files use the default ``rocpd`` format. See :ref:`profiling-output-format` for details
-on available output formats and when the final ``pmc_perf.csv`` is created.
+The default ``rocpd`` format produces one merged ``.db`` per profiling pass
+at the workload root (``<workload>/<fbase>.db``). Per-host outputs from
+multi-rank runs are merged via SQLite ``ATTACH``+``INSERT`` and the
+intermediate ``out/`` directory is removed. ``rocprof-compute analyze``
+reads the root-level ``.db`` files directly. See
+:ref:`profiling-output-format` for the legacy ``--format-rocprof-output csv``
+layout (``pmc_perf_*.csv``).
 
 * Profiling with MPI at host ``amd-ryzen``:
 
@@ -353,10 +358,10 @@ on available output formats and when the final ``pmc_perf.csv`` is created.
     │   ├── pmc_perf_SQ_INST_LEVEL_VMEM.yaml
     │   └── pmc_perf_SQ_LEVEL_WAVES.yaml
     ├── profiling_config.yaml
-    ├── results_pmc_perf_0.csv
-    ├── results_pmc_perf_1.csv
-    ├── results_pmc_perf_2.csv
-    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv
+    ├── pmc_perf_0.db
+    ├── pmc_perf_1.db
+    ├── pmc_perf_2.db
+    ├── pmc_perf_SQ_LEVEL_WAVES.db
     ├── roofline.csv
     └── sysinfo.csv
 
@@ -376,15 +381,15 @@ of raw performance counter data produced by the underlying
 
 * ``rocpd`` format (default):
    * Instructs ROCprofiler-SDK to write raw performance counter data in rocpd (SQLite) format.
-   * The rocpd database files are converted to CSV files (``results_pmc_perf_0.csv``, ``results_pmc_perf_SQ_*.csv``, etc.) for each profiling run, after which the database files are removed.
-   * These files are merged into a single ``pmc_perf.csv`` file when running ``rocprof-compute analyze``.
-   * Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
-
-.. note::
-
-   Intermediate CSV generation (``results_*.csv``) in ``rocpd`` mode and
-   ``--retain-rocpd-output`` are deprecated and will be removed in a future release.
-   ``.db`` files will be retained by default and the analyze step will read them directly.
+   * Each profiling pass produces a single ``<workload>/<fbase>.db`` at the
+     workload root.  Per-host outputs from multi-rank runs are merged via
+     SQLite ``ATTACH``+``INSERT``, the intermediate ``<workload>/out/``
+     directory is removed, and ``rocprof-compute analyze`` reads the
+     root-level ``.db`` files directly.  No intermediate ``results_*.csv``
+     or ``pmc_perf.csv`` is materialized on this path.
+   * Requires a rocprofiler-sdk build with the rocpd public API (ROCm 7.x).
+     On older ROCm releases ``rocprof-compute`` automatically falls back to
+     the ``csv`` format below.
 
 
 .. _filtering:

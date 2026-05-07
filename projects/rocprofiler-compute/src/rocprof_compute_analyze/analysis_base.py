@@ -3,7 +3,6 @@
 
 import argparse
 import copy
-import csv
 import re
 import sys
 from abc import abstractmethod
@@ -15,7 +14,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, schema
+from utils import file_io, parser, rocpd_data, schema, utils_analysis
 from utils.logger import (
     console_debug,
     console_error,
@@ -458,35 +457,13 @@ class OmniAnalyze_Base:
         join_type = profiling_config.get("join_type", "grid")
         kokkos_trace = profiling_config.get("kokkos_trace", False)
 
-        # handle rocpd format
         if format_rocprof == "rocpd":
-            # Vertically concat (by rows) results_*.csv into pmc_perf.csv
-            result_files = list(workload_dir.glob("results_*.csv"))
-
-            console_warning(
-                "Reading intermediate results_*.csv files is deprecated and "
-                "will be removed in a future release."
-            )
-
-            with open(output_file, "w", newline="") as outfile:
-                writer = None
-                for file in result_files:
-                    with open(file, newline="") as infile:
-                        reader = csv.reader(infile)
-                        header = next(reader)
-                        # Write header only once
-                        if writer is None:
-                            writer = csv.writer(outfile)
-                            writer.writerow(header)
-                        for row in reader:
-                            writer.writerow(row)
-
-            console_debug(f"Created file: {output_file}")
-
             if iteration_multiplexing is not None:
-                df = pd.read_csv(output_file)
-                detect_missing_counters(df, workload_dir, join_type)
-
+                db_paths = rocpd_data.find_workload_db_paths(workload_dir)
+                long_df = utils_analysis.load_rocpd_pmc_df(db_paths)
+                if not long_df.empty:
+                    df = utils_analysis.process_rocpd_csv(long_df)
+                    detect_missing_counters(df, workload_dir, join_type)
             return None
 
         # Collect files to process - normalize to Path objects
@@ -687,21 +664,38 @@ class OmniAnalyze_Base:
 
         # Helper to process and join CSV files in a single directory
         def process_and_join_directory(directory: Path) -> None:
+            profiling_config = file_io.load_profiling_config(str(directory))
+            format_rocprof = profiling_config.get("format_rocprof_output", "rocpd")
+
+            if format_rocprof == "rocpd":
+                db_paths = rocpd_data.find_workload_db_paths(directory)
+                if not db_paths:
+                    console_error(
+                        f"No rocpd profiling data found in {directory}.\n"
+                        f"Expected: <workload>/<fbase>.db\n"
+                        f"Please run 'rocprof-compute profile' first."
+                    )
+                    return
+                console_debug(
+                    f"Using rocpd .db files for {directory} "
+                    f"({len(db_paths)} db(s) found)"
+                )
+                self.join_prof(directory)
+                return
+
             pmc_perf = directory / "pmc_perf.csv"
             pmc_perf_files = list(directory.glob("pmc_perf_*.csv"))
-            results_files = list(directory.glob("results_*.csv"))
 
             if pmc_perf.exists():
                 console_debug(f"Using existing {pmc_perf}")
-            elif pmc_perf_files or results_files:
-                files_desc = "pmc_perf_*.csv" if pmc_perf_files else "results_*.csv"
-                console_log(f"Joining {files_desc} for {directory}...")
+            elif pmc_perf_files:
+                console_log(f"Joining pmc_perf_*.csv for {directory}...")
                 self.join_prof(directory, out=str(pmc_perf))
                 console_log(f"Created {pmc_perf}")
             else:
                 console_error(
                     f"No profiling data found in {directory}.\n"
-                    f"Expected: pmc_perf.csv or pmc_perf_*.csv or results_*.csv\n"
+                    f"Expected: pmc_perf.csv or pmc_perf_*.csv\n"
                     f"Please run 'rocprof-compute profile' first."
                 )
 

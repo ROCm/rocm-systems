@@ -51,13 +51,11 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "LD_PRELOAD": ld_preload_value,
             "ROCPROF_KERNEL_TRACE": "1",
             "ROCPROF_OUTPUT_FORMAT": args.format_rocprof_output,
-            "ROCPROF_OUTPUT_PATH": f"{args.output_directory}/out/pmc_1",
+            "ROCPROF_OUTPUT_PATH": f"{args.output_directory}/out",
         })
 
         if getattr(args, "torch_trace", False):
             options["ROCPROF_MARKER_API_TRACE"] = "1"
-        # Create folder pointed by ROCPROF_OUTPUT_PATH
-        Path(options["ROCPROF_OUTPUT_PATH"]).mkdir(parents=True, exist_ok=True)
 
         if args.iteration_multiplexing:
             options.update({

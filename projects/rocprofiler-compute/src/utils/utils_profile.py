@@ -67,7 +67,6 @@ def run_prof(
     loglevel: int,
     format_rocprof_output: str,
     torch_trace_enabled: bool = False,
-    retain_rocpd_output: bool = False,
 ) -> None:
     multiple_files = isinstance(fnames, list)
     if multiple_files and (
@@ -112,6 +111,10 @@ def run_prof(
         default_options = ["-i", fnames]
         options = default_options + cast(list[str], profiler_options)
         options = ["-A", "absolute"] + options
+        for i, opt in enumerate(options):
+            if opt == "-d" and i + 1 < len(options):
+                options[i + 1] = f"{workload_dir}/out/{fbase}"
+                break
 
     new_env = os.environ.copy()
 
@@ -145,10 +148,13 @@ def run_prof(
 
     time_1 = time.time()
 
-    output_path = Path(workload_dir + "/out/pmc_1")
+    # Each pass writes to its own out/<fbase>/ to keep .db files isolated.
+    output_path_str = f"{workload_dir}/out/{fbase}"
+    output_path = Path(output_path_str)
     output_path.mkdir(parents=True, exist_ok=True)
 
     if get_rocprof_cmd() == "rocprofiler-sdk":
+        options["ROCPROF_OUTPUT_PATH"] = output_path_str
         app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
         for key, value in options.items():
             new_env[key] = value
@@ -182,13 +188,13 @@ def run_prof(
     )
 
     if get_rocprof_cmd() != "rocprofiler-sdk":
-        # rocprofv3 with yaml input file can write out/pass_1 instead of out/pmc_1
-        # Move files from out/pass_1 to out/pmc_1 if pass_1 exists
-        pass_1 = Path(workload_dir) / "out" / "pass_1"
+        # rocprofv3 with yaml input writes into a "pass_1" subdir under -d.
+        # Promote its contents one level to match the SDK layout.
+        pass_1 = output_path / "pass_1"
         if pass_1.exists():
-            shutil.copytree(
-                pass_1, Path(workload_dir) / "out" / "pmc_1", dirs_exist_ok=True
-            )
+            for item in pass_1.iterdir():
+                shutil.move(str(item), str(output_path / item.name))
+            pass_1.rmdir()
 
     # Delete counter definition temporary directory
     if new_env.get("ROCPROFILER_METRICS_PATH"):
@@ -204,107 +210,46 @@ def run_prof(
     results_files: list[str] = []
 
     if format_rocprof_output == "rocpd":
-        # If using native tool for counter collection
+        per_host_db_paths = sorted(
+            glob.glob(f"{workload_dir}/out/{fbase}/*/*.db")
+        )
         if (
             get_rocprof_cmd() == "rocprofiler-sdk"
             and options["ROCPROF_COUNTER_COLLECTION"] == "0"
         ):
-            for db_name in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
+            for db_name in per_host_db_paths:
                 pid = Path(db_name).stem.split("_")[0]
-                # Read CSV as list of dicts instead of pandas DataFrame
                 counter_rows, _ = csv_ops.read_csv_as_dicts(
-                    f"{workload_dir}/out/pmc_1/{pid}_native_counter_collection.csv"
+                    f"{workload_dir}/out/{fbase}/"
+                    f"{pid}_native_counter_collection.csv"
                 )
                 rocpd_data.update_rocpd_pmc_events(
                     counter_rows,
                     db_name,
                 )
                 console_debug(f"Updated rocpd db {db_name} with native tool counters.")
-        # Write results_fbase.csv
-        rocpd_data.convert_dbs_to_csv(
-            glob.glob(workload_dir + "/out/pmc_1/*/*.db"),
-            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
-            workload_dir + f"/out/pmc_1/{fbase}_marker_api_trace.csv",
-        )
-        # Subprocess succeeded but may have dispatched zero GPU kernels,
-        # in which case the CSV is missing or has no data rows.
-        try:
-            combined_rows, _ = csv_ops.read_csv_as_dicts(
-                workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv"
-            )
-        except (FileNotFoundError, ValueError):
-            combined_rows = []
-        if not combined_rows:
+        if (
+            not per_host_db_paths
+            or rocpd_data.count_counter_rows(per_host_db_paths) == 0
+        ):
             console_warning(
                 "No GPU kernel data collected. "
                 "The workload may not have dispatched any GPU kernels."
             )
             shutil.rmtree(f"{workload_dir}/out", ignore_errors=True)
             return
-        else:
-            # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
-            # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
-            csv_ops.assign_group_ids(
-                combined_rows,
-                [
-                    "PID",
-                    "Kernel_Name",
-                    "Grid_Size",
-                    "Workgroup_Size",
-                    "LDS_Per_Workgroup",
-                    "Start_Timestamp",
-                    "End_Timestamp",
-                ],
-                "Dispatch_ID",
-            )
-            # Reset Kernel_ID based on Kernel_Name, Grid_Size,
-            # Workgroup_Size, LDS_Per_Workgroup
-            csv_ops.assign_group_ids(
-                combined_rows,
-                ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
-                "Kernel_ID",
-            )
-            # Drop PID since its not required
-            csv_ops.drop_column_from_rows(combined_rows, "PID")
-            # Write back to CSV
-            csv_ops.write_csv_from_dicts(
-                workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
-                combined_rows,
-            )
-            csv_ops.write_csv_from_dicts(
-                workload_dir + f"/results_{fbase}.csv", combined_rows
-            )
-            console_warning(
-                "Intermediate results_*.csv generation from rocpd databases is "
-                "deprecated and will be replaced with automatic .db file "
-                "retention in a future release."
-            )
+        merged_db = f"{workload_dir}/{fbase}.db"
+        rocpd_data.merge_pass_dbs(per_host_db_paths, merged_db)
         if torch_trace_enabled:
-            # move counter collection and marker trace to workload dir
             save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
-        if retain_rocpd_output:
-            console_warning(
-                "--retain-rocpd-output is deprecated and will be removed in "
-                "a future release. .db files will be retained automatically."
-            )
-            for db_path in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
-                pid = Path(db_path).stem.split("_")[0]
-                shutil.copyfile(
-                    db_path,
-                    workload_dir + f"/{fbase}_{pid}.db",
-                )
-                console_warning(
-                    f"Retaining large raw rocpd database: "
-                    f"{workload_dir}/{fbase}_{pid}.db"
-                )
-        # Remove temp directory
-        shutil.rmtree(workload_dir + "/" + "out")
+        shutil.rmtree(f"{workload_dir}/out", ignore_errors=True)
         return
     elif format_rocprof_output == "csv":
         if get_rocprof_cmd() == "rocprofiler-sdk":
             # rocprofv3 requires additional processing for each process
             results_files = process_rocprofv3_output(
                 workload_dir,
+                fbase,
                 # counter data collected using native tool
                 using_native_tool=options["ROCPROF_COUNTER_COLLECTION"] == "0",
             )
@@ -314,7 +259,7 @@ def run_prof(
             # rocprofv3 requires additional processing for each process
             # rocprofv3 cannot use native tool
             results_files = process_rocprofv3_output(
-                workload_dir, using_native_tool=False
+                workload_dir, fbase, using_native_tool=False
             )
             if "--kokkos-trace" in options:
                 # TODO: as rocprofv3 --kokkos-trace feature improves,
@@ -348,13 +293,13 @@ def run_prof(
         )
 
         csv_ops.write_csv_from_dicts(
-            workload_dir + "/out/pmc_1/results_" + fbase + ".csv", combined_results
+            f"{workload_dir}/out/{fbase}/results_{fbase}.csv", combined_results
         )
 
         if Path(f"{workload_dir}/out").exists():
             # copy and remove out directory if needed
             shutil.copyfile(
-                f"{workload_dir}/out/pmc_1/results_{fbase}.csv",
+                f"{workload_dir}/out/{fbase}/results_{fbase}.csv",
                 f"{workload_dir}/{fbase}.csv",
             )
             # Remove temp directory
@@ -697,14 +642,14 @@ def v3_counter_csv_to_v2_csv(
     )
 
 
-def convert_native_counter_collection_csv(workload_dir: str) -> None:
+def convert_native_counter_collection_csv(workload_dir: str, fbase: str) -> None:
     """
     Use native counter collection csv and rocprofiler-sdk kernel
     trace to write counter collection csv in rocprofiler-sdk format
     for further processing to pmc_perf.csv file
     """
     for native_filename in glob.glob(
-        f"{workload_dir}/out/pmc_1/*_native_counter_collection.csv"
+        f"{workload_dir}/out/{fbase}/*_native_counter_collection.csv"
     ):
         counter_data, _ = csv_ops.read_csv_as_dicts(native_filename)
         # Group by on dispatch_id and counter_id and sum the counter_value,
@@ -724,7 +669,7 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
 
         pid = Path(native_filename).stem.split("_")[0]
         kernel_data_filename = glob.glob(
-            f"{workload_dir}/out/pmc_1/*/{pid}_kernel_trace.csv"
+            f"{workload_dir}/out/{fbase}/*/{pid}_kernel_trace.csv"
         )[0]
         kernel_data, _ = csv_ops.read_csv_as_dicts(kernel_data_filename)
 
@@ -777,7 +722,9 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
         )
 
 
-def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list[str]:
+def process_rocprofv3_output(
+    workload_dir: str, fbase: str, using_native_tool: bool
+) -> list[str]:
     """
     rocprofv3 specific output processing for csv format.
     """
@@ -785,7 +732,7 @@ def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list
 
     if using_native_tool:
         try:
-            convert_native_counter_collection_csv(workload_dir)
+            convert_native_counter_collection_csv(workload_dir, fbase)
         except Exception:
             console_error(
                 "Error converting native counter collection csv.\n"
@@ -793,7 +740,7 @@ def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list
             )
 
     counter_info_csvs = glob.glob(
-        f"{workload_dir}/out/pmc_1/*/*_counter_collection.csv"
+        f"{workload_dir}/out/{fbase}/*/*_counter_collection.csv"
     )
     existing_counter_files_csv = [f for f in counter_info_csvs if Path(f).is_file()]
 
@@ -825,7 +772,9 @@ def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list
                 )
                 return []
 
-        results_files_csv = glob.glob(f"{workload_dir}/out/pmc_1/*/*_converted.csv")
+        results_files_csv = glob.glob(
+            f"{workload_dir}/out/{fbase}/*/*_converted.csv"
+        )
     else:
         return []
 
@@ -842,17 +791,13 @@ def save_torch_trace_inputs(
     Move counter_collection and marker_api_trace data to workload_dir,
     for creation of PyTorch operator trace in Analyze mode.
     """
-    src_dir = Path(workload_dir) / "out" / "pmc_1"
+    src_dir = Path(workload_dir) / "out" / fbase
     if output_format == "rocpd":
-        # Only one pair expected
-        src_counter = src_dir / f"{fbase}_counter_collection.csv"
-        src_marker = src_dir / f"{fbase}_marker_api_trace.csv"
+        merged_db = f"{workload_dir}/{fbase}.db"
         dst_counter = Path(workload_dir) / f"torch_trace_{fbase}_counter_collection.csv"
         dst_marker = Path(workload_dir) / f"torch_trace_{fbase}_marker_api_trace.csv"
-        # These files are expected to exist
-        # Letting shutil.copyfile raise error if files not found
-        shutil.copyfile(src_counter, dst_counter)
-        shutil.copyfile(src_marker, dst_marker)
+        rocpd_data.dump_counter_collection_csv([merged_db], str(dst_counter))
+        rocpd_data.dump_marker_trace_csv([merged_db], str(dst_marker))
         console_log(
             "torch trace",
             "Moved counter collection and marker trace files "
@@ -896,7 +841,7 @@ def save_torch_trace_inputs(
 def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
     # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(
-        f"{workload_dir}/out/pmc_1/*/*_marker_api_trace.csv"
+        f"{workload_dir}/out/{fbase}/*/*_marker_api_trace.csv"
     )
     existing_marker_files_csv = [f for f in marker_api_trace_csvs if Path(f).is_file()]
 
@@ -904,12 +849,12 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
     combined_results = csv_ops.concat_csv_files(existing_marker_files_csv)
 
     csv_ops.write_csv_from_dicts(
-        f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
+        f"{workload_dir}/out/{fbase}/results_{fbase}_marker_api_trace.csv",
         combined_results,
     )
 
     if Path(f"{workload_dir}/out").exists():
         shutil.copyfile(
-            f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
+            f"{workload_dir}/out/{fbase}/results_{fbase}_marker_api_trace.csv",
             f"{workload_dir}/{fbase}_marker_api_trace.csv",
         )

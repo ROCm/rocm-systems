@@ -17,6 +17,8 @@ SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
+from utils import rocpd_data  # noqa: E402  (sys.path adjusted above)
+
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},
     "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
@@ -54,6 +56,84 @@ def check_file_pattern(pattern, file_path):
     with open(file_path) as f:
         content = f.read()
     return len(re.findall(pattern, content)) != 0
+
+
+def _check_in_workload(workload_dir, db_query, db_params, csv_pattern):
+    """Return True when `csv_pattern` (or `db_query`) matches workload data.
+
+    Looks at rocpd .db files first (default profile path) and falls back
+    to results_*.csv / pmc_perf*.csv (legacy csv profile path).
+    """
+    import sqlite3
+    from contextlib import closing
+
+    workload_path = Path(workload_dir)
+    db_paths = rocpd_data.find_workload_db_paths(workload_path)
+    for db_path in db_paths:
+        try:
+            with closing(sqlite3.connect(str(db_path))) as conn:
+                cursor = conn.execute(db_query, db_params)
+                if cursor.fetchone():
+                    return True
+        except sqlite3.DatabaseError:
+            continue
+
+    for results_file in workload_path.glob("results_*.csv"):
+        if check_file_pattern(csv_pattern, str(results_file)):
+            return True
+    for pmc_perf in workload_path.glob("pmc_perf*.csv"):
+        if check_file_pattern(csv_pattern, str(pmc_perf)):
+            return True
+    return False
+
+
+def check_counter_in_workload(counter_name, workload_dir):
+    """Return True when `counter_name` was collected in this workload."""
+    return _check_in_workload(
+        workload_dir,
+        "SELECT 1 FROM counters_collection WHERE counter_name = ? LIMIT 1",
+        (counter_name,),
+        counter_name,
+    )
+
+
+def check_kernel_in_workload(kernel_name_substr, workload_dir):
+    """Return True when a kernel matching `kernel_name_substr` was profiled."""
+    return _check_in_workload(
+        workload_dir,
+        "SELECT 1 FROM counters_collection WHERE kernel_name LIKE ? LIMIT 1",
+        (f"%{kernel_name_substr}%",),
+        kernel_name_substr,
+    )
+
+
+def load_workload_timestamps(workload_dir):
+    """Return a DataFrame with Start_Timestamp/End_Timestamp for the
+    workload, reading rocpd .db (default) or the legacy results_*.csv.
+    """
+    import sqlite3
+    from contextlib import closing
+
+    workload_path = Path(workload_dir)
+    db_paths = rocpd_data.find_workload_db_paths(workload_path)
+    if db_paths:
+        frames = []
+        for db_path in db_paths:
+            with closing(sqlite3.connect(str(db_path))) as conn:
+                frames.append(
+                    pd.read_sql_query(
+                        "SELECT start AS Start_Timestamp, "
+                        "end AS End_Timestamp "
+                        "FROM counters_collection",
+                        conn,
+                    )
+                )
+        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+    results_files = list(workload_path.glob("results_*.csv"))
+    if not results_files:
+        return pd.DataFrame()
+    return pd.concat([pd.read_csv(f) for f in results_files], ignore_index=True)
 
 
 def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
@@ -152,22 +232,26 @@ def check_csv_files(output_dir, num_devices, num_kernels):
     """
     files_in_workload = os.listdir(output_dir)
 
-    # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv)
     has_separate = any(
         f.startswith("pmc_perf_") and f.endswith(".csv") for f in files_in_workload
     )
-    has_results = any(
+    has_db = bool(rocpd_data.find_workload_db_paths(output_dir))
+
+    assert not any(
         f.startswith("results_") and f.endswith(".csv") for f in files_in_workload
+    ), "results_*.csv must not be written at the workload root"
+
+    assert has_separate or has_db, (
+        "Expected pmc_perf_*.csv (csv format) or "
+        "<workload>/<fbase>.db (rocpd format) from profile mode"
     )
 
-    assert has_separate or has_results, (
-        "Expected pmc_perf_*.csv or results_*.csv from profile mode"
+    assert not (Path(output_dir) / "out").exists(), (
+        "out/ must be removed after profiling completes"
     )
 
-    # Validate row counts for PMC files (but don't add to return dict)
     for file in files_in_workload:
-        is_pmc = file.startswith("pmc_perf_") or file.startswith("results_")
-        if is_pmc and file.endswith(".csv"):
+        if file.startswith("pmc_perf_") and file.endswith(".csv"):
             df = pd.read_csv(output_dir + "/" + file)
             err_msg = (
                 f"PMC file {file} has insufficient rows: "
@@ -198,7 +282,7 @@ def check_non_pmc_files(output_dir, num_devices, num_kernels):
     for file in files_in_workload:
         if file.endswith(".csv"):
             # Skip PMC files (already validated above)
-            if file.startswith("pmc_perf_") or file.startswith("results_"):
+            if file.startswith("pmc_perf_"):
                 continue
 
             # Load other CSV files

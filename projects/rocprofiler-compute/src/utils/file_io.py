@@ -10,7 +10,7 @@ import pandas as pd
 import yaml
 
 import config
-from utils import schema, utils_analysis
+from utils import rocpd_data, schema, utils_analysis
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
@@ -301,13 +301,34 @@ def create_df_pmc(
         dfs: list[pd.DataFrame] = []
         coll_levels: list[str] = []
 
+        if config_dict.get("format_rocprof_output") == "rocpd":
+            db_paths = rocpd_data.find_workload_db_paths(raw_data_dir)
+            if not db_paths:
+                return pd.DataFrame()
+            long_df = utils_analysis.load_rocpd_pmc_df(db_paths)
+            if long_df.empty:
+                return pd.DataFrame()
+            tmp_df = utils_analysis.process_rocpd_csv(long_df)
+            if kernel_verbose >= 0:
+                kernel_name_shortener(tmp_df, kernel_verbose)
+            if node_name is not None:
+                tmp_df.insert(0, "Node", node_name)
+            final_df = pd.concat(
+                [tmp_df],
+                keys=[schema.PMC_PERF_FILE_PREFIX],
+                axis=1,
+                join="inner",
+                copy=False,
+            )
+            if verbose >= 2:
+                console_debug(f"pmc_raw_data final_single_df {final_df.info}")
+            return final_df
+
         coll_level_map = {}
         for file_name in Path(raw_data_dir).rglob("*.csv"):
             # In csv format accumulator counters are specified as
             # SQ_ACCUM_PREV_HIRES counter in the coll_level specific csv
-            if config_dict.get(
-                "format_rocprof_output"
-            ) == "csv" and file_name.name.startswith("pmc_perf_SQ"):
+            if file_name.name.startswith("pmc_perf_SQ"):
                 coll_level_map[file_name] = file_name.name[
                     len("pmc_perf_") : -len(".csv")
                 ]
@@ -318,9 +339,6 @@ def create_df_pmc(
 
         for csv_file in coll_level_map:
             tmp_df = pd.read_csv(csv_file)
-
-            if config_dict.get("format_rocprof_output") == "rocpd":
-                tmp_df = utils_analysis.process_rocpd_csv(tmp_df)
 
             # Demangle original KernelNames
             # Skip for Standalone Roofline with -1 to keep full kernel names

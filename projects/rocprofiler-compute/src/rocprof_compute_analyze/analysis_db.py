@@ -14,7 +14,7 @@ import pandas as pd
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from utils import utils_analysis
+from utils import rocpd_data, schema, utils_analysis
 from utils.analysis_orm import Database, get_views
 from utils.file_io import process_pc_sampling_kernel_trace
 from utils.logger import (
@@ -296,15 +296,22 @@ class db_analysis(OmniAnalyze_Base):
         args = self.get_args()
 
         for workload_path in self._runs.keys():
-            if not (Path(workload_path) / "pmc_perf.csv").exists():
+            db_paths = rocpd_data.find_workload_db_paths(workload_path)
+            if not db_paths:
                 continue
 
-            pmc_df = utils_analysis.process_rocpd_csv(
-                pd.read_csv(Path(workload_path) / "pmc_perf.csv")
-            )
+            long_df = utils_analysis.load_rocpd_pmc_df(db_paths)
+            if long_df.empty:
+                continue
 
-            # Create multi index df with collection level as pmc_perf
-            raw_pmc = pd.concat([pmc_df], keys=["pmc_perf"], axis=1, copy=False)
+            pmc_df = utils_analysis.process_rocpd_csv(long_df)
+            raw_pmc = pd.concat(
+                [pmc_df],
+                keys=[schema.PMC_PERF_FILE_PREFIX],
+                axis=1,
+                join="inner",
+                copy=False,
+            )
 
             if args.spatial_multiplexing:
                 raw_pmc = self.spatial_multiplex_merge_counters(raw_pmc)

@@ -647,18 +647,26 @@ def test_path_rocpd(
     options = ["--format-rocprof-output", "rocpd"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
-    # Validate profile outputs (results_*.csv for rocpd format)
     common.check_csv_files(workload_dir, num_devices, num_kernels)
     assert common.check_file_pattern(
         "format_rocprof_output: rocpd", f"{workload_dir}/profiling_config.yaml"
     )
+    workload_path = Path(workload_dir)
+    assert list(workload_path.glob("*.db")), (
+        "Expected rocpd .db files at the workload root: <workload>/<fbase>.db"
+    )
+    assert not (workload_path / "out").exists(), (
+        "out/ must be removed after profiling completes"
+    )
+    assert not list(workload_path.glob("results_*.csv")), (
+        "results_*.csv must not be written on the rocpd path"
+    )
+    assert not (workload_path / "pmc_perf.csv").exists(), (
+        "pmc_perf.csv must not be materialized on the rocpd path"
+    )
 
-    # Run analyze to create merged pmc_perf.csv
     code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
     assert code == 0
-
-    # Validate merged pmc_perf.csv content
-    assert common.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1053,19 +1061,24 @@ def test_roof_rocpd(
     options = ["--device", "0", "--roof-only", "--format-rocprof-output", "rocpd"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
 
-    # Validate profile outputs
     common.check_csv_files(workload_dir, num_devices, num_kernels)
-    assert (Path(workload_dir) / "roofline.csv").exists()
+    workload_path = Path(workload_dir)
+    assert (workload_path / "roofline.csv").exists()
     assert common.check_file_pattern(
         "format_rocprof_output: rocpd", f"{workload_dir}/profiling_config.yaml"
     )
+    assert list(workload_path.glob("*.db")), (
+        "Expected rocpd .db files at the workload root: <workload>/<fbase>.db"
+    )
+    assert not (workload_path / "out").exists(), (
+        "out/ must be removed after profiling completes"
+    )
+    assert not list(workload_path.glob("results_*.csv")), (
+        "results_*.csv must not be written on the rocpd path"
+    )
 
-    # Run analyze to create merged pmc_perf.csv
     code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
     assert code == 0
-
-    # Validate merged pmc_perf.csv content
-    assert common.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1340,7 +1353,8 @@ def test_bench_only_basic(binary_handler_profile_rocprof_compute):
     assert not (workload_path / "perfmon").exists()
     assert not (workload_path / "sysinfo.csv").exists()
     assert not (workload_path / "profiling_config.yaml").exists()
-    assert not list(workload_path.glob("results_*.csv"))
+    assert not list(workload_path.glob("*.db"))
+    assert not (workload_path / "out").exists()
     assert not list(workload_path.glob("pmc_perf_*.csv"))
 
 
@@ -1830,8 +1844,7 @@ def test_lds_section(binary_handler_profile_rocprof_compute):
     assert common.check_file_pattern(
         f"- '{lds_block}'", f"{workload_dir}/profiling_config.yaml"
     )
-    results_files = Path(workload_dir).glob("results_*.csv")
-    assert any(common.check_file_pattern("SQ_INSTS_LDS", str(f)) for f in results_files)
+    assert common.check_counter_in_workload("SQ_INSTS_LDS", workload_dir)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1856,14 +1869,8 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
     )
     assert common.check_file_pattern("- '3'", f"{workload_dir}/profiling_config.yaml")
     instmix_counter = "SQ_INSTS_FLAT" if is_rdna35_halo_soc() else "TA_FLAT_WAVEFRONTS"
-    results_files = Path(workload_dir).glob("results_*.csv")
-    assert any(
-        common.check_file_pattern(instmix_counter, str(f)) for f in results_files
-    )
-    results_files = Path(workload_dir).glob("results_*.csv")
-    assert any(
-        common.check_file_pattern("SQC_TC_DATA_READ_REQ", str(f)) for f in results_files
-    )
+    assert common.check_counter_in_workload(instmix_counter, workload_dir)
+    assert common.check_counter_in_workload("SQC_TC_DATA_READ_REQ", workload_dir)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1889,10 +1896,7 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
     lds_sol_counter = (
         "SQC_LDS_IDX_ACTIVE" if is_rdna35_halo_soc() else "SQ_ACTIVE_INST_LDS"
     )
-    results_files = Path(workload_dir).glob("results_*.csv")
-    assert any(
-        common.check_file_pattern(lds_sol_counter, str(f)) for f in results_files
-    )
+    assert common.check_counter_in_workload(lds_sol_counter, workload_dir)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1926,14 +1930,9 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
     kernel_counter = (
         "SQ_INSTS_FLAT_STORE" if is_rdna35_halo_soc() else "TA_FLAT_WAVEFRONTS"
     )
-    results_files = Path(workload_dir).glob("results_*.csv")
-    assert any(common.check_file_pattern(kernel_counter, str(f)) for f in results_files)
-    results_files = Path(workload_dir).glob("results_*.csv")
-    assert any(common.check_file_pattern("global_write", str(f)) for f in results_files)
-    results_files = Path(workload_dir).glob("results_*.csv")
-    assert not any(
-        common.check_file_pattern("global_read", str(f)) for f in results_files
-    )
+    assert common.check_counter_in_workload(kernel_counter, workload_dir)
+    assert common.check_kernel_in_workload("global_write", workload_dir)
+    assert not common.check_kernel_in_workload("global_read", workload_dir)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -3080,10 +3079,7 @@ def test_torch_trace_overhead(
     assert returncode_baseline == 0, "Baseline profiling failed"
 
     # Read baseline timestamps
-    baseline_results_files = list(Path(workload_dir_baseline).glob("results_*.csv"))
-    baseline_df = pd.concat(
-        [pd.read_csv(f) for f in baseline_results_files], ignore_index=True
-    )
+    baseline_df = common.load_workload_timestamps(workload_dir_baseline)
     baseline_kernel_duration_total = (
         baseline_df["End_Timestamp"].max() - baseline_df["Start_Timestamp"].min()
     )
@@ -3102,10 +3098,7 @@ def test_torch_trace_overhead(
     with_flag_time = time.time() - start_with_flag
     assert returncode_with_flag == 0, "Profiling with torch-trace failed"
     # Read with-flag timestamps
-    with_flag_results_files = list(Path(workload_dir_with_flag).glob("results_*.csv"))
-    with_flag_df = pd.concat(
-        [pd.read_csv(f) for f in with_flag_results_files], ignore_index=True
-    )
+    with_flag_df = common.load_workload_timestamps(workload_dir_with_flag)
     with_flag_kernel_duration_total = (
         with_flag_df["End_Timestamp"].max() - with_flag_df["Start_Timestamp"].min()
     )

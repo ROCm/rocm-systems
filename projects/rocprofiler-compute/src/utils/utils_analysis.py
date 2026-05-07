@@ -3,6 +3,8 @@
 
 import math
 import shutil
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -10,6 +12,7 @@ from typing import Any, Optional, Union
 import numpy as np
 import pandas as pd
 
+from utils import rocpd_data
 from utils.logger import (
     console_debug,
     console_error,
@@ -17,6 +20,35 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+
+
+def load_rocpd_pmc_df(db_paths: list[str]) -> pd.DataFrame:
+    """Return the long-format PMC DataFrame across all per-pass `.db` files.
+
+    Each DB is queried once with ``COUNTERS_COLLECTION_QUERY`` and the
+    resulting frames are concatenated. ``Dispatch_ID`` is then renumbered
+    per-DB using ``(PID, original_dispatch_id) -> contiguous int`` so
+    multi-rank rows within one merged-host DB do not collide on the
+    downstream ``process_rocpd_csv`` groupby.
+    """
+    frames: list[pd.DataFrame] = []
+    for db_path in db_paths:
+        with closing(sqlite3.connect(db_path)) as conn:
+            try:
+                frame = pd.read_sql_query(rocpd_data.COUNTERS_COLLECTION_QUERY, conn)
+            except Exception as e:
+                console_error(f"Error reading {db_path}: {e}")
+                continue
+            if frame.empty:
+                continue
+            frame["Dispatch_ID"] = (
+                frame.groupby(["PID", "Dispatch_ID"], sort=False).ngroup() + 1
+            )
+            frames.append(frame)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
 
 NS_TO_MS = 1.0 / 1_000_000.0
 
@@ -569,19 +601,18 @@ def is_workload_empty(path: str) -> None:
     workload_dir = Path(path)
     pmc_perf_path = workload_dir / "pmc_perf.csv"
 
-    # Find PMC data files (merged or separate)
+    db_files = rocpd_data.find_workload_db_paths(workload_dir)
+
     if pmc_perf_path.is_file():
         files_to_check = [pmc_perf_path]
     else:
         pmc_files = list(workload_dir.glob("pmc_perf_*.csv"))
-        results_files = list(workload_dir.glob("results_*.csv"))
-        files_to_check = pmc_files if pmc_files else results_files
+        files_to_check = pmc_files
 
-    if not files_to_check:
+    if not files_to_check and not db_files:
         console_error("analysis", "No profiling data found.")
         return
 
-    # Validate files are not empty
     for file_path in files_to_check:
         temp_df = pd.read_csv(file_path)
         if temp_df.dropna().empty:

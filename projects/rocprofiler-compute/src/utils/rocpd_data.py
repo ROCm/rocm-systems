@@ -2,10 +2,19 @@
 # SPDX-License-Identifier:  MIT
 
 import csv
+import shutil
 import sqlite3
-from contextlib import ExitStack, closing
+from contextlib import closing
+from pathlib import Path
+from typing import Union
 
 from utils.logger import console_error
+
+
+def find_workload_db_paths(workload_dir: Union[Path, str]) -> list[str]:
+    """Return all rocpd .db files at the workload root: <workload>/<fbase>.db."""
+    return [str(p) for p in sorted(Path(workload_dir).glob("*.db"))]
+
 
 # From schema definition in source/share/rocprofiler-sdk-rocpd/data_views.sql
 # in rocprofiler-sdk repository
@@ -57,45 +66,101 @@ TABLE_NAME_PREFIX_QUERY = (
 INSERT_QUERY = "INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
 
 
-def convert_dbs_to_csv(
+def _dump_query_to_csv(
     db_paths: list[str],
-    counter_collection_csv_path: str,
-    marker_trace_csv_path: str,
+    query: str,
+    csv_path: str,
 ) -> None:
-    queries = {
-        counter_collection_csv_path: COUNTERS_COLLECTION_QUERY,
-        marker_trace_csv_path: MARKER_API_TRACE_QUERY,
-    }
-    header_written = {path: False for path in queries}
-
-    with ExitStack() as stack:
-        writers = {
-            path: csv.writer(stack.enter_context(open(path, "w", newline="")))
-            for path in queries
-        }
+    """Stream the rows of `query` across all `db_paths` into a single CSV.
+    Rows are written out as the cursor produces them.
+    """
+    header_written = False
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
         for db_path in db_paths:
             with closing(sqlite3.connect(db_path)) as conn:
-                for file_path, query in queries.items():
-                    try:
-                        with closing(conn.execute(query)) as cursor:
-                            if cursor.description is None:
-                                continue
-                            if not header_written[file_path]:
-                                writers[file_path].writerow([
-                                    desc[0] for desc in cursor.description
-                                ])
-                                header_written[file_path] = True
-                            writers[file_path].writerows(cursor)
-                    except OSError as e:
-                        console_error(
-                            f"Database error while extracting {file_path} "
-                            f"from {db_path}: {e}"
-                        )
-                    except Exception as e:
-                        console_error(
-                            f"Unexpected error while extracting {file_path} "
-                            f"from {db_path}: {e}"
-                        )
+                try:
+                    with closing(conn.execute(query)) as cursor:
+                        if cursor.description is None:
+                            continue
+                        if not header_written:
+                            writer.writerow([d[0] for d in cursor.description])
+                            header_written = True
+                        writer.writerows(cursor)
+                except OSError as e:
+                    console_error(
+                        f"Database error while extracting {csv_path} "
+                        f"from {db_path}: {e}"
+                    )
+                except Exception as e:
+                    console_error(
+                        f"Unexpected error while extracting {csv_path} "
+                        f"from {db_path}: {e}"
+                    )
+
+
+def dump_counter_collection_csv(
+    db_paths: list[str], counter_collection_csv_path: str
+) -> None:
+    """Write the counters_collection table from each db into one CSV."""
+    _dump_query_to_csv(db_paths, COUNTERS_COLLECTION_QUERY, counter_collection_csv_path)
+
+
+def dump_marker_trace_csv(db_paths: list[str], marker_trace_csv_path: str) -> None:
+    """Write the regions (marker API) table from each db into one CSV."""
+    _dump_query_to_csv(db_paths, MARKER_API_TRACE_QUERY, marker_trace_csv_path)
+
+
+def merge_pass_dbs(src_db_paths: list[str], dst_db_path: str) -> None:
+    """Merge multiple per-host rocpd ``.db`` files into a single ``.db``."""
+    if not src_db_paths:
+        console_error(f"merge_pass_dbs called with no source dbs (dst={dst_db_path})")
+        return
+
+    Path(dst_db_path).parent.mkdir(parents=True, exist_ok=True)
+    if Path(dst_db_path).exists():
+        Path(dst_db_path).unlink()
+
+    shutil.copyfile(src_db_paths[0], dst_db_path)
+    if len(src_db_paths) == 1:
+        return
+
+    with closing(sqlite3.connect(dst_db_path)) as conn:
+        with closing(
+            conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+        ) as cursor:
+            tables = [row[0] for row in cursor.fetchall()]
+        for i, src in enumerate(src_db_paths[1:], start=1):
+            alias = f"src{i}"
+            conn.execute(f"ATTACH DATABASE ? AS {alias}", (src,))
+            try:
+                for table in tables:
+                    conn.execute(
+                        f'INSERT INTO main."{table}" SELECT * FROM {alias}."{table}"'
+                    )
+                conn.commit()
+            finally:
+                conn.execute(f"DETACH DATABASE {alias}")
+
+
+def count_counter_rows(db_paths: list[str]) -> int:
+    """Return total number of counters_collection rows across all dbs."""
+    total = 0
+    for db_path in db_paths:
+        with closing(sqlite3.connect(db_path)) as conn:
+            try:
+                with closing(
+                    conn.execute("SELECT COUNT(*) FROM counters_collection")
+                ) as cursor:
+                    row = cursor.fetchone()
+                    if row:
+                        total += int(row[0])
+            except Exception as e:
+                console_error(f"Unexpected error counting rows in {db_path}: {e}")
+    return total
 
 
 def update_rocpd_pmc_events(counter_info: list[dict], rocpd_db_path: str) -> None:

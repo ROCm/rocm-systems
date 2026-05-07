@@ -20,11 +20,15 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Profile workload output folder name for Strix Halo series (gfx1151) is changed from `strix_halo` to `rdna35_halo`
 
+* Profile mode `--format-rocprof-output rocpd` (default) no longer writes intermediate `results_*.csv` files. Each pass produces a single `<workload>/<fbase>.db` at the workload root (per-host outputs are merged via SQLite ATTACH+INSERT, the intermediate `out/` directory is removed) and `rocprof-compute analyze` reads them directly via SQL. `--format-rocprof-output csv` remains a fully supported alternative for environments without rocpd (e.g. ROCm <7) and is also used internally for PC sampling.
+
 ### Removed
 
 * ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
 
 * Removed redundant `if (X != 0) else None` divide-by-zero guards from metric equations across all analysis YAML configurations. Division by zero is already handled by the metric evaluation engine, which returns `"N/A"` for `inf` and `NaN` results.
+
+* Removed `--retain-rocpd-output` profile-mode option. `.db` files are now retained by default on the rocpd path.
 
 ### Optimized
 
