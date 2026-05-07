@@ -2,16 +2,16 @@
 stream:
   Unit_hipStreamCreate_default:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamCreate_Negative:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamGetFlags_Basic:
     <<: *level_2
-    tags: [properties]
+    tags: [properties, model_1250]
   Unit_hipStreamGetFlags_Negative:
     <<: *level_2
-    tags: [properties]
+    tags: [properties, model_1250]
   Unit_hipStreamGetFlags_StreamsCreatedWithCUMask:
     <<: *level_2
     tags: [properties]
@@ -20,16 +20,16 @@ stream:
     tags: [properties]
   Unit_hipStreamGetPriority_nullptr_nullptr:
     <<: *level_2
-    tags: [properties]
+    tags: [properties, model_1250]
   Unit_hipStreamGetPriority_stream_nullptr:
     <<: *level_2
-    tags: [properties]
+    tags: [properties, model_1250]
   Unit_hipStreamGetPriority_nullptr_priority:
     <<: *level_2
-    tags: [properties]
+    tags: [properties, model_1250]
   Unit_hipStreamGetPriority_stream_priority:
     <<: *level_2
-    tags: [properties]
+    tags: [properties, model_1250]
   Unit_hipStreamGetPriority_StreamsWithCUMask:
     <<: *level_2
     tags: [properties]
@@ -41,31 +41,31 @@ stream:
     tags: [lifecycle]
   Unit_hipStreamAddCallback_ParamTst_Positive:
     <<: *level_2
-    tags: [callback]
+    tags: [callback, model_1250]
   Unit_hipStreamAddCallback_ParamTst_Negative:
     <<: *level_2
-    tags: [callback]
+    tags: [callback, model_1250]
   Unit_hipStreamAddCallback_WithDefaultStream:
     <<: *level_2
-    tags: [callback]
+    tags: [callback, model_1250]
   Unit_hipStreamAddCallback_WithCreatedStream:
     <<: *level_2
-    tags: [callback]
+    tags: [callback, model_1250]
   Unit_hipStreamAttachMemAsync_Negative:
     <<: *level_2
-    tags: [memory]
+    tags: [memory, model_1250]
   Unit_hipStreamAttachMemAsync_UseCase:
     <<: *level_2
-    tags: [memory]
+    tags: [memory, model_1250]
   Unit_hipStreamCreateWithFlags_Negative_NullStream:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamCreateWithFlags_Negative_InvalidFlag:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamCreateWithFlags_Default:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamCreateWithFlags_DefaultStreamInteraction:
     <<: *level_2
     # (amd_windows) Disabling below tests temporarily due to change in API behavior
@@ -87,7 +87,7 @@ stream:
     tags: [lifecycle]
   Unit_hipStreamCreateWithPriority_NegTst:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamCreateWithPriority_CheckPriorityVal:
     <<: *level_2
     tags: [lifecycle]
@@ -95,19 +95,19 @@ stream:
     <<: *level_2
     # Below tests fail in stress test on 24/07/23
     disabled: [amd_windows, amd_wsl]
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamCreateWithPriority_TestMultipleStreamWithPriority:
     <<: *level_2
     tags: [lifecycle]
   Unit_hipStreamDestroy_Default:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamDestroy_Negative_NullStream:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamDestroy_WithFinishedWork:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamDestroy_WithPendingWork:
     <<: *level_2
     # Note: TDR
@@ -115,10 +115,10 @@ stream:
     tags: [lifecycle]
   Unit_hipMemcpyAsync_hipStreamLegacy_H2H_H2D_D2H_H2PinMem:
     <<: *level_2
-    tags: [memory]
+    tags: [memory, model_1250]
   Unit_hipStreamGetCaptureInfo_hipStreamLegacy_CaptureInfo:
     <<: *level_2
-    tags: [properties]
+    tags: [properties, model_1250]
   Unit_hipMemPrefetchAsync_Basic:
     <<: *level_2
     tags: [memory]
@@ -129,19 +129,19 @@ stream:
     <<: *level_2
     # Below tests fail in stress test on 30/06/23
     disabled: [amd_wsl]
-    tags: [synchronization]
+    tags: [synchronization, model_1250]
   Unit_hipStreamValue_Negative_InvalidMemory:
     <<: *level_2
-    tags: [synchronization]
+    tags: [synchronization, model_1250]
   Unit_hipStreamWriteValue_Default:
     <<: *level_2
-    tags: [synchronization]
+    tags: [synchronization, model_1250]
   Unit_hipStreamWaitValue_Default:
     <<: *level_2
     tags: [synchronization]
   Unit_hipStreamSynchronize_EmptyStream:
     <<: *level_2
-    tags: [synchronization]
+    tags: [synchronization, model_1250]
   Unit_hipStreamSynchronize_FinishWork:
     <<: *level_2
     # Note: TDR (pass)
@@ -163,12 +163,12 @@ stream:
     tags: [synchronization]
   Unit_hipStreamQuery_WithNoWork:
     <<: *level_2
-    tags: [synchronization]
+    tags: [synchronization, model_1250]
   Unit_hipStreamQuery_WithFinishedWork:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
-    tags: [synchronization]
+    tags: [synchronization, model_1250]
   Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream:
     <<: *level_2
     # Note: TDR (pass)
@@ -187,7 +187,7 @@ stream:
     tags: [synchronization]
   Unit_hipDeviceGetStreamPriorityRange_Default:
     <<: *level_2
-    tags: [properties]
+    tags: [properties, model_1250]
   Unit_hipStreamAddCallback_StrmSyncTiming:
     <<: *level_2
     # (amd_windows) SWDEV-400049 tdr intermittently
@@ -196,7 +196,7 @@ stream:
     tags: [callback]
   Unit_hipLaunchHostFunc_basic:
     <<: *level_2
-    tags: [callback]
+    tags: [callback, model_1250]
   Unit_hipLaunchHostFunc_Negative:
     <<: *level_2
     tags: [callback]
@@ -216,7 +216,7 @@ stream:
     tags: [callback]
   Unit_hipLaunchHostFunc_multidevice:
     <<: *level_2
-    tags: [callback, multigpu]
+    tags: [callback, multigpu, model_1250]
   Unit_hipLaunchHostFunc_Samepriority:
     <<: *level_2
     tags: [callback]
@@ -229,46 +229,46 @@ stream:
     tags: [callback]
   Unit_hipStreamGetDevice_Negative:
     <<: *level_2
-    tags: [properties]
+    tags: [properties, model_1250]
   Unit_hipStreamGetDevice_Usecase:
     <<: *level_2
-    tags: [properties]
+    tags: [properties, model_1250]
   Unit_hipStreamGetDevice_MThread:
     <<: *level_2
-    tags: [properties]
+    tags: [properties, model_1250]
   Unit_hipStreamGetDevice_SetDiffDevice:
     <<: *level_2
     tags: [properties, multigpu]
   Unit_hipStreamGetDevice_NullStream:
     <<: *level_2
-    tags: [properties]
+    tags: [properties, model_1250]
   Unit_hipStreamLegacy_WithBlockingStream:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamLegacy_MultipleThreads:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamLegacy_NegetiveCase:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamLegacy_WithNonBlockingStream:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamLegacy_WithStreamPerThread:
     <<: *level_2
-    tags: [streamperthread]
+    tags: [streamperthread, model_1250]
   Unit_hipStreamLegacy_MultiDevice:
     <<: *level_2
     tags: [lifecycle, multigpu]
   Unit_hipStreamLegacy_H2H_H2D_D2D_D2H_Default:
     <<: *level_2
-    tags: [memory]
+    tags: [memory, model_1250]
   Unit_hipStreamLegacy_MultiDeviceMultiOperation:
     <<: *level_2
     tags: [lifecycle, multigpu]
   Unit_hipStreamLegacy_TwoThreadsEachOneDiffOperation:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation:
     <<: *level_2
     tags: [lifecycle, multigpu]
@@ -277,19 +277,19 @@ stream:
     tags: [lifecycle, multigpu]
   Unit_hipStreamLegacy_InChildProcess:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamLegacy_WithKernel:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, model_1250]
   Unit_hipStreamLegacy_hipStreamSynchronize:
     <<: *level_2
-    tags: [synchronization]
+    tags: [synchronization, model_1250]
   Unit_hipStreamLegacy_WithSptCompilerOption:
     <<: *level_2
-    tags: [streamperthread]
+    tags: [streamperthread, model_1250]
   Unit_hipStreamLegacy_TwoThreadsDiffOperationWithSptCompOption:
     <<: *level_2
-    tags: [streamperthread]
+    tags: [streamperthread, model_1250]
   Unit_hipStreamGetId_Negative:
     <<: *level_2
     tags: [properties]
@@ -313,7 +313,7 @@ stream:
     tags: [properties]
   Unit_hipExtStreamGetCUMask_Negative:
     <<: *level_2
-    tags: [properties]
+    tags: [properties, model_1250]
   Unit_hipExtStreamCreateWithCUMask_ValidateCallbackFunc:
     <<: *level_2
     tags: [properties]
@@ -333,7 +333,7 @@ stream:
     tags: [callback]
   Unit_hipStreamWaitEvent_Negative:
     <<: *level_2
-    tags: [synchronization]
+    tags: [synchronization, model_1250]
   Unit_hipStreamWaitEvent_Default:
     <<: *level_2
     tags: [synchronization]
@@ -344,10 +344,10 @@ stream:
     tags: [synchronization]
   Unit_hipStreamGetFlags_spt_Basic:
     <<: *level_2
-    tags: [properties, streamperthread]
+    tags: [properties, streamperthread, model_1250]
   Unit_hipStreamGetFlags_spt_Negative:
     <<: *level_2
-    tags: [properties, streamperthread]
+    tags: [properties, streamperthread, model_1250]
   Unit_hipStreamGetFlags_spt_StreamsCreatedWithCUMask:
     <<: *level_2
     tags: [properties, streamperthread]
@@ -356,18 +356,18 @@ stream:
     tags: [properties, streamperthread]
   Unit_hipStreamGetPriority_spt_NegativeCases:
     <<: *level_2
-    tags: [properties, streamperthread]
+    tags: [properties, streamperthread, model_1250]
   Unit_hipStreamGetPriority_spt_StreamsWithCUMask:
     <<: *level_2
     tags: [properties, streamperthread]
   Unit_hipStreamQuery_spt_WithNoWork:
     <<: *level_2
-    tags: [synchronization, streamperthread]
+    tags: [synchronization, streamperthread, model_1250]
   Unit_hipStreamQuery_spt_WithFinishedWork:
     <<: *level_2
     # Following tests disabled due to SWDEV-486363
     disabled: [amd_windows]
-    tags: [synchronization, streamperthread]
+    tags: [synchronization, streamperthread, model_1250]
   Unit_hipStreamQuery_spt_NegativeCases:
     <<: *level_2
     # Following tests disabled due to SWDEV-486363
@@ -380,7 +380,7 @@ stream:
     tags: [synchronization, streamperthread]
   Unit_hipStreamSynchronize_spt_EmptyStream:
     <<: *level_2
-    tags: [synchronization, streamperthread]
+    tags: [synchronization, streamperthread, model_1250]
   Unit_hipStreamSynchronize_spt_FinishWork:
     <<: *level_2
     # Following tests disabled due to SWDEV-486363
@@ -414,7 +414,7 @@ stream:
     tags: [properties]
   Unit_hipStreamValue_Negative_StreamAndFlag:
     <<: *level_2
-    tags: [synchronization]
+    tags: [synchronization, model_1250]
   Unit_hipStreamValue_Wait_Blocking:
     <<: *level_2
     tags: [synchronization]

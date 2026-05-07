@@ -2,22 +2,22 @@
 vector_types:
   Unit_make_vector_SanityCheck_Basic_Host:
     <<: *level_2
-    tags: [types]
+    tags: [types, model_1250]
   Unit_make_vector_SanityCheck_Basic_Device:
     <<: *level_2
-    tags: [types]
+    tags: [types, model_1250]
   Unit_VectorAndVectorOperations_SanityCheck_Basic_Host:
     <<: *level_2
-    tags: [types]
+    tags: [types, model_1250]
   Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host:
     <<: *level_2
-    tags: [types]
+    tags: [types, model_1250]
   Unit_VectorAndVectorOperations_SanityCheck_Basic_Device:
     <<: *level_2
-    tags: [types]
+    tags: [types, model_1250]
   Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device:
     <<: *level_2
-    tags: [types]
+    tags: [types, model_1250]
   Unit_VectorStructuredBindings_SanityCheck_Basic_host:
     <<: *level_2
     tags: [types]

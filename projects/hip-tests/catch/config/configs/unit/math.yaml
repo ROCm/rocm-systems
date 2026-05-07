@@ -1,66 +1,116 @@
 ---
 math:
-  Unit_Device_sin_Accuracy_Positive_float: *level_2
-  Unit_Device_sin_Accuracy_Positive_double: *level_2
+  Unit_Device_sin_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_sin_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_sin_sinf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_cos_Accuracy_Positive_float: *level_2
-  Unit_Device_cos_Accuracy_Positive_double: *level_2
+  Unit_Device_cos_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_cos_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_cos_cosf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_tan_Accuracy_Positive_float: *level_2
-  Unit_Device_tan_Accuracy_Positive_double: *level_2
+  Unit_Device_tan_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_tan_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_tan_tanf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_asin_Accuracy_Positive_float: *level_2
-  Unit_Device_asin_Accuracy_Positive_double: *level_2
+  Unit_Device_asin_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_asin_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_asin_asinf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_acos_Accuracy_Positive_float: *level_2
-  Unit_Device_acos_Accuracy_Positive_double: *level_2
+  Unit_Device_acos_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_acos_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_acos_acosf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_atan_Accuracy_Positive_float: *level_2
-  Unit_Device_atan_Accuracy_Positive_double: *level_2
+  Unit_Device_atan_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_atan_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_atan_atanf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_sinh_Accuracy_Positive_float: *level_2
-  Unit_Device_sinh_Accuracy_Positive_double: *level_2
+  Unit_Device_sinh_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_sinh_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_sinh_sinhf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_cosh_Accuracy_Positive_float: *level_2
-  Unit_Device_cosh_Accuracy_Positive_double: *level_2
+  Unit_Device_cosh_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_cosh_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_cosh_coshf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_tanh_Accuracy_Positive_float: *level_2
-  Unit_Device_tanh_Accuracy_Positive_double: *level_2
+  Unit_Device_tanh_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_tanh_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_tanh_tanhf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_asinh_Accuracy_Positive_float: *level_2
-  Unit_Device_asinh_Accuracy_Positive_double: *level_2
+  Unit_Device_asinh_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_asinh_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_asinh_asinhf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_acosh_Accuracy_Positive_float: *level_2
-  Unit_Device_acosh_Accuracy_Positive_double: *level_2
+  Unit_Device_acosh_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_acosh_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_acosh_acoshf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_atanh_Accuracy_Positive_float: *level_2
-  Unit_Device_atanh_Accuracy_Positive_double: *level_2
+  Unit_Device_atanh_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_atanh_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_atanh_atanhf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_sinpi_Accuracy_Positive_float: *level_2
+  Unit_Device_sinpi_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_sinpi_Accuracy_Positive_double:
     <<: *level_2
     # special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 31)]
@@ -68,7 +118,9 @@ math:
   Unit_Device_sinpi_sinpif_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_cospi_Accuracy_Positive_float: *level_2
+  Unit_Device_cospi_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_cospi_Accuracy_Positive_double:
     <<: *level_2
     # special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 31)]
@@ -80,12 +132,18 @@ math:
   Unit_Device_atan2_atan2f_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_sincos_Accuracy_Positive_float: *level_2
-  Unit_Device_sincos_Accuracy_Positive_double: *level_2
+  Unit_Device_sincos_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_sincos_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_sincos_sincosf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_sincospi_Accuracy_Positive_float: *level_2
+  Unit_Device_sincospi_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_sincospi_Accuracy_Positive_double:
     <<: *level_2
     # special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 31)]
@@ -93,8 +151,12 @@ math:
   Unit_Device_sincospi_sincospif_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_fabs_Accuracy_Positive_float: *level_2
-  Unit_Device_fabs_Accuracy_Positive_double: *level_2
+  Unit_Device_fabs_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_fabs_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_fabs_fabsf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
@@ -127,23 +189,39 @@ math:
   Unit_Device_fdividef_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_isfinite_Accuracy_Positive_float: *level_2
-  Unit_Device_isfinite_Accuracy_Positive_double: *level_2
+  Unit_Device_isfinite_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_isfinite_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_isfinite_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_isinf_Accuracy_Positive_float: *level_2
-  Unit_Device_isinf_Accuracy_Positive_double: *level_2
+  Unit_Device_isinf_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_isinf_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_isinf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_isnan_Accuracy_Positive_float: *level_2
-  Unit_Device_isnan_Accuracy_Positive_double: *level_2
+  Unit_Device_isnan_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_isnan_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_isnan_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_signbit_Accuracy_Positive_float: *level_2
-  Unit_Device_signbit_Accuracy_Positive_double: *level_2
+  Unit_Device_signbit_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_signbit_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_signbit_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
@@ -162,53 +240,93 @@ math:
   Unit_Device_fdim_fdimf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_trunc_Accuracy_Positive_float: *level_2
-  Unit_Device_trunc_Accuracy_Positive_double: *level_2
+  Unit_Device_trunc_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_trunc_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_trunc_truncf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_round_Accuracy_Positive_float: *level_2
-  Unit_Device_round_Accuracy_Positive_double: *level_2
+  Unit_Device_round_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_round_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_round_roundf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_rint_Accuracy_Positive_float: *level_2
-  Unit_Device_rint_Accuracy_Positive_double: *level_2
+  Unit_Device_rint_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_rint_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_rint_rintf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_nearbyint_Accuracy_Positive_float: *level_2
-  Unit_Device_nearbyint_Accuracy_Positive_double: *level_2
+  Unit_Device_nearbyint_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_nearbyint_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_nearbyint_nearbyintf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_ceil_Accuracy_Positive_float: *level_2
-  Unit_Device_ceil_Accuracy_Positive_double: *level_2
+  Unit_Device_ceil_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_ceil_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_ceil_ceilf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_floor_Accuracy_Positive_float: *level_2
-  Unit_Device_floor_Accuracy_Positive_double: *level_2
+  Unit_Device_floor_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_floor_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_floor_floorf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_lrint_Accuracy_Positive_float: *level_2
-  Unit_Device_lrint_Accuracy_Positive_double: *level_2
+  Unit_Device_lrint_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_lrint_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_lrint_lrintf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_lround_Accuracy_Positive_float: *level_2
-  Unit_Device_lround_Accuracy_Positive_double: *level_2
+  Unit_Device_lround_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_lround_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_lround_lroundf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_llrint_Accuracy_Positive_float: *level_2
-  Unit_Device_llrint_Accuracy_Positive_double: *level_2
+  Unit_Device_llrint_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_llrint_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_llrint_llrintf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_llround_Accuracy_Positive_float: *level_2
-  Unit_Device_llround_Accuracy_Positive_double: *level_2
+  Unit_Device_llround_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_llround_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_llround_llroundf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
@@ -219,8 +337,12 @@ math:
   Unit_Device_remquo_remquof_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_modf_Accuracy_Positive_float: *level_2
-  Unit_Device_modf_Accuracy_Positive_double: *level_2
+  Unit_Device_modf_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_modf_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_modf_modff_Negative_RTC:
     <<: *level_2
     # float* can be casted to double* [math_remainder_rounding_negative_kernels_rtc.hh:247]
@@ -430,8 +552,12 @@ math:
   Unit_Device_rsqrt_rsqrtf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_cbrt_Accuracy_Positive_float: *level_2
-  Unit_Device_cbrt_Accuracy_Positive_double: *level_2
+  Unit_Device_cbrt_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_cbrt_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_cbrt_cbrtf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
@@ -476,22 +602,36 @@ math:
   Unit_Device_rnorm_rnormf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_log_Accuracy_Positive_float: *level_2
-  Unit_Device_log_Accuracy_Positive_double: *level_2
+  Unit_Device_log_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_log_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_log_logf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_log2_Accuracy_Positive_float: *level_2
-  Unit_Device_log2_Accuracy_Positive_double: *level_2
+  Unit_Device_log2_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_log2_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_log2_log2f_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_log10_Accuracy_Positive_float: *level_2
-  Unit_Device_log10_Accuracy_Positive_double: *level_2
+  Unit_Device_log10_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_log10_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_log10_log10f_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_log1p_Accuracy_Positive_float: *level_2
+  Unit_Device_log1p_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_log1p_Accuracy_Positive_double:
     <<: *level_2
     # special values test, fix: comment out [HEX_DBL(-, 0, 0000000000001, -, 1022)]
@@ -499,8 +639,12 @@ math:
   Unit_Device_log1p_log1pf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_logb_Accuracy_Positive_float: *level_2
-  Unit_Device_logb_Accuracy_Positive_double: *level_2
+  Unit_Device_logb_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_logb_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_logb_logbf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
@@ -517,13 +661,21 @@ math:
   Unit_Device_ilogb_ilogbf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_erf_Accuracy_Positive_float: *level_2
-  Unit_Device_erf_Accuracy_Positive_double: *level_2
+  Unit_Device_erf_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_erf_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_erf_erff_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_erfc_Accuracy_Positive_float: *level_2
-  Unit_Device_erfc_Accuracy_Positive_double: *level_2
+  Unit_Device_erfc_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_erfc_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_erfc_erfcf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
@@ -1109,18 +1261,30 @@ math:
     # Below tests cause timeout in stress test of 09/02/24
     disabled: [amd_windows]
     tags: [deviceLib]
-  Unit_Device_exp_Accuracy_Positive_float: *level_2
-  Unit_Device_exp_Accuracy_Positive_double: *level_2
+  Unit_Device_exp_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_exp_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_exp_expf_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_exp2_Accuracy_Positive_float: *level_2
-  Unit_Device_exp2_Accuracy_Positive_double: *level_2
+  Unit_Device_exp2_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_exp2_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_exp2_exp2f_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]
-  Unit_Device_expm1_Accuracy_Positive_float: *level_2
-  Unit_Device_expm1_Accuracy_Positive_double: *level_2
+  Unit_Device_expm1_Accuracy_Positive_float:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_Device_expm1_Accuracy_Positive_double:
+    <<: *level_2
+    tags: [model_1250]
   Unit_Device_expm1_expm1f_Negative_RTC:
     <<: *level_2
     tags: [deviceLib]

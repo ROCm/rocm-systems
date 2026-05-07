@@ -19,5 +19,7 @@ callback:
     # (amd_wsl) Note: Linux disabled
     disabled: [amd_windows, amd_wsl]
   Unit_hipKernelNameRefByPtr_Positive_Basic: *level_2
-  Unit_hipKernelNameRefByPtr_Positive_StreamNullptr: *level_2
+  Unit_hipKernelNameRefByPtr_Positive_StreamNullptr:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipKernelNameRefByPtr_Negative_KernelNullptr: *level_2

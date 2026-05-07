@@ -174,7 +174,7 @@ module:
     tags: [load]
   Unit_hipModuleUnload_basic:
     <<: *level_2
-    tags: [load]
+    tags: [load, model_1250]
   Unit_hipModuleGetFunctionCount_Functional:
     <<: *level_2
     # (amd_linux) Rock_Linux_Failures_on_gfx94X

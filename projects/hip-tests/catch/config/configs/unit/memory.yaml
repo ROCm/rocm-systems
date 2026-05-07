@@ -46,57 +46,57 @@ memory:
     tags: [multigpu, transfer, image]
   Unit_hipMemcpy3D_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy3D_Positive_Synchronization_Behavior:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy3D_Positive_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy3D_Positive_Array:
     <<: *level_2
     tags: [transfer, image]
   Unit_hipMemcpy3D_Negative_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy3D_Capture:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpy3D_multiDevice_Negative:
     <<: *level_2
-    tags: [multigpu, image]
+    tags: [multigpu, image, model_1250]
   Unit_hipMemcpy3DAsync_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy3DAsync_Positive_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy3DAsync_Positive_Array:
     <<: *level_2
     tags: [transfer, image]
   Unit_hipMemcpy3DAsync_Negative_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy3DAsync_Capture:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpy3DAsync_multiDevice_Negative:
     <<: *level_2
-    tags: [multigpu, image]
+    tags: [multigpu, image, model_1250]
   Unit_hipMemcpy3DAsync_multiDevice_DiffStream:
     <<: *level_2
-    tags: [multigpu, image]
+    tags: [multigpu, image, model_1250]
   Unit_hipMemcpyParam2D_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyParam2D_Positive_Synchronization_Behavior:
     <<: *level_2
     # Below tests tests fail in PSDB
@@ -104,40 +104,40 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyParam2D_Positive_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyParam2D_Positive_Array:
     <<: *level_2
     tags: [transfer, image]
   Unit_hipMemcpyParam2D_Negative_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyParam2D_Capture:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyParam2DAsync_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyParam2DAsync_Positive_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyParam2DAsync_Positive_Array:
     <<: *level_2
     tags: [transfer, image]
   Unit_hipMemcpyParam2DAsync_Negative_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyParam2DAsync_Capture:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyParam2DAsync_multiDevice_StreamOnDiffDevice:
     <<: *level_2
-    tags: [multigpu, transfer]
+    tags: [multigpu, transfer, model_1250]
   Unit_hipMemcpy2D_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy2D_Positive_Synchronization_Behavior:
     <<: *level_2
     # Below tests tests fail in PSDB
@@ -145,10 +145,10 @@ memory:
     tags: [transfer]
   Unit_hipMemcpy2D_Positive_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy2D_Negative_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy2D_Capture:
     <<: *level_2
     tags: [transfer]
@@ -156,40 +156,44 @@ memory:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
+    tags: [model_1250]
   Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
+    tags: [model_1250]
   Unit_hipMemcpy2D_H2D_D2D_D2H_Managed_WithOffset:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
+    tags: [model_1250]
   Unit_hipMemcpy2D_multiDevice_Basic_Size_Test:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy2DAsync_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy2DAsync_Positive_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy2DAsync_Negative_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy2DAsync_Capture: *level_2
   Unit_hipMemcpy2DAsync_Host_N_PinnedMem:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
+    tags: [model_1250]
   Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice:
     <<: *level_2
-    tags: [multigpu]
+    tags: [multigpu, model_1250]
   Unit_hipMemcpy2DAsync_multiDevice_Basic_Size_Test:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy2DFromArray_Positive_Default:
     <<: *level_2
     tags: [transfer, image]
@@ -310,20 +314,22 @@ memory:
     tags: [multigpu, transfer, image]
   Unit_hipMemcpy_Negative:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy_NullCheck:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy_HalfMemCopy:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy_MultiThread_AllAPIs:
     <<: *level_2
-    tags: []
+    tags: [model_1250]
   Unit_hipHostRegister_ReferenceFromKernelandhipMemset:
     <<: *level_2
-    tags: []
-  Unit_hipHostRegister_DirectReferenceFromKernel: *level_2
+    tags: [model_1250]
+  Unit_hipHostRegister_DirectReferenceFromKernel:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipHostRegister_DirectReferenceMultGpu:
     <<: *level_2
     tags: []
@@ -346,34 +352,38 @@ memory:
     tags: [alloc]
   Unit_hipHostRegister_AsyncApis:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostRegister_Graphs:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostRegister_MemAdvise_SetGet:
     <<: *level_2
     tags: [alloc]
-  Unit_hipHostRegister_Memcpy: *level_2
-  Unit_hipHostRegister_Flags: *level_2
+  Unit_hipHostRegister_Memcpy:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_hipHostRegister_Flags:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipHostRegister_Negative: *level_2
   Unit_hipHostRegister_Capture:
     <<: *level_2
     tags: [alloc]
   Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostUnregister_NullPtr:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostUnregister_Ptr_Different_Than_Specified_To_Register:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostUnregister_NotRegisteredPointer:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostUnregister_AlreadyUnregisteredPointer:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostUnregister_Capture:
     <<: *level_2
     tags: [alloc]
@@ -381,15 +391,15 @@ memory:
     <<: *level_2
     # Note: CONFIG_NUMA disabled
     disabled: [amd_wsl]
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipHostGetFlags_DifferentThreads:
     <<: *level_2
     # Note: CONFIG_NUMA disabled
     disabled: [amd_wsl]
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipHostGetFlags_InvalidArgs:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipHostGetFlags_Capture:
     <<: *level_2
     tags: [query]
@@ -397,10 +407,10 @@ memory:
     <<: *level_2
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/96
     disabled: [amd_windows, amd_wsl]
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipHostGetDevicePointer_UseCase:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipHostGetDevicePointer_Capture:
     <<: *level_2
     tags: [query]
@@ -409,25 +419,25 @@ memory:
     tags: [alloc]
   Unit_hipMallocHost_DataValidation:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocHost_Negative:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocHost_Capture:
     <<: *level_2
     tags: [alloc]
   Unit_hipMemAllocHost_Positive:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemAllocHost_DataValidation:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemAllocHost_Negative:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemAllocHost_VerifyAccess:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemAllocHost_Capture:
     <<: *level_2
     tags: [alloc]
@@ -442,10 +452,10 @@ memory:
     tags: [alloc, multigpu]
   Unit_hipMallocManaged_OverSubscription:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocManaged_Negative:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocManaged_TwoPointers:
     <<: *level_2
     tags: []
@@ -456,54 +466,54 @@ memory:
     disabled: [amd_windows, amd_wsl]
   Unit_hipMemset_Negative_InvalidPtr:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset_Negative_OutOfBoundsSize:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset_Negative_OutOfBoundsPtr:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset2D_Negative_InvalidPtr:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset2D_Negative_InvalidSizes:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset2D_Negative_OutOfBoundsPtr:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3D_Negative_InvalidPtr:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3D_Negative_ModifiedPtr:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3D_Negative_InvalidSizes:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3D_Negative_OutOfBounds:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset_SetMemoryWithOffset:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetAsync_SetMemoryWithOffset:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset_SmallBufferSizes:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset_2AsyncOperations:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset_Capture: *level_2
   Unit_hipMemsetD8_Capture: *level_2
   Unit_hipMemset3D_BasicFunctional:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3DAsync_BasicFunctional:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3DAsync_capturehipMemset3DAsync:
     <<: *level_2
     # Below tests are failing PSDB
@@ -512,55 +522,55 @@ memory:
   Unit_hipMemset3D_Capture: *level_2
   Unit_hipMemset2D_BasicFunctional:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset2DAsync_BasicFunctional:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset2D_UniqueWidthHeight:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset2DAsync_capturehipMemset2DAsync:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset2D_Capture: *level_2
   Unit_hipHostMalloc_ArgValidation:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemset3D_MemsetWithExtent:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3DAsync_MemsetWithExtent:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3D_MemsetMaxValue:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3DAsync_MemsetMaxValue:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3D_SeekSetSlice:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3DAsync_SeekSetSlice:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3D_SeekSetArrayPortion:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3DAsync_SeekSetArrayPortion:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3D_RegressInLoop:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3DAsync_RegressInLoop:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset3DAsync_ConcurrencyMthread:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMallocManaged_FlgParam:
     <<: *level_2
     tags: [alloc]
@@ -569,10 +579,10 @@ memory:
     tags: [alloc]
   Unit_hipMemPrefetchAsyncAdviseFlgTst:
     <<: *level_2
-    tags: [multigpu, query]
+    tags: [multigpu, query, model_1250]
   Unit_hipMemPrefetchAsyncAccsdByTst:
     <<: *level_2
-    tags: [multigpu, query]
+    tags: [multigpu, query, model_1250]
   Unit_hipMemPrefetchAsyncNegativeTst:
     <<: *level_2
     tags: [query]
@@ -583,7 +593,7 @@ memory:
     tags: [query]
   Unit_hipMemAdvise_MmapMem:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMallocManaged_Basic:
     <<: *level_2
     tags: [alloc]
@@ -594,7 +604,7 @@ memory:
     tags: [alloc]
   Unit_hipMallocManaged_Large:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Basic:
     <<: *level_2
     tags: [query]
@@ -637,7 +647,7 @@ memory:
     tags: [query]
   Unit_hipMemRangeGetAttribute_TstCountParam:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMemRangeGetAttribute_AccessedBy1:
     <<: *level_2
     disabled: [amd_windows, amd_wsl]
@@ -648,7 +658,7 @@ memory:
     tags: [query]
   Unit_hipHostMalloc_CoherentTst:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMallocManaged_CoherentTst:
     <<: *level_2
     tags: [query]
@@ -661,57 +671,57 @@ memory:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipExtMallocWithFlags_CoherentTst:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMemsetD32_ValidBuffer:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetD32_InvalidArg:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetD32_KernelBuffer:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetD32_Capture: *level_2
   Unit_hipMemsetD16_ValidBuffer:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetD16_InvalidArg:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetD16_KernelBuffer:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetD16_Capture: *level_2
   Unit_hipMemsetD16Async_ValidBuffer:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetD16Async_InvalidArg:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetD16Async_KernelBuffer:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetD32Async_ValidBuffer:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetD32Async_InvalidArg:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetD32Async_KernelBuffer:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetD8Async_ValidBuffer:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetD8Async_InvalidArg:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetD8Async_KernelBuffer:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemcpy2DArrayToArray_Negative:
     <<: *level_2
     tags: [transfer, image]
@@ -805,7 +815,7 @@ memory:
     tags: [transfer, image]
   Unit_hipMemPoolExportPointer_Negative:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolExportToShareableHandle_SameProc:
     <<: *level_2
     tags: [alloc]
@@ -814,61 +824,61 @@ memory:
     tags: [alloc]
   Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl:
     <<: *level_2
     tags: [alloc]
   Unit_hipMemPoolExportToShareableHandle_Negative:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolImportFromShareableHandle_Negative:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolImportPointer_Negative:
     <<: *level_2
     tags: [alloc]
   Unit_hipMemPtrGetInfo_Basic:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMemPtrGetInfo_SizeZeroAllocation:
     <<: *level_2
     tags: [query]
   Unit_hipPointerGetAttributes_Basic:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipPointerGetAttributes_ClusterAlloc:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipPointerGetAttributes_TinyClusterAlloc:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipPointerGetAttributes_MultiThread:
     <<: *level_2
     tags: []
   Unit_hipPointerGetAttributes_Negative:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipPointerGetAttributes_GpuIter:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipPointerGetAttributes_GpuIter_Managed__Memory:
     <<: *level_2
     tags: [query]
   Unit_hipPointerGetAttributes_GpuIter_Unregistered_Memory:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipExtMallocWithFlags_Positive_Basic:
     <<: *level_2
     tags: [alloc]
   Unit_hipExtMallocWithFlags_Positive_Zero_Size:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipExtMallocWithFlags_Positive_Alignment:
     <<: *level_2
     tags: [alloc]
   Unit_hipExtMallocWithFlags_Negative_Parameters:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocManaged_MultiThread:
     <<: *level_2
     tags: [alloc]
@@ -877,7 +887,7 @@ memory:
     tags: [alloc, multigpu]
   Unit_hipMallocManaged_MultiKrnlComnHmm:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocManaged_MultiKrnlComnMalloc:
     <<: *level_2
     tags: [alloc]
@@ -918,33 +928,51 @@ memory:
     tags: [alloc, image]
   Unit_hipMemcpyDeviceToDeviceNoCU_SingleStream:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyDeviceToDeviceNoCU_WithCU_NoCU_Comb_SingleStrm:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyDeviceToDeviceNoCU_NoCU_MulStrm:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyDeviceToDeviceNoCU_Memcpy_Kernel_InParallel:
     <<: *level_2
-    tags: [transfer]
-  Unit_hipGetProcAddress_MemoryApisMallocFree: *level_2
-  Unit_hipGetProcAddress_MemoryApisRegisterUnReg: *level_2
+    tags: [transfer, model_1250]
+  Unit_hipGetProcAddress_MemoryApisMallocFree:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_hipGetProcAddress_MemoryApisRegisterUnReg:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipGetProcAddress_MemoryApisArrayRelated:
     <<: *level_2
     tags: [image]
-  Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes: *level_2
-  Unit_hipGetProcAddress_MemoryApisMemCopy: *level_2
-  Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams: *level_2
-  Unit_hipGetProcAddress_MemoryApisMemset: *level_2
-  Unit_hipGetProcAddress_MemoryApisMemset2D3D: *level_2
-  Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated: *level_2
+  Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_hipGetProcAddress_MemoryApisMemCopy:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_hipGetProcAddress_MemoryApisMemset:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_hipGetProcAddress_MemoryApisMemset2D3D:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated: *level_2
   Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array:
     <<: *level_2
     tags: [image]
   Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated: *level_2
-  Unit_hipGetProcAddress_MemoryApisAddressRelated: *level_2
+  Unit_hipGetProcAddress_MemoryApisAddressRelated:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipGetProcAddress_MemoryApisManagedMemory: *level_2
   Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory: *level_2
   Unit_hipGetProcAddress_MemoryApisPeerToPeer:
@@ -978,13 +1006,13 @@ memory:
     tags: [query]
   Unit_hipPointerSetAttribute_Negative_Parameters:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMemcpyFromToSymbol_Negative:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyToFromSymbol_SyncAndAsync:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyToFromSymbol_Capture:
     <<: *level_2
     tags: [transfer]
@@ -1015,22 +1043,22 @@ memory:
     tags: [alloc]
   Unit_hipDeviceGetMemPool_Basic:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipDeviceGetMemPool_Functional:
     <<: *level_2
     tags: [alloc]
   Unit_hipDeviceGetMemPool_Multidevice:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipDeviceGetDefaultMemPool_Functional:
     <<: *level_2
     tags: [alloc]
   Unit_hipDeviceSetMemPool_Basic:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipDeviceSetMemPool_DestroyCurrentMempool:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipDeviceSetMemPool_functional:
     <<: *level_2
     tags: [alloc]
@@ -1039,7 +1067,7 @@ memory:
     tags: [alloc]
   Unit_hipMemPoolSetGetAccess_Positive_Basic:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolSetGetAccess_Positive_MultipleGPU:
     <<: *level_2
     tags: [alloc, multigpu]
@@ -1051,30 +1079,30 @@ memory:
     <<: *level_2
     # SWDEV-435667: Below tests failing randomly in stress test on 08/12/23
     disabled: [amd_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolSetAccess_SetAccess:
     <<: *level_2
     tags: [alloc, multigpu]
   Unit_hipMemPoolSetAccess_NegTst:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolGetAccess_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolGetAccess_SetGet:
     <<: *level_2
     tags: [alloc, multigpu]
   Unit_hipMemPoolGetAccess_GetDefMempoolOfEachDevice:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolSetGetAttribute_Positive_Default:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolSetGetAttribute_Positive_MemBasic:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolSetAttribute_Opportunistic:
     <<: *level_2
     tags: [alloc]
@@ -1087,7 +1115,7 @@ memory:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolSetAttribute_ResetMemHighAttr:
     <<: *level_2
     tags: [alloc]
@@ -1095,10 +1123,10 @@ memory:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolGetAttribute_SetGet:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolGetAttribute_UsedMem:
     <<: *level_2
     tags: [alloc]
@@ -1110,13 +1138,13 @@ memory:
     tags: [alloc]
   Unit_hipMemPoolGetAttribute_hipMalloc_DefMempool:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolGetAttribute_CheckDefaultValues:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolCreate_Negative_Parameter:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolCreate_With_maxSize:
     <<: *level_2
     tags: [alloc]
@@ -1128,13 +1156,13 @@ memory:
     tags: [alloc, multigpu]
   Unit_hipMemPoolDestroy_Negative_Parameter:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolMaxAlloc:
     <<: *level_2
     tags: [alloc]
   Unit_hipMemPoolTrimTo_Negative_Parameter:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemPoolTrimTo_Positive_Basic:
     <<: *level_2
     tags: [alloc]
@@ -1143,7 +1171,7 @@ memory:
     tags: [alloc]
   Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold:
     <<: *level_2
-    tags: [alloc, multigpu]
+    tags: [alloc, multigpu, model_1250]
   Unit_hipMemPoolTrimTo_Multithreaded:
     <<: *level_2
     disabled: [amd_windows]
@@ -1159,7 +1187,7 @@ memory:
     tags: [alloc]
   Unit_hipMallocFromPoolAsync_Negative_Parameters:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocFromPoolAsync_ReleaseThreshold:
     <<: *level_2
     tags: [alloc]
@@ -1243,34 +1271,34 @@ memory:
     tags: [multigpu, transfer]
   Unit_hipMemcpyPeerAsync_StreamOnDiffDevice:
     <<: *level_2
-    tags: [multigpu, transfer]
+    tags: [multigpu, transfer, model_1250]
   Unit_hipMemcpyWithStream_TestwithTwoStream:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyWithStream_TestkindDtoH:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyWithStream_TestkindHtoH:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyWithStream_TestkindDtoD:
     <<: *level_2
-    tags: [multigpu, transfer]
+    tags: [multigpu, transfer, model_1250]
   Unit_hipMemcpyWithStream_TestOnMultiGPUwithOneStream:
     <<: *level_2
-    tags: [multigpu, transfer]
+    tags: [multigpu, transfer, model_1250]
   Unit_hipMemcpyWithStream_TestkindDefault:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyWithStream_TestkindDefaultForDtoD:
     <<: *level_2
-    tags: [multigpu, transfer]
+    tags: [multigpu, transfer, model_1250]
   Unit_hipMemcpyWithStream_TestDtoDonSameDevice:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy_Positive_Synchronization_Behavior:
     <<: *level_2
     # Below tests tests fail in PSDB
@@ -1278,7 +1306,7 @@ memory:
     tags: [transfer]
   Unit_hipMemcpy_Negative_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyWithStream_Capture:
     <<: *level_2
     tags: [transfer]
@@ -1287,80 +1315,82 @@ memory:
     tags: [transfer]
   Unit_hipMemsetAsync_VerifyExecutionWithKernel:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset2DAsync_WithKernel:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemset2DAsync_MultiThread:
     <<: *level_2
     tags: [memset]
   Unit_hipMemcpyDtoD_Basic:
     <<: *level_2
-    tags: [multigpu, transfer]
+    tags: [multigpu, transfer, model_1250]
   Unit_hipMemcpyDtoDAsync_Basic:
     <<: *level_2
-    tags: [multigpu, transfer]
+    tags: [multigpu, transfer, model_1250]
   Unit_hipMemcpyDtoDAsync_Capture:
     <<: *level_2
     tags: [multigpu, transfer]
   Unit_hipHostMalloc_Basic:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostMalloc_Negative:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostMalloc_NonCoherent:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostMalloc_Coherent:
     <<: *level_2
     tags: [alloc]
   Unit_hipHostMalloc_Default:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostMalloc_Capture:
     <<: *level_2
     tags: [alloc]
-  Unit_hipMemcpy_KernelLaunch: *level_2
+  Unit_hipMemcpy_KernelLaunch:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem:
     <<: *level_2
-    tags: []
+    tags: [model_1250]
   Unit_hipMemcpy_MultiThreadWithSerialization:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpy_PinnedRegMemWithKernelLaunch:
     <<: *level_2
-    tags: [multigpu]
+    tags: [multigpu, model_1250]
   Unit_hipMemcpyDtoH_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyDtoH_Positive_Synchronization_Behavior:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyDtoH_Negative_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyHtoD_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyHtoD_Positive_Synchronization_Behavior:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyHtoD_Negative_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyDtoD_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyDtoD_Positive_Synchronization_Behavior:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyDtoD_Negative_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyAsync_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyAsync_Positive_Synchronization_Behavior:
     <<: *level_2
     tags: [transfer]
@@ -1368,21 +1398,25 @@ memory:
     <<: *level_2
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18
     disabled: [amd_windows, amd_wsl]
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyAsync_Capture:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem:
     <<: *level_2
-    tags: []
-  Unit_hipMemcpyAsync_hipMultiMemcpyMultiThread: *level_2
-  Unit_hipMemcpyAsync_hipMultiMemcpyMultiThreadMultiStream: *level_2
+    tags: [model_1250]
+  Unit_hipMemcpyAsync_hipMultiMemcpyMultiThread:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_hipMemcpyAsync_hipMultiMemcpyMultiThreadMultiStream:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipMemcpyAsync_PinnedRegMemWithKernelLaunch:
     <<: *level_2
-    tags: [multigpu]
+    tags: [multigpu, model_1250]
   Unit_hipMemcpyDtoHAsync_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyDtoHAsync_Positive_Synchronization_Behavior:
     <<: *level_2
     tags: [transfer]
@@ -1390,10 +1424,10 @@ memory:
     <<: *level_2
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18
     disabled: [amd_windows, amd_wsl]
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyHtoDAsync_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyHtoDAsync_Positive_Synchronization_Behavior:
     <<: *level_2
     tags: [transfer]
@@ -1401,10 +1435,10 @@ memory:
     <<: *level_2
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18
     disabled: [amd_windows, amd_wsl]
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyDtoDAsync_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyDtoDAsync_Positive_Synchronization_Behavior:
     <<: *level_2
     tags: [transfer]
@@ -1412,7 +1446,7 @@ memory:
     <<: *level_2
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18
     disabled: [amd_windows, amd_wsl]
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipMemcpyDtoHAsync_Capture:
     <<: *level_2
     tags: [transfer]
@@ -1421,81 +1455,81 @@ memory:
     tags: [transfer]
   Unit_hipMemsetFunctional_ZeroValue_hipMemset:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_ZeroValue_hipMemsetD32:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_ZeroValue_hipMemsetD16:
     <<: *level_2
     # Below tests soft hang in stress test on 13/09/23
     disabled: [amd_wsl]
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_ZeroValue_hipMemsetD8:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_SmallSize_hipMemset:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_SmallSize_hipMemsetD32:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_SmallSize_hipMemsetD16:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_SmallSize_hipMemsetD8:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_ZeroSize_hipMemset:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_ZeroSize_hipMemsetD32:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_ZeroSize_hipMemsetD16:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_ZeroSize_hipMemsetD8:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_PartialSet_1D:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_ZeroValue_2D:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_SmallSize_2D:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_ZeroSize_2D:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_PartialSet_2D:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_ZeroValue_3D:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_SmallSize_3D:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_ZeroSize_3D:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMemsetFunctional_PartialSet_3D:
     <<: *level_2
-    tags: [memset]
+    tags: [memset, model_1250]
   Unit_hipMalloc_Positive_Basic:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMalloc_Positive_Zero_Size:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMalloc_Positive_Alignment:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMalloc_Negative_Parameters:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMalloc_Allocate90PercentOfDeviceMemory:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
@@ -1509,49 +1543,53 @@ memory:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemAllocPitch_ValidatePitch:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocPitch_ValidatePitch:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMalloc3D_Negative:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocPitch_Negative:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocPitch_Zero_Dims:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMemAllocPitch_Negative:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocPitch_Basic:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocPitch_SmallandBigChunks:
     <<: *level_2
-    tags: [alloc]
-  Unit_hipMallocPitch_Memcpy2D: *level_2
+    tags: [alloc, model_1250]
+  Unit_hipMallocPitch_Memcpy2D:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipMallocPitch_MultiThread:
     <<: *level_2
-    tags: [alloc]
-  Unit_hipMallocPitch_KernelLaunch: *level_2
+    tags: [alloc, model_1250]
+  Unit_hipMallocPitch_KernelLaunch:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipMalloc3D_Basic:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMalloc3D_SmallandBigChunks:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMalloc3D_MultiThread:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMalloc3DArray_DiffSizes:
     <<: *level_2
     tags: [alloc, image]
@@ -1643,15 +1681,15 @@ memory:
     tags: [image]
   Unit_hipDrvMemcpy3D_Positive_Basic:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipDrvMemcpy3D_Positive_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipDrvMemcpy3D_Positive_Array:
     <<: *level_2
     # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
@@ -1659,7 +1697,7 @@ memory:
     tags: [transfer, image]
   Unit_hipDrvMemcpy3D_Negative_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipDrvMemcpy3D_Capture:
     <<: *level_2
     tags: [transfer]
@@ -1718,22 +1756,22 @@ memory:
     tags: [query, image]
   Unit_hipPointerGetAttribute_KernelUpdation:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipPointerGetAttribute_PeerGPU:
     <<: *level_2
-    tags: [multigpu, query]
+    tags: [multigpu, query, model_1250]
   Unit_hipPointerGetAttribute_BufferID:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipPointerGetAttribute_HostDeviceOrdinal:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipPointerGetAttribute_MappedMem:
     <<: *level_2
     tags: [query]
   Unit_hipPointerGetAttribute_Negative:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipPointerGetAttribute_ipc_capable:
     <<: *level_2
     tags: [query]
@@ -1742,13 +1780,13 @@ memory:
     tags: [query, image]
   Unit_hipDrvPtrGetAttributes_Negative:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipDrvPtrGetAttributes_Functional:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMemPrefetchAsync_Basic_AllDevices:
     <<: *level_2
-    tags: []
+    tags: [model_1250]
   Unit_hipMemPrefetchAsync_Sync_Behavior:
     <<: *level_2
     tags: [query]
@@ -1760,59 +1798,59 @@ memory:
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMemPrefetchBatchAsync_LocationDistribution:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMemPrefetchBatchAsync_Negative_NullAndInvalidPointers:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMemPrefetchBatchAsync_Negative_IndexArrayConstraints:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMemPrefetchBatchAsync_Negative_ParameterValidation:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMemPrefetchBatchAsync_Negative_DeviceCapabilities:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMemPrefetchBatchAsync_MultiDevice:
     <<: *level_2
     tags: [query]
   Unit_hipMemGetInfo_FreeLessThanTotal:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipFreeImplicitSyncDev:
     <<: *level_2
     # Note: TDR
     disabled: [amd_wsl]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipFreeImplicitSyncHost:
     <<: *level_2
     # Note: TDR
     disabled: [amd_wsl]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipFreeImplicitSyncArray:
     <<: *level_2
     tags: [image]
   Unit_hipFreeNegativeDev:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipFreeNegativeHost:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipFreeNegativeArray:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipFreeDoubleDevice:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipFreeDoubleHost:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipFreeDoubleArrayFree:
     <<: *level_2
     tags: [alloc]
@@ -1820,8 +1858,12 @@ memory:
   Unit_hipFreeDoubleArray:
     <<: *level_2
     tags: [alloc, image]
-  Unit_hipFreeMultiTDev: *level_2
-  Unit_hipFreeMultiTHost: *level_2
+  Unit_hipFreeMultiTDev:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_hipFreeMultiTHost:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipFreeMultiTArray:
     <<: *level_2
     tags: [image]
@@ -1830,7 +1872,7 @@ memory:
     tags: [image]
   Unit_hipFreeArray_NegativeArray:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipFreeArray_DoubleFree:
     <<: *level_2
     tags: [alloc, image]
@@ -1839,13 +1881,13 @@ memory:
     tags: [image]
   Unit_hipHostFree_InvalidMemory:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostFree_DoubleFree:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostFree_Multithreading:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostFree_Capture:
     <<: *level_2
     tags: [alloc]
@@ -1879,8 +1921,10 @@ memory:
     tags: [memset]
   Unit_hipMemsetASyncMulti:
     <<: *level_2
-    tags: [memset]
-  Unit_hipMemsetDASyncMulti: *level_2
+    tags: [memset, model_1250]
+  Unit_hipMemsetDASyncMulti:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipMemset2DASyncMulti:
     <<: *level_2
     tags: [memset]
@@ -1892,10 +1936,10 @@ memory:
     tags: [multigpu, query]
   Unit_hipMemAdvise_TstAccessedByFlg2:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMemAdvise_TstAccessedByFlg3:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMemAdvise_TstAccessedByFlg4:
     <<: *level_2
     # Note: Windows disabled
@@ -1962,13 +2006,13 @@ memory:
     tags: [alloc]
   Unit_hipFreeHost_InvalidMemory:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipFreeHost_DoubleFree:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipFreeHost_Multithreading:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocAsync_Basic_OneAlloc:
     <<: *level_2
     tags: [alloc]
@@ -1980,7 +2024,7 @@ memory:
     tags: [alloc]
   Unit_hipMallocAsync_Negative_Parameters:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocAsync_basic:
     <<: *level_2
     tags: [alloc]
@@ -2001,7 +2045,7 @@ memory:
     tags: [alloc, multigpu]
   Unit_hipMallocAsync_ByUsinghipMalloc:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocAsync_ByUsinghipFree:
     <<: *level_2
     tags: [alloc]
@@ -2043,80 +2087,85 @@ memory:
     <<: *level_2
     # Note: intermittent Seg fault failure
     disabled: [amd_wsl]
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipMallocMipmappedArray_DiffSizes:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocMipmappedArray_MultiThread:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
     # Below tests are failing PSDB
     disabled: [amd_windows]
-  Unit_hipMallocMipmappedArray_happy: *level_2
+  Unit_hipMallocMipmappedArray_happy:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipMallocMipmappedArray_Negative_NullArrayPtr:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocMipmappedArray_Negative_NullDescPtr:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocMipmappedArray_Negative_ZeroWidth:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocMipmappedArray_Negative_ZeroHeight:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocMipmappedArray_Negative_InvalidFlags:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocMipmappedArray_Negative_InvalidFormat:
     <<: *level_2
     # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
     disabled: [nvidia_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocMipmappedArray_Negative_BadChannelLayout:
     <<: *level_2
     # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
     disabled: [nvidia_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocMipmappedArray_Negative_8BitFloat:
     <<: *level_2
     # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
     disabled: [nvidia_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocMipmappedArray_Negative_DifferentChannelSizes:
     <<: *level_2
     # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
     disabled: [nvidia_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocMipmappedArray_Negative_BadChannelSize:
     <<: *level_2
     # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
     disabled: [nvidia_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocMipmappedArray_Negative_NumericLimit:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipMallocMipmappedArray_Negative_Non2DTextureGather: *level_2
   Unit_hipMallocMipmappedArray_Negative_NumLevels:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipGetMipmappedArrayLevel_Negative:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [alloc]
-  Unit_hipFreeMipmappedArrayImplicitSyncArray: *level_2
+    tags: [alloc, model_1250]
+  Unit_hipFreeMipmappedArrayImplicitSyncArray:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipFreeMipmappedArray_Negative_Nullptr:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipFreeMipmappedArrayMultiTArray:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
+    tags: [model_1250]
   Unit_hipMallocArray_DiffSizes:
     <<: *level_2
     tags: [alloc, image]
@@ -2176,50 +2225,50 @@ memory:
     tags: [alloc, image]
   Unit_hipHostAlloc_Positive:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostAlloc_DataValidation:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostAlloc_Negative:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostAlloc_Basic:
     <<: *level_2
     # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
     disabled: [amd_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostAlloc_Default:
     <<: *level_2
     # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
     disabled: [amd_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostAlloc_Negative_NonCoherent:
     <<: *level_2
     # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
     disabled: [amd_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostAlloc_Negative_Coherent:
     <<: *level_2
     # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
     disabled: [amd_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostAlloc_Negative_NumaUser:
     <<: *level_2
     # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
     disabled: [amd_windows]
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostAlloc_ArgValidation:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, model_1250]
   Unit_hipHostAlloc_Capture:
     <<: *level_2
     tags: [alloc]
   Unit_hipDrvMemcpy2DUnaligned_NegTst:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipDrvMemcpy2DUnaligned_FuncTst:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipDrvMemcpy2DUnaligned_Positive_Basic:
     <<: *level_2
     tags: [transfer]
@@ -2228,7 +2277,7 @@ memory:
     tags: [transfer]
   Unit_hipDrvMemcpy2DUnaligned_Positive_Parameters:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, model_1250]
   Unit_hipArrayGetInfo_Positive_Basic:
     <<: *level_2
     tags: [query, image]
@@ -2270,7 +2319,7 @@ memory:
     tags: [query, image]
   Unit_hipArrayGetDescriptor_Negative_Scenarios:
     <<: *level_2
-    tags: [query]
+    tags: [query, model_1250]
   Unit_hipArrayGetDescriptor_Positive_Basic:
     <<: *level_2
     tags: [query, image]
@@ -2286,25 +2335,32 @@ memory:
   Unit_hipMemcpyToFromSymbol_GlobalConstVar: *level_2
   Unit_svm_byte_granularity:
     <<: *level_2
-    tags: []
+    tags: [model_1250]
   Unit_svm_fine_grain_memory_consistency:
     <<: *level_2
-    tags: []
-  Unit_svm_fine_grain_sync_buffers: *level_2
+    tags: [model_1250]
+  Unit_svm_fine_grain_sync_buffers:
+    <<: *level_2
+    tags: [model_1250]
   Unit_svm_shared_address_space_fine_grain_buffers:
     <<: *level_2
-    tags: []
+    tags: [model_1250]
   Unit_svm_shared_address_space_fine_grain_system:
     <<: *level_2
-    tags: []
+    tags: [model_1250]
   Unit_hipMemGetMemPool_Negative: *level_2
   Unit_hipMemGetMemPool_Basic: *level_2
   Unit_hipMemSetMemPool_Negative: *level_2
   Unit_hipMemSetMemPool_Basic: *level_2
   Unit_hipFreeHost_Capture_negative:
     <<: *level_2
-  Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory: *level_2
-  Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory: *level_2
+    tags: [model_1250]
+  Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory:
+    <<: *level_2
+    tags: [model_1250]
+  Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory:
+    <<: *level_2
+    tags: [model_1250]
   Unit_hipMemPoolExportToShareableHandle_multiproc: *level_2
   Unit_hipMemPoolExportToShareableHandle_multiproc_child:
     <<: *level_2

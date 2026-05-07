@@ -13,25 +13,25 @@ dynamicLoading:
     tags: [module]
   Unit_hipGetProcAddress_Positive:
     <<: *level_2
-    tags: [module]
+    tags: [module, model_1250]
     disabled: [amd_wsl]
   Unit_hipGetProcAddress_Negative:
     <<: *level_2
-    tags: [module]
+    tags: [module, model_1250]
     disabled: [amd_wsl]
   Unit_hipGetProcAddress_spt_Positive:
     <<: *level_2
-    tags: [module]
+    tags: [module, model_1250]
     disabled: [amd_wsl]
   Unit_hipGetProcAddress_spt_Negative:
     <<: *level_2
-    tags: [module]
+    tags: [module, model_1250]
     disabled: [amd_wsl]
   Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress:
     <<: *level_2
-    tags: [module]
+    tags: [module, model_1250]
     disabled: [amd_wsl]
   Unit_hipGetProcAddress_With_spt_CompilerOption:
     <<: *level_2
-    tags: [module]
+    tags: [module, model_1250]
     disabled: [amd_wsl]

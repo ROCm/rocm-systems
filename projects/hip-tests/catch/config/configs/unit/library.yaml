@@ -5,7 +5,7 @@ library:
     tags: [module]
   Unit_hip_library_load_co:
     <<: *level_2
-    tags: [module]
+    tags: [module, model_1250]
   Unit_hipKernelGetParamInfo_Negative:
     <<: *level_2
     tags: [module]
@@ -14,13 +14,13 @@ library:
     tags: [module]
   Unit_hipKernelGetAttribute_Positive_Basic:
     <<: *level_2
-    tags: [module]
+    tags: [module, model_1250]
   Unit_hipKernelGetAttribute_Negative_Parameters:
     <<: *level_2
-    tags: [module]
+    tags: [module, model_1250]
   Unit_hipKernelSetAttribute_Negative_Parameters:
     <<: *level_2
-    tags: [module]
+    tags: [module, model_1250]
   Unit_hipKernelGetFunction_Negative_Parameters:
     <<: *level_2
-    tags: [module]
+    tags: [module, model_1250]

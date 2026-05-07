@@ -2,22 +2,22 @@
 atomics:
   Unit_atomicAnd_Positive_SameAddress:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicAnd_Positive_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicAnd_Positive_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicAnd_Positive_Multi_Kernel_Same_Address:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicAnd_Positive_Multi_Kernel_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicAnd_Positive_Multi_Kernel_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicAnd_Negative_Parameters_RTC:
     <<: *level_2
     tags: [deviceLib, ops]
@@ -32,22 +32,22 @@ atomics:
     tags: [deviceLib, system, multigpu]
   Unit_atomicOr_Positive_SameAddress:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicOr_Positive_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicOr_Positive_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicOr_Positive_Multi_Kernel_Same_Address:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicOr_Positive_Multi_Kernel_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicOr_Positive_Multi_Kernel_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicOr_Negative_Parameters_RTC:
     <<: *level_2
     tags: [deviceLib, ops]
@@ -62,22 +62,22 @@ atomics:
     tags: [deviceLib, system, multigpu]
   Unit_atomicXor_Positive_SameAddress:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicXor_Positive_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicXor_Positive_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicXor_Positive_Multi_Kernel_Same_Address:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicXor_Positive_Multi_Kernel_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicXor_Positive_Multi_Kernel_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicXor_Negative_Parameters_RTC:
     <<: *level_2
     tags: [deviceLib, ops]
@@ -92,22 +92,22 @@ atomics:
     tags: [deviceLib, system, multigpu]
   Unit_atomicMin_Positive_SameAddress:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicMin_Positive_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicMin_Positive_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicMin_Positive_Multi_Kernel_Same_Address:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicMin_Positive_Multi_Kernel_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicMin_Positive_Multi_Kernel_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicMin_Negative_Parameters_RTC:
     <<: *level_2
     tags: [deviceLib, ops]
@@ -122,22 +122,22 @@ atomics:
     tags: [deviceLib, system, multigpu]
   Unit_atomicMax_Positive_SameAddress:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicMax_Positive_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicMax_Positive_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicMax_Positive_Multi_Kernel_Same_Address:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicMax_Positive_Multi_Kernel_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, ops]
+    tags: [deviceLib, ops, model_1250]
   Unit_atomicMax_Negative_Parameters_RTC:
     <<: *level_2
     tags: [deviceLib, ops]
@@ -224,40 +224,40 @@ atomics:
     tags: [deviceLib, ops]
   Unit___hip_atomic_fetch_min_Positive_Wavefront_SameAddress:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_min_Positive_Wavefront_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_min_Positive_Wavefront_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_min_Positive_Workgroup_SameAddress:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_min_Positive_Workgroup_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_min_Positive_Workgroup_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_max_Positive_Wavefront_SameAddress:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_max_Positive_Wavefront_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_max_Positive_Wavefront_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_max_Positive_Workgroup_SameAddress:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_max_Positive_Workgroup_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_max_Positive_Workgroup_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit_AtomicBuiltins_Negative_Parameters_RTC:
     <<: *level_2
     tags: [builtin, deviceLib]
@@ -440,58 +440,58 @@ atomics:
     tags: [deviceLib, system]
   Unit___hip_atomic_fetch_and_Positive_Wavefront_SameAddress:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_and_Positive_Wavefront_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_and_Positive_Wavefront_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_and_Positive_Workgroup_SameAddress:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_and_Positive_Workgroup_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_and_Positive_Workgroup_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_or_Positive_Wavefront_SameAddress:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_or_Positive_Wavefront_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_or_Positive_Wavefront_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_or_Positive_Workgroup_SameAddress:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_or_Positive_Workgroup_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_or_Positive_Workgroup_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_xor_Positive_Wavefront_SameAddress:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_xor_Positive_Wavefront_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_xor_Positive_Wavefront_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_xor_Positive_Workgroup_SameAddress:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_xor_Positive_Workgroup_Adjacent_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_fetch_xor_Positive_Workgroup_Scattered_Addresses:
     <<: *level_2
-    tags: [deviceLib, builtin]
+    tags: [deviceLib, builtin, model_1250]
   Unit___hip_atomic_exchange_Positive_Wavefront:
     <<: *level_2
     tags: [deviceLib, builtin]
