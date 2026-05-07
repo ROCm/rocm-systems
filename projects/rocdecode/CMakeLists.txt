@@ -334,6 +334,30 @@ if(DEPENDENCIES_MET)
       PAL_KMT_BUILD=1
       PAL_CLOSED_SOURCE=1
     )
+# -----------------------------------------------------------------------
+# Platform-specific settings
+# -----------------------------------------------------------------------
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+        WINVER=0x0A00
+        _WIN32_WINNT=0x0A00
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        # Match PAL library build settings
+        PAL_CLIENT_INTERFACE_MAJOR_VERSION=954
+        GPUOPEN_CLIENT_INTERFACE_MAJOR_VERSION=42
+        PAL_BUILD_RDF=1
+        PAL_DEVELOPER_BUILD=0
+        PAL_KMT_BUILD=1
+        PAL_CLIENT_OCL=1
+        PAL_CLOSED_SOURCE=1
+        PAL_BUILD_GFX9=1
+        PAL_BUILD_LIGHT_SHAFT_OPT=1
+        PAL_BUILD_OSS=1
+        PAL_BUILD_VIDEO=1
+        PAL_BUILD_VCN3=1
+        PAL_BUILD_VCN4=1
+        PAL_BUILD_VCN5=1
+        )
 
     # Set static runtime library to match PAL (works for both MSVC and Clang)
     set_property(TARGET ${PROJECT_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
