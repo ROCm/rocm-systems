@@ -475,40 +475,64 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     // and that counter PERSISTS across queue lifecycles. When KFD
     // destroys a queue and creates a new one on the same pipe, the new
     // queue inherits the previous queue's wptr value. At
-    // enable_dispatch_log_for_queue time we initialize qs.next_idx from
-    // the current FW signal value, but the host signal_addr is still 0
-    // at that moment (FW hasn't published since enable). Once FW writes
-    // its first record post-enable, signal jumps from 0 to whatever the
-    // pipe scratch wptr was + 1, which can be huge (millions).
+    // enable_dispatch_log_for_queue time qs.next_idx is initialized to
+    // 0 because the host signal word is also 0 at enable (FW hasn't
+    // published since enable). Once FW writes its first record
+    // post-enable, signal jumps from 0 to scratch_wptr+1, which can
+    // be small (e.g. 2 if the pipe was lightly used previously) or
+    // huge (millions on a long-lived process).
     //
-    // Without this sync the overrun handler below would interpret the
-    // huge gap as "we fell behind by ring_records or more" and emit a
-    // drop event followed by reads of stale ring storage (most slots
-    // empty / pre-zero, only the freshly-written slot has real data).
-    // Net effect: hundreds of zero-record batched events per queue
-    // immediately after enable.
+    // Code-quality C2: the previous magnitude-based heuristic
+    // (`if observed > ring_records: next_idx = observed - 1`) was
+    // wrong in two complementary ways:
     //
-    // Heuristic: if next_idx is 0 (never advanced past initial enable)
-    // AND observed > ring_records (impossibly far ahead for a fresh
-    // queue), treat as initial-state sync. Set next_idx = observed - 1
-    // so we drain ONE record (the actual fresh dispatch FW just wrote)
-    // and start tracking from there. The single record at slot
-    // (observed - 1) & ring_mask is the real one FW just wrote at the
-    // pre-increment scratch wptr position.
-    if (qs.next_idx == 0 && observed > qs.ring_records) {
-      qs.next_idx = observed - 1;
-    }
+    //   1. SMALL persisted-counter case (e.g. observed == 2 with FW
+    //      writing one fresh record): the heuristic did not fire, so
+    //      [start=0, end=2) was emitted including slot 0 which was
+    //      pre-zeroed by AqlQueue::SetProfiling. Consumers received
+    //      a record with all-zero ts / record_type / dispatch_idx.
+    //
+    //   2. HUGE persisted-counter case with N>1 fresh records (e.g.
+    //      scratch wptr = 5000, FW writes 3 records → observed = 5003):
+    //      the heuristic set next_idx = 5002 and emitted only slot
+    //      5002, silently dropping the records at slots 5000 and 5001
+    //      with no kernel_dispatch_drop event.
+    //
+    // Fix: make init-sync independent of `observed` magnitude and
+    // independent of whether the host fell behind. We treat the first
+    // non-zero signal observation specially:
+    //   - Compute the candidate scan window [start, end). For a fresh
+    //     buffer, the meaningful window is the suffix of FW-written
+    //     slots ending at end-1; older slots are pre-zeroed and stale.
+    //   - During init-sync only, validate each slot's record_type
+    //     during emit and SKIP slots whose record_type is 0. This
+    //     correctly emits all FW-written records in the window without
+    //     ever emitting a stale pre-zeroed slot.
+    //   - Do NOT emit kernel_dispatch_drop during init-sync — the
+    //     pre-zeroed gap represents records that never existed for
+    //     this queue lifecycle, not records the host fell behind on.
+    //
+    // The validate-on-emit strategy is safe under FW write ordering:
+    // signal is the LAST per-record write FW issues, so by the time
+    // we observe signal=N, every slot in [0, N) that WILL be written
+    // by FW has already been written. Slots with rt==0 in [start, end)
+    // are slots FW will never write for this lifecycle (they predate
+    // the queue or were pre-zeroed by SetProfiling).
+    const bool initial_sync = (qs.next_idx == 0);
 
     // Overrun detection. If FW lapped us, log a drop event and skip
     // the unrecoverable region. The records we DO read after the skip
     // are still valid (they're the most recent observed - ring_records
-    // records, just with a gap before them).
+    // records, just with a gap before them). Skipped during init-sync
+    // because the gap is not a real drop (see comment above).
     uint64_t start = qs.next_idx;
     uint64_t end   = observed;
     if ((end - start) > qs.ring_records) {
-      const uint64_t lost = (end - start) - qs.ring_records;
-      rocm_trace_emit_hsa_kernel_dispatch_drop(
-          queue_id_to_wire(qs.queue_id), lost);
+      if (!initial_sync) {
+        const uint64_t lost = (end - start) - qs.ring_records;
+        rocm_trace_emit_hsa_kernel_dispatch_drop(
+            queue_id_to_wire(qs.queue_id), lost);
+      }
       start = end - qs.ring_records;
     }
 
@@ -533,6 +557,17 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
       const uint64_t slot = i & qs.ring_mask;
       auto* rec = reinterpret_cast<mec_dispatch_record_16*>(
           static_cast<char*>(qs.ring_base) + slot * kSlotStride);
+
+      // Init-sync validation: skip pre-zeroed slots. FW writes
+      // record_type ∈ {1, 2}; slots with rt==0 in our scan window are
+      // slots FW has not written for this queue's lifecycle (the host
+      // pre-zero from AqlQueue::SetProfiling is still intact). Acquire
+      // ordering so the body loads (via memcpy below) cannot be
+      // reordered above this check on the rare slot that IS non-zero.
+      if (initial_sync) {
+        uint32_t rt = __atomic_load_n(&rec->record_type, __ATOMIC_ACQUIRE);
+        if (rt == 0) continue;
+      }
 
       // FW publish-ordering contract (per f32_mec.uc Q6): record body
       // is host-visible BEFORE the wptr update we acquire-loaded above.
