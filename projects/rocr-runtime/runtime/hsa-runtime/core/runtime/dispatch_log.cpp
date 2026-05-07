@@ -1125,19 +1125,9 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
 
 bool predicate_now() {
 #if defined(HSA_ENABLE_LTTNG_UST) && HSA_ENABLE_LTTNG_UST
-  /* DIAGNOSTIC: log the three predicate inputs once on the first call
-   * so we can see why dispatch_log is or isn't enabling. */
-  static std::atomic<bool> diag_first{true};
-  bool first_call = diag_first.exchange(false);
   bool trace_dis = rocm_trace_disabled();
   bool kfd_ok   = g_kfd_supports_dispatch_log.load(std::memory_order_relaxed);
   int  tp_en    = lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_record);
-  if (first_call) {
-    std::fprintf(stderr,
-                 "[hsa-runtime] dispatch_log DIAG predicate_now first-call: "
-                 "trace_disabled=%d kfd_supports=%d tracepoint_enabled=%d\n",
-                 (int)trace_dis, (int)kfd_ok, tp_en);
-  }
 
   if (trace_dis) return false;
   if (!kfd_ok) {
@@ -1163,26 +1153,9 @@ bool predicate_now() {
 void ts_poller_loop() {
   const auto tick_interval = std::chrono::milliseconds(5);
 
-  /* DIAGNOSTIC: confirm the poller actually starts, and log every
-   * predicate-result transition so we can see when (or if) it ever
-   * flips true. Steady-state silent. */
-  std::fprintf(stderr,
-               "[hsa-runtime] dispatch_log DIAG ts_poller_loop entered\n");
-  bool last_curr = false;
-  bool first_iter = true;
-
   while (!g_shutdown.load(std::memory_order_relaxed)) {
     const bool curr = predicate_now();
     g_dispatch_logging_active.store(curr, std::memory_order_relaxed);
-
-    if (first_iter || curr != last_curr) {
-      std::fprintf(stderr,
-                   "[hsa-runtime] dispatch_log DIAG ts_poller_loop predicate=%d "
-                   "(was %d)\n",
-                   (int)curr, (int)last_curr);
-      last_curr = curr;
-      first_iter = false;
-    }
 
     if (curr) {
       // ENABLE pass (spec §4): for each known live queue Q with
