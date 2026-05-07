@@ -389,29 +389,32 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
     }
 
     // Create command buffer
+    // NOTE: pCmdAllocator must be nullptr at creation; it is supplied at Reset() time
     {
         Pal::CmdBufferCreateInfo cbci = {};
         cbci.engineType = eng;
         cbci.queueType = Pal::QueueTypeVideoDecode;
-        cbci.pCmdAllocator = cmd_allocator_.Get();
+        cbci.pCmdAllocator = nullptr;
 
         size_t sz = device_->GetCmdBufferSize(cbci, &res);
         if (Util::IsErrorResult(res)) {
-            CriticalLog(g_rocdec_logger, "PAL: GetCmdBufferSize failed");
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: GetCmdBufferSize failed with result ") + ROCDEC_TOSTR((int)res));
             return ROCDEC_RUNTIME_ERROR;
         }
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: CmdBuffer size = ") + ROCDEC_TOSTR(sz));
 
         void* mem = malloc(sz);
         Pal::ICmdBuffer* cb = nullptr;
         res = device_->CreateCmdBuffer(cbci, mem, &cb);
         if (Util::IsErrorResult(res) || !cb) {
             free(mem);
-            CriticalLog(g_rocdec_logger, "PAL: CreateCmdBuffer failed");
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: CreateCmdBuffer failed with result ") + ROCDEC_TOSTR((int)res));
             return ROCDEC_RUNTIME_ERROR;
         }
 
         *cmd_buffer_.PtrAddr() = cb;
         *cmd_buffer_.MemAddr() = mem;
+        InfoLog(g_rocdec_logger, "PAL: Command buffer created successfully");
     }
 
     // Create fence
@@ -1016,26 +1019,32 @@ rocDecStatus PalVideoDecoder::DecodeHEVC(RocdecPicParams* params) {
         return ROCDEC_RUNTIME_ERROR;
     }
 
-    // Submit to queue
+    // Reset fence before submission so it can be signaled on completion
+    {
+        Pal::IFence* fences_to_reset[] = { fence_.Get() };
+        res = device_->ResetFences(1, fences_to_reset);
+        if (Util::IsErrorResult(res)) {
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: ResetFences failed with result ") + ROCDEC_TOSTR((int)res));
+            return ROCDEC_RUNTIME_ERROR;
+        }
+    }
+
+    // Submit to queue, attaching fence via MultiSubmitInfo
     Pal::ICmdBuffer* cmd_bufs[] = { cmd_buffer_.Get() };
     Pal::PerSubQueueSubmitInfo per_queue_info = {};
     per_queue_info.cmdBufferCount = 1;
     per_queue_info.ppCmdBuffers = cmd_bufs;
 
+    Pal::IFence* submit_fence = fence_.Get();
     Pal::MultiSubmitInfo submit_info = {};
     submit_info.perSubQueueInfoCount = 1;
     submit_info.pPerSubQueueInfo = &per_queue_info;
+    submit_info.ppFences = &submit_fence;
+    submit_info.fenceCount = 1;
 
     res = video_queue_->Submit(submit_info);
     if (Util::IsErrorResult(res)) {
         CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: Queue Submit failed with result ") + ROCDEC_TOSTR((int)res));
-        return ROCDEC_RUNTIME_ERROR;
-    }
-
-    // Associate fence with submission (signal fence after decode completes)
-    res = video_queue_->AssociateFenceWithLastSubmit(fence_.Get());
-    if (Util::IsErrorResult(res)) {
-        CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: AssociateFence failed with result ") + ROCDEC_TOSTR((int)res));
         return ROCDEC_RUNTIME_ERROR;
     }
 
