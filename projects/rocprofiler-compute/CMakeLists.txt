@@ -404,13 +404,14 @@ if(MPI_CXX_COMPILER)
     )
 endif()
 
-add_test(
-    NAME test_metric_validation
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_metric_validation.xml ${COV_OPTION}
-        tests/test_metric_validation.py ${WORKING_DIR_OPTION}
-)
+# Enable in ROCm 7.14 release where the underlying metric was made stable
+# add_test(
+#     NAME test_metric_validation
+#     COMMAND
+#         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+#         --junitxml=tests/test_metric_validation.xml ${COV_OPTION}
+#         tests/test_metric_validation.py ${WORKING_DIR_OPTION}
+# )
 
 set_tests_properties(
     test_profile_kernel_execution
@@ -457,13 +458,14 @@ add_test(
 # TCP counter tests
 # ---------------------------
 
-add_test(
-    NAME test_L1_cache_counters
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m L1_cache
-        --junitxml=tests/test_L1_cache_counters.xml ${COV_OPTION}
-        tests/test_TCP_counters.py ${WORKING_DIR_OPTION}
-)
+# Enable in ROCm 7.14 release where the underlying metric was made stable
+# add_test(
+#     NAME test_L1_cache_counters
+#     COMMAND
+#         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m L1_cache
+#         --junitxml=tests/test_L1_cache_counters.xml ${COV_OPTION}
+#         tests/test_TCP_counters.py ${WORKING_DIR_OPTION}
+# )
 
 # ---------------------------
 # Spec tests
