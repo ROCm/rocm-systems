@@ -943,6 +943,14 @@ ncclResult_t ncclSocketMultiOp(struct ncclSocketOp* ops, int numOps) {
       WARN("ncclSocketMultiOp: invalid op %d at index %d", ops[i].op, i);
       return ncclInvalidArgument;
     }
+    if (ops[i].size < 0) {
+      WARN("ncclSocketMultiOp: invalid size %d at index %d", ops[i].size, i);
+      return ncclInvalidArgument;
+    }
+    if (ops[i].size > 0 && ops[i].ptr == NULL) {
+      WARN("ncclSocketMultiOp: NULL ptr with size %d at index %d", ops[i].size, i);
+      return ncclInvalidArgument;
+    }
     ops[i].offset = 0;
     if (ops[i].size == 0) completedOps++;
   }
