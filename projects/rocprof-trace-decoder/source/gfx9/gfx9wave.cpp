@@ -638,22 +638,45 @@ void CSRegisterHandlerGFX9::HandleRealtimeClock(size_t time, size_t data)
 
     if (userdata3_count == 0)
     {
-        if (data == 0x5) userdata3_count = 3;
+        rocprof_trace_decoder_packet_header_t header{};
+        header.u32All = static_cast<uint32_t>(data);
+
+        if (header.opcode == ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP)
+        {
+            userdata3_count = header.data20 ? static_cast<int>(header.data20) : 3;
+            userdata3_known = true;
+        }
+        else if (header.opcode == ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP_LO32)
+        {
+            userdata3_count = header.data20 ? static_cast<int>(header.data20) : 1;
+            userdata3_known = true;
+            userdata3_values[RT_LOW] = userdata3_values[RT_DELTA];
+        }
+        else
+        {
+            userdata3_count = static_cast<int>(header.data20);
+            userdata3_known = false;
+        }
         return;
     }
 
     userdata3_count--;
-    userdata3_values[userdata3_count] = data;
+    if (!userdata3_known || userdata3_count < 0) return;
 
+    if (userdata3_count < RT_LAST) userdata3_values[userdata3_count] = data;
     if (userdata3_count > 0) return;
+
+    // Detect a 32-bit wrap of the realtime clock low half between consecutive
+    // RT_TIMESTAMP_LO32 emissions. RT_LOW is the previously latched low half
+    // and RT_DELTA is the freshly received one; both are GPU clock samples
+    // taken close in time, so they differ only by the elapsed cycles. A
+    // smaller new sample means the low 32 bits rolled over, so bump the high
+    // half by one to reconstruct the true 64-bit value.
+    if (userdata3_values[RT_DELTA] < userdata3_values[RT_LOW]) userdata3_values[RT_HI]++;
 
     att_decoder_realtime_t rt{};
     rt.shader_clock = time;
     rt.realtime_clock = userdata3_values[RT_DELTA] | (userdata3_values[RT_HI] << 32);
-
-    // handle wrapping of lowest 32 bits
-    if (userdata3_values[RT_DELTA] < userdata3_values[RT_LOW]) rt.realtime_clock += 1ul << 32;
-
     realtime.push_back(rt);
 }
 
