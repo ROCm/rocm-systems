@@ -330,8 +330,8 @@ if(ROCPROFILER_BUILD_SQLITE_ZSTD)
                           ${ROCPROFILER_SQLITE_ZSTD_BUILD_DIR}
         BUILD_COMMAND
             ${CMAKE_COMMAND} -E env "CARGO_TARGET_DIR=${ROCPROFILER_SQLITE_ZSTD_BUILD_DIR}"
-            ${CARGO_EXECUTABLE} build --release --manifest-path
-            ${PROJECT_SOURCE_DIR}/external/sqlite-zstd/Cargo.toml
+            ${CARGO_EXECUTABLE} build --release --features build_extension
+            --manifest-path ${PROJECT_SOURCE_DIR}/external/sqlite-zstd/Cargo.toml
         INSTALL_COMMAND
             ${CMAKE_COMMAND} -E make_directory
             ${ROCPROFILER_SQLITE_ZSTD_INSTALL_DIR} COMMAND ${CMAKE_COMMAND} -E
