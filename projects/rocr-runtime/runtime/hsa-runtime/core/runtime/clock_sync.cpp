@@ -1,5 +1,7 @@
 #include "core/inc/clock_sync.h"
 
+#if defined(HSA_ENABLE_LTTNG_UST) && HSA_ENABLE_LTTNG_UST
+
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -19,7 +21,6 @@ std::atomic<bool> g_shutdown{false};
 std::thread g_poller_thread;
 
 void poller_loop() {
-#if defined(HSA_ENABLE_LTTNG_UST) && HSA_ENABLE_LTTNG_UST
   // Configurable sync interval. Default is 100ms.
   auto tick_interval = std::chrono::milliseconds(100);
   const char* env_interval = getenv("HSA_CLOCK_SYNC_INTERVAL_MS");
@@ -51,7 +52,6 @@ void poller_loop() {
 
     std::this_thread::sleep_for(tick_interval);
   }
-#endif
 }
 
 }  // namespace
@@ -70,3 +70,22 @@ void shutdown() {
 
 }  // namespace clock_sync
 }  // namespace rocr
+
+#else  // !HSA_ENABLE_LTTNG_UST
+
+// When LTTng-UST support is disabled at build time, the clock_sync poller
+// has no tracepoint to emit into. init()/shutdown() compile to no-ops so
+// non-LTTng builds neither spawn nor join a background thread. The
+// declarations in core/inc/clock_sync.h still need definitions because
+// runtime.cpp Runtime::Load/Unload call them unconditionally.
+
+namespace rocr {
+namespace clock_sync {
+
+void init() {}
+void shutdown() {}
+
+}  // namespace clock_sync
+}  // namespace rocr
+
+#endif  // HSA_ENABLE_LTTNG_UST
