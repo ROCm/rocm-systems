@@ -39,6 +39,14 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build clang libdrm-dev
 
+      - name: Install ROCm SDK (HIP headers + device libs)
+        run: |
+          pip install --index-url https://repo.amd.com/rocm/whl/gfx950-dcgpu/ rocm-sdk-core
+          ROCM_SDK_CORE=$(python3 -c "import importlib; print(importlib.import_module('_rocm_sdk_core').__path__[0])")
+          echo "ROCM_PATH=$ROCM_SDK_CORE" >> $GITHUB_ENV
+          printf '#!/bin/bash\nSCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"\nexec clang++ -x hip --offload-arch=gfx950 -I"$SCRIPT_DIR/include" --rocm-path="$SCRIPT_DIR/lib/llvm" "$@"\n' > "$ROCM_SDK_CORE/bin/hipcc"
+          chmod +x "$ROCM_SDK_CORE/bin/hipcc"
+
       - name: Configure
         env:
           CC: clang
