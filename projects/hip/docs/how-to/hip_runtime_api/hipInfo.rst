@@ -7,7 +7,7 @@
 Using hipInfo
 =============
 
-``hipInfo`` is a diagnostic utility that displays information about AMD GPU devices available on your system. It queries and reports device properties, architectural features, memory information, and peer-to-peer capabilities through the HIP runtime API. 
+``hipInfo`` is a diagnostic utility that displays information about AMD GPU devices available on your system. It queries and reports device properties, architectural features, memory information, and peer-to-peer capabilities through the HIP runtime API. ``hipInfo`` is similar to ``rocminfo``, though they are different as described in :ref:`hip-v-rocm-info`. For more information, see `rocminfo <https://rocm.docs.amd.com/projects/rocminfo/en/latest/index.html>`__.
 
 ``hipInfo`` can be used for:
 
@@ -18,10 +18,10 @@ Using hipInfo
 
 .. note::
 
-   ``hipInfo`` is installed as part of the `HIP SDK for Windows <https://rocm.docs.amd.com/projects/install-on-windows/en/latest/>`_. However, on Linux systems it is not installed with HIP, but must be separately built as described in `Building HIP tests <https://rocm.docs.amd.com/projects/HIP/en/latest/install/build.html#build-hip-tests>`_. 
+   ``hipInfo`` is installed as part of the `HIP SDK for Windows <https://rocm.docs.amd.com/projects/install-on-windows/en/latest/>`_. However, on Linux systems it is not installed with HIP, but can be separately built as described in `Building HIP tests <https://rocm.docs.amd.com/projects/HIP/en/latest/install/build.html#build-hip-tests>`_. 
 
-Using hipInfo
---------------
+hipInfo command
+----------------
 
 The command requires no arguments and will automatically detect and report information for all available AMD GPU devices.
 
@@ -47,7 +47,7 @@ The tool also displays the following categories of information for each detected
 
    * **Name**: GPU device name
    * **pciBusID, pciDeviceID, pciDomainID**: PCI location identifiers
-   * **gcnArchName**: AMD GCN architecture name (e.g., gfx906, gfx90a, gfx1100)
+   * **gcnArchName**: AMD GCN architecture name (for example: gfx906, gfx90a, gfx1100)
 
 - Compute Capabilities
 
@@ -116,8 +116,10 @@ Example Output
    memInfo.total:                    31.98 GB
    memInfo.free:                     31.96 GB (100%)
 
+.. _hip-v-rocm-info:
+
 Comparing hipinfo and rocminfo
--------------------------
+------------------------------
 
 While both ``hipInfo`` and ``rocminfo`` provide GPU device information, they serve different purposes:
 
