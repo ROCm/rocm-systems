@@ -118,7 +118,9 @@ static void clear_after_fork(HsaKFDContext *ctx)
 
 	int fd = ctx->fd;
 	if (fd >= 0) {
-		close(fd);
+		/* Don't close the memfd when using model - FFM owns its lifecycle */
+		if (!hsakmt_use_model)
+			close(fd);
 		hsakmt_kfdcontext_clear_context(ctx);
  	}
 	if (hsakmt_udmabuf_dev_fd > 0) {
@@ -159,6 +161,9 @@ static HSAKMT_STATUS init_vars_from_env(void)
 	if (envvar)
 		hsakmt_zfb_support = atoi(envvar);
 
+	envvar = getenv("PM4_TARGET_XCC");
+	if (envvar)
+		hsakmt_pm4_target_xcc = atoi(envvar);
 	return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -232,8 +237,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
 
 		useSvmStr = getenv("HSA_USE_SVM");
 		hsakmt_primary_kfd_ctx.hsakmt_is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0"));
-		if(!hsakmt_use_model)
-			result = hsakmt_topology_sysfs_get_system_props(&hsakmt_primary_kfd_ctx, &sys_props);
+		result = hsakmt_topology_sysfs_get_system_props(&hsakmt_primary_kfd_ctx, &sys_props);
 
 		if (result != HSAKMT_STATUS_SUCCESS)
 			goto topology_sysfs_failed;
@@ -286,6 +290,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFDCtx(void)
 			hsakmt_destroy_counter_props(&hsakmt_primary_kfd_ctx);
 			hsakmt_destroy_device_debugging_memory(&hsakmt_primary_kfd_ctx);
 			hsakmt_fmm_clear_all_aperture(&hsakmt_primary_kfd_ctx);
+
+			if (hsakmt_use_model && hsakmt_primary_kfd_ctx.fd >= 0) {
+				close(hsakmt_primary_kfd_ctx.fd);
+				hsakmt_kfdcontext_clear_context(&hsakmt_primary_kfd_ctx);
+
+			}
 		}
 
 		result = HSAKMT_STATUS_SUCCESS;

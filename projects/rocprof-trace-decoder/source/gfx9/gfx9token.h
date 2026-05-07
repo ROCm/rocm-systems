@@ -201,7 +201,7 @@ enum sqtt_token_type_t
 class Token
 {
 public:
-    Token(uint64_t _type, uint64_t val) : type(_type)
+    Token(uint64_t _type, uint64_t val) : time(0), delta(0), type(_type)
     {
         if (type == TOKEN_MISC)
             fields.misc = Misc(val);

@@ -117,6 +117,9 @@ class ConfigureCITest(unittest.TestCase):
             therock_configure_ci.is_path_skippable("projects/rocminfo/docs/api.rst")
         )
         self.assertTrue(therock_configure_ci.is_path_skippable(".gitignore"))
+        self.assertTrue(therock_configure_ci.is_path_skippable(".github/labeler.yml"))
+        self.assertTrue(therock_configure_ci.is_path_skippable(".github/labels.yml"))
+        self.assertTrue(therock_configure_ci.is_path_skippable(".github/workflows/labeler.yml"))
 
         # Test non-skippable patterns
         self.assertFalse(
