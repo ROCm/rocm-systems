@@ -233,6 +233,8 @@ release(cstring, HIPRTC_COMPILE_OPTIONS_APPEND, "",                           \
         "Set compile options needed for hiprtc compilation")                  \
 release(cstring, HIPRTC_LINK_OPTIONS_APPEND, "",                              \
         "Set link options needed for hiprtc compilation")                     \
+release(cstring, GPU_CLR_PROFILE_OUTPUT, "",                                  \
+        "Enable built-in HIP profiling and write Chrome trace JSON to this path on exit") \
 release(bool, HIP_VMEM_MANAGE_SUPPORT, true,                                  \
         "Virtual Memory Management Support")                                  \
 release(uint, DEBUG_HIP_GRAPH_DOT_PRINT, 0,                               \
@@ -262,7 +264,7 @@ release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
         "Set this to true, to avoid host side abort for GPU errors")          \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
         "Force use of SPIRV instead of device specific code object.")         \
-release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 8,                               \
+release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 16,                               \
         "Forces the minimum batch size for CPU sync")                         \
 release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                                 \
         "1 = Disable Image support for ROC path")                             \

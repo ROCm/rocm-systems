@@ -41,6 +41,7 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= PREDICATED_DEF;
 }
 
 void SCmovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -268,7 +269,10 @@ SCbranchIForkSopk::SCbranchIForkSopk(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SCbranchIForkSopk::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SCbranchIForkSopk::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
     : Sopk("s_getreg_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -281,7 +285,10 @@ SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
     : Sopk("s_setreg_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -294,7 +301,10 @@ SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
     : Sopk("s_setreg_imm32_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -305,7 +315,10 @@ SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
     : Sopk("s_call_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCallB64Sopk>()),
@@ -315,6 +328,7 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= INDIRECT_CALL;
 }
 
 void SCallB64Sopk::execute_impl(amdgpu::Wavefront &wf) {

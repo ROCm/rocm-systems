@@ -20,15 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <sys/stat.h>
 #include <array>
-#include <cassert>
-#include <chrono>
 #include <cstring>
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <unordered_map>
 
 #include "mi400parser.h"
 #include "mi400token.h"
@@ -39,91 +32,24 @@ typedef mi400::Token Token;
 namespace mi400
 {
 
-std::array<std::pair<int, int>, NAVI_TYPE_LAST> TokenLookupTable::time_bits = []()
+TokenLookupTable::TokenLookupTable()
 {
-    std::unordered_map<int, std::pair<int, int>> map{};
-    map[UNKNOWN] = {0, 0};
-    map[INST] = {4, 6};
-    map[VALU_INST] = {4, 8};
-    map[WAVE_READY] = {5, 8};
-    map[IMMEDIATE] = {5, 8};
-    map[IMM_ONE] = {7, 10};
-    map[NEW_PC_GFX12] = {8, 11};
-    map[EXEC_POPCOUNT1] = {7, 10};
-    map[EXEC_POPCOUNT3] = {6, 9};
-    map[WAVE_START] = {5, 7};
-    map[WAVE_START_EXT] = {5, 7};
-    map[WAVE_ALLOC] = {5, 8};
-    map[WAVE_END] = {7, 10};
-    map[SHADER_DATA] = {7, 10};
-    map[SHADER_DATA_SHORT] = {7, 10};
-    map[LDS_CONFIG] = {8, 10};
-    map[UTIL_COUNTER_GFX11] = {7, 9};
-    map[TIME] = {4, 8};
-    map[MISC_GFX10] = {7, 10};
-    map[EVENT] = {8, 11};
-    map[EVENT_SYNC] = {8, 11};
-    map[REG] = {4, 7};
-    map[REG_INIT] = {7, 10};
-    map[TIMESTAMP] = {12, 64};
-    map[HEADER] = {0, 0};
-    map[MEDIUM_TIME] = {8, 16};
-    map[NOP] = {0, 0};
-
-    // Unused
-    map[NEW_PC_GFX10] = {0, 0};
-    map[UTIL_COUNTER_GFX10] = {0, 0};
-
-    std::array<std::pair<int, int>, NAVI_TYPE_LAST> ret{};
-
-    for (size_t i = 0; i < NAVI_TYPE_LAST; i++)
-        if (map.find(i) == map.end()) abort();
-
-    for (size_t i = 0; i < NAVI_TYPE_LAST; i++) ret[i] = map.at(i);
-
-    return ret;
-}();
-
-std::array<uint8_t, 64> TokenGenerator::TOKEN_LEN = []()
-{
-    static_assert(NAVI_TYPE_LAST <= 64);
-    std::array<uint8_t, 64> map{};
-    for (auto& v : map) v = 8;
-
-    map[UNKNOWN] = 8;
-    map[INST] = 24;
-    map[VALU_INST] = 8;
-    map[IMM_ONE] = 16;
-    map[IMMEDIATE] = 24;
-    map[WAVE_READY] = 24;
-    map[NEW_PC_GFX12] = 72;
-    map[EXEC_POPCOUNT1] = 24;
-    map[EXEC_POPCOUNT3] = 48;
-    map[WAVE_START] = 32;
-    map[WAVE_START_EXT] = 40;
-    map[WAVE_ALLOC] = 24;
-    map[WAVE_END] = 24;
-    map[SHADER_DATA] = 56;
-    map[SHADER_DATA_SHORT] = 32;
-    map[UTIL_COUNTER_GFX11] = 48;
-    map[LDS_CONFIG] = 24;
-    map[MISC_GFX10] = 24;
-    map[EVENT] = 24;
-    map[EVENT_SYNC] = 32;
-    map[REG] = 64;
-    map[REG_INIT] = 64;
-    map[TIME] = 8;
-    map[MEDIUM_TIME] = 16;
-    map[TIMESTAMP] = 64;
-    map[HEADER] = 64;
-    map[NOP] = 8;
-
-    // Unused
-    map[NEW_PC_GFX10] = 8;
-    map[UTIL_COUNTER_GFX10] = 8;
-
-    return map;
-}();
+    // MI400 overrides on top of the inherited gfx12 table.
+    // Adds LDS_CONFIG and MEDIUM_TIME, and re-points INST/VALU_INST/IMM_ONE/WAVE_END/MISC_GFX10/TIME/NOP
+    // to the bit lengths and time-field positions used by MI4xx (gfx12.5) traces.
+    // clang-format off
+    //                  type             pattern      plen  toklen  time_begin  time_end
+    AddEncoding({INST,         0b0010,      4, 24, 4,  6});
+    AddEncoding({VALU_INST,    0b011,       3,  8, 4,  8});
+    AddEncoding({NOP,          0b0000,      4,  8, 0,  0});
+    AddEncoding({IMM_ONE,      0b1101,      4, 16, 7, 10});
+    AddEncoding({WAVE_END,     0b1000001,   7, 24, 7, 10});
+    AddEncoding({LDS_CONFIG,   0b00100110,  8, 24, 8, 10});
+    AddEncoding({MISC_GFX10,   0b1010001,   7, 24, 7, 10});
+    AddEncoding({TIME,         0b1110,      4,  8, 4,  8});
+    AddEncoding({MEDIUM_TIME,  0b10100110,  8, 16, 8, 16});
+    // clang-format on
+}
 
 std::array<int, 16> TM_DELTA_TABLE = {1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 1, 2};
 
@@ -140,21 +66,22 @@ gfx10::Token TokenGenerator::next()
             continue;
         }
 
-        RdnaType type = (RdnaType) lookupbits.lookup(current);
+        auto& info = lookupbits.lookup(current);
+        RdnaType type = (RdnaType) info.type;
         if (type == RdnaType::NOP)
         {
             bits_toread = 8;
             continue;
         }
 
-        bits_toread = TOKEN_LEN.at(type);
+        bits_toread = info.length;
         bIsExt = type == WAVE_START_EXT;
 
         int64_t real = 0;
         if (type == VALU_INST)
             globaltime += TM_DELTA_TABLE[valu_inst_type{.raw = current}.wavetm];
         else
-            globaltime = lookupbits.getTime(type, current, globaltime, packetlost, real);
+            globaltime = lookupbits.getTime(info, current, globaltime, packetlost, real);
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {
@@ -198,21 +125,22 @@ gfx10::Token TokenGenerator::next()
             continue;
         }
 
-        RdnaType type = (RdnaType) lookupbits.lookup(current);
+        auto& info = lookupbits.lookup(current);
+        RdnaType type = (RdnaType) info.type;
         if (type == RdnaType::NOP)
         {
             bits_toread = 8;
             continue;
         }
 
-        bits_toread = TOKEN_LEN.at(type);
+        bits_toread = info.length;
         bIsExt = type == WAVE_START_EXT;
 
         int64_t real = 0;
         if (type == VALU_INST)
             globaltime += TM_DELTA_TABLE[valu_inst_type{.raw = current}.wavetm];
         else
-            globaltime = lookupbits.getTime(type, current, globaltime, packetlost, real);
+            globaltime = lookupbits.getTime(info, current, globaltime, packetlost, real);
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {

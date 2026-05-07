@@ -1299,6 +1299,16 @@ bool Device::populateOCLDeviceConstants() {
   info_.maxWorkItemSizes_[2] = std::min(max_workgroup_size[2], max_work_item_size);
   info_.preferredWorkGroupSize_ = settings().preferredWorkGroupSize_;
 
+  hsa_dim3_t grid_max_dim = {0, 0, 0};
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::agent_get_info(bkendDevice_, HSA_AGENT_INFO_GRID_MAX_DIM, &grid_max_dim)) {
+    return false;
+  }
+  assert(grid_max_dim.x != 0 && grid_max_dim.y != 0 && grid_max_dim.z != 0);
+  info_.maxGridDim_[0] = std::min(grid_max_dim.x, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+  info_.maxGridDim_[1] = std::min(grid_max_dim.y, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+  info_.maxGridDim_[2] = std::min(grid_max_dim.z, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+
   info_.nativeVectorWidthChar_ = info_.preferredVectorWidthChar_ = 4;
   info_.nativeVectorWidthShort_ = info_.preferredVectorWidthShort_ = 2;
   info_.nativeVectorWidthInt_ = info_.preferredVectorWidthInt_ = 1;
@@ -1715,7 +1725,7 @@ bool Device::populateOCLDeviceConstants() {
   // devices with no cluster support; max size is 0
   info_.clusterMaxSize_ = 0;
 
-  hsa_status_t hsaStatus = hsa_agent_get_info(
+  hsa_status_t hsaStatus = Hsa::agent_get_info(
       bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE),
       &info_.clusterMaxSize_);
 
@@ -3918,6 +3928,9 @@ cl_int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
     case (hsa_status_t)HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION:
       cl_error = CL_INVALID_MEM_OBJECT;
       break;
+    case (hsa_status_t)HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS:
+      cl_error = CL_OUT_OF_RESOURCES;
+      break;
     case HSA_STATUS_ERROR:
     default:
       cl_error = CL_DEVICE_NOT_AVAILABLE;
@@ -3956,12 +3969,17 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
               errorMsg, status);
     }
 
-    // Core dumps generally provide limited value for OOM, so do not let
-    // DumpCoreFile() be the reason to abort in that case. OOM should still
-    // honor HIP_SKIP_ABORT_ON_GPU_ERROR consistently.
+    // Core dumps generally provide limited value for OOM or register overflow,
+    // so do not let DumpCoreFile() be the reason to abort in those cases. These
+    // errors should still honor HIP_SKIP_ABORT_ON_GPU_ERROR consistently.
     const bool is_oom = (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+    // HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS is a dispatch-time
+    // failure (kernel exceeds hardware register limits), not a corruption.
+    // Treat it as recoverable rather than aborting.
+    const bool invalid_dispatch =
+        (status == (hsa_status_t)HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS);
     const bool should_abort =
-      is_oom
+      (is_oom || invalid_dispatch)
         ? !HIP_SKIP_ABORT_ON_GPU_ERROR
         : (amd::Os::DumpCoreFile() || !HIP_SKIP_ABORT_ON_GPU_ERROR);
 

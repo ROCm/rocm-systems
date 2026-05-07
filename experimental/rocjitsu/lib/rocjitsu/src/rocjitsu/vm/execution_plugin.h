@@ -39,33 +39,30 @@ public:
   // -- AMDGPU hooks --------------------------------------------------------
 
   /// Called before every AMDGPU instruction is executed.
-  virtual void onAmdgpuExecuteInstruction(uint64_t /*pc*/, const Instruction& /*inst*/) {}
+  virtual void onAmdgpuExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/) {}
 
   /// Called when an AMDGPU memory instruction is routed to a pipeline.
   virtual void onAmdgpuRouteMemoryInstruction(const Instruction & /*inst*/) {}
 
   /// Called when a new AMDGPU kernel dispatch begins.
-  virtual void onAmdgpuKernelDispatch(uint64_t /*kernel_object*/,
-                                      uint64_t /*entry_pc*/) {}
+  virtual void onAmdgpuKernelDispatch(uint64_t /*kernel_object*/, uint64_t /*entry_pc*/) {}
 
   /// Called after a workgroup's wavefronts have been dispatched to a CU.
-  virtual void onAmdgpuDispatchWorkgroup(
-      uint32_t /*wg_id*/, uint32_t /*vgpr_count*/, uint32_t /*sgpr_count*/,
-      std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
+  virtual void onAmdgpuDispatchWorkgroup(uint32_t /*wg_id*/, uint32_t /*vgpr_count*/,
+                                         uint32_t /*sgpr_count*/,
+                                         std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
 
   /// Called when a VGPR is read during instruction execution.
   /// Not yet wired — to be connected when race detection lands.
-  virtual void onAmdgpuReadVgpr(amdgpu::Wavefront * /*wf*/,
-                                uint32_t /*logical_reg*/, uint32_t /*lane*/) {}
+  virtual void onAmdgpuReadVgpr(amdgpu::Wavefront * /*wf*/, uint32_t /*logical_reg*/,
+                                uint32_t /*lane*/) {}
 
   /// Called when an SGPR is read during instruction execution.
   /// Not yet wired — to be connected when race detection lands.
-  virtual void onAmdgpuReadSgpr(amdgpu::Wavefront * /*wf*/,
-                                uint32_t /*logical_reg*/) {}
+  virtual void onAmdgpuReadSgpr(amdgpu::Wavefront * /*wf*/, uint32_t /*logical_reg*/) {}
 
   /// Called when s_waitcnt sets counter thresholds.
-  virtual void onAmdgpuSetWaitTarget(amdgpu::Wavefront * /*wf*/, int /*vmcnt*/,
-                                     int /*lgkmcnt*/) {}
+  virtual void onAmdgpuSetWaitTarget(amdgpu::Wavefront * /*wf*/, int /*vmcnt*/, int /*lgkmcnt*/) {}
 
   /// Called when all waves in a workgroup have reached s_barrier.
   virtual void onAmdgpuBarrierResolved(uint32_t /*wg_id*/) {}
@@ -73,7 +70,7 @@ public:
   // -- RISC-V hooks --------------------------------------------------------
 
   /// Called before every RISC-V instruction is executed.
-  virtual void onRiscvExecuteInstruction(uint64_t /*pc*/, const Instruction& /*inst*/) {}
+  virtual void onRiscvExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/) {}
 };
 
 /// @brief Collection of plugins that delegates to each member.
@@ -100,16 +97,13 @@ public:
       p->onAmdgpuKernelDispatch(kernel_object, entry_pc);
   }
 
-  void onAmdgpuDispatchWorkgroup(uint32_t wg_id, uint32_t vgpr_count,
-                                   uint32_t sgpr_count,
-                                   std::span<amdgpu::Wavefront *> wavefronts) {
+  void onAmdgpuDispatchWorkgroup(uint32_t wg_id, uint32_t vgpr_count, uint32_t sgpr_count,
+                                 std::span<amdgpu::Wavefront *> wavefronts) {
     for (auto &p : plugins_)
-      p->onAmdgpuDispatchWorkgroup(wg_id, vgpr_count, sgpr_count,
-                                     wavefronts);
+      p->onAmdgpuDispatchWorkgroup(wg_id, vgpr_count, sgpr_count, wavefronts);
   }
 
-  void onAmdgpuReadVgpr(amdgpu::Wavefront *wf, uint32_t logical_reg,
-                         uint32_t lane) {
+  void onAmdgpuReadVgpr(amdgpu::Wavefront *wf, uint32_t logical_reg, uint32_t lane) {
     for (auto &p : plugins_)
       p->onAmdgpuReadVgpr(wf, logical_reg, lane);
   }
