@@ -214,12 +214,13 @@ static void ChunkDeliveryThread() {
       std::unique_lock<std::mutex> lk(g_chunk_mtx);
       g_chunk_cv.wait(lk, [&] {
         if (g_chunk_thread_stop.load(std::memory_order_relaxed)) return true;
-        uint32_t max_id = g_max_gpu_chunk_id.load(std::memory_order_acquire);
-        // Wake when the next slab's last record (chunk_id) is at least
-        // kDeliveryMargin behind the highest GPU-callback chunk_id.
-        // slab_last is the chunk_id of the last record in slab next_slab.
-        uint32_t slab_last = (next_slab + 1) * static_cast<uint32_t>(kChunkSize) - 1;
-        return max_id > slab_last + kDeliveryMargin;
+        uint32_t max_id  = g_max_gpu_chunk_id.load(std::memory_order_acquire);
+        // Wake when the GPU callback watermark is kDeliveryMargin full slabs
+        // ahead of next_slab.  Slab-granular margin (not record-granular) gives
+        // ~kChunkSize * kDeliveryMargin records of safety, making it safe even
+        // when GPU callbacks arrive significantly out of order.
+        uint32_t max_slab = max_id / static_cast<uint32_t>(kChunkSize);
+        return max_slab > next_slab + kDeliveryMargin;
       });
     }
 
@@ -236,17 +237,21 @@ static void ChunkDeliveryThread() {
     auto deliver_slab = [&](uint32_t slab_idx, uint32_t count) {
       if (slab_idx >= g_records.size() || !g_records[slab_idx]) return;
       hipApiRecordExt* ptr = g_records[slab_idx];
-      uint32_t slab_first  = slab_idx * static_cast<uint32_t>(kChunkSize);
       for (auto& c : clients)
-        c.cb(ptr, count, slab_first, c.user_data);
+        c.cb(ptr, count, slab_idx, c.user_data);
       for (uint32_t i = 0; i < count; ++i)
         FreeRecordResources(&ptr[i]);
       g_records[slab_idx] = nullptr;
     };
 
-    // Deliver all complete slabs that are kDeliveryMargin behind the GPU callback watermark.
-    if (total >= static_cast<uint32_t>(kChunkSize)) {
-      uint32_t watermark_slab = total / static_cast<uint32_t>(kChunkSize) - 1;
+    // Deliver all complete slabs that are kDeliveryMargin full slabs behind the
+    // GPU callback watermark.  max_slab is the slab of the highest GPU callback;
+    // we only deliver slabs strictly before max_slab - kDeliveryMargin.
+    uint32_t max_id   = g_max_gpu_chunk_id.load(std::memory_order_acquire);
+    uint32_t max_slab = max_id / static_cast<uint32_t>(kChunkSize);
+    if (total >= static_cast<uint32_t>(kChunkSize) &&
+        max_slab > next_slab + kDeliveryMargin) {
+      uint32_t watermark_slab = max_slab - kDeliveryMargin - 1;
       while (next_slab <= watermark_slab) {
         deliver_slab(next_slab, static_cast<uint32_t>(kChunkSize));
         ++next_slab;
@@ -328,6 +333,10 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
 
   size_t idx = slot / kChunkSize;
   if (idx >= g_records.size()) return 0;
+
+  // g_records[idx] may be nullptr if the chunk was already delivered and freed
+  // by the streaming delivery thread — ignore late GPU callbacks for freed slabs.
+  if (!g_records[idx]) return 0;
 
   hipApiRecordExt* rec = &g_records[idx][slot % kChunkSize];
 
