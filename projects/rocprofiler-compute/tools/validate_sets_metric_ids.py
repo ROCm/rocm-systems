@@ -188,7 +188,7 @@ def validate() -> list[str]:
             if not formula_texts or limits is None:
                 continue
 
-            counters = extract_counters("\n".join(formula_texts))
+            counters = extract_counters("\n".join(formula_texts), arch=arch)
             # *_ACCUM is the per-bucket alias for SQ_ACCUM_PREV_HIRES, which is
             # injected automatically by the profiler for level counters
             counters = {c for c in counters if not c.endswith("_ACCUM")}

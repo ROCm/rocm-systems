@@ -311,7 +311,10 @@ class TestEvaluationPipeline:
             }
         )
         with (
-            patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}),
+            patch(
+                "utils.metrics.evaluation_pipeline.get_build_in_vars",
+                return_value={},
+            ),
             patch(
                 "utils.metrics.evaluation_pipeline.debug_row_tracker"
             ) as mock_debug_row_tracker,
@@ -338,7 +341,9 @@ class TestEvaluationPipeline:
                 "Value": "to_sum(raw_pmc_df['SQ_WAVES'])",
             }
         )
-        with patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}):
+        with patch(
+            "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
+        ):
             eval_metric(
                 dfs,
                 dfs_type,
@@ -382,7 +387,9 @@ class TestEvaluationPipeline:
         )
         assert metric_df.loc["1.1.0", "Average"] is None
 
-        with patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}):
+        with patch(
+            "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
+        ):
             eval_metric(
                 dfs,
                 dfs_type,

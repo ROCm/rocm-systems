@@ -57,10 +57,11 @@ BUILD_IN_VARS: dict[str, dict[str, str]] = {
         ),
         "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
     },
-    # RDNA analysis YAMLs (currently only gfx1151) reference no built-ins;
-    # numActiveCUs has no per-CU-busy counter equivalent on RDNA, and
-    # hbmBandwidth is meaningless without HBM.
-    "rdna": {},
+    "rdna": {
+        "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
+        "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
+        "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
+    },
 }
 
 _ARCH_TO_FAMILY: dict[str, str] = {
