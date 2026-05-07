@@ -19,6 +19,7 @@ def test_import_and_constants():
     assert rocshmem4py.ROCSHMEM_SUCCESS == 0
     assert rocshmem4py.ROCSHMEM_TEAM_WORLD == 0
     assert rocshmem4py.ROCSHMEM_TEAM_INVALID == -1
+    assert rocshmem4py.ROCSHMEM_TEAM_WORLD != rocshmem4py.ROCSHMEM_TEAM_INVALID
 
     assert rocshmem4py.ROCSHMEM_SIGNAL_SET == 0
     assert rocshmem4py.ROCSHMEM_SIGNAL_ADD == 1
