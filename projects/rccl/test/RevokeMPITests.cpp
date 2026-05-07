@@ -151,7 +151,6 @@ TEST_F(RevokeMPITest, RevokeThenShrink_ChildWorks)
                                  &child, nullptr, NCCL_SHRINK_DEFAULT));
 
         ASSERT_NE(child, nullptr);
-        auto child_guard = makeCommAutoGuard(child);
 
         void* send_buf = nullptr;
         void* recv_buf = nullptr;
@@ -167,6 +166,15 @@ TEST_F(RevokeMPITest, RevokeThenShrink_ChildWorks)
                   ncclAllReduce(send_buf, recv_buf, 1, ncclFloat, ncclSum, child, stream));
 
         HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+    }
+
+    // Barrier before child destruction ensures all participating ranks
+    // complete their operations before any rank starts destroying
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if(!isExcluded)
+    {
+        ASSERT_EQ(ncclSuccess, ncclCommDestroy(child));
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -259,11 +267,18 @@ TEST_F(RevokeMPITest, Collective_Revoke_Shrink_Collective)
 
     if(!isExcluded)
     {
-        auto child_guard = makeCommAutoGuard(child);
-
         ASSERT_EQ(ncclSuccess,
                   ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, child, stream));
         HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+    }
+
+    // Barrier before child destruction ensures all participating ranks
+    // complete their operations before any rank starts destroying
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if(!isExcluded)
+    {
+        ASSERT_EQ(ncclSuccess, ncclCommDestroy(child));
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -338,8 +353,6 @@ TEST_F(RevokeMPITest, P2P_Revoke_Shrink_P2P)
 
     if(!isExcluded)
     {
-        auto child_guard = makeCommAutoGuard(child);
-
         int child_rank = -1;
         int child_size = 0;
         ASSERT_EQ(ncclSuccess, ncclCommUserRank(child, &child_rank));
@@ -359,6 +372,15 @@ TEST_F(RevokeMPITest, P2P_Revoke_Shrink_P2P)
         ASSERT_EQ(ncclSuccess, ncclGroupEnd());
 
         HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+    }
+
+    // Barrier before child destruction ensures all participating ranks
+    // complete their operations before any rank starts destroying
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if(!isExcluded)
+    {
+        ASSERT_EQ(ncclSuccess, ncclCommDestroy(child));
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -499,11 +521,18 @@ TEST_F(RevokeMPITest, IncompleteCollective_Revoke_Shrink_Collective)
 
     if(!isExcluded)
     {
-        auto child_guard = makeCommAutoGuard(child);
-
         ASSERT_EQ(ncclSuccess,
                   ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, child, stream));
         HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+    }
+
+    // Barrier before child destruction ensures all participating ranks
+    // complete their operations before any rank starts destroying
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if(!isExcluded)
+    {
+        ASSERT_EQ(ncclSuccess, ncclCommDestroy(child));
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -595,11 +624,18 @@ TEST_F(RevokeMPITest, Collective_Revoke_AsymmetricShrink_Collective)
 
     if(!isExcluded)
     {
-        auto child_guard = makeCommAutoGuard(child);
-
         ASSERT_EQ(ncclSuccess,
                   ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, child, stream));
         HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+    }
+
+    // Barrier before child destruction ensures all participating ranks
+    // complete their operations before any rank starts destroying
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if(!isExcluded)
+    {
+        ASSERT_EQ(ncclSuccess, ncclCommDestroy(child));
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -668,11 +704,18 @@ TEST_F(RevokeMPITest, ShrinkAbort_InFlight_ChildWorks_RankRenumbering)
 
     if(!isExcluded)
     {
-        auto child_guard = makeCommAutoGuard(child);
-
         ASSERT_EQ(ncclSuccess,
                   ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, child, stream));
         HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+    }
+
+    // Barrier before child destruction ensures all participating ranks
+    // complete their operations before any rank starts destroying
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if(!isExcluded)
+    {
+        ASSERT_EQ(ncclSuccess, ncclCommDestroy(child));
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
