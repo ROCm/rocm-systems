@@ -1215,16 +1215,29 @@ static HSAKMT_STATUS hsaKmtSetDispatchLogCtx(HsaKFDContext *ctx,
 	args.op = KFD_IOC_PROFILER_DISPATCH_LOG;
 	args.dispatch_log.gpu_id    = GpuId;
 	args.dispatch_log.queue_id  = q->queue_id;
-	args.dispatch_log.op        = BufferBase
-	                                  ? KFD_DISPATCH_LOG_OP_SET
-	                                  : KFD_DISPATCH_LOG_OP_CLEAR;
-	args.dispatch_log.mem_space = KFD_DISPATCH_LOG_MEM_GTT;
-	args.dispatch_log.buffer_addr         = (__u64)(uintptr_t)BufferBase;
-	args.dispatch_log.buffer_size_records = NumRecords;
-	args.dispatch_log.pad                 = 0;
-	args.dispatch_log.wptr_addr           = (__u64)(uintptr_t)WptrAddr;
-	args.dispatch_log.rptr_addr           = (__u64)(uintptr_t)RptrAddr;
-	args.dispatch_log.signal_addr         = (__u64)(uintptr_t)SignalAddr;
+	args.dispatch_log.pad       = 0;
+	if (BufferBase) {
+		args.dispatch_log.op                  = KFD_DISPATCH_LOG_OP_SET;
+		args.dispatch_log.mem_space           = KFD_DISPATCH_LOG_MEM_GTT;
+		args.dispatch_log.buffer_addr         = (__u64)(uintptr_t)BufferBase;
+		args.dispatch_log.buffer_size_records = NumRecords;
+		args.dispatch_log.wptr_addr           = (__u64)(uintptr_t)WptrAddr;
+		args.dispatch_log.rptr_addr           = (__u64)(uintptr_t)RptrAddr;
+		args.dispatch_log.signal_addr         = (__u64)(uintptr_t)SignalAddr;
+	} else {
+		/*
+		 * CLEAR: kernel rejects nonzero mem_space / buffer / pointer
+		 * fields with -EINVAL (debate-stage code-quality C8). Send a
+		 * fully-zeroed args block beyond op/gpu_id/queue_id/pad.
+		 */
+		args.dispatch_log.op                  = KFD_DISPATCH_LOG_OP_CLEAR;
+		args.dispatch_log.mem_space           = 0;
+		args.dispatch_log.buffer_addr         = 0;
+		args.dispatch_log.buffer_size_records = 0;
+		args.dispatch_log.wptr_addr           = 0;
+		args.dispatch_log.rptr_addr           = 0;
+		args.dispatch_log.signal_addr         = 0;
+	}
 
 	/* Mirror the queue's local cache of buffer addr/size for backward
 	 * compat with existing UPDATE_QUEUE callers that read these on
