@@ -32,9 +32,9 @@
     "metadata": {
         "category": "hpc",
         "cli_flag": "--trace-openmp",
-        "description": "OpenMP offload workloads: tracing kernel dispatch, memory copy, and OMPT enabled",
+        "description": "OpenMP workloads: tracing kernel dispatch, memory copy, and OMPT enabled",
         "name": "trace-openmp",
-        "use_case": "OpenMP offload applications using target directives on AMD GPUs"
+        "use_case": "OpenMP applications using target directives on AMD GPUs"
     },
     "profiling": {
         "enabled": false
