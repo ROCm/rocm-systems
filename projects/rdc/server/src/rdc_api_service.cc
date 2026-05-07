@@ -260,13 +260,21 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  // Bound client-controlled count before writing the fixed-size stack array below.
+  const int request_count = request->field_ids_size();
+  if (request_count < 0 || request_count > RDC_MAX_FIELD_IDS_PER_FIELD_GROUP) {
+    reply->set_status(RDC_ST_BAD_PARAMETER);
+    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
+                          "field_ids count exceeds RDC_MAX_FIELD_IDS_PER_FIELD_GROUP");
+  }
+
   rdc_field_grp_t field_group_id;
   rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
-  for (int i = 0; i < request->field_ids_size(); i++) {
+  for (int i = 0; i < request_count; i++) {
     field_ids[i] = static_cast<rdc_field_t>(request->field_ids(i));
   }
   rdc_status_t result =
-      rdc_group_field_create(rdc_handle_, request->field_ids_size(), &field_ids[0],
+      rdc_group_field_create(rdc_handle_, request_count, &field_ids[0],
                              request->field_group_name().c_str(), &field_group_id);
   reply->set_status(result);
   if (result != RDC_ST_OK) {
