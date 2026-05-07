@@ -5,7 +5,6 @@ env:
   AIS_CI_IMAGE_NAME: ais_ci_${{ inputs.platform }}
   AIS_DOCKER_REGISTRY: ghcr.io/${{ github.repository_owner }}/hipfile
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
-  AIS_PR_BASE_URL: ${{ github.server_url }}/${{ github.repository }}/pull
 
 on:
   workflow_call:
@@ -97,7 +96,6 @@ jobs:
       - name: Set CI environment variables
         run: |
           echo "AIS_CI_IMAGE_TAG=$(echo "${GITHUB_REF}" | sed 's|[^a-zA-Z0-9]|-|g')-rocm${AIS_INPUT_ROCM_VERSION}" >> "${GITHUB_ENV}"
-          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
 
       - name: Set target AIS CI Image
         id: ci-image
@@ -138,10 +136,6 @@ jobs:
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
             --target base \
-            --label "org.opencontainers.image.description= \
-              ${AIS_CI_IMAGE_NAME} Development Image for AIS CI using branch \
-              ${GITHUB_HEAD_REF} for PR #${AIS_PR_NUMBER}. \
-              PR URL: ${AIS_PR_BASE_URL}/${AIS_PR_NUMBER}" \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             --build-arg ROCM_VERSION=${AIS_INPUT_ROCM_VERSION} \
             --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE }}" \
@@ -155,10 +149,6 @@ jobs:
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
             --target nvidia \
-            --label "org.opencontainers.image.description= \
-              ${AIS_CI_IMAGE_NAME} NVIDIA Development Image for AIS CI using branch \
-              ${GITHUB_HEAD_REF} for PR #${AIS_PR_NUMBER}. \
-              PR URL: ${AIS_PR_BASE_URL}/${AIS_PR_NUMBER}" \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             --build-arg ROCM_VERSION=${AIS_INPUT_ROCM_VERSION} \
             --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}" \
