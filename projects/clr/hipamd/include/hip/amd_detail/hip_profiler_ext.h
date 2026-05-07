@@ -288,14 +288,13 @@ hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
 /**
  * @brief Callback type for streaming delivery of completed activity records.
  *
- * @param records     Pointer to the slab — an array of count records aligned to a
- *                    kChunkSize boundary.  Valid only for the duration of the callback;
- *                    do not store this pointer.  The profiler frees the records immediately
- *                    after the callback returns.
+ * @param records     Pointer to the slab — an array of count records.  Valid only for
+ *                    the duration of the callback; do not store this pointer.  The profiler
+ *                    frees the records immediately after the callback returns.
  * @param count       Number of valid records in the slab (always kChunkSize except for the
  *                    last partial slab delivered at exit).
- * @param chunk_id    chunk_id of records[0].  Records within the slab are contiguous, so
- *                    the last record has chunk_id == chunk_id + count - 1.
+ * @param chunk_id    Monotonically increasing slab index (0, 1, 2, …).  Slabs are always
+ *                    delivered in order.  records[i].chunk_id == chunk_id * kChunkSize + i.
  * @param user_data   Opaque pointer supplied to hipProfilerRegisterChunkCallbackExt.
  */
 typedef void (*hipProfilerChunkCallback)(
