@@ -614,7 +614,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Basic, int)
 // @extraMasks  when testing coalesced_threads, this can be use to simulate
 //              divergence
 template <size_t TileSize, class Functor, class T>
-void __global__ reduceKernel(T* output, const T* input)
+void __global__ reduceKernel(T* output, const T* input, unsigned long long* extraMasks, AggregationType* aggType)
 {
   int tid = threadIdx.x;
   int laneId = tid % warpSize;
@@ -625,7 +625,21 @@ void __global__ reduceKernel(T* output, const T* input)
     int idx = warpSize * i + laneId;
     T& result = output[idx];
 
-    result = cg::reduce(mytile, input[idx], Functor());
+    if ((1ull << laneId) & mask) {
+      switch (*aggType) {
+      case AggregationType::Reduce:
+        result = cg::reduce(mytile, input[idx], Functor());
+        break;
+      case AggregationType::InclusiveScan:
+        result = cg::inclusive_scan(mytile, input[idx], Functor());
+        break;
+      default:
+        assert(false && "Unsupported enumeration");
+      }
+
+    } else {
+      result = 0;
+    }
   }
 }
 
@@ -666,6 +680,7 @@ void aggregateForTypeAndOp(AggregationType aggType)
                                                     kNumReduces * sizeof(unsigned long long));
   LinearAllocGuard<unsigned long long> h_extraMasks(LinearAllocs::malloc,
                                                     kNumReduces * sizeof(unsigned long long));
+  LinearAllocGuard<AggregationType> d_aggType(LinearAllocs::hipMalloc, sizeof(AggregationType));
   std::mt19937_64 gen(Catch::rngSeed());
   dim3 gridDim = { 1 };
   dim3 blockDim = { static_cast<unsigned short>(wavefrontSize) };
@@ -679,6 +694,7 @@ void aggregateForTypeAndOp(AggregationType aggType)
   void* kernelPtr;
   T expected[64];
 
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
   genRandomBuffers(d_input, h_input, distInput, gen, kNumReduces * wavefrontSize);
 
   if (TileSize) {
@@ -693,7 +709,7 @@ void aggregateForTypeAndOp(AggregationType aggType)
                    kNumReduces);
   }
 
-  std::array<void*, 3> devicePtrs = { d_result.ptr(), d_input.ptr(), d_extraMasks.ptr() };
+  std::array<void*, 4> devicePtrs = { d_result.ptr(), d_input.ptr(), d_extraMasks.ptr(), d_aggType.ptr() };
   void* args[devicePtrs.size()];
 
   for (int i = 0; i < devicePtrs.size(); i++) {
@@ -1142,6 +1158,22 @@ TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
 
   if (getWarpSize() == 64) {
     testScanForTileSize<64>();
+  }
+}
+
+// for all the tile sizes and all input types, using random input values, calculates the scan
+// values. Additionally, randomly make some threads not participate for the coalesced_threads case
+// TODO g-h-c add more types
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic, int)
+{
+  std::tuple<cooperative_groups::plus<TestType>,
+             cooperative_groups::less<TestType>,
+             cooperative_groups::greater<TestType>> types;
+
+  if (getWarpSize() == 32) {
+    runAggregationRandomForOps<false, TestType, 32>(AggregationType::InclusiveScan, types);
+  } else {
+    runAggregationRandomForOps<false, TestType, 64>(AggregationType::InclusiveScan, types);
   }
 }
 
