@@ -22,11 +22,9 @@ ErrorCode Device::Create(Platform *platform, LdaChain *ldaChain,
                          const thunk_proxy::DeviceInfo &deviceInfo,
                          Device **deviceOut) {
   (void)deviceIndex;
-  (void)deviceInfo;
-
   auto dctx = std::unique_ptr<thunk_proxy::DeviceContext>(
       ldaChain->GetChainContext()->CreateDevice(
-          ldaChain->DeviceHandle(), chainIndex));
+          ldaChain->DeviceHandle(), chainIndex, deviceInfo));
 
   if (!dctx)
     return ErrorCode::InitializationFailed;

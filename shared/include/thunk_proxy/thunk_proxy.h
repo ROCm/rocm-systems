@@ -191,9 +191,9 @@ public:
   uint32_t VendorId(uint32_t index) const;
 
   // Create a DeviceContext for GPU slot chain_index.
-  // Must be called after QueryAdapterInfo().
   class DeviceContext *CreateDevice(WinDeviceHandle device_handle,
-                                    uint32_t chain_index) const;
+                                    uint32_t chain_index,
+                                    const DeviceInfo &device_info) const;
 
   ChainContext(const ChainContext &) = delete;
   ChainContext &operator=(const ChainContext &) = delete;
@@ -281,6 +281,8 @@ public:
 
   // Send a driver-escape packet on behalf of this GPU slot.
   ErrorCode Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
+
+  const DeviceInfo &GetDeviceInfo() const;
 
   DeviceContext(const DeviceContext &) = delete;
   DeviceContext &operator=(const DeviceContext &) = delete;
