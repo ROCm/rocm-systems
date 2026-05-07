@@ -49,10 +49,22 @@ get_profiler_ioctl_request()
         kfd_ioctl_get_version_args args = {};
         if(ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_GET_VERSION, &args) != 0)
         {
-            return static_cast<unsigned long>(AMDKFD_IOC_PROFILER);
+            auto err      = errno;
+            auto fallback = static_cast<unsigned long>(AMDKFD_IOC_PROFILER);
+            ROCP_INFO << fmt::format("KFD version query failed (error: {}); using fallback "
+                                     "profiler ioctl request {:#x}.",
+                                     strerror(err),
+                                     fallback);
+            return fallback;
         }
 
-        return get_profiler_ioctl_request_for_version(args.major_version, args.minor_version);
+        auto selected =
+            get_profiler_ioctl_request_for_version(args.major_version, args.minor_version);
+        ROCP_INFO << fmt::format("KFD version {}.{} detected; using profiler ioctl request {:#x}.",
+                                 args.major_version,
+                                 args.minor_version,
+                                 selected);
+        return selected;
     }();
 
     return request;
@@ -119,9 +131,11 @@ counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues
                 return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
             default:
                 ROCP_WARNING << fmt::format(
-                    "Failed to lock device {}. PMC Counters may be inaccurate and System Counter "
+                    "Failed to lock device {} (error: {}). PMC Counters may be "
+                    "inaccurate and System Counter "
                     "Collection will be degraded.",
-                    agent->id.handle);
+                    agent->id.handle,
+                    strerror(err));
                 return ROCPROFILER_STATUS_ERROR;
         }
     }
