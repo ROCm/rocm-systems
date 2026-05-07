@@ -1429,8 +1429,8 @@ class TestMetricEvaluatorDivisionByZero:
     def test_nullified_incomplete_kernel_returns_na(self):
         """Incomplete kernel nullified by imputation: both columns all-NaN → N/A.
 
-        Since commit 9ac99865cd8, kernels with fewer dispatches than perfmon
-        files have every counter column set to NaN before metric evaluation.
+        Kernels with fewer dispatches than perfmon files have every counter
+        column set to NaN before metric evaluation.
         SUM(all-NaN) / SUM(all-NaN) = NaN, which must be caught as N/A.
         """
         evaluator = self._make_evaluator({
