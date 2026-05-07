@@ -547,8 +547,19 @@ void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
         amd_queue_.hsa_queue.size - 1, /* size is power-of-2 */
         (int64_t)value);
   }
+  // Code-quality C1: use amd_queue_.hsa_queue.id (the HSA process-unique
+  // queue id) as the on-the-wire join key, NOT queue_id_ (the KFD-side
+  // opaque QueueId). The doorbell tracepoint MUST share a queue-id
+  // namespace with the consumers it joins against:
+  //   - rocm_hsa:hsa_intercept_packets emits amd_queue_.hsa_queue.id
+  //     (intercept_queue.cpp::SubmitPackets)
+  //   - rocm_hsa:kernel_dispatch_record emits amd_queue_.hsa_queue.id
+  //     via queue_id_of() (dispatch_log.cpp; see queue_id_of() helper)
+  // queue_id_ is the KFD-driver-side identifier (queue_rsrc.QueueId,
+  // assigned by KfdDriver::CreateQueue), useful only for KFD ioctls.
+  // Mixing namespaces silently breaks every consumer-side join.
   rocm_trace_emit_hsa_doorbell_ring(
-      (uint32_t)queue_id_, (int64_t)value, pkt_type);
+      (uint32_t)amd_queue_.hsa_queue.id, (int64_t)value, pkt_type);
 
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF() ||
         core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
