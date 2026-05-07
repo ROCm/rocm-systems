@@ -25,8 +25,6 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-include(FindPackageHandleStandardArgs)
-
 project(
     rocprofiler-sdk-tests-rocprofv3-att
     LANGUAGES CXX
@@ -42,28 +40,10 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 
 find_package(rocprofiler-sdk REQUIRED)
 
-find_library(
-    attdecoder_LIBRARY
-    NAMES rocprof-trace-decoder
-    HINTS ${ROCM_PATH}
-    PATHS ${ROCM_PATH}
-    PATH_SUFFIXES lib)
+set(COMMON_PARAMS ${PRELOAD_ARGS} --att --output-format json --log-level env -d
+                  ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/)
 
-if(attdecoder_LIBRARY)
-    cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
-endif()
-
-find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
-                                                           attdecoder_LIBRARY)
-
-set(COMMON_PARAMS_NO_LIB ${PRELOAD_ARGS} --att --output-format json --log-level env -d
-                         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/)
-
-set(IS_DISABLED ON)
-if(attdecoder_FOUND)
-    set(IS_DISABLED OFF)
-    set(COMMON_PARAMS --att-library-path ${attdecoder_LIB_DIR} ${COMMON_PARAMS_NO_LIB})
-endif()
+set(IS_DISABLED OFF)
 
 # hsa multiqueue dependency test with lib path
 rocprofiler_add_integration_execute_test(
@@ -127,70 +107,6 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/json_input
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
-function(configure_att_input _FILENAME)
-    set(LIB_PATH_LOC "${attdecoder_LIB_DIR}")
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}//${_FILENAME}.in
-                   ${CMAKE_CURRENT_BINARY_DIR}/${_FILENAME} @ONLY)
-endfunction()
-
-configure_att_input(att_input.yml)
-configure_att_input(att_input_will_fail.yml)
-
-# test yaml input
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-att-yaml-input
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS_NO_LIB}/yaml -i
-        ${CMAKE_CURRENT_BINARY_DIR}/att_input.yml --echo --
-        $<TARGET_FILE:hsa_code_object_testapp>
-    DEPENDS hsa_code_object_testapp
-    TIMEOUT 45
-    LABELS "integration-tests"
-    DISABLED ${IS_DISABLED})
-
-# Invalid lib path has to fail
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-att-yaml-input-will-fail
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/att_input_will_fail.yml --log-level env --echo --
-        $<TARGET_FILE:hsa_code_object_testapp>
-    DEPENDS hsa_code_object_testapp
-    TIMEOUT 45
-    LABELS "integration-tests"
-    WILL_FAIL
-    DISABLED ${IS_DISABLED})
-
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-att-library-path-cmd-line-will-fail
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --att-library-path .
-            --log-level env --echo -- $<TARGET_FILE:hsa_code_object_testapp>
-    DEPENDS hsa_code_object_testapp
-    TIMEOUT 45
-    LABELS "integration-tests"
-    WILL_FAIL
-    DISABLED ${IS_DISABLED})
-
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-att-library-path-env-var-will-fail
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS_NO_LIB}/envfail
-            --att-library-path . --echo -- $<TARGET_FILE:hsa_code_object_testapp>
-    DEPENDS hsa_code_object_testapp
-    TIMEOUT 45
-    LABELS "integration-tests"
-    WILL_FAIL
-    DISABLED ${IS_DISABLED}
-    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}")
-
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-att-env-var
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS_NO_LIB}/envvar --
-            $<TARGET_FILE:hsa_code_object_testapp>
-    DEPENDS hsa_code_object_testapp
-    TIMEOUT 45
-    LABELS "integration-tests"
-    DISABLED ${IS_DISABLED}
-    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}")
 #
 # Uses ATT and Counter Collection at the same time
 #
@@ -339,7 +255,6 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED_OTHER_SIMD}
-    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-att-other-simd)
 
@@ -409,7 +324,6 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
-    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-att-shaderdata)
 

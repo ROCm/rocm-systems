@@ -188,21 +188,18 @@ To decode the raw thread trace data, create and initialize a Trace Decoder:
 
 .. code-block:: cpp
 
-    rocprofiler_thread_trace_decoder_id_t decoder{};
+    rocprof_trace_decoder_handle_t decoder{};
 
-    // Create the Trace Decoder with the path to the decoder library
-    ROCPROFILER_CALL(
-        rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib"),
-        "thread trace decoder creation");
+    // Create the Trace Decoder handle
+    DECODER_CALL(rocprof_trace_decoder_create_handle(&decoder));
 
     // Adds code object load information, reported by the code object tracing service
-    ROCPROFILER_CALL(rocprofiler_thread_trace_decoder_codeobj_load(decoder,
-                                                                   code_object_id,
-                                                                   load_delta,
-                                                                   load_size,
-                                                                   data,
-                                                                   datasize),
-                    "code object load");
+    DECODER_CALL(rocprof_trace_decoder_codeobj_load(decoder,
+                                                    code_object_id,
+                                                    load_delta,
+                                                    load_size,
+                                                    data,
+                                                    datasize));
 
 Code object tracking
 ++++++++++++++++++++
@@ -221,7 +218,7 @@ To properly decode instruction addresses, track the code object information:
             return;
 
         // Optionally, ROCPROFILER_CALLBACK_PHASE_UNLOAD can be handled by calling
-        // rocprofiler_thread_trace_decoder_codeobj_unload(decoder, data->code_object_id);
+        // rocprof_trace_decoder_codeobj_unload(decoder, data->code_object_id);
         if(record.phase != ROCPROFILER_CALLBACK_PHASE_LOAD) return;
 
         auto* data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
@@ -231,15 +228,14 @@ To properly decode instruction addresses, track the code object information:
         auto* memorybase = reinterpret_cast<const void*>(data->memory_base);
 
         // Register code object with Trace Decoder
-        ROCPROFILER_CALL(
-            rocprofiler_thread_trace_decoder_codeobj_load(
+        DECODER_CALL(
+            rocprof_trace_decoder_codeobj_load(
                 decoder,
                 data->code_object_id,
                 data->load_delta,
                 data->load_size,
                 memorybase,
-                data->memory_size),
-            "code object loading to decoder");
+                data->memory_size));
     }
 
 Processing thread trace data
@@ -261,11 +257,11 @@ The thread trace service asynchronously delivers raw trace data via a dedicated 
                          rocprofiler_user_data_t userdata)
     {
         // Process shader callback data using the Trace Decoder.
-        auto status = rocprofiler_trace_decode(decoder_handle,
-                                               trace_decoder_callback,
-                                               data,
-                                               data_size,
-                                               userdata);
+        DECODER_CALL(rocprof_trace_decoder_parse(decoder_handle,
+                                                      data,
+                                                      data_size,
+                                                      trace_decoder_callback,
+                                                      &userdata));
     }
 
 Decoder callback
@@ -346,9 +342,9 @@ The Trace Decoder provides important information about the quality and comprehen
 
 For more information about the data structures and functions available for thread trace decoding, see the following headers:
 
-- `trace_decoder.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>`_
+- `rocprof_trace_decoder.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprof-trace-decoder/include/rocprof_trace_decoder/rocprof_trace_decoder.h>`_
 
-- `trace_decoder_types.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/experimental/thread-trace/trace_decoder_types.h>`_
+- `trace_decoder_types.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprof-trace-decoder/include/rocprof_trace_decoder/trace_decoder_types.h>`_
 
 - `core.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/experimental/thread-trace/core.h>`_
 

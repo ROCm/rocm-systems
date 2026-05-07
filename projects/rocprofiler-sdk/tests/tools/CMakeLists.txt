@@ -9,6 +9,7 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
+find_package(rocprof-trace-decoder REQUIRED)
 
 # tool library supporting JSON and perfetto output
 add_library(rocprofiler-sdk-json-tool SHARED)
@@ -57,7 +58,8 @@ add_custom_command(
 # thread-trace tool libraries
 set(THREAD_TRACE_TOOL_LINK_LIBRARIES
     rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
-    rocprofiler-sdk::tests-common-library)
+    rocprofiler-sdk::tests-common-library
+    rocprof-trace-decoder::rocprof-trace-decoder)
 
 # single dispatch thread trace tool
 add_library(thread-trace-single-tool SHARED)
