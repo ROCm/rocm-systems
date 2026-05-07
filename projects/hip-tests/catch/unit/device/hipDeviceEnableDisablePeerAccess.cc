@@ -155,8 +155,7 @@ HIP_TEST_CASE(Unit_hipDeviceDisablePeerAccess_negative) {
     int canAccessPeer = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
     if (canAccessPeer == 0) {
-      HipTest::HIP_SKIP_TEST("Skipping because no P2P support between device 0 and 1");
-      return;
+      HIP_SKIP_TEST("Skipping because no P2P support between device 0 and 1");
     }
     HIP_CHECK_ERROR(hipDeviceDisablePeerAccess(1), hipErrorPeerAccessNotEnabled);
   }
