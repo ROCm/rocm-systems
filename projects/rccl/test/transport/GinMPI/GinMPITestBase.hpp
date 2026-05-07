@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <strings.h>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -28,11 +29,9 @@
 #include "TestChecks.hpp"
 #include "rccl/rccl.h"
 
-#include "gin.h"
 #include "nccl_net.h"
 #include "nccl_gin.h"
 
-extern ncclGin_t ncclGinIbProxy;
 extern ncclGin_t IbCastGinIbProxy;
 
 namespace RCCLGinTests
@@ -45,26 +44,13 @@ using ::MPITestConstants::kNoNodeLimit;
 
 inline ncclGin_t* GetGinPlugin()
 {
-    const char* env = std::getenv("NCCL_GIN_PLUGIN");
-    if (env == nullptr || *env == '\0') {
-        return &ncclGinIbProxy;
-    }
-    if (std::strcmp(env, "GIN_IB_PROXY") == 0) {
-        return &ncclGinIbProxy;
-    }
-    if (std::strcmp(env, "CAST_GIN_IB_PROXY") == 0) {
-        return &IbCastGinIbProxy;
-    }
+    const char* envNet = std::getenv("NCCL_NET");
+    if (envNet == nullptr) return nullptr;
 
-    static bool warned = false;
-    if (!warned)
-    {
-        std::fprintf(stderr,
-                     "[GinMPITest] WARN: unknown NCCL_GIN_PLUGIN='%s', "
-                     "falling back to GIN_IB_PROXY\n", env);
-        warned = true;
-    }
-    return &ncclGinIbProxy;
+    if (strcasecmp(envNet, "IB-CAST") == 0) return &IbCastGinIbProxy;
+    // if (strcasecmp(envNet, "IB") == 0) return &ncclGinIbProxy;
+
+    return nullptr;
 }
 
 class GinMPITestBase : public MPITestBase
@@ -105,6 +91,25 @@ protected:
     {
         MPITestBase::SetUp();
         gin_ = GetGinPlugin();
+        if (gin_ == nullptr)
+        {
+            // GetGinPlugin() returned null -> NCCL_NET selects a transport
+            // with no GIN backend ported to this RCCL build (or is unset).
+            static bool warned = false;
+            if (!warned)
+            {
+                const char* envNet = std::getenv("NCCL_NET");
+                std::fprintf(stderr,
+                             "[GinMPITest] WARN: NCCL_NET=%s has no GIN "
+                             "backend in this RCCL build. Currently only "
+                             "NCCL_NET=ib-cast is supported. Skipping all "
+                             "GIN tests.\n",
+                             envNet ? envNet : "<unset>");
+                warned = true;
+            }
+            GTEST_SKIP() << "No GIN backend available for current NCCL_NET";
+            return;
+        }
     }
 
     void TearDown() override
@@ -155,6 +160,11 @@ protected:
                       int maxProcesses = kNoProcessLimit,
                       int minNodes = 1)
     {
+        // SetUp() already recorded the skip + warning when NCCL_NET wasn't
+        // ib-cast. Short-circuit so the per-test body doesn't proceed to
+        // dereference gin_->init() etc.
+        if (gin_ == nullptr) return false;
+
         if(!validateTestPrerequisites(minProcesses, maxProcesses,
                                       kNoPowerOfTwoRequired,
                                       minNodes, kNoNodeLimit))
@@ -166,7 +176,12 @@ protected:
         int nGpus = 0;
         if(hipGetDeviceCount(&nGpus) != hipSuccess || nGpus <= 0)
         {
-            GTEST_SKIP() << "No HIP devices visible; GIN tests require GPU";
+            // GTEST_SKIP() expands to `return <void>`, which we cannot do
+            // from this bool-returning helper. Execute it inside a void
+            // lambda so the return is consumed there, then bail to the
+            // caller normally — the skip status is still registered on
+            // the active test.
+            [&]() { GTEST_SKIP() << "No HIP devices visible; GIN tests require GPU"; }();
             return false;
         }
 
@@ -190,7 +205,8 @@ protected:
         }
         if(nDevices_ <= 0)
         {
-            GTEST_SKIP() << "No IB GIN-capable devices on this host";
+            // See comment above on the bool-vs-void GTEST_SKIP wrapping.
+            [&]() { GTEST_SKIP() << "No IB GIN-capable devices on this host"; }();
             return false;
         }
 
