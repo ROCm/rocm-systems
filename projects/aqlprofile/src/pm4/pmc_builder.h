@@ -107,9 +107,11 @@ class GpuPmcBuilder : public PmcBuilder {
   uint32_t se_number_;
   uint32_t wgp_per_sa_;
   uint32_t sarrays_per_se_;
-  // XCC number on the GPU
+  // XCC topology
   uint32_t xcc_number_;
   uint32_t xcc_per_aid_;
+  bool is_multi_xcc_;   // xcc_number_ > 1: enables PRED_EXEC packets and AID-aware addressing
+  uint32_t aid_count_;  // Total AID count: xcc_number_ / xcc_per_aid_
 
   CmdBuilder* builder_;
   const PrimitivesProvider* prim_;

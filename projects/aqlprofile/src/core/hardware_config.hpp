@@ -71,6 +71,7 @@ struct HardwareConfig {
 
   // SQTT configuration
   uint32_t sqtt_buffer_alignment; // SQTT buffer alignment requirement
+  uint32_t sqtt_header_version;   // SQTT header version2 field (GFX9 only; 4=generic, 5=MI300, 6=MI350)
 
   // Default constructor
   HardwareConfig()
@@ -97,7 +98,8 @@ struct HardwareConfig {
         has_wptr_relative_addressing(false),
         needs_sqtt_header_packet(false),
         spm_sample_delay_max(0),
-        sqtt_buffer_alignment(0x1000) {}
+        sqtt_buffer_alignment(0x1000),
+        sqtt_header_version(0) {}
 
   // Helper: Is this a multi-XCC architecture?
   bool IsMultiXCC() const { return xcc_count > 1; }

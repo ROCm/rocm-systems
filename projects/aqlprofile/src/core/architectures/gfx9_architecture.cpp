@@ -59,6 +59,7 @@ void Gfx9Architecture::InitializeConfig(const AgentInfo* agent_info) {
   config_.has_sqtt_status2_register = false;
   config_.has_wptr_relative_addressing = false;
   config_.needs_sqtt_header_packet = true;
+  config_.sqtt_header_version = 4;   // GFX9 generic (MI100/MI200 inherit; MI300/MI350 override)
   config_.spm_sample_delay_max = 0;  // Base GFX9 - MI variants override
   config_.sqtt_buffer_alignment = 0x1000;
 

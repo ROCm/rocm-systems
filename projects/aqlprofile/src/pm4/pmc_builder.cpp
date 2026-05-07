@@ -64,13 +64,15 @@ GpuPmcBuilder::GpuPmcBuilder(const AgentInfo* agent_info, CmdBuilder* builder,
       se_number_(agent_info->se_num / agent_info->xcc_num),
       xcc_number_(agent_info->xcc_num),
       xcc_per_aid_(agent_info->xcc_per_aid),
+      is_multi_xcc_(agent_info->xcc_num > 1),
+      aid_count_(agent_info->xcc_num / agent_info->xcc_per_aid),
       sarrays_per_se_(agent_info->shader_arrays_per_se) {
   this->wgp_per_sa_ =
       (agent_info->cu_num / 2 + sarrays_per_se_ * se_number_ - 1) / (se_number_ * sarrays_per_se_);
   this->wgp_per_sa_ /= agent_info->xcc_num;
   // Due to MI300 CP firmware issue we need to use mem_mapped_register mode to patch for GCEA
   // hang. Otherwise both perfcounters mode and mem_mapped_register mode should work.
-  builder_->bUsePerfCounterMode = (xcc_number_ > 1) ? false : true;
+  builder_->bUsePerfCounterMode = !is_multi_xcc_;
   this->asymmetric_cu_patch = strncmp(agent_info->name, "gfx1250", 7) ? false : true;
 }
 
@@ -89,7 +91,7 @@ const CounterRegInfo* GpuPmcBuilder::get_reg_table(const counter_des_t& counter_
   const auto* block_info = counter_des.block_info;
   const auto& block_des = counter_des.block_des;
   auto base_index = block_des.index;
-  if ((block_info->attr & CounterBlockAidAttr) && (xcc_number_ > 1))
+  if ((block_info->attr & CounterBlockAidAttr) && is_multi_xcc_)
     // MI300 all AID style instances fold back to per AID counter_reg_info
     base_index %= (block_info->instance_count / MAX_AID);
   base_index =
@@ -98,7 +100,7 @@ const CounterRegInfo* GpuPmcBuilder::get_reg_table(const counter_des_t& counter_
 }
 
 uint32_t GpuPmcBuilder::GetAidNumber() const {
-  return (xcc_number_ > 1) ? 4 : 1;
+  return aid_count_;
 }
 
 uint32_t GpuPmcBuilder::GetTargetAid(const counter_des_t& counter_des) const {
@@ -112,7 +114,7 @@ uint32_t GpuPmcBuilder::GetTargetAid(const counter_des_t& counter_des) const {
 }
 
 uint64_t GpuPmcBuilder::get_smn_addr(uint64_t addr, uint32_t target_aid_index, bool use_aid) {
-  if ((xcc_number_ > 1) && use_aid)
+  if (is_multi_xcc_ && use_aid)
     addr |= ((uint64_t)1 << UMC_USR_BIT) | ((uint64_t)target_aid_index << UMC_AID_BIT);
   return addr;
 }
@@ -126,7 +128,7 @@ void GpuPmcBuilder::start_generic_mc_counters(CmdBuffer* cmd_buffer,
                                               const std::set<uint64_t>& instances, bool use_aid) {
   // insert master XCC PRED_EXEC packet here if it is MI300
   PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, VIRTUALXCCID_SELECT,
-                                    (xcc_number_ > 1) && use_aid);
+                                    is_multi_xcc_ && use_aid);
   for (const auto& control_addr : instances) {
     // rpb instance clear
     builder_->BuildWritePConfigRegPacket(cmd_buffer, control_addr, prim_->McResetValue());
@@ -141,7 +143,7 @@ void GpuPmcBuilder::SetGrbmGfxIndex(CmdBuffer* cmd_buffer, uint32_t value, GCMod
     builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetGrbmGfxIndexAddr(), value);
   if (gc_mode & GC_MODE_AID) {
     for (xcc_id = 0; xcc_id < xcc_number_; xcc_id += xcc_per_aid_) {
-      PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, xcc_id, xcc_number_ > 1);
+      PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, xcc_id, is_multi_xcc_);
       builder_->BuildWritePConfigRegPacketToChiplet(cmd_buffer, prim_->GetGrbmaGfxIndexAddr(),
                                                     value, static_cast<ChipletId>(xcc_id));
     }
@@ -163,7 +165,7 @@ void GpuPmcBuilder::SetPerfmonCntl(CmdBuffer* cmd_buffer, uint32_t value, uint32
     builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetCpPerfmonCntlAddr(), value);
   if (attr & CounterBlockGrbmaAttr) {
     for (uint32_t xcc_id = 0; xcc_id < xcc_number_; xcc_id += xcc_per_aid_) {
-      PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, xcc_id, xcc_number_ > 1);
+      PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, xcc_id, is_multi_xcc_);
       builder_->BuildWritePConfigRegPacketToChiplet(cmd_buffer, prim_->GetAidPerfmonCntlAddr(),
                                                     value, static_cast<ChipletId>(xcc_id));
     }
@@ -293,7 +295,7 @@ void GpuPmcBuilder::Start(CmdBuffer* cmd_buffer, const counters_vector& counters
       auto value = block_info->select_value(counter_des);
       if (block_info->attr & CounterBlockGrbmaAttr) {
         for (uint32_t xcc_id = 0; xcc_id < xcc_number_; xcc_id += xcc_per_aid_) {
-          PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, xcc_id, xcc_number_ > 1);
+          PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, xcc_id, is_multi_xcc_);
           builder_->BuildWritePConfigRegPacketToChiplet(cmd_buffer, select_addr, value,
                                                         static_cast<ChipletId>(xcc_id));
         }
@@ -316,9 +318,9 @@ void GpuPmcBuilder::Start(CmdBuffer* cmd_buffer, const counters_vector& counters
         // sdma enable/clear/stop is programmed per instance and saved in sdmas
         sdmas.insert({sdma_index, get_smn_addr(reg_info.control_addr, target_aid_index)});
 
-        if (xcc_number_ > 1) {
+        if (is_multi_xcc_) {
           PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, VIRTUALXCCID_SELECT,
-                                            xcc_number_ > 1);
+                                            is_multi_xcc_);
           builder_->BuildWritePConfigRegPacket(cmd_buffer, get_smn_addr(0x4B30 >> 2, 0),
                                                0x04000100);
           builder_->BuildWritePConfigRegPacket(cmd_buffer, get_smn_addr(0x6330 >> 2, 0),
@@ -360,7 +362,7 @@ void GpuPmcBuilder::Start(CmdBuffer* cmd_buffer, const counters_vector& counters
 
         // insert master XCC PRED_EXEC packet here if it is MI300
         PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, VIRTUALXCCID_SELECT,
-                                          xcc_number_ > 1);
+                                          is_multi_xcc_);
 
         // sdma counter select is programmed per performance counter
         uint64_t select_addr = get_smn_addr(reg_info.select_addr, target_aid_index);
@@ -375,7 +377,7 @@ void GpuPmcBuilder::Start(CmdBuffer* cmd_buffer, const counters_vector& counters
 
       // insert master XCC PRED_EXEC packet here if it is MI300
       PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, VIRTUALXCCID_SELECT,
-                                        (xcc_number_ > 1) && use_aid);
+                                        is_multi_xcc_ && use_aid);
 
       // umc counter select per UMC counter
       uint64_t select_addr = get_smn_addr(reg_info.select_addr, target_aid_index, use_aid);
@@ -432,7 +434,7 @@ void GpuPmcBuilder::Start(CmdBuffer* cmd_buffer, const counters_vector& counters
   if (!sdmas.empty()) {
     // MI200 and MI300
     // insert master XCC PRED_EXEC packet here if it is MI300
-    PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, VIRTUALXCCID_SELECT, xcc_number_ > 1);
+    PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, VIRTUALXCCID_SELECT, is_multi_xcc_);
 
     for (const auto& i : sdmas) {
       uint32_t sdma_index = i.first;
@@ -665,7 +667,7 @@ void GpuPmcBuilder::Stop(CmdBuffer* cmd_buffer, const counters_vector& counters_
       if (block_info->attr & CounterBlockAidAttr) {
         // MI300 AID blocks: UMC/RPB/ATC/SDMA event insert master XCC PRED_EXEC packet here
         PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, VIRTUALXCCID_SELECT,
-                                          xcc_number_ > 1);
+                                          is_multi_xcc_);
 
         const auto target_aid_index = GetTargetAid(counter_des);
         uint64_t smn_control_addr = get_smn_addr(reg_info.control_addr, target_aid_index);
@@ -687,7 +689,7 @@ void GpuPmcBuilder::Stop(CmdBuffer* cmd_buffer, const counters_vector& counters_
               builder_->BuildWritePConfigRegPacket(cmd_buffer, control_addr,
                                                    prim_->SdmaStopValue(counter_des));
             }
-          } else if (xcc_number_ > 1) {
+          } else if (is_multi_xcc_) {
             // MI300 SDMA event: insert master XCC PRED_EXEC packet here
             builder_->BuildWritePConfigRegPacket(cmd_buffer, smn_control_addr,
                                                  prim_->SdmaStopValue(counter_des));
@@ -737,7 +739,7 @@ uint32_t GpuPmcBuilder::Read(CmdBuffer* cmd_buffer, const counters_vector& count
       } else if (block_info->attr & CounterBlockSdmaAttr) {
         // insert master XCC PRED_EXEC packet accordingly
         PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, VIRTUALXCCID_SELECT,
-                                          xcc_number_ > 1);
+                                          is_multi_xcc_);
 
         const auto sdma_index = counter_des.block_des.index;
         const auto target_aid_index = sdma_index >> 2;
@@ -761,7 +763,7 @@ uint32_t GpuPmcBuilder::Read(CmdBuffer* cmd_buffer, const counters_vector& count
         // Read UMC/ATC/RPB
         // insert master XCC PRED_EXEC packet accordingly
         PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, VIRTUALXCCID_SELECT,
-                                          xcc_number_ > 1);
+                                          is_multi_xcc_);
 
         const auto target_aid_index = GetTargetAid(counter_des);
         if (counters_attr & (CounterBlockRpbAttr | CounterBlockAtcAttr)) {
@@ -779,13 +781,13 @@ uint32_t GpuPmcBuilder::Read(CmdBuffer* cmd_buffer, const counters_vector& count
     }
   }
   for (uint32_t xcc_selected = 0; xcc_selected < xcc_number_; ++xcc_selected) {
-    PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, xcc_selected, xcc_number_ > 1);
+    PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, xcc_selected, is_multi_xcc_);
     ReadXccPackets(cmd_buffer, counters_vec, buf, read_counter);
   }
   // AIGC blocks
   if (counters_vec.get_attr() & CounterBlockGrbmaAttr) {
     for (uint32_t xcc_selected = 0; xcc_selected < xcc_number_; xcc_selected += xcc_per_aid_) {
-      PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, xcc_selected, xcc_number_ > 1);
+      PrecExecBuilder prec_exec_builder(*builder_, cmd_buffer, xcc_selected, is_multi_xcc_);
       GCMode gc_mode = (GCMode)(GC_MODE_AID_WITH_XCD_INDEX | xcc_selected);
       ReadXccPackets(cmd_buffer, counters_vec, buf, read_counter, gc_mode);
     }

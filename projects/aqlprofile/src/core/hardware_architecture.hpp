@@ -104,6 +104,11 @@ class HardwareArchitecture {
     return GetConfig().spm_sample_delay_max;
   }
 
+  /// Get SQTT header version2 field (only meaningful when needs_sqtt_header_packet is set)
+  virtual uint32_t GetSqttHeaderVersion() const {
+    return GetConfig().sqtt_header_version;
+  }
+
   /// Get the number of events/samples for a given block
   /// Accounts for SE/SA/WGP/XCC distribution
   virtual size_t GetNumEventsForBlock(uint32_t block_id) const;

@@ -65,6 +65,7 @@ class Pm4FactoryAdapter : public Pm4Factory {
   bool HasWptrRelativeAddressing() const override { return architecture_->GetConfig().has_wptr_relative_addressing; }
   bool NeedsSqttHeaderPacket() const override { return architecture_->GetConfig().needs_sqtt_header_packet; }
   bool SupportsSpmV2() const override { return architecture_->GetConfig().supports_spm_v2; }
+  uint32_t GetSqttHeaderVersion() const override { return architecture_->GetSqttHeaderVersion(); }
 
   uint32_t GetXccNumber() const;
   uint32_t GetSpmSampleDelayMax() override;

@@ -122,6 +122,7 @@ class GpuSqttBuilder : public SqttBuilder {
       : builder_(builder),
         prim_(prim),
         xcc_number_(agent_info->xcc_num),
+        is_multi_xcc_(agent_info->xcc_num > 1),
         se_number_total(agent_info->se_num),
         timestamp_freq(agent_info->timestamp_freq),
         cu_per_se(agent_info->cu_num / agent_info->se_num) {}
@@ -161,6 +162,7 @@ class GpuSqttBuilder : public SqttBuilder {
 
   size_t se_number_total{};
   size_t xcc_number_{};
+  bool is_multi_xcc_{};  // xcc_number_ > 1: selects multi-XCC SPM token mask variant
   uint32_t timestamp_freq{};
   uint32_t cu_per_se{};
 };

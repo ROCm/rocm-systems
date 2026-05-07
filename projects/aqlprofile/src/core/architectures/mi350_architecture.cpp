@@ -34,6 +34,7 @@ void Mi350Architecture::InitializeConfig(const AgentInfo* agent_info) {
   Mi300Architecture::InitializeConfig(agent_info);
 
   config_.name = "MI350";
+  config_.sqtt_header_version = 6;
   config_.spm_sample_delay_max = 0x33;
 }
 

@@ -41,12 +41,10 @@
 #define THREAD_TRACE_PREFIX_SIZE 0x100
 #define DEFAULT_TRACE_BUFFER_SIZE (3 << 26)
 
-inline rocprof_trace_decoder_gfx9_header_t getHeaderPacket(int SE, int CU, int SIMD, aql_profile::gpu_id_t id, bool double_buffer) {
+inline rocprof_trace_decoder_gfx9_header_t getHeaderPacket(int SE, int CU, int SIMD, uint32_t version, bool double_buffer) {
   rocprof_trace_decoder_gfx9_header_t header{.raw = 0};
   // Requires decoder version 0.1.2 or higher
-  if(id == aql_profile::MI300_GPU_ID) header.gfx9_version2 = 5;
-  else if(id == aql_profile::MI350_GPU_ID) header.gfx9_version2 = 6;
-  else header.gfx9_version2 = 4;
+  header.gfx9_version2 = version;
 
   header.legacy_version = 0x11;
   header.SEID = SE;
@@ -140,7 +138,7 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     char* sample_data_ptr = (char*)cpu_sample.data();
     if (pm4_factory->NeedsSqttHeaderPacket()) {
       auto* header = reinterpret_cast<rocprof_trace_decoder_gfx9_header_t*>(cpu_sample.data());
-      *header = getHeaderPacket(se_index, target_cu, memorymgr->GetSimdMask(), pm4_factory->GetGpuId(), false);
+      *header = getHeaderPacket(se_index, target_cu, memorymgr->GetSimdMask(), pm4_factory->GetSqttHeaderVersion(), false);
       sample_data_ptr += gfx9_header_size;
       sample_size_plus_header = sample_size + gfx9_header_size;
     }
@@ -419,7 +417,7 @@ PUBLIC_API hsa_status_t aqlprofile_att_get_buffer_packets(
   *num_buffer_packets = buffers.size();
 
   if (pm4_factory->NeedsSqttHeaderPacket())
-    *header = getHeaderPacket(shader_engine_id, manager->config.GetTargetCU(shader_engine_id), manager->GetSimdMask(), pm4_factory->GetGpuId(), true).raw;
+    *header = getHeaderPacket(shader_engine_id, manager->config.GetTargetCU(shader_engine_id), manager->GetSimdMask(), pm4_factory->GetSqttHeaderVersion(), true).raw;
   else
     *header = 0;
 

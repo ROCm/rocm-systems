@@ -172,6 +172,11 @@ class __attribute__((visibility("default"))) Pm4Factory {
   virtual bool SupportsSpmV2() const {
     return gpu_id_ >= MI200_GPU_ID && gpu_id_ <= MI350_GPU_ID;
   }
+  virtual uint32_t GetSqttHeaderVersion() const {
+    if (gpu_id_ == MI300_GPU_ID) return 5;
+    if (gpu_id_ == MI350_GPU_ID) return 6;
+    return 4;  // Generic GFX9 (MI100, MI200, plain GFX9)
+  }
 
   virtual const GpuBlockInfo* GetBlockInfo(const aqlprofile_pmc_event_t* event) const {
     const GpuBlockInfo* info = block_map_.Get(event->block_name);

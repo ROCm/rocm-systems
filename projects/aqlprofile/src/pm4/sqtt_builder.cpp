@@ -293,7 +293,7 @@ void GpuSqttBuilder::Begin(CmdBuffer* cmd_buffer, TraceConfig* config) {
 
         uint32_t token_mask = (config->occupancy_mode)
                                   ? prim_->SqttTokenMaskOccupancyValue()
-                                  : prim_->SqttTokenMaskOnValue(xcc_number_ > 1);
+                                  : prim_->SqttTokenMaskOnValue(is_multi_xcc_);
         if (((1 << global_se) & config->se_mask) == 0)
           token_mask = prim_->SqttTokenMaskOffValue();
 
