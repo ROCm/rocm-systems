@@ -3176,7 +3176,9 @@ void GpuAgent::SyncClocks() {
 hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers,
                                                 pcs_sampling_data_t* pcs_stochastic_buffers,
                                                 uint32_t per_xcc_size) {
-  static_assert(256 * 1024 * 1024 * 2 < UINT32_MAX,
+  // 256MB default max buffer × 2 (double-buffered) = 512MB max per XCC
+  constexpr size_t kMaxPcsBufferSize = 256ULL * 1024 * 1024 * 2;
+  static_assert(kMaxPcsBufferSize < UINT32_MAX,
                 "Max trap buffer size would overflow uint32_t per_xcc_size");
 
   // Assemble the trap handler source code.
@@ -3964,17 +3966,16 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
 
     if (HSA::hsa_signal_create(1, 0, NULL, &init_data->done_sig0) != HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    // Copy immediately so freeResources scope guard can clean up if done_sig1 creation fails
+    pcs_data->xcc_data[xcc_id].done_sig0 = init_data->done_sig0;
 
     if (HSA::hsa_signal_create(1, 0, NULL, &init_data->done_sig1) != HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    pcs_data->xcc_data[xcc_id].done_sig1 = init_data->done_sig1;
 
     // Set watermarks at 80% to trigger early flush before buffer fills
     init_data->buf_watermark0 = 0.8 * init_data->buf_size;
     init_data->buf_watermark1 = 0.8 * init_data->buf_size;
-
-    // Store signal handles in per-XCC struct for later access during stop/cleanup
-    pcs_data->xcc_data[xcc_id].done_sig0 = init_data->done_sig0;
-    pcs_data->xcc_data[xcc_id].done_sig1 = init_data->done_sig1;
 
     // DMA copy init structure to device (required for non-large BAR systems)
     if (DmaCopy(pcs_data->xcc_data[xcc_id].device_data, init_data, sizeof(*init_data)) !=
@@ -4390,7 +4391,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
 
   // Per-XCC PM4 resources (avoids races on multi-XCC non-large-BAR systems)
   uint32_t* cmd_data = pcs_data->xcc_data[xcc_id].cmd_data;
-  size_t cmd_data_sz = pcs_data->xcc_data[xcc_id].cmd_data_sz;
+  const size_t cmd_data_sz = pcs_data->xcc_data[xcc_id].cmd_data_sz;
   uint64_t* old_val = pcs_data->xcc_data[xcc_id].old_val;
   hsa_signal_t& exec_pm4_signal = pcs_data->xcc_data[xcc_id].exec_pm4_signal;
 
@@ -4531,10 +4532,10 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   size_t first_copy = std::min((size_t)to_copy, contiguous_space);
   size_t second_copy = (size_t)to_copy - first_copy;
 
-  // Helper lambda to emit DMA_DATA command(s) for a contiguous region
-  auto emit_dma_data = [&](uint8_t* src, uint8_t* dst, uint32_t bytes, bool is_last) {
+  // Helper lambda to emit DMA_DATA command(s) for a contiguous region.
+  auto emit_dma_data = [&](uint8_t* src, uint8_t* dst, size_t bytes, bool is_last) {
     while (bytes > 0) {
-      uint32_t chunk = std::min(bytes, (uint32_t)CP_DMA_DATA_TRANSFER_CNT_MAX);
+      uint32_t chunk = std::min(bytes, (size_t)CP_DMA_DATA_TRANSFER_CNT_MAX);
       cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_DMA_DATA, dma_data_cmd_sz, isa_->GetMajorVersion());
       cmd_data[i++] = PM4_DMA_DATA_DW1(PM4_DMA_DATA_DST_SEL_DST_ADDR_USING_L2 |
                                        PM4_DMA_DATA_SRC_SEL_SRC_ADDR_USING_L2);

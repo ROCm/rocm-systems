@@ -91,7 +91,7 @@ void HsaApiTable::Init() {
   constexpr size_t expected_image_ext_table_size = 128;
   constexpr size_t expected_finalizer_ext_table_size = 64;
   constexpr size_t expected_tools_table_size = 64;
-  constexpr size_t expected_pc_sampling_ext_table_size = 72;
+  constexpr size_t expected_pc_sampling_ext_table_size = 80;
 
   static_assert(sizeof(CoreApiTable) == expected_core_api_table_size,
                 "HSA core API table size changed, bump HSA_CORE_API_TABLE_STEP_VERSION and set "
