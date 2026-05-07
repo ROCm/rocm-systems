@@ -256,7 +256,10 @@ Pal::IDevice* PalVideoDecoder::GetPalDevice() {
         device_instance_ = dev;
         video_decode_engine_ = video_engine;
 
-        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Device ") + ROCDEC_TOSTR(i) + " initialized with VCN support");
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Device ") + ROCDEC_TOSTR(i) +
+                " initialized with VCN support, engineType=" + ROCDEC_TOSTR((int)video_engine) +
+                " (EngineTypeVcnDecode=" + ROCDEC_TOSTR((int)Pal::EngineTypeVcnDecode) +
+                " EngineTypeVcnUnified=" + ROCDEC_TOSTR((int)Pal::EngineTypeVcnUnified) + ")");
         return device_instance_;
     }
 
@@ -395,6 +398,12 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
         cbci.engineType = eng;
         cbci.queueType = Pal::QueueTypeVideoDecode;
         cbci.pCmdAllocator = nullptr;
+
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: CmdBuffer create - engineType=") + ROCDEC_TOSTR((int)cbci.engineType) +
+                " queueType=" + ROCDEC_TOSTR((int)cbci.queueType) +
+                " (EngineTypeVcnDecode=" + ROCDEC_TOSTR((int)Pal::EngineTypeVcnDecode) +
+                " EngineTypeVcnUnified=" + ROCDEC_TOSTR((int)Pal::EngineTypeVcnUnified) +
+                " QueueTypeVideoDecode=" + ROCDEC_TOSTR((int)Pal::QueueTypeVideoDecode) + ")");
 
         size_t sz = device_->GetCmdBufferSize(cbci, &res);
         if (Util::IsErrorResult(res)) {
