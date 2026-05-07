@@ -820,7 +820,7 @@ class Graph {
 
   void FreeMemory(void* dev_ptr, hip::Stream* stream) const {
     size_t offset = 0;
-    auto memory = getMemoryObject(dev_ptr, offset);
+    auto memory = getMemoryObjectForCurrentDevice(dev_ptr, offset);
     if (memory != nullptr) {
       auto device_id = memory->getUserData().deviceId;
       // Skip event marker for non-DD path when pool frees memory
@@ -833,7 +833,7 @@ class Graph {
 
   bool ProbeMemory(void* dev_ptr) const {
     size_t offset = 0;
-    auto memory = getMemoryObject(dev_ptr, offset);
+    auto memory = getMemoryObjectForCurrentDevice(dev_ptr, offset);
     if (memory != nullptr) {
       return mem_pool_->IsBusyMemory(memory);
     }
@@ -1811,24 +1811,24 @@ class GraphMemcpyNode : public GraphNode {
     hipMemoryType srcMemoryType = pCopy.srcMemoryType;
     if (srcMemoryType == hipMemoryTypeUnified) {
       srcMemoryType =
-          getMemoryObject(pCopy.srcDevice, offset) ? hipMemoryTypeDevice : hipMemoryTypeHost;
+          getMemoryObjectForCurrentDevice(pCopy.srcDevice, offset) ? hipMemoryTypeDevice : hipMemoryTypeHost;
     }
     offset = 0;
     hipMemoryType dstMemoryType = pCopy.dstMemoryType;
     if (dstMemoryType == hipMemoryTypeUnified) {
       dstMemoryType =
-          getMemoryObject(pCopy.dstDevice, offset) ? hipMemoryTypeDevice : hipMemoryTypeHost;
+          getMemoryObjectForCurrentDevice(pCopy.dstDevice, offset) ? hipMemoryTypeDevice : hipMemoryTypeHost;
     }
 
     // If {src/dst}MemoryType is hipMemoryTypeHost, check if the memory was prepinned.
     // In that case upgrade the copy type to hipMemoryTypeDevice to avoid extra pinning.
     offset = 0;
     if (srcMemoryType == hipMemoryTypeHost) {
-      amd::Memory* mem = getMemoryObject(pCopy.srcHost, offset);
+      amd::Memory* mem = getMemoryObjectForCurrentDevice(pCopy.srcHost, offset);
       srcMemoryType = mem ? hipMemoryTypeDevice : hipMemoryTypeHost;
     }
     if (dstMemoryType == hipMemoryTypeHost) {
-      amd::Memory* mem = getMemoryObject(pCopy.dstHost, offset);
+      amd::Memory* mem = getMemoryObjectForCurrentDevice(pCopy.dstHost, offset);
       dstMemoryType = mem ? hipMemoryTypeDevice : hipMemoryTypeHost;
     }
     std::string memcpyDirection;
@@ -1921,10 +1921,10 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   // id accordingly so that node can be executed on dev1.
   void UpdateDevId() {
     size_t sOffset = 0;
-    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
+    amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
     size_t dOffset = 0;
-    amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
-
+    amd::Memory* dstMemory = getMemoryObjectForCurrentDevice(dst_, dOffset);
+    
     hip::MemcpyType memType = hipHostToHost;
     if (srcMemory != nullptr && dstMemory == nullptr) {
         memType = ihipGetMemcpyType(srcMemory, dst_);
@@ -1989,8 +1989,8 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
 
     hip::MemcpyType type = hipHostToHost;
     size_t dOffset, sOffset;
-    amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
-    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
+    amd::Memory* dstMemory = getMemoryObjectForCurrentDevice(dst_, dOffset);
+    amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
 
     if (dstMemory != nullptr && srcMemory != nullptr) {
       status = ihipMemcpyCommand(command, dstMemory, srcMemory, count_, kind_, *stream, dOffset,
@@ -2107,14 +2107,14 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   static hipError_t ValidateParams(void* dst, const void* src, size_t count, hipMemcpyKind kind);
   virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
     size_t sOffsetOrig = 0;
-    amd::Memory* origSrcMemory = getMemoryObject(src_, sOffsetOrig);
+    amd::Memory* origSrcMemory = getMemoryObjectForCurrentDevice(src_, sOffsetOrig);
     size_t dOffsetOrig = 0;
-    amd::Memory* origDstMemory = getMemoryObject(dst_, dOffsetOrig);
+    amd::Memory* origDstMemory = getMemoryObjectForCurrentDevice(dst_, dOffsetOrig);
 
     size_t sOffset = 0;
-    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
+    amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
     size_t dOffset = 0;
-    amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
+    amd::Memory* dstMemory = getMemoryObjectForCurrentDevice(dst_, dOffset);
     std::string memcpyDirection;
     if ((srcMemory == nullptr) && (dstMemory != nullptr)) {  // host to device
       memcpyDirection = "HtoD";
@@ -2163,8 +2163,8 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
       hip::MemcpyType type = hipHostToHost;
 
       size_t dOffset, sOffset;
-      amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
-      amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
+      amd::Memory* dstMemory = getMemoryObjectForCurrentDevice(dst_, dOffset);
+      amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
 
       // The case below is only interested in hipCopyBuffer,
       // which is only valid for device to device copies.
@@ -2218,8 +2218,8 @@ class GraphMemcpyNodeFromSymbol : public GraphMemcpyNode1D {
     }
 
     size_t devOffset, dOffset;
-    amd::Memory* devMemory = getMemoryObject(device_ptr, devOffset);
-    amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
+    amd::Memory* devMemory = getMemoryObjectForCurrentDevice(device_ptr, devOffset);
+    amd::Memory* dstMemory = getMemoryObjectForCurrentDevice(dst_, dOffset);
 
     if (devMemory == nullptr) {
         return hipErrorInvalidValue;
@@ -2242,9 +2242,9 @@ class GraphMemcpyNodeFromSymbol : public GraphMemcpyNode1D {
                        hipMemcpyKind kind, bool isExec = false) {
     if (isExec) {
       size_t discardOffset = 0;
-      amd::Memory* memObj = getMemoryObject(dst, discardOffset);
+      amd::Memory* memObj = getMemoryObjectForCurrentDevice(dst, discardOffset);
       if (memObj != nullptr) {
-        amd::Memory* memObjOri = getMemoryObject(dst_, discardOffset);
+        amd::Memory* memObjOri = getMemoryObjectForCurrentDevice(dst_, discardOffset);
         if (memObjOri != nullptr) {
           if (memObjOri->getUserData().deviceId != memObj->getUserData().deviceId) {
             return hipErrorInvalidValue;
@@ -2265,7 +2265,7 @@ class GraphMemcpyNodeFromSymbol : public GraphMemcpyNode1D {
     }
 
     size_t dOffset = 0;
-    amd::Memory* dstMemory = getMemoryObject(dst, dOffset);
+    amd::Memory* dstMemory = getMemoryObjectForCurrentDevice(dst, dOffset);
     if (dstMemory == nullptr && kind != hipMemcpyDeviceToHost && kind != hipMemcpyDefault) {
       return hipErrorInvalidMemcpyDirection;
     } else if (dstMemory != nullptr && dstMemory->getMemFlags() == 0 &&
@@ -2332,8 +2332,8 @@ class GraphMemcpyNodeToSymbol : public GraphMemcpyNode1D {
     }
 
     size_t devOffset, sOffset;
-    amd::Memory* devMemory = getMemoryObject(device_ptr, devOffset);
-    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
+    amd::Memory* devMemory = getMemoryObjectForCurrentDevice(device_ptr, devOffset);
+    amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
 
     if (devMemory == nullptr) {
         return hipErrorInvalidValue;
@@ -2356,9 +2356,9 @@ class GraphMemcpyNodeToSymbol : public GraphMemcpyNode1D {
                        hipMemcpyKind kind, bool isExec = false) {
     if (isExec) {
       size_t discardOffset = 0;
-      amd::Memory* memObj = getMemoryObject(src, discardOffset);
+      amd::Memory* memObj = getMemoryObjectForCurrentDevice(src, discardOffset);
       if (memObj != nullptr) {
-        amd::Memory* memObjOri = getMemoryObject(src_, discardOffset);
+        amd::Memory* memObjOri = getMemoryObjectForCurrentDevice(src_, discardOffset);
         if (memObjOri != nullptr) {
           if (memObjOri->getUserData().deviceId != memObj->getUserData().deviceId) {
             return hipErrorInvalidValue;
@@ -2378,7 +2378,7 @@ class GraphMemcpyNodeToSymbol : public GraphMemcpyNode1D {
       return status;
     }
     size_t dOffset = 0;
-    amd::Memory* srcMemory = getMemoryObject(src, dOffset);
+    amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src, dOffset);
     cl_mem_flags srcFlag = 0;
     if (srcMemory != nullptr) {
       srcFlag = srcMemory->getMemFlags();
@@ -2492,7 +2492,7 @@ class GraphMemsetNode : public GraphNode {
     if (memsetParams_.height == 1 && depth_ == 1) {
       size_t sizeBytes = memsetParams_.width * memsetParams_.elementSize;
       size_t offset = 0;
-      amd::Memory* memObj = getMemoryObject(memsetParams_.dst, offset);
+      amd::Memory* memObj = getMemoryObjectForCurrentDevice(memsetParams_.dst, offset);
       if (memObj == nullptr) {
         return hipErrorInvalidValue;
       }
@@ -2502,7 +2502,7 @@ class GraphMemsetNode : public GraphNode {
       auto sizeBytes =
           memsetParams_.width * memsetParams_.elementSize * memsetParams_.height * depth_;
       size_t offset = 0;
-      amd::Memory* memObj = getMemoryObject(memsetParams_.dst, offset);
+      amd::Memory* memObj = getMemoryObjectForCurrentDevice(memsetParams_.dst, offset);
       if (memObj == nullptr) {
         return hipErrorInvalidValue;
       }
@@ -2532,9 +2532,9 @@ class GraphMemsetNode : public GraphNode {
     }
     if (isExec) {
       size_t discardOffset = 0;
-      amd::Memory* memObj = getMemoryObject(params->dst, discardOffset);
+      amd::Memory* memObj = getMemoryObjectForCurrentDevice(params->dst, discardOffset);
       if (memObj != nullptr) {
-        amd::Memory* memObjOri = getMemoryObject(memsetParams_.dst, discardOffset);
+        amd::Memory* memObjOri = getMemoryObjectForCurrentDevice(memsetParams_.dst, discardOffset);
         if (memObjOri != nullptr) {
           if (memObjOri->getUserData().deviceId != memObj->getUserData().deviceId) {
             return hipErrorInvalidValue;
@@ -2547,7 +2547,7 @@ class GraphMemsetNode : public GraphNode {
       // 1D - for hipGraphMemsetNodeSetParams & hipGraphExecMemsetNodeSetParams, They return
       // invalid value if new width is more than actual allocation.
       size_t offset = 0;
-      amd::Memory* memObj = getMemoryObject(params->dst, offset);
+      amd::Memory* memObj = getMemoryObjectForCurrentDevice(params->dst, offset);
       if (memObj == nullptr) {
         return hipErrorInvalidValue;
       }
@@ -2573,7 +2573,7 @@ class GraphMemsetNode : public GraphNode {
         // hipMalloc3D; for plain hipMalloc (and similar flat allocators) they are 0, in which case
         // the size-based check in ihipMemset3D_validate below is authoritative.
         size_t discardOffset = 0;
-        amd::Memory* memObj = getMemoryObject(params->dst, discardOffset);
+        amd::Memory* memObj = getMemoryObjectForCurrentDevice(params->dst, discardOffset);
         if (memObj != nullptr && memObj->getUserData().width_ != 0) {
           if (params->width * params->elementSize > memObj->getUserData().width_ ||
               params->height > memObj->getUserData().height_ ||
@@ -2584,7 +2584,7 @@ class GraphMemsetNode : public GraphNode {
       }
       sizeBytes = params->width * params->elementSize * params->height * depth;
       size_t offset = 0;
-      amd::Memory* memObj = getMemoryObject(params->dst, offset, sizeBytes);
+      amd::Memory* memObj = getMemoryObjectForCurrentDevice(params->dst, offset, sizeBytes);
       if (memObj == nullptr) {
         return hipErrorInvalidValue;
       }
@@ -2828,7 +2828,7 @@ class GraphMemAllocNode final : public GraphNode {
         return;
       }
       size_t offset = 0;
-      memory_ = getMemoryObject(dptr, offset);
+      memory_ = getMemoryObjectForCurrentDevice(dptr, offset);
       if (!AMD_DIRECT_DISPATCH) {
         memory_->retain();
       }
@@ -2975,7 +2975,7 @@ class GraphMemAllocNode final : public GraphNode {
         commands_.push_back(cmd);
         size_t offset = 0;
         // Check if memory was already added after first reserve
-        if (getMemoryObject(node_params_.dptr, offset) == nullptr) {
+        if (getMemoryObjectForCurrentDevice(node_params_.dptr, offset) == nullptr) {
           // Map VA in the accessible space because the graph execution still has
           // pointers validation and must find a valid object
           // @note: Memory can be released outside of the graph and

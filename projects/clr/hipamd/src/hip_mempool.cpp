@@ -116,7 +116,9 @@ class FreeAsyncCommand : public amd::Command {
 
   virtual void submit(device::VirtualDevice& device) final {
     size_t offset = 0;
-    auto memory = getMemoryObject(ptr_, offset);
+    // Worker-thread submit body: do NOT hoist hip::getCurrentDevice(); use the convenience
+    // wrapper that re-fetches TLS each call.
+    auto memory = getMemoryObjectForCurrentDevice(ptr_, offset);
     if (memory != nullptr) {
       auto id = memory->getUserData().deviceId;
       if (!g_devices[id]->FreeMemory(memory, static_cast<hip::Stream*>(queue()), event_)) {
@@ -167,7 +169,7 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
 
   if (!graph_in_use) {
     size_t offset = 0;
-    auto memory = getMemoryObject(dev_ptr, offset);
+    auto memory = getMemoryObject(hip::getCurrentDevice(), dev_ptr, offset);
     if (memory != nullptr) {
       auto id = memory->getUserData().deviceId;
       if (!g_devices[id]->FreeMemory(memory, hip_stream, event)) {
@@ -435,7 +437,7 @@ hipError_t hipMemPoolExportPointer(hipMemPoolPtrExportData* export_data, void* p
   }
 
   size_t offset = 0;
-  auto memory = getMemoryObject(ptr, offset);
+  auto memory = getMemoryObject(hip::getCurrentDevice(), ptr, offset);
   if (memory != nullptr) {
     auto id = memory->getUserData().deviceId;
     // Note: export_data must point to 64 bytes of shared memory
@@ -465,7 +467,7 @@ hipError_t hipMemPoolImportPointer(void** ptr, hipMemPool_t mem_pool,
     HIP_RETURN(hipErrorOutOfMemory);
   }
   size_t offset = 0;
-  auto memory = getMemoryObject(*ptr, offset);
+  auto memory = getMemoryObject(hip::getCurrentDevice(), *ptr, offset);
   mpool->AddBusyMemory(memory);
   mpool->retain();
   HIP_RETURN(hipSuccess);

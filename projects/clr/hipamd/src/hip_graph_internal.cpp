@@ -68,9 +68,9 @@ hipError_t GraphMemcpyNode1D::ValidateParams(void* dst, const void* src, size_t 
     return hipErrorInvalidMemcpyDirection;
   }
   size_t sOffset = 0;
-  amd::Memory* srcMemory = getMemoryObject(src, sOffset);
+  amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src, sOffset);
   size_t dOffset = 0;
-  amd::Memory* dstMemory = getMemoryObject(dst, dOffset);
+  amd::Memory* dstMemory = getMemoryObjectForCurrentDevice(dst, dOffset);
 
   if ((srcMemory == nullptr) && (dstMemory != nullptr)) {  // host to device
     if ((kind != hipMemcpyHostToDevice) && (kind != hipMemcpyDefault)) {
@@ -82,16 +82,25 @@ hipError_t GraphMemcpyNode1D::ValidateParams(void* dst, const void* src, size_t 
     }
   }
 
-  if (srcMemory != nullptr) {
-    hipError_t status = ihipMemcpy_validate_memory(srcMemory, count, sOffset, /*read_write*/ false);
-    if (status != hipSuccess) {
-      return status;
+  if (srcMemory != nullptr || dstMemory != nullptr) {
+    hip::Device* dev = hip::getCurrentDevice();
+    if (dev == nullptr) {
+      return hipErrorInvalidDevice;
     }
-  }
-  if (dstMemory != nullptr) {
-    hipError_t status = ihipMemcpy_validate_memory(dstMemory, count, dOffset, /*read_write*/ true);
-    if (status != hipSuccess) {
-      return status;
+    amd::Device& amdDev = *dev->devices()[0];
+    if (srcMemory != nullptr) {
+      hipError_t status =
+          ihipMemcpy_validate_memory(amdDev, srcMemory, count, sOffset, /*read_write*/ false);
+      if (status != hipSuccess) {
+        return status;
+      }
+    }
+    if (dstMemory != nullptr) {
+      hipError_t status =
+          ihipMemcpy_validate_memory(amdDev, dstMemory, count, dOffset, /*read_write*/ true);
+      if (status != hipSuccess) {
+        return status;
+      }
     }
   }
 
