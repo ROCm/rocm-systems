@@ -452,6 +452,20 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   //   3. Opens the door to hsa_signal_wait on signal_addr instead of
   //      polling, deferred to a future optimization.
   //
+  // Multi-XCC hazard for init-sync (C7): because XCCs publish without
+  // atomics, observing signal=N does NOT prove that every slot in
+  // [0, N) has been written — XCC A can publish its higher slot's
+  // signal value before XCC B has finished publishing its lower slot's
+  // record body. The FW interface spec
+  // (specs/2026-05-01-mec-firmware-dispatch-log-interface.md §3.5)
+  // assumes a single producer per queue and says nothing about XCC
+  // interleaving; on multi-XCC systems this assumption is empirically
+  // violated. To avoid permanently dropping a slot that just hasn't
+  // been written yet, init-sync stops at the first zero record_type
+  // (see the loop body below) and leaves qs.next_idx pointing AT
+  // that slot, so the next drain pass re-evaluates it once FW has
+  // had a chance to commit.
+  //
   // Backward-publish protection (still needed because signal races too):
   // qs.next_idx is our host-side monotonic floor. If FW publishes a
   // value < next_idx, treat it as stale and skip the pass; we wait for
@@ -505,20 +519,28 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     //     buffer, the meaningful window is the suffix of FW-written
     //     slots ending at end-1; older slots are pre-zeroed and stale.
     //   - During init-sync only, validate each slot's record_type
-    //     during emit and SKIP slots whose record_type is 0. This
-    //     correctly emits all FW-written records in the window without
-    //     ever emitting a stale pre-zeroed slot.
+    //     during emit. The first zero record_type STOPS the scan
+    //     and leaves qs.next_idx pointing at that slot so the next
+    //     drain pass will re-evaluate it. This is conservative under
+    //     the multi-XCC hazard: a zero slot in our window may be
+    //     either (a) a pre-zeroed stale slot, or (b) a slot whose
+    //     XCC hasn't published the record body yet even though a
+    //     higher-index slot's signal was already observed. We can't
+    //     distinguish (a) from (b) cheaply, so we wait. The cost is
+    //     one extra drain pass to consume the records; the benefit
+    //     is no permanently-dropped records.
     //   - Do NOT emit kernel_dispatch_drop during init-sync — the
     //     pre-zeroed gap represents records that never existed for
     //     this queue lifecycle, not records the host fell behind on.
     //
-    // The validate-on-emit strategy is safe under FW write ordering:
-    // signal is the LAST per-record write FW issues, so by the time
-    // we observe signal=N, every slot in [0, N) that WILL be written
-    // by FW has already been written. Slots with rt==0 in [start, end)
-    // are slots FW will never write for this lifecycle (they predate
-    // the queue or were pre-zeroed by SetProfiling).
+    // Single-producer caveat: if a future FW spec rev guarantees a
+    // single globally-ordered producer (or adds an atomic publish
+    // barrier across XCCs), this pessimistic stop-at-zero can be
+    // relaxed back to "skip and continue". Until then, stopping is
+    // the only way to avoid the drop documented in C7.
     const bool initial_sync = (qs.next_idx == 0);
+    bool init_sync_stopped_at_zero = false;
+    uint64_t init_sync_resume_idx = 0;
 
     // Overrun detection. If FW lapped us, log a drop event and skip
     // the unrecoverable region. The records we DO read after the skip
@@ -558,15 +580,40 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
       auto* rec = reinterpret_cast<mec_dispatch_record_16*>(
           static_cast<char*>(qs.ring_base) + slot * kSlotStride);
 
-      // Init-sync validation: skip pre-zeroed slots. FW writes
-      // record_type ∈ {1, 2}; slots with rt==0 in our scan window are
-      // slots FW has not written for this queue's lifecycle (the host
-      // pre-zero from AqlQueue::SetProfiling is still intact). Acquire
-      // ordering so the body loads (via memcpy below) cannot be
-      // reordered above this check on the rare slot that IS non-zero.
+      // Init-sync validation (C7): STOP at the first zero record_type
+      // during init-sync. FW writes record_type ∈ {1, 2}; a slot with
+      // rt==0 in our scan window [next_idx, observed) during init-sync
+      // is either:
+      //   (a) a pre-zeroed stale slot (slot was never written for
+      //       this queue lifecycle), OR
+      //   (b) a slot whose XCC has not finished publishing yet
+      //       (XCC A's signal=N publish raced ahead of XCC B's
+      //       slot[<N] body publish; spec §3.5 assumes single-
+      //       producer ordering that does NOT hold across XCCs
+      //       without an inter-XCC publish barrier).
+      // We can't distinguish (a) from (b) cheaply, so we stop and
+      // let the next pass re-evaluate. Leaving qs.next_idx at the
+      // zero slot's index means we re-scan from there next time;
+      // by then either FW has published (case b → emit it) or it
+      // stays zero (case a → we keep stopping until either signal
+      // grows past it via the overrun-skip path or the queue is
+      // destroyed). Cost: one extra drain pass to consume the
+      // window after FW commits. Benefit: no permanently-dropped
+      // records in case (b), no emit-all-zero record in either case.
+      //
+      // Out of scope: steady-state (non-init-sync) passes still
+      // memcpy zero slots and emit them as records — the same
+      // multi-XCC hazard exists there but the historical behavior
+      // is preserved here to limit the C7 change to its claim.
+      // Acquire ordering so the body loads (via memcpy below)
+      // cannot be reordered above this check.
       if (initial_sync) {
         uint32_t rt = __atomic_load_n(&rec->record_type, __ATOMIC_ACQUIRE);
-        if (rt == 0) continue;
+        if (rt == 0) {
+          init_sync_stopped_at_zero = true;
+          init_sync_resume_idx = i;
+          break;
+        }
       }
 
       // FW publish-ordering contract (per f32_mec.uc Q6): record body
@@ -589,6 +636,20 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     }
     flush_batch();
 
+    // C7: if init-sync hit a zero hole, leave qs.next_idx pointing AT
+    // that slot so the next drain pass re-evaluates it. We must NOT
+    // advance past the hole — under the multi-XCC hazard the slot may
+    // simply not have been published yet by its producing XCC, and
+    // skipping it would permanently drop the record. Note this also
+    // means we do NOT publish `end` to qs.rptr_ptr in this case, since
+    // we have not actually consumed [resume_idx, end).
+    if (init_sync_stopped_at_zero) {
+      qs.next_idx = init_sync_resume_idx;
+      if (qs.rptr_ptr) {
+        __atomic_store_n(qs.rptr_ptr, init_sync_resume_idx, __ATOMIC_RELEASE);
+      }
+      return any;
+    }
     qs.next_idx = end;
     // Publish our consumer position back to FW (informational; FW does
     // not enforce backpressure today but reads on connect/dequeue).
