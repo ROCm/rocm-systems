@@ -23,6 +23,12 @@
 namespace rocprofsys
 {
 
+namespace logger_detail
+{
+std::string
+include_process_id_in_filename(std::string_view filename);
+}  // namespace logger_detail
+
 namespace
 {
 
@@ -36,32 +42,6 @@ to_lower(std::string_view s)
         result += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
     return result;
-}
-
-std::string
-include_process_id_in_filename(std::string_view filename)
-{
-    if(filename.empty())
-    {
-        return std::string{};
-    }
-
-    auto last_sep       = filename.find_last_of('/');
-    auto filename_start = (last_sep == std::string_view::npos) ? 0 : last_sep + 1;
-    auto dot_pos        = filename.find_last_of('.');
-
-    bool has_extension =
-        (dot_pos != std::string_view::npos) && (dot_pos > filename_start);
-
-    std::string pid_suffix = "_" + std::to_string(getpid());
-
-    if(!has_extension)
-    {
-        return std::string(filename) + pid_suffix;
-    }
-
-    return std::string(filename.substr(0, dot_pos)) + pid_suffix +
-           std::string(filename.substr(dot_pos));
 }
 
 inline bool
@@ -248,7 +228,7 @@ private:
         auto log_file = logger_settings.get_log_file();
         if(!log_file.empty())
         {
-            log_file = include_process_id_in_filename(log_file);
+            log_file = logger_detail::include_process_id_in_filename(log_file);
 
             sinks.push_back(
                 std::make_shared<spdlog::sinks::basic_file_sink_st>(log_file, true));

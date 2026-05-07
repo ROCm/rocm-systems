@@ -31,8 +31,8 @@
         if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                    \
         {                                                                                \
             std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);         \
-            LOG_WARNING("rocprofiler-sdk call [{}] failed with error code {} :: {}",     \
-                        #result, status_msg);                                            \
+            LOG_WARNING("rocprofiler-sdk call [{}] failed with error code {}", #result,  \
+                        status_msg);                                                     \
         }                                                                                \
     }
 
