@@ -446,15 +446,24 @@ constexpr size_t kSlotStride = 16;
 // batching.
 constexpr uint32_t kBatchMax = 256;
 
-// Stale-zero quarantine threshold (debate stage code-quality C8). Path A
-// stops at the first record_type==0 inside [next_idx, observed) to handle
-// either a pre-zeroed stale slot OR a multi-XCC publish-race in-flight
-// slot. After this many milliseconds of being stalled at the SAME
-// (observed, next_idx) coordinate with no forward progress, the drainer
-// declares the slot stale, emits a kernel_dispatch_drop event for it,
-// and advances past it. 100 ms aligns with the wait_for_idle bound and
-// is ~100x the worker's max sleep cadence (1 ms), so a real in-flight
-// XCC publish would commit well before this fires in practice.
+// Stale-zero quarantine threshold (debate stage code-quality C8/C10).
+// Path A stops at the first record_type==0 inside [next_idx, observed)
+// to handle either a pre-zeroed stale slot OR a multi-XCC publish-race
+// in-flight slot. After this many milliseconds of being stalled at the
+// SAME (observed, next_idx) coordinate with no forward progress, the
+// drainer declares the slot stale and sweeps the contiguous stale-zero
+// prefix forward in one pass, emitting a single aggregate
+// kernel_dispatch_drop event covering the whole gap (see C10 logic in
+// drain_one_queue Path A below).
+//
+// 100 ms aligns with the wait_for_idle bound and is ~100x the worker's
+// max sleep cadence (1 ms), so a real in-flight XCC publish would
+// commit well before this fires in practice. Only ONE quarantine
+// timeout is paid per stale prefix (regardless of prefix length),
+// which bounds the worst-case time-to-first-record on the huge
+// persisted-counter overrun case (scratch wptr in the millions, FW
+// writes a few fresh records → ring-sized stale prefix before the
+// fresh records).
 constexpr int64_t kStaleZeroQuarantineMs = 100;
 
 bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
@@ -578,10 +587,15 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     //   - Stale-zero quarantine: track (stall_observed, stall_idx,
     //     stall_first_seen). If a subsequent pass sees the same
     //     coordinate AND has been stalled for kStaleZeroQuarantineMs,
-    //     declare the slot stale, emit a one-record
-    //     kernel_dispatch_drop event for visibility, advance next_idx
-    //     by 1, clear the quarantine. This guarantees forward progress
-    //     without silently dropping in-flight publishes.
+    //     declare the slot stale, sweep the contiguous stale-zero
+    //     prefix forward in this same pass (C10), emit ONE aggregate
+    //     kernel_dispatch_drop event covering the whole gap, advance
+    //     next_idx past the prefix, and clear the quarantine. This
+    //     guarantees forward progress in O(prefix-length) memcpy +
+    //     compare per stale prefix (not per slot) without silently
+    //     dropping in-flight publishes; if the sweep stops at a real
+    //     record, the main loop continues processing it in the same
+    //     pass.
     //   - The worker loop honors qs.pending_zero_stall.load() and
     //     skips its signal-equal fast-skip while quarantine is armed,
     //     so the next pass actually runs at the polling cadence
@@ -665,8 +679,9 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
       //   - FW has published (case b → emit it next pass), or
       //   - the slot is still zero AND the (observed, next_idx)
       //     coordinate has not changed for kStaleZeroQuarantineMs
-      //     (case a → quarantine fires below, drops the slot, and
-      //     advances by 1).
+      //     (case a → quarantine fires below, sweeps the contiguous
+      //     stale-zero prefix in one pass, emits one aggregate drop
+      //     event, and advances next_idx past the prefix).
       //
       // Acquire ordering so the body loads (via memcpy below)
       // cannot be reordered above this check.
@@ -683,21 +698,66 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   now - qs.stall_first_seen).count();
           if (stalled_for_ms >= kStaleZeroQuarantineMs) {
-            // Slot declared stale (case a). Emit one-record drop
-            // event for consumer visibility, advance past it, and
-            // disarm the quarantine. Note we do NOT continue the
-            // scan in this pass — the next pass will pick up at
-            // i+1 and re-evaluate the rest of [i+1, observed).
-            // This keeps the per-pass cost bounded and avoids
-            // back-to-back stale-slot fires within a single pass.
+            // Slot declared stale (case a). Sweep forward across the
+            // contiguous stale-zero prefix in this same pass, emit ONE
+            // aggregate kernel_dispatch_drop event covering all swept
+            // slots, then disarm the quarantine and continue the main
+            // loop from the first non-zero slot (or from `end` if the
+            // entire remaining window was zeros).
+            //
+            // Why sweep here (debate stage code-quality C10): the
+            // huge persisted-counter overrun case (e.g. scratch wptr
+            // = 5000, FW writes 3 fresh records → observed = 5003,
+            // ring = 4096) sets start = end - ring_records and walks
+            // a long stale-zero prefix before reaching the 3 fresh
+            // records. Without the sweep, each stale slot would
+            // require its own quarantine cycle (~100 ms each), so a
+            // 4093-slot stale prefix would take ~400 s before the
+            // first real record reached the consumer. Sweeping
+            // collapses this to a single quarantine timeout + one
+            // bounded scan (≤ ring_records iterations of a memcpy +
+            // compare), and produces ONE drop event whose count
+            // accurately reflects the gap size for downstream
+            // visibility.
+            //
+            // Loop bound: stale_end ≤ end ≤ next_idx + ring_records
+            // (the start = end - ring_records overrun clamp guarantees
+            // end - i ≤ ring_records); no busy-spin risk.
+            //
+            // Acquire ordering on each rt load mirrors the main-loop
+            // load: any non-zero we observe means the corresponding
+            // record body is host-visible (FW publishes body before
+            // record_type per f32_mec.uc Q6).
+            uint64_t stale_end = i;
+            while (stale_end < end) {
+              auto* zrec = reinterpret_cast<mec_dispatch_record_16*>(
+                  static_cast<char*>(qs.ring_base) +
+                  (stale_end & qs.ring_mask) * kSlotStride);
+              uint32_t zrt = __atomic_load_n(&zrec->record_type,
+                                             __ATOMIC_ACQUIRE);
+              if (zrt != 0) break;
+              ++stale_end;
+            }
+            const uint64_t stale_count = stale_end - i;
             rocm_trace_emit_hsa_kernel_dispatch_drop(
-                queue_id_to_wire(qs.queue_id), 1);
-            qs.next_idx = i + 1;
+                queue_id_to_wire(qs.queue_id), stale_count);
+            qs.next_idx = stale_end;
             if (qs.rptr_ptr) {
-              __atomic_store_n(qs.rptr_ptr, i + 1, __ATOMIC_RELEASE);
+              __atomic_store_n(qs.rptr_ptr, stale_end, __ATOMIC_RELEASE);
             }
             qs.pending_zero_stall.store(false, std::memory_order_release);
-            return true;  // forward progress: drop event emitted
+            any = true;
+            // If the sweep stopped at a real record, fall through to
+            // process it (and the rest of [stale_end, end)) in this
+            // same pass by resuming the for-loop at stale_end. If the
+            // sweep consumed the entire remaining window, the loop
+            // condition (i < end) will exit naturally.
+            i = stale_end;
+            // The for-loop's ++i would skip past stale_end; counteract
+            // by stepping back one. (When stale_end == end, this still
+            // works: i becomes end-1, ++i → end, loop exits.)
+            --i;
+            continue;
           }
         } else {
           qs.stall_observed   = observed;
