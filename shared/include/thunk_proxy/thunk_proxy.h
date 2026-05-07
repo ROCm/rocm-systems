@@ -131,7 +131,6 @@ typedef struct {
   // --- Misc capabilities ---
   bool platform_atomic_support;
 
-  // --- KMD adapter blob (opaque, managed by ParseAdapterInfo/DestroyDeviceInfo) ---
   void *adapter_info;
   uint32_t kmd_version;
 
@@ -283,6 +282,10 @@ public:
   ErrorCode Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
 
   const DeviceInfo &GetDeviceInfo() const;
+
+  WinDeviceHandle DeviceHandle() const;
+  WinAdapterHandle AdapterHandle() const;
+  LUID AdapterLuid() const;
 
   DeviceContext(const DeviceContext &) = delete;
   DeviceContext &operator=(const DeviceContext &) = delete;

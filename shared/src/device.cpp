@@ -127,5 +127,17 @@ const thunk_proxy::DeviceInfo &Device::DeviceInfo() const {
   return device_ctx_->GetDeviceInfo();
 }
 
+WinDeviceHandle Device::DeviceHandle() const {
+  return device_ctx_->DeviceHandle();
+}
+
+WinAdapterHandle Device::AdapterHandle() const {
+  return device_ctx_->AdapterHandle();
+}
+
+LUID Device::AdapterLuid() const {
+  return device_ctx_->AdapterLuid();
+}
+
 } // namespace thunk
 } // namespace wsl

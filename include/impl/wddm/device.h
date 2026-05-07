@@ -51,6 +51,7 @@
 #include <vector>
 
 #include "shared/include/d3dkmt_types.h"
+#include "shared/include/device.h"
 #include "shared/include/thunk_proxy/thunk_proxy.h"
 #include "impl/wddm/va_mgr.h"
 #include "shared/include/status.h"
@@ -89,7 +90,7 @@ public:
   static constexpr size_t GpuMemoryChunkSize = 2 * (1ULL << 30);   // 2 GB
 
   WDDMDevice(Device *shared_dev,
-             D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id);
+             D3DKMT_HANDLE adapter, uint32_t node_id);
   ~WDDMDevice();
 
   Device *SharedDevice() const { return shared_dev_; }
@@ -197,8 +198,8 @@ public:
 
   D3DKMT_HANDLE PagingQueue() const { return page_queue_; }
   D3DKMT_HANDLE PagingFence() const { return page_syncobj_; }
-  D3DKMT_HANDLE DeviceHandle() const { return device_; }
-  LUID GetLuid() const { return adapter_luid_; }
+  D3DKMT_HANDLE DeviceHandle() const { return shared_dev_->DeviceHandle(); }
+  LUID GetLuid() const { return shared_dev_->AdapterLuid(); }
   D3DKMT_HANDLE GetAdapter() const { return adapter_; }
 
   const thunk_proxy::DeviceInfo& DeviceInfo() const { return shared_dev_->DeviceInfo(); }
@@ -206,8 +207,6 @@ public:
   ErrorCode CreateGpuMemory(const GpuMemoryCreateInfo &create_info, GpuMemory **gpu_mem, gpusize *gpu_va = nullptr);
 
 private:
-  bool CreateDevice(void);
-  bool DestroyDevice(void);
   bool CreatePagingQueue(void);
   bool DestroyPagingQueue(void);
   void *Lock(D3DKMT_HANDLE handle);
@@ -222,9 +221,7 @@ private:
   bool GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type, uint32_t &segment_id);
 
   D3DKMT_HANDLE adapter_;
-  LUID adapter_luid_;
   Device *shared_dev_ = nullptr;
-  D3DKMT_HANDLE device_;
 
   D3DKMT_HANDLE page_queue_;
   D3DKMT_HANDLE page_syncobj_;

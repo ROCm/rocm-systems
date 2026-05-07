@@ -64,10 +64,9 @@ namespace thunk {
 const uint32_t WDDMDevice::cmdbuf_aql_frame_num_ = 0x1000;
 
 WDDMDevice::WDDMDevice(Device *shared_dev,
-                       D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id)
-  : adapter_(adapter), adapter_luid_(adapter_luid), shared_dev_(shared_dev),
+                       D3DKMT_HANDLE adapter, uint32_t node_id)
+  : adapter_(adapter), shared_dev_(shared_dev),
     node_id_(node_id) {
-  CreateDevice();
   SetPowerOptimization(false);
   CreatePagingQueue();
   InitCmdbufInfo();
@@ -77,7 +76,6 @@ WDDMDevice::WDDMDevice(Device *shared_dev,
 WDDMDevice::~WDDMDevice() {
   DestroyPagingQueue();
   SetPowerOptimization(true);
-  DestroyDevice();
 }
 
 static NTSTATUS WDDMQueryAdapter(D3DKMT_HANDLE adapter, KMTQUERYADAPTERINFOTYPE type,
@@ -101,7 +99,7 @@ bool WDDMDevice::QuerySegmentInfo()
   // Get the number of segments
   D3DKMT_QUERYSTATISTICS adapterQuery = {};
   adapterQuery.Type = D3DKMT_QUERYSTATISTICS_ADAPTER;
-  adapterQuery.AdapterLuid = adapter_luid_;
+  adapterQuery.AdapterLuid = GetLuid();
 
   NTSTATUS ret = DXCORE_CALL(D3DKMTQueryStatistics(&adapterQuery));
   if (ret == STATUS_SUCCESS) {
@@ -116,7 +114,7 @@ bool WDDMDevice::QuerySegmentInfo()
 
     D3DKMT_QUERYSTATISTICS segQuery = {};
     segQuery.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-    segQuery.AdapterLuid = adapter_luid_;
+    segQuery.AdapterLuid = GetLuid();
     segQuery.QuerySegment.SegmentId = i;
 
     ret = DXCORE_CALL(D3DKMTQueryStatistics(&segQuery));
@@ -175,7 +173,7 @@ uint64_t WDDMDevice::VramAvail(void) {
 
   memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
   stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-  stats.AdapterLuid = adapter_luid_;
+  stats.AdapterLuid = GetLuid();
   stats.QuerySegment.SegmentId = segmentId;
   ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
   if (ret == 0)
@@ -186,7 +184,7 @@ uint64_t WDDMDevice::VramAvail(void) {
     segmentId++;
     memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
     stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-    stats.AdapterLuid = adapter_luid_;
+    stats.AdapterLuid = GetLuid();
     stats.QuerySegment.SegmentId = segmentId;
     ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
     if (ret == 0)
@@ -202,7 +200,7 @@ uint64_t WDDMDevice::VramAvail(void) {
 
   memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
   stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-  stats.AdapterLuid = adapter_luid_;
+  stats.AdapterLuid = GetLuid();
   stats.QuerySegment.SegmentId = segmentId;
   ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
   if (ret == 0)
@@ -211,35 +209,9 @@ uint64_t WDDMDevice::VramAvail(void) {
   return LocalHeapSize() + NonLocalHeapSize() - usedVis - usedInv - usedNonLocal;
 }
 
-bool WDDMDevice::CreateDevice(void) {
-  D3DKMT_CREATEDEVICE args = {0};
-  args.hAdapter = adapter_;
-
-  NTSTATUS ret = DXCORE_CALL(D3DKMTCreateDevice(&args));
-  if (ret == STATUS_SUCCESS) {
-    device_ = args.hDevice;
-    return true;
-  }
-
-  pr_err("fail %x\n", ret);
-  return false;
-}
-
-bool WDDMDevice::DestroyDevice(void) {
-  D3DKMT_DESTROYDEVICE args = {0};
-  args.hDevice = device_;
-
-  NTSTATUS ret = DXCORE_CALL(D3DKMTDestroyDevice(&args));
-  if (ret == STATUS_SUCCESS)
-    return true;
-
-  pr_err("fail %x\n", ret);
-  return false;
-}
-
 bool WDDMDevice::CreatePagingQueue(void) {
   D3DKMT_CREATEPAGINGQUEUE args = {0};
-  args.hDevice = device_;
+  args.hDevice = DeviceHandle();
   args.Priority = D3DDDI_PAGINGQUEUE_PRIORITY_NORMAL;
 
   NTSTATUS ret = DXCORE_CALL(D3DKMTCreatePagingQueue(&args));
@@ -274,7 +246,7 @@ void WDDMDevice::SetPowerOptimization(bool restore) {
   memset(&d3dkmt_escape, 0, sizeof(d3dkmt_escape));
 
   d3dkmt_escape.hAdapter              = adapter_;
-  d3dkmt_escape.hDevice               = device_;
+  d3dkmt_escape.hDevice               = DeviceHandle();
   d3dkmt_escape.hContext              = 0; //KMD only use device to identify the process
   d3dkmt_escape.Type                  = D3DKMT_ESCAPE_DRIVERPRIVATE;
   d3dkmt_escape.pPrivateDriverData    = priv.data();
@@ -315,7 +287,7 @@ ErrorCode WDDMDevice::CreateGpuMemory(const GpuMemoryCreateInfo &create_info,
 
 void *WDDMDevice::Lock(D3DKMT_HANDLE handle) {
   D3DKMT_LOCK2 args = {0};
-  args.hDevice = device_;
+  args.hDevice = DeviceHandle();
   args.hAllocation = handle;
 
   NTSTATUS ret = DXCORE_CALL(D3DKMTLock2(&args));
@@ -328,7 +300,7 @@ void *WDDMDevice::Lock(D3DKMT_HANDLE handle) {
 
 bool WDDMDevice::Unlock(D3DKMT_HANDLE handle) {
   D3DKMT_UNLOCK2 args = {0};
-  args.hDevice = device_;
+  args.hDevice = DeviceHandle();
   args.hAllocation = handle;
 
   NTSTATUS ret = DXCORE_CALL(D3DKMTUnlock2(&args));
@@ -347,7 +319,7 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
   auto priv = thunk_proxy::MakeContextPrivData(SupportStateShadowingByCpFw());
 
   D3DKMT_CREATECONTEXTVIRTUAL args = {0};
-  args.hDevice = device_;
+  args.hDevice = DeviceHandle();
   args.EngineAffinity = 1 << 0;
   args.NodeOrdinal = ordinal;
   args.pPrivateDriverData = priv.data();
@@ -417,7 +389,7 @@ bool WDDMDevice::GpuSignal(D3DKMT_HANDLE context, const D3DKMT_HANDLE *syncobjs,
 bool WDDMDevice::CpuWait(const D3DKMT_HANDLE *syncobjs, uint64_t *value,
 			 int count, bool wait_any) {
   D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU args = {0};
-  args.hDevice = device_;
+  args.hDevice = DeviceHandle();
   args.ObjectCount = count;
   args.ObjectHandleArray = syncobjs;
   args.FenceValueArray = value;
@@ -443,7 +415,7 @@ bool WDDMDevice::WaitOnPagingFenceFromCpu() {
 
 bool WDDMDevice::CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr) {
   D3DKMT_CREATESYNCHRONIZATIONOBJECT2 args = {0};
-  args.hDevice = device_;
+  args.hDevice = DeviceHandle();
   args.Info.Type = D3DDDI_MONITORED_FENCE;
   args.Info.MonitoredFence.EngineAffinity = 1 << 0;
 
@@ -528,8 +500,7 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
     if (!wsl::thunk::QueryAdapterSupported(query.DeviceIds.DeviceID))
       continue;
 
-    auto device = new WDDMDevice(sdev, adapter, chain->AdapterLuid(),
-                                 devices.size() + 1);
+    auto device = new WDDMDevice(sdev, adapter, devices.size() + 1);
     if (!device)
       continue;
     devices.push_back(device);

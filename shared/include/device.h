@@ -75,6 +75,9 @@ public:
                    bool hardwareAccess = false) const;
 
   const thunk_proxy::DeviceInfo &DeviceInfo() const;
+  WinDeviceHandle DeviceHandle() const;
+  WinAdapterHandle AdapterHandle() const;
+  LUID AdapterLuid() const;
 
 private:
   Device(Platform *platform, LdaChain *lda_chain, u32 chainIndex,
