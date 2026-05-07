@@ -301,8 +301,10 @@ private:
 
     PalDpb dpb_;
     PalBitstreamBuffer bitstream_;
+    PalObject<Pal::IGpuMemory> decoder_heap_;  // VCN decoder internal heap
 
     bool initialized_;
+    bool session_begun_;
     std::mutex mutex_;
 
     // Platform singleton state (recursive mutex because GetPalDevice calls GetPalPlatform)

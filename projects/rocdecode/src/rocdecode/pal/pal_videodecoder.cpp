@@ -276,7 +276,8 @@ PalVideoDecoder::PalVideoDecoder()
     , max_coded_height_(0)
     , bit_depth_(0)
     , max_dpb_slots_(0)
-    , initialized_(false) {
+    , initialized_(false)
+    , session_begun_(false) {
 }
 
 PalVideoDecoder::~PalVideoDecoder() {
@@ -491,6 +492,37 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
         *video_decoder_.PtrAddr() = vd;
         *video_decoder_.MemAddr() = mem;
         InfoLog(g_rocdec_logger, "PAL: Video decoder created successfully");
+    }
+
+    // Allocate decoder heap (VCN internal memory - 2 MB)
+    InfoLog(g_rocdec_logger, "PAL: Allocating decoder heap...");
+    {
+        Pal::GpuMemoryCreateInfo heap_ci = {};
+        heap_ci.size = 2 * 1024 * 1024;  // 2 MB for decoder heap
+        heap_ci.alignment = 4096;
+        heap_ci.vaRange = Pal::VaRange::Default;
+        heap_ci.priority = Pal::GpuMemPriority::Normal;
+        heap_ci.heapCount = 1;
+        heap_ci.heaps[0] = Pal::GpuHeapLocal;  // Local heap for VCN
+
+        size_t heap_obj_size = device_->GetGpuMemorySize(heap_ci, &res);
+        if (Util::IsErrorResult(res)) {
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: GetGpuMemorySize (decoder heap) failed with result ") + ROCDEC_TOSTR((int)res));
+            return ROCDEC_RUNTIME_ERROR;
+        }
+
+        void* heap_obj_mem = malloc(heap_obj_size);
+        Pal::IGpuMemory* heap_mem = nullptr;
+        res = device_->CreateGpuMemory(heap_ci, heap_obj_mem, &heap_mem);
+        if (Util::IsErrorResult(res) || !heap_mem) {
+            free(heap_obj_mem);
+            CriticalLog(g_rocdec_logger, "PAL: CreateGpuMemory (decoder heap) failed");
+            return ROCDEC_RUNTIME_ERROR;
+        }
+
+        *decoder_heap_.PtrAddr() = heap_mem;
+        *decoder_heap_.MemAddr() = heap_obj_mem;
+        InfoLog(g_rocdec_logger, "PAL: Decoder heap allocated successfully");
     }
 
     // Allocate bitstream buffer (16 MB initial)
@@ -879,28 +911,73 @@ rocDecStatus PalVideoDecoder::DecodeHEVC(RocdecPicParams* params) {
     // Codec info
     decode_info.pCodecInfoBuffer = &codec_info;
 
-    // DPB configuration (use simplified DPB for now)
+    // Decoder heap (VCN internal memory)
+    decode_info.pDecoderHeapBuffer = decoder_heap_.Get();
+    decode_info.decoderHeapOffset = 0;
+
+    // DPB configuration
     decode_info.dpbArraySize = max_dpb_slots_;
-    decode_info.dpbConfig.dynamicDpbTier1 = 1;
-    decode_info.dpbConfig.dynamicDpbTier2 = 0;
-    decode_info.dpbConfig.dynamicDpbTier3 = 0;
 
-    // DPB current buffer (Tier 2 mode - current frame in separate buffer)
-    decode_info.pDpbCurrBuffer = output_slot->image.Get();
-    decode_info.dpbCurArraySlice = output_slot->image_index;
+    // Query device properties to determine DPB tier
+    Pal::DeviceProperties dev_props = {};
+    device_->GetProperties(&dev_props);
 
-    // Reference frames (Tier 2 mode - reference frames in array of images)
-    for (uint32_t i = 0; i < Pal::MaxDpbSliceCount; i++) {
-        decode_info.dpbRefArraySlices[i] = 0xFF;  // Mark as invalid
-        decode_info.pDpbRefBuffers[i] = nullptr;
+    if (dev_props.vcnipProperties.flags.supportUnifiedDecodeTarget) {
+        // Tier 2: Array of textures (preferred)
+        decode_info.dpbConfig.dynamicDpbTier1 = 0;
+        decode_info.dpbConfig.dynamicDpbTier2 = 1;
+        decode_info.dpbConfig.dynamicDpbTier3 = 0;
+    } else if (dev_props.vcnipProperties.flags.supportArrayOfTextures) {
+        // Tier 2: Array of textures
+        decode_info.dpbConfig.dynamicDpbTier1 = 0;
+        decode_info.dpbConfig.dynamicDpbTier2 = 1;
+        decode_info.dpbConfig.dynamicDpbTier3 = 0;
+    } else {
+        // Tier 1: Single texture array
+        decode_info.dpbConfig.dynamicDpbTier1 = 1;
+        decode_info.dpbConfig.dynamicDpbTier2 = 0;
+        decode_info.dpbConfig.dynamicDpbTier3 = 0;
     }
 
-    for (uint32_t i = 0; i < 15 && i < Pal::MaxDpbSliceCount; i++) {
-        if (hevc->ref_frames[i].pic_idx >= 0 && hevc->ref_frames[i].pic_idx != 0xFF) {
-            PalDpbSlot* ref_slot = dpb_.GetSlot(hevc->ref_frames[i].pic_idx);
-            if (ref_slot && ref_slot->image.Get()) {
-                decode_info.pDpbRefBuffers[i] = ref_slot->image.Get();
-                decode_info.dpbRefArraySlices[i] = ref_slot->image_index;
+    if (decode_info.dpbConfig.dynamicDpbTier2) {
+        // Tier 2: Separate current and reference buffers
+        decode_info.pDpbCurrBuffer = output_slot->image.Get();
+        decode_info.dpbCurArraySlice = output_slot->image_index;
+
+        // Initialize reference frames array
+        for (uint32_t i = 0; i < Pal::MaxDpbSliceCount; i++) {
+            decode_info.dpbRefArraySlices[i] = 0xFF;  // Mark as invalid
+            decode_info.pDpbRefBuffers[i] = nullptr;
+        }
+
+        // Map reference frames using the reference list from codec parameters
+        for (uint32_t i = 0; i < Pal::MaxDpbSliceCount; i++) {
+            uint8_t pic_entry = pal_hevc.ref_pic_list[i] & 0x7F;
+
+            if (pic_entry != 0x7F && pic_entry < max_dpb_slots_) {
+                PalDpbSlot* ref_slot = dpb_.GetSlot(pic_entry);
+                if (ref_slot && ref_slot->image.Get()) {
+                    decode_info.pDpbRefBuffers[i] = ref_slot->image.Get();
+                    decode_info.dpbRefArraySlices[i] = ref_slot->image_index;
+                }
+            }
+        }
+    } else {
+        // Tier 1: Single DPB array
+        decode_info.pDpbCurrBuffer = output_slot->image.Get();
+        decode_info.dpbCurArraySlice = output_slot->image_index;
+
+        for (uint32_t i = 0; i < Pal::MaxDpbSliceCount; i++) {
+            decode_info.pDpbRefBuffers[i] = nullptr;
+            if (i < max_dpb_slots_) {
+                PalDpbSlot* slot = dpb_.GetSlot(i);
+                if (slot) {
+                    decode_info.dpbRefArraySlices[i] = slot->image_index;
+                } else {
+                    decode_info.dpbRefArraySlices[i] = 0xFF;
+                }
+            } else {
+                decode_info.dpbRefArraySlices[i] = 0xFF;
             }
         }
     }
@@ -920,13 +997,13 @@ rocDecStatus PalVideoDecoder::DecodeHEVC(RocdecPicParams* params) {
     }
 
     // Begin video decode session (if first frame)
-    static bool session_begun = false;
-    if (!session_begun) {
+    if (!session_begun_) {
         Pal::VideoDecodeBeginInfo begin_info = {};
-        begin_info.srcExtent.width = max_coded_width_;
-        begin_info.srcExtent.height = max_coded_height_;
+        begin_info.srcExtent.width = hevc->picture_width_in_luma_samples;
+        begin_info.srcExtent.height = hevc->picture_height_in_luma_samples;
         cmd_buffer_->CmdBeginVideoDecode(begin_info);
-        session_begun = true;
+        session_begun_ = true;
+        InfoLog(g_rocdec_logger, "PAL: Video decode session begun");
     }
 
     // Submit decode frame command
@@ -1057,6 +1134,7 @@ void PalVideoDecoder::Destroy() {
     // Release resources (PalObject destructors handle this)
     bitstream_.gpu_memory.Reset();
     dpb_.Clear();
+    decoder_heap_.Reset();
     fence_.Reset();
     cmd_buffer_.Reset();
     cmd_allocator_.Reset();
@@ -1064,6 +1142,7 @@ void PalVideoDecoder::Destroy() {
     video_decoder_.Reset();
 
     initialized_ = false;
+    session_begun_ = false;
     device_ = nullptr;
 
     ReleasePalPlatform();
