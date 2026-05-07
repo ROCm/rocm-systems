@@ -6,6 +6,7 @@
 
 #include "core/inc/counted_queue_manager.h"
 #include "core/inc/agent.h"
+#include "core/inc/dispatch_log.h"
 #include "core/inc/runtime.h"
 
 namespace rocr {
@@ -88,7 +89,18 @@ core::Queue* CountedQueuePoolManager::FindOrCreateHardwareQueue(
   // best-effort. Ignore the return for behavioral parity; the buffer-
   // wiring failure modes (libhsakmt SetQueueProfilingBuffer failure)
   // do not regress correctness for these internal queues.
-  (void)cmd_queue->SetProfiling(true);
+  //
+  // Code-quality C3: route through the dispatch_log refcount instead
+  // of calling SetProfiling directly. SetProfiling owns the per-queue
+  // dispatch-record buffer + KFD MQD wiring; if the LTTng dispatch_log
+  // path enables/disables profiling on a counted queue it shares with
+  // us, a refcount-bypassing direct SetProfiling(false) by either
+  // owner would free state the other still depends on. The Acquire is
+  // never matched by a Release here — counted queues hold profiling
+  // for their full lifetime — so the refcount stays at 1 (or higher
+  // if another consumer also acquires) until the queue is destroyed,
+  // at which point on_queue_destroy clears the refcount entry.
+  (void)rocr::dispatch_log::QueueProfilingAcquire(cmd_queue);
 
   // Add to pool
   pool.push_back(cmd_queue);

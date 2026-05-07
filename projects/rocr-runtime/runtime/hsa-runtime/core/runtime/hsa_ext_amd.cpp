@@ -65,6 +65,7 @@
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
 #include "core/inc/counted_queue_manager.h"
+#include "core/inc/dispatch_log.h"
 
 namespace rocr {
 
@@ -643,7 +644,29 @@ hsa_status_t hsa_amd_profiling_set_profiler_enabled(hsa_queue_t* queue, int enab
   // HSA_STATUS_ERROR_NOT_SUPPORTED, etc.); propagate so callers can act
   // on them rather than silently believing profiling is enabled when
   // KFD never accepted the buffer.
-  return cmd_queue->SetProfiling(enable);
+  //
+  // Code-quality C3: route through the dispatch_log refcount instead
+  // of calling SetProfiling directly. SetProfiling owns the per-queue
+  // dispatch-record buffer + KFD MQD wiring; if multiple consumers
+  // (this public API, the LTTng dispatch_log path,
+  // CountedQueuePoolManager) call SetProfiling independently, a disable
+  // from one of them frees state another still depends on. The
+  // QueueProfilingAcquire / Release refcount makes the underlying
+  // SetProfiling(true) / (false) calls happen exactly on the 0->1 / 1->0
+  // edges, so all callers can coexist.
+  //
+  // Semantics note: under the old direct-SetProfiling path,
+  // calling enable=1 N times then enable=0 once would leave profiling
+  // disabled. Under the refcount path the same sequence leaves
+  // profiling enabled (N-1 acquires still outstanding). The public API
+  // does not document idempotence in either direction; refcount
+  // semantics are the only safe choice when multiple subsystems share
+  // the queue.
+  if (enable) {
+    return rocr::dispatch_log::QueueProfilingAcquire(cmd_queue);
+  } else {
+    return rocr::dispatch_log::QueueProfilingRelease(cmd_queue);
+  }
   CATCH;
 }
 
