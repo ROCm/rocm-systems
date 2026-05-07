@@ -1377,6 +1377,27 @@ write_rocpd(
                     insert_value("extdata", json_data),
                 });
         }
+
+        // Insert id=0 placeholders for kernel dispatches whose code object was not captured
+        // (e.g., in attach mode when the kernel was loaded before the attach window).
+        // These ensure FK constraints are satisfied for kernel_id=0 dispatch records.
+        get_insert_statement(db,
+                             "rocpd_info_code_object{{uuid}}",
+                             {
+                                 insert_value("id", uint64_t{0}),
+                                 insert_value("nid", node_id),
+                                 insert_value("pid", this_pid),
+                             });
+        get_insert_statement(db,
+                             "rocpd_info_kernel_symbol{{uuid}}",
+                             {
+                                 insert_value("id", uint64_t{0}),
+                                 insert_value("nid", node_id),
+                                 insert_value("pid", this_pid),
+                                 insert_value("code_object_id", uint64_t{0}),
+                                 insert_value("kernel_name", std::string{"<unknown>"}),
+                                 insert_value("display_name", std::string{"<unknown>"}),
+                             });
     };
 
     auto insert_pmc_data = [&db, &tool_metadata, node_id, this_pid]() {
@@ -1507,7 +1528,13 @@ write_rocpd(
                     insert_value("grid_size_x", grid.x),
                     insert_value("grid_size_y", grid.y),
                     insert_value("grid_size_z", grid.z),
-                    insert_value("region_name_id", string_entries.at(region_name)),
+                    insert_value("region_name_id",
+                                 [&]() {
+                                     auto it = string_entries.find(region_name);
+                                     if(it == string_entries.end())
+                                         return string_entries.at(region_name);  // triggers throw
+                                     return it->second;
+                                 }()),
                     insert_value("event_id", evt_id),
                 });
         };
