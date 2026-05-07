@@ -4,13 +4,13 @@
 version: 2
 
 sphinx:
-  configuration: docs/conf.py
+  configuration: projects/hipfile/docs/conf.py
 
 formats: []
 
 python:
   install:
-    - requirements: docs/sphinx/requirements.txt
+    - requirements: projects/hipfile/docs/sphinx/requirements.txt
 
 build:
   os: ubuntu-24.04
