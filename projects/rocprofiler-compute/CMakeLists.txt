@@ -893,6 +893,11 @@ if(INSTALL_TESTS)
         PATTERN "__pycache__" EXCLUDE
     )
     install(
+        PROGRAMS therock_test_runner.py
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT tests
+    )
+    install(
         DIRECTORY tests/workloads
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
         COMPONENT tests
