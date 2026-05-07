@@ -394,6 +394,18 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
 
 enum class AggregationType { Reduce, InclusiveScan, ExclusiveScan};
 
+constexpr uint64_t nextPowerOf2(uint64_t v) {
+  v += (v == 0);
+  v--;
+  v |= v >> 1;
+  v |= v >> 2;
+  v |= v >> 4;
+  v |= v >> 8;
+  v |= v >> 16;
+  v |= v >> 32;
+  return ++v;
+}
+
 // given an operation produces the expected result of the warp-wide reduction
 // @mask indicates the lanes that will participate in the computation
 // @return the result in the highest lane
@@ -407,6 +419,7 @@ T calculateExpected(T* output,
   T result;
   bool inclusive = aggType != AggregationType::ExclusiveScan;
   int lastLane = 64 - __builtin_clzll(mask) - 1;
+  T lastOutput[64];
 
   std::memset(output, 0, 64 * sizeof(T));
 
@@ -417,12 +430,14 @@ T calculateExpected(T* output,
        }
     }
 
-    for (int modulo = 2; modulo <= lastLane + 1; modulo *= 2) {
+    for (int modulo = 2; modulo <= nextPowerOf2(lastLane + 1); modulo *= 2) {
+      std::memcpy(lastOutput, output, sizeof(lastOutput));
+
       for (int i = 0; i < lastLane + 1; i += 1) {
         int j = i - modulo / 2;
 
-        if (j >= 0 && i % modulo == modulo - 1) {
-          output[i] += output[j];
+        if (j >= 0) {
+          output[i] += lastOutput[j];
         }
       }
     }
@@ -528,7 +543,7 @@ void compareFloatingPoint(const T& result, const T& expected, unsigned long long
           std::cout << "Relative epsilon: " << relativeEpsilon << "\n";
           std::cout << "Difference: " << absDifference << "\n";
         }
-       }
+      }
 
       REQUIRE_THAT(__half2float(resultFloat), WithinRel(expectedFloat, eps));
     }
