@@ -1,9 +1,0 @@
-rocprofiler-compute:
-  - 'projects/rocprofiler-compute/**'
-  - '.github/workflows/rocprofiler-compute-formatting.yml'
-rocprofiler-sdk:
-  - 'projects/rocprofiler-sdk/**'
-  - '.github/workflows/rocprofiler-sdk-formatting.yml'
-rocprofiler-systems:
-  - 'projects/rocprofiler-systems/**'
-  - '.github/workflows/rocprofiler-systems-formatting.yml'

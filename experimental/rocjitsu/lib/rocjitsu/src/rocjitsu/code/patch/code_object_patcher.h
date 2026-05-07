@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/kernel_descriptor_info.h"
+
 #include <cstdint>
 #include <span>
 #include <string>
@@ -44,17 +46,8 @@ public:
 
   std::span<const uint8_t> cave_body() const { return cave_body_; }
 
-  /// @brief Information about a kernel's workgroup_id SGPR layout.
-  struct WorkGroupIdInfo {
-    uint64_t entry_text_offset; ///< Kernel entry offset relative to .text start.
-    int8_t sgpr_wg_id_x;        ///< SGPR index for workgroup_id_x, or -1 if not used.
-    int8_t sgpr_wg_id_y;        ///< SGPR index for workgroup_id_y, or -1 if not used.
-    int8_t sgpr_wg_id_z;        ///< SGPR index for workgroup_id_z, or -1 if not used.
-  };
-
-  /// @brief Get workgroup_id SGPR assignments for each kernel.
-  /// Parses the kernel descriptors to determine which SGPRs hold workgroup IDs.
-  std::vector<WorkGroupIdInfo> workgroup_id_info() const;
+  /// @brief Get parsed kernel descriptor metadata for the current image.
+  std::vector<KernelDescriptorInfo> kernel_descriptor_info() const;
 
   std::vector<uint8_t> emit() const;
 

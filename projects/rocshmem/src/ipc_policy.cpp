@@ -43,7 +43,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
 
   // Check if we should use pod-based detection (for VMM Fabric allocator)
   HIPAllocator *allocator = get_default_allocator();
-  bool use_pod_detection = (allocator->type == AllocatorTypeVMMFabric);
+  bool use_pod_detection = (allocator->get_type() == AllocatorTypeVMMFabric);
 
   if (use_pod_detection) {
     // Use pod-based detection
@@ -189,7 +189,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                      TcpBootstrap *bootstr) {
   // Check if we should use pod-based detection (for VMM Fabric allocator)
   HIPAllocator *allocator = get_default_allocator();
-  bool use_pod_detection = (allocator->type == AllocatorTypeVMMFabric);
+  bool use_pod_detection = (allocator->get_type() == AllocatorTypeVMMFabric);
 
   // For VMM_FABRIC, use pod-based IPC capability detection; otherwise use local ranks
   auto shm_ranks = use_pod_detection ? bootstr->getIpcCapableRanks() : bootstr->getLocalRanks();
@@ -281,16 +281,5 @@ __host__ void IpcOnImpl::ipcHostStop() {
   }
 }
 
-__device__ void IpcOnImpl::ipcCopy(void *dst, void *src, size_t size) {
-  memcpy_lane(dst, src, size);
-}
-
-__device__ void IpcOnImpl::ipcCopy_wave(void *dst, void *src, size_t size) {
-  memcpy_wave(dst, src, size);
-}
-
-__device__ void IpcOnImpl::ipcCopy_wg(void *dst, void *src, size_t size) {
-  memcpy_wg(dst, src, size);
-}
 
 }  // namespace rocshmem
