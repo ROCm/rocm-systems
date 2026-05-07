@@ -1168,30 +1168,30 @@ hsa_status_t XdnaDriver::IsModelEnabled(bool* enable) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::DestroyBOHandle(BOHandle& handle) {
-  if (!handle.IsValid()) {
+hsa_status_t XdnaDriver::DestroyBOHandle(BOHandle& bo_handle) {
+  if (!bo_handle.IsValid()) {
     return HSA_STATUS_SUCCESS;
   }
 
   hsa_status_t unmap_err = HSA_STATUS_SUCCESS;
 
   // Unmap the memory.
-  if (handle.unmap_vaddr) {
-    if (munmap(handle.vaddr, handle.size) != 0) {
+  if (bo_handle.unmap_vaddr) {
+    if (munmap(bo_handle.vaddr, bo_handle.size) != 0) {
       unmap_err = HSA_STATUS_ERROR;
       assert(false && "Failed to unmap BO memory.");
     } else {
-      handle.unmap_vaddr = false;
-      handle.vaddr = nullptr;
-      handle.size = 0;
+      bo_handle.unmap_vaddr = false;
+      bo_handle.vaddr = nullptr;
+      bo_handle.size = 0;
     }
   }
 
   // Close the BO handle.
   drm_gem_close close_bo_args = {};
-  close_bo_args.handle = handle.handle;
+  close_bo_args.handle = bo_handle.handle;
   hsa_status_t ioctl_err = xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_bo_args);
-  handle.handle = AMDXDNA_INVALID_BO_HANDLE;
+  bo_handle.handle = AMDXDNA_INVALID_BO_HANDLE;
 
   if (ioctl_err != HSA_STATUS_SUCCESS) {
     return ioctl_err;
