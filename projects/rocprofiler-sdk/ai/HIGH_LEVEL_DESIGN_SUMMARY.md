@@ -1,7 +1,8 @@
 # Firmware-Assisted Kernel Dispatch Tracing — Design Summary
 
 > Detail docs: `KNOWN_ISSUES.md`, `FIRMWARE_RING_HYBRID_DESIGN.md`,
-> `KFD_DISPATCH_LOG_DESIGN.md` (in this directory).
+> `KFD_DISPATCH_LOG_DESIGN.md`, `LTTNG_DLOPEN_DESIGN.md` (in this
+> directory).
 
 ## What this is
 
