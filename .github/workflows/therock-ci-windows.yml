@@ -50,13 +50,6 @@ jobs:
         run: |
           pip install -r TheRock/requirements.txt
 
-      - name: Patch rocm-systems
-        run: |
-          # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
-          # rm ./TheRock/patches/amd-mainline/rocm-systems/*.patch
-          rm ./TheRock/patches/amd-mainline/rocm-systems/0008-Find-bundled-libelf.patch
-          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
-
       - name: Install requirements
         run: |
           choco install --no-progress -y ccache
