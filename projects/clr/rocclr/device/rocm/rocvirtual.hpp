@@ -767,6 +767,8 @@ class VirtualGPU : public device::VirtualDevice {
   int fence_state_;                    //!< Fence scope
                                        //!< kUnknown/kFlushedToDevice/kFlushedToSystem
   std::atomic<bool> fence_dirty_;      //!< Fence modified flag
+  bool heap_init_fence_emitted_ = false;  //!< True once this queue has emitted system scope
+                                          //!< fence after hidden heap init.
 
   uint64_t last_write_index_ = kInvalidQueueIndex; //!< The last HW queue write index for any packet
   uint64_t last_packet_with_signal_index_ = kInvalidQueueIndex; //!< The last HW queue write index for a packet

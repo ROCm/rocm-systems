@@ -4077,6 +4077,10 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
           // Initialize hidden heap buffer
           if (!isGraphCapture) {
             const_cast<Device&>(dev()).HiddenHeapInit(*this);
+            if (!heap_init_fence_emitted_) {
+              addSystemScope();
+              heap_init_fence_emitted_ = true;
+            }
           }
           // Add heap pointer to the code
           size_t heap_ptr = static_cast<size_t>(dev().HeapBuffer()->virtualAddress());
