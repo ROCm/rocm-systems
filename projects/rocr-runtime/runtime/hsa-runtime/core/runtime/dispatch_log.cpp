@@ -1305,14 +1305,54 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
     // else: legacy sentinel-scan mode; null pointers tell drain_one_queue
     // to use the fallback scan path.
 
-    // next_idx starts at 0. The drain loop's initial-state sync (see
-    // drain_one_queue Path A) detects the FW per-pipe scratch wptr
-    // persistence on the FIRST observed signal advance and adjusts
-    // next_idx then. We can't read FW's wptr at enable time because
-    // FW won't publish to signal_addr until the first new record write
-    // POST-enable — at this exact point the host word is still 0
-    // (initialized by SetProfiling).
-    qs->next_idx = 0;
+    // next_idx initialization (code-quality C2). Snapshot the current
+    // value of *signal_ptr (Path A only) and adopt it as our monotonic
+    // floor. Two cases this correctly covers:
+    //
+    //   1. Fresh queue (the common case). SetProfiling(true) just
+    //      allocated and zeroed the host signal word, so observed=0,
+    //      qs->next_idx=0. The first FW post-enable record write will
+    //      jump signal from 0 to (scratch_wptr_persisted + 1) and the
+    //      drain_one_queue Path A initial-sync logic
+    //      (initial_sync == (next_idx == 0)) handles the persisted
+    //      scratch wptr exactly as before. NO behavior change.
+    //
+    //   2. Re-enable after a failed disable. If the previous disable's
+    //      QueueProfilingRelease -> AqlQueue::SetProfiling(false) failed
+    //      its KFD CLEAR, AqlQueue keeps the dispatch_record_buffer_
+    //      live, leaves the profiling bit set, and FW continues writing
+    //      records into the buffer (and advancing *signal_ptr) during
+    //      the disabled window. On a subsequent enable, SetProfiling
+    //      sees dispatch_record_buffer_ != nullptr and is a no-op — it
+    //      does NOT re-zero the signal word. Without this snapshot the
+    //      new drainer would start at next_idx=0 with observed already
+    //      huge, treat it as init-sync (initial_sync==true), and either
+    //      silently drop the entire ring's worth of stale-or-real
+    //      records or emit pre-zeroed slots as records. Snapshotting
+    //      the FW signal here causes the drainer to skip everything FW
+    //      wrote during the disabled window — which is the only safe
+    //      behavior, since we have no way to distinguish records the
+    //      consumer would still want from records belonging to a
+    //      lifecycle that already ended.
+    //
+    // Path B (sentinel-scan fallback, signal_ptr==nullptr) is not
+    // affected by this hazard: it has no out-of-band write counter,
+    // and its existing per-slot record_type sentinel walk handles
+    // both fresh and re-enable cases correctly.
+    if (qs->signal_ptr != nullptr) {
+      qs->next_idx = __atomic_load_n(qs->signal_ptr, __ATOMIC_ACQUIRE);
+      // Publish the snapshot to *rptr_ptr too so FW's backpressure view
+      // matches our monotonic floor. SetProfiling on a re-enable after
+      // a failed disable does not re-zero the rptr word either, so it
+      // could otherwise lag far behind signal and report false
+      // backpressure to FW. On a fresh queue both words are 0 and this
+      // is a no-op store.
+      if (qs->rptr_ptr) {
+        __atomic_store_n(qs->rptr_ptr, qs->next_idx, __ATOMIC_RELEASE);
+      }
+    } else {
+      qs->next_idx = 0;
+    }
 
     g_active_drainers[qs->queue_id] = qs;
 
