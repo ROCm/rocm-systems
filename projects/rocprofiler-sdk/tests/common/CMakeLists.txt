@@ -12,6 +12,10 @@ set(ROCPROFILER_DEFAULT_FAIL_REGEX
     "threw an exception|Permission denied|Could not create logging file|failed with error code|Subprocess aborted"
     CACHE INTERNAL "Default FAIL_REGULAR_EXPRESSION for tests")
 
+set(ROCPROFILER_DEFAULT_SKIP_REGEX
+    "firmware version.*below minimum required version"
+    CACHE INTERNAL "Default SKIP_REGULAR_EXPRESSION for tests")
+
 set(DEFAULT_GPU_TARGETS
     "gfx900"
     "gfx906"
@@ -257,6 +261,7 @@ function(rocprofiler_add_integration_execute_test NAME)
 
     # provide default
     set_arg_if_empty(arg_FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    set_arg_if_empty(arg_SKIP_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_SKIP_REGEX}")
     set_arg_if_empty(arg_TIMEOUT 60)
     set_arg_if_empty(arg_FIXTURES_SETUP ${NAME})
 
@@ -438,6 +443,7 @@ function(rocprofiler_add_integration_validate_test NAME)
 
     # provide default
     set_arg_if_empty(arg_FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    set_arg_if_empty(arg_SKIP_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_SKIP_REGEX}")
     set_arg_if_empty(arg_WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
     set_arg_if_empty(arg_TIMEOUT 60)
     set_arg_if_empty(arg_FIXTURES_REQUIRED ${NAME})
