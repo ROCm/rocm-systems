@@ -16,10 +16,12 @@ on:
     branches: [develop]
     paths:
       - "experimental/rocjitsu/**"
+      - ".github/workflows/rocjitsu-ci.yml"
   push:
     branches: [develop]
     paths:
       - "experimental/rocjitsu/**"
+      - ".github/workflows/rocjitsu-ci.yml"
   workflow_dispatch:
 
 permissions:
