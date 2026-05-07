@@ -179,7 +179,15 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         {
                             if (slot.empty() || slot.back().bIsComplete)
                                 slot.push_back(wave_t(
-                                    target_sa_wgp, start.simd, start.wid, pcinfo_t{0, 0}, token, exclude_barrier_wait
+                                    target_sa_wgp,
+                                    start.simd,
+                                    start.wid,
+                                    pcinfo_t{0, 0},
+                                    token,
+                                    exclude_barrier_wait,
+                                    (uint8_t) start.me,
+                                    (uint8_t) start.pipe,
+                                    (uint8_t) start.wgid
                                 ));
 
                             auto& wave = slot.back();
@@ -201,7 +209,17 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         auto it = running_waves.find(start.getGPULocation());
                         if (it != running_waves.end())
                         {
-                            occupancy.push_back({it->second, token.time, start.SACU(), start.simd, start.wid, 0});
+                            occupancy.push_back(
+                                {it->second,
+                                 token.time,
+                                 start.SACU(),
+                                 start.simd,
+                                 start.wid,
+                                 0,
+                                 (uint64_t) start.me,
+                                 (uint64_t) start.pipe,
+                                 (uint64_t) start.wgid}
+                            );
                             saved_waves[start.getGPULocation()] = it->second;
                         }
                     }
@@ -213,7 +231,17 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                         saved_waves.erase(start.getGPULocation());
                         running_waves[start.getGPULocation()] = addr;
-                        occupancy.push_back({addr, token.time, start.SACU(), start.simd, start.wid, 1});
+                        occupancy.push_back(
+                            {addr,
+                             token.time,
+                             start.SACU(),
+                             start.simd,
+                             start.wid,
+                             1,
+                             (uint64_t) start.me,
+                             (uint64_t) start.pipe,
+                             (uint64_t) start.wgid}
+                        );
                     }
 
                     break;
@@ -221,7 +249,17 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                 running_waves[start.getGPULocation()] = wave_addr;
 
-                occupancy.push_back({wave_addr, token.time, start.SACU(), start.simd, start.wid, 1});
+                occupancy.push_back(
+                    {wave_addr,
+                     token.time,
+                     start.SACU(),
+                     start.simd,
+                     start.wid,
+                     1,
+                     (uint64_t) start.me,
+                     (uint64_t) start.pipe,
+                     (uint64_t) start.wgid}
+                );
                 if (double_buffer && occupancy.size() >= MAX_ACCUM_RECORDS) send_occupancy();
 
                 if (bIsTarget)
@@ -233,9 +271,17 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         stitch.stitch(wave);
                         SIMD[start.wid].pop_back();
                     }
-                    SIMD[start.wid].push_back(
-                        wave_t(target_sa_wgp, start.simd, start.wid, wave_addr, token, exclude_barrier_wait)
-                    );
+                    SIMD[start.wid].push_back(wave_t(
+                        target_sa_wgp,
+                        start.simd,
+                        start.wid,
+                        wave_addr,
+                        token,
+                        exclude_barrier_wait,
+                        (uint8_t) start.me,
+                        (uint8_t) start.pipe,
+                        (uint8_t) start.wgid
+                    ));
                 }
                 break;
             }

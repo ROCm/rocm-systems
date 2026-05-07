@@ -135,7 +135,9 @@ const uint64_t SQTT_ISSUE_INST = 2;
 const uint64_t SQTT_ISSUE_IMMED = 3;
 
 wave_t::wave_t(int cu, pcinfo_t addr, Wave& token, int64_t token_time) :
-WaveDataInternal(cu, token.simd, token.wave, token_time, addr, false)
+WaveDataInternal(
+    cu, token.simd, token.wave, token_time, addr, false, (uint8_t) token.me, (uint8_t) token.pipe, (uint8_t) token.count
+)
 {
     this->cur_state = WaveslotState::WS_IDLE;
     this->state_start_cycle = token_time;
@@ -358,6 +360,9 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
         stitch.sendOccupancy(occupancy);
     };
 
+    auto generate_event = [&](int64_t time, rocprofiler_thread_trace_decoder_event_type_t type)
+    { stitch.sendEvent(type, time, 0, 0, 0); };
+
     while (generator.valid())
     {
         Token token = generator.next();
@@ -365,13 +370,30 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
         switch (token.type)
         {
             case TOKEN_MISC:
-                if (token.fields.misc.misc_type == 2) { info.bPacketLost = true; }
-                else if (token.fields.misc.misc_type == 6)
+                switch (token.fields.misc.misc_type)
                 {
-                    for (auto& simd : SIMD)
-                        for (auto& slot : simd)
-                            if (slot.size() && slot.back().end_time == 0)
-                                slot.back().trap_status = WaveTrapStatus::TRAP_REQUEST;
+                    case MISC_TYPE_PACKET_LOST:
+                    {
+                        generate_event(token.time, ROCPROF_TRACE_DECODER_EVENT_PACKET_LOSS);
+                        info.bPacketLost = true;
+                        break;
+                    }
+                    case MISC_TYPE_SAVE_CONTEXT:
+                    {
+                        generate_event(token.time, ROCPROF_TRACE_DECODER_EVENT_SAVE_CONTEXT);
+                        for (auto& simd : SIMD)
+                            for (auto& slot : simd)
+                                if (slot.size() && slot.back().end_time == 0)
+                                    slot.back().trap_status = WaveTrapStatus::TRAP_REQUEST;
+                        break;
+                    }
+                    case MISC_TYPE_TT_STALL_BEGIN:
+                        generate_event(token.time, ROCPROF_TRACE_DECODER_EVENT_TT_STALL_BEGIN);
+                        break;
+                    case MISC_TYPE_TT_STALL_END:
+                        generate_event(token.time, ROCPROF_TRACE_DECODER_EVENT_TT_STALL_END);
+                        break;
+                    default: break;
                 }
                 break;
             case TOKEN_WAVE_START:
@@ -407,7 +429,17 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
 
                 auto it = running_waves.emplace(getGPULocation(wstart), wave_addr);
                 if (it.second)
-                    occupancy.push_back({wave_addr, token.time, wstart.cu, wstart.simd, wstart.wave, 1});
+                    occupancy.push_back(
+                        {wave_addr,
+                         token.time,
+                         wstart.cu,
+                         wstart.simd,
+                         wstart.wave,
+                         1,
+                         (uint64_t) wstart.me,
+                         (uint64_t) wstart.pipe,
+                         (uint64_t) wstart.count}
+                    );
                 else
                     it.first->second = wave_addr;
                 break;
@@ -436,12 +468,43 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
                 {
                     startpc = occ_it->second;
                     running_waves.erase(occ_it);
-                    occupancy.push_back({startpc, token.time, wend.cu, wend.simd, wend.wave, 0});
+                    occupancy.push_back(
+                        {startpc,
+                         token.time,
+                         wend.cu,
+                         wend.simd,
+                         wend.wave,
+                         0,
+                         (uint64_t) wend.me,
+                         (uint64_t) wend.pipe,
+                         (uint64_t) wend.count}
+                    );
                 }
                 else if (!info.bPacketLost)
                 {
-                    occupancy.insert(occupancy.begin(), {startpc, 0, wend.cu, wend.simd, wend.wave, 1});
-                    occupancy.push_back({startpc, 0, wend.cu, wend.simd, wend.wave, 0});
+                    occupancy.insert(
+                        occupancy.begin(),
+                        {startpc,
+                         0,
+                         wend.cu,
+                         wend.simd,
+                         wend.wave,
+                         1,
+                         (uint64_t) wend.me,
+                         (uint64_t) wend.pipe,
+                         (uint64_t) wend.count}
+                    );
+                    occupancy.push_back(
+                        {startpc,
+                         0,
+                         wend.cu,
+                         wend.simd,
+                         wend.wave,
+                         0,
+                         (uint64_t) wend.me,
+                         (uint64_t) wend.pipe,
+                         (uint64_t) wend.count}
+                    );
                 }
 
                 if (double_buffer && occupancy.size() >= MAX_ACCUM_RECORDS) send_occupancy();
@@ -497,8 +560,29 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
                 break;
             }
             case TOKEN_REG_CS:
-            case TOKEN_REG_CS_PRIV: csregister.UpdateRegCS(token.fields.regcs); break;
+            case TOKEN_REG_CS_PRIV:
+            {
+                rocprofiler_thread_trace_decoder_event_type_t type = ROCPROF_TRACE_DECODER_EVENT_NONE;
+                switch (int(token.fields.regcs.regaddr))
+                {
+                    case COMPUTE_DISPATCH_INITIATOR: type = ROCPROF_TRACE_DECODER_EVENT_DISPATCH_BEGIN; break;
+                    case COMPUTE_PGM_LO: type = ROCPROF_TRACE_DECODER_EVENT_REG_PGM_LO; break;
+                    case COMPUTE_PGM_HI: type = ROCPROF_TRACE_DECODER_EVENT_REG_PGM_HI; break;
+                    case COMPUTE_PGM_RSRC1: type = ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC1; break;
+                    case COMPUTE_PGM_RSRC2: type = ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC2; break;
+                    case COMPUTE_PGM_RSRC3: type = ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC3; break;
+                    case COMPUTE_NOWHERE: type = ROCPROF_TRACE_DECODER_EVENT_REG_NOWHERE; break;
+                    default: break;
+                }
+                if (type != ROCPROF_TRACE_DECODER_EVENT_NONE)
+                    stitch.sendEvent(
+                        type, token.time, token.fields.regcs.me, token.fields.regcs.pipe, token.fields.regcs.regdata
+                    );
+                csregister.UpdateRegCS(token.fields.regcs);
+                break;
+            }
             case TOKEN_REG:
+                if (token.fields.reg.disable) break;
                 if (csregister.IsUserdata3(token.fields.reg.regaddr))
                     csregister.HandleRealtimeClock(token.time, token.fields.reg.regdata);
                 else if (csregister.UpdateRegNoCS(token.fields.reg))
@@ -568,7 +652,7 @@ void wave_t::apply_pc(Token& token, CodeobjTableTranslator& table)
 
     auto& back = pc_infos.at(info_idx).second;
 
-    back = table.ToPcV2(token.fields.inst_pc.pc << 2);
+    back = ToPcV2(table, token.fields.inst_pc.pc << 2);
     if (back.code_object_id == 0) unattrib_pcs.push_back(info_idx);
 }
 

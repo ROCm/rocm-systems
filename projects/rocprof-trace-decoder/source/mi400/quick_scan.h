@@ -22,29 +22,27 @@
 
 #pragma once
 
-#include "rocprof_trace_decoder/cxx/common.hpp"
-#include "rocprof_trace_decoder/cxx/segment.hpp"
+#include <cstddef>
+#include <cstdint>
 
-// Pull the unified types into the global namespace for internal library use.
-using address_range_t = rocprof_trace_decoder::codeobj::address_range_t;
-using CodeobjTableTranslator = rocprof_trace_decoder::codeobj::CodeobjTableTranslator;
+#include "mi400parser.h" // mi400::TokenGenerator::QuickToken
 
-inline bool operator==(const pcinfo_t& a, const pcinfo_t& b)
+namespace mi400::quick_scan
 {
-    return a.address == b.address && a.code_object_id == b.code_object_id;
-}
-inline bool operator!=(const pcinfo_t& a, const pcinfo_t& b)
-{
-    return a.address != b.address || a.code_object_id != b.code_object_id;
-}
+// Purpose-built fast scanner that walks an mi400 SQTT token stream and
+// captures only the rare-token cluster (REG, REG_INIT, EVENT, EVENT_SYNC)
+// with full 64-bit contents. Skips everything else with a flat byte-length
+// table — no visitor calls, no FIFO updates, no globaltime tracking, no
+// Token{} construction.
+//
+// Writes up to `out_cap` entries into `out` in stream order; returns the
+// number written. If the buffer would produce more than `out_cap` rare
+// tokens, the excess are silently dropped (callers should size out_cap
+// generously — observed counts are O(50) per 15 MB of trace).
+//
+// Single-threaded, no exceptions. The buffer is read up to position
+// `size`; the windowed inner loop loads 8 bytes at a time, so a tail
+// fallback handles the last <16 bytes safely.
+size_t scan_mi400(const uint8_t* buf, size_t size, TokenGenerator::QuickToken* out, size_t out_cap);
 
-template <> struct std::hash<pcinfo_t>
-{
-    uint64_t operator()(const pcinfo_t& d) const
-    {
-        return (d.address >> 2) ^ (d.code_object_id << 24) ^ (d.code_object_id >> 40);
-    }
-};
-
-/// Internal helper: translate a raw virtual address to a pcinfo_t using the table.
-pcinfo_t ToPcV2(CodeobjTableTranslator& table, uint64_t pc);
+} // namespace mi400::quick_scan

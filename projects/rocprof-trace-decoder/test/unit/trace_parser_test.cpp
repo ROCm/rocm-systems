@@ -23,8 +23,8 @@
 #include "trace_parser.hpp"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "rocprof_trace_decoder/rocprof_trace_decoder.h"
 #include "stitch/stitch.hpp"
-#include "trace_decoder_api.h"
 
 // Forward declarations for internal functions
 std::unique_ptr<SQTTParser> AnalyseBinary_GFX9_internal(

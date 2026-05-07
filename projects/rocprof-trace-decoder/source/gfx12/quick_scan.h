@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,25 +22,18 @@
 
 #pragma once
 
-#include "att_lib_wrapper.hpp"
+#include <cstddef>
+#include <cstdint>
 
-#include <map>
-#include <vector>
-#include "util.hpp"
-
-namespace rocprofiler
+namespace gfx12::quick_scan
 {
-namespace att_wrapper
-{
-namespace OccupancyFile
-{
-using AddressTable = rocprof_trace_decoder::codeobj::CodeobjAddressTranslate;
 
-void
-OccupancyFile(const Fspath&                                     dir,
-              std::shared_ptr<AddressTable>&                    table,
-              const std::map<size_t, std::vector<occupancy_t>>& occ);
-};  // namespace OccupancyFile
+struct QuickToken
+{
+    uint64_t contents;
+    uint32_t type;
+};
 
-}  // namespace att_wrapper
-}  // namespace rocprofiler
+size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap);
+
+} // namespace gfx12::quick_scan

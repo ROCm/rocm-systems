@@ -34,7 +34,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include "common.hpp"
+#include "rocprof_trace_decoder/cxx/common.hpp"
 
 enum class InstCategory
 {
