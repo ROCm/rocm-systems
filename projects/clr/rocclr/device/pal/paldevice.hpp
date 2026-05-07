@@ -230,11 +230,7 @@ class Sampler : public device::Sampler {
 //! A GPU device ordinal (physical GPU device)
 class Device : public NullDevice {
  public:
-#ifdef ATI_OS_WIN
-  struct QueueRecycleInfo : public amd::HeapObject {
-#else
   struct QueueRecycleInfo {
-#endif
     int counter_;                    //!< Lock usage counter
     Pal::EngineType engineType_;     //!< Engine type
     uint32_t index_;                 //!< HW queue index for scratch buffer access
@@ -271,11 +267,7 @@ class Device : public NullDevice {
   };
 
   //! Transfer buffers
-#ifdef ATI_OS_WIN
-  class XferBuffers : public amd::HeapObject {
-#else
   class XferBuffers {
-#endif
    public:
     static constexpr size_t MaxXferBufListSize = 8;
 
@@ -318,11 +310,7 @@ class Device : public NullDevice {
     const Device& gpuDevice_;         //!< GPU device object
   };
 
-#ifdef ATI_OS_WIN
-  struct ScratchBuffer : public amd::HeapObject {
-#else
   struct ScratchBuffer {
-#endif
     Memory* memObj_;   //!< Memory objects for scratch buffers
     uint64_t offset_;  //!< Offset from the global scratch store
     uint64_t size_;    //!< Scratch buffer size on this queue
@@ -338,11 +326,7 @@ class Device : public NullDevice {
   };
 
 
-#ifdef ATI_OS_WIN
-  class SrdManager : public amd::HeapObject {
-#else
   class SrdManager {
-#endif
    public:
     SrdManager(const Device& dev, uint srdSize, uint bufSize)
         : dev_(dev),
