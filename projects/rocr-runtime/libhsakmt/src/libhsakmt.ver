@@ -21,6 +21,7 @@ hsaKmtWaitOnMultipleEvents;
 hsaKmtCreateQueue;
 hsaKmtUpdateQueue;
 hsaKmtDestroyQueue;
+hsaKmtSetDispatchLog;
 hsaKmtSetQueueCUMask;
 hsaKmtSetMemoryPolicy;
 hsaKmtAllocMemory;
