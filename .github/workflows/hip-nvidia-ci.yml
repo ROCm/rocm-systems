@@ -84,7 +84,7 @@ jobs:
         run: |
           apt-get update -q
           apt-get install -y --no-install-recommends \
-            cmake ninja-build \
+            cmake ninja-build llvm-dev libnuma \
             libelf-dev libdrm-dev \
             pkg-config
 
@@ -93,9 +93,10 @@ jobs:
           cmake -B "${BUILD_DIR}/hipcc" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             TheRock/compiler/amd-llvm/amd/hipcc
-          cmake --build "${BUILD_DIR}/hipcc" --target hipconfig --parallel
+          cmake --build "${BUILD_DIR}/hipcc" --parallel
           mkdir -p "${BUILD_DIR}/hipcc-install/bin"
           cp "${BUILD_DIR}/hipcc/hipconfig" "${BUILD_DIR}/hipcc-install/bin/"
+          ln -s "$(which nvcc)" "${BUILD_DIR}/hipcc-install/bin/hipcc"
 
       - name: Configure clr (NVIDIA platform)
         run: |
