@@ -205,15 +205,16 @@ LTTNG_UST_TRACEPOINT_EVENT(
     )
 )
 
-/* kernel_dispatch_drop: tracepoint defined but currently unemittable. The
- * sentinel-scan drainer (core/runtime/dispatch_log.cpp::drain_one_queue)
- * cannot detect ring overruns because the substrate publishes no
- * host-visible FW write pointer to compare against the host read cursor.
- * Reserved for a future overrun-detection mechanism (e.g. a per-slot
- * sequence-number gap check, or a substrate extension that publishes
- * wptr); see rocm_trace_emit.h::rocm_trace_emit_hsa_kernel_dispatch_drop
- * and design spec §10. Per-queue enable failures are reported via stderr
- * WARNING (see Phase A spec §5), not via this tracepoint. */
+/* kernel_dispatch_drop: emitted by the signal-bound drain path (Path A
+ * in core/runtime/dispatch_log.cpp::drain_one_queue) when the host
+ * falls behind FW by more than ring_records, i.e. FW silently
+ * overwrote unread records. bytes_lost is the count of lost records.
+ *
+ * NOT emitted on the sentinel-scan fallback (Path B, older kernels
+ * without host-VA wptr/signal pointers), nor during init-sync (the
+ * pre-zeroed gap between slot 0 and the first FW-written slot is not
+ * a real drop). Per-queue ENABLE failures are reported via stderr
+ * WARNING per spec §5, not via this tracepoint. */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, kernel_dispatch_drop,
     LTTNG_UST_TP_ARGS(uint32_t, queue_id, uint64_t, bytes_lost),

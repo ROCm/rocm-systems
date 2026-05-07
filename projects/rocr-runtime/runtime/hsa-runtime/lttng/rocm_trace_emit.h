@@ -264,18 +264,29 @@ static inline void rocm_trace_emit_hsa_kernel_dispatch_record(
     }
 }
 
-/* kernel_dispatch_drop emit helper. The current sentinel-scan drainer
- * (core/runtime/dispatch_log.cpp::drain_one_queue) cannot detect ring
- * overruns because the substrate publishes no host-visible FW write
- * pointer to compare against the host read cursor. As a result no code
- * path emits this tracepoint today. The definition is retained so a
- * future overrun-detection mechanism (e.g. a sequence-number gap check
- * across slots, or a substrate extension that publishes wptr) can emit
- * it without re-introducing the tracepoint definition. Per-queue enable
- * failures use stderr WARNING per spec §5. force_emit not supported here:
- * drop events would always be observed via the tracepoint-enabled gate,
- * since they would only fire while the drainer is actively consuming a
- * ring (i.e. while the tracepoint is enabled). */
+/* kernel_dispatch_drop emit helper. Emitted by the signal-bound drain
+ * path (core/runtime/dispatch_log.cpp::drain_one_queue Path A) when the
+ * host falls behind FW by more than ring_records: i.e. when
+ * (observed_signal - next_idx) > ring_records the older
+ * ((observed_signal - next_idx) - ring_records) records have been
+ * silently overwritten by FW (FW does not stall on full ring), and
+ * the drainer emits this event with bytes_lost = the number of lost
+ * records.
+ *
+ * NOT emitted on the sentinel-scan fallback path (Path B, older kernels
+ * without the host-VA wptr/signal pointer set), because that path has
+ * no out-of-band write-pointer to compare against. Also NOT emitted
+ * during init-sync (next_idx == 0 first observation): the pre-zeroed
+ * gap between slot 0 and the first FW-written slot is not a real
+ * drop — those records never existed for this queue lifecycle.
+ *
+ * Per-queue ENABLE failures still use stderr WARNING per spec §5;
+ * those are configuration / substrate problems, not record-loss events.
+ *
+ * force_emit not supported here: drop events would always be observed
+ * via the tracepoint-enabled gate, since they would only fire while
+ * the drainer is actively consuming a ring (i.e. while the tracepoint
+ * is enabled). */
 static inline void rocm_trace_emit_hsa_kernel_dispatch_drop(uint32_t queue_id,
                                                             uint64_t bytes_lost) {
     if (rocm_trace_disabled()) return;
