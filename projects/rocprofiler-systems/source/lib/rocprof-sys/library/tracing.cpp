@@ -7,6 +7,7 @@
 #include "core/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
+#include <cstdint>
 
 #include <timemory/hash/types.hpp>
 #include <timemory/process/threading.hpp>
@@ -18,20 +19,20 @@ namespace rocprofsys::tracing
 namespace
 {
 tim::hash_map_ptr_t&
-get_timemory_hash_ids(int64_t _tid = threading::get_id());
+get_timemory_hash_ids(std::int64_t _tid = threading::get_id());
 
 tim::hash_alias_ptr_t&
-get_timemory_hash_aliases(int64_t _tid = threading::get_id());
+get_timemory_hash_aliases(std::int64_t _tid = threading::get_id());
 
 tim::hash_map_ptr_t&
-get_timemory_hash_ids(int64_t _tid)
+get_timemory_hash_ids(std::int64_t _tid)
 {
     return thread_data<identity<tim::hash_map_ptr_t>>::instance(
         construct_on_thread{ _tid });
 }
 
 tim::hash_alias_ptr_t&
-get_timemory_hash_aliases(int64_t _tid)
+get_timemory_hash_aliases(std::int64_t _tid)
 {
     return thread_data<identity<tim::hash_alias_ptr_t>>::instance(
         construct_on_thread{ _tid });

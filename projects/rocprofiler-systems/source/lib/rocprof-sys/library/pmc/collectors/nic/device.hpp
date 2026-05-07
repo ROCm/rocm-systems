@@ -84,7 +84,7 @@ public:
         {
             auto stats = m_driver->get_nic_rdma_port_statistics(0);
 
-            static const std::unordered_map<std::string_view, uint64_t metrics::*>
+            static const std::unordered_map<std::string_view, std::uint64_t metrics::*>
                 METRIC_MAP = { { "rx_rdma_ucast_bytes", &metrics::rx_rdma_ucast_bytes },
                                { "tx_rdma_ucast_bytes", &metrics::tx_rdma_ucast_bytes },
                                { "rx_rdma_ucast_pkts", &metrics::rx_rdma_ucast_pkts },
@@ -182,7 +182,7 @@ private:
     std::string             m_device_name;
     std::string             m_product_name;
     std::string             m_vendor_name;
-    uint8_t                 m_rdma_port_count = 0;
+    std::uint8_t            m_rdma_port_count = 0;
     bool                    m_is_supported    = false;
 };
 

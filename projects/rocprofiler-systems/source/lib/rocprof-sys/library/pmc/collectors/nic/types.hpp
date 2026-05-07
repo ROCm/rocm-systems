@@ -38,7 +38,7 @@ struct port_info
  */
 struct rdma_info
 {
-    uint8_t port_count = 0;
+    std::uint8_t port_count = 0;
 };
 
 /**
@@ -46,8 +46,8 @@ struct rdma_info
  */
 struct stat_entry
 {
-    std::string name;
-    uint64_t    value = 0;
+    std::string   name;
+    std::uint64_t value = 0;
 };
 
 /**
@@ -65,18 +65,18 @@ union enabled_metrics
 {
     struct
     {
-        uint32_t rx_rdma_ucast_bytes : 1;
-        uint32_t tx_rdma_ucast_bytes : 1;
-        uint32_t rx_rdma_ucast_pkts  : 1;
-        uint32_t tx_rdma_ucast_pkts  : 1;
-        uint32_t rx_rdma_cnp_pkts    : 1;
-        uint32_t tx_rdma_cnp_pkts    : 1;
+        std::uint32_t rx_rdma_ucast_bytes : 1;
+        std::uint32_t tx_rdma_ucast_bytes : 1;
+        std::uint32_t rx_rdma_ucast_pkts  : 1;
+        std::uint32_t tx_rdma_ucast_pkts  : 1;
+        std::uint32_t rx_rdma_cnp_pkts    : 1;
+        std::uint32_t tx_rdma_cnp_pkts    : 1;
     } bits;
-    uint32_t value = 0;
+    std::uint32_t value = 0;
 };
 
 /// All 6 NIC RDMA metrics enabled (bits 0-5)
-static constexpr uint32_t ALL_NIC_METRICS = 0x3F;
+static constexpr std::uint32_t ALL_NIC_METRICS = 0x3F;
 
 /**
  * @brief Container for NIC RDMA metrics.
@@ -86,12 +86,12 @@ static constexpr uint32_t ALL_NIC_METRICS = 0x3F;
  */
 struct metrics
 {
-    uint64_t rx_rdma_ucast_bytes = 0;
-    uint64_t tx_rdma_ucast_bytes = 0;
-    uint64_t rx_rdma_ucast_pkts  = 0;
-    uint64_t tx_rdma_ucast_pkts  = 0;
-    uint64_t rx_rdma_cnp_pkts    = 0;
-    uint64_t tx_rdma_cnp_pkts    = 0;
+    std::uint64_t rx_rdma_ucast_bytes = 0;
+    std::uint64_t tx_rdma_ucast_bytes = 0;
+    std::uint64_t rx_rdma_ucast_pkts  = 0;
+    std::uint64_t tx_rdma_ucast_pkts  = 0;
+    std::uint64_t rx_rdma_cnp_pkts    = 0;
+    std::uint64_t tx_rdma_cnp_pkts    = 0;
 };
 
 }  // namespace nic
