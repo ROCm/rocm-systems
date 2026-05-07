@@ -371,7 +371,7 @@ def test_async_copy_direction(input_data):
 
     # Both transpose threads do a classic hipMemcpyAsync H2D + D2H
     # (>= 3 records each: 2 callback phases + 1 buffer record). The
-    # devid == 0 thread additionally runs run_hip_memcpy_batch(), which
+    # tid == 0 thread additionally runs run_hip_memcpy_batch(), which
     # adds kCopiesPerDirection * 3 records per direction.
     assert len(thread_async_dir_cnt) == 2, f"{thread_async_dir_cnt}"
     min_copy_records = 3

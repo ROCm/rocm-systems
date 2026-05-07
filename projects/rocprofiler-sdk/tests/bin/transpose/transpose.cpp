@@ -319,8 +319,12 @@ run(int rank, int tid, int devid, int argc, char** argv)
 
     HIP_API_CALL(hipStreamSynchronize(stream));
 
-    // Only run batch memory copies on device 0.
-    if(devid == 0)
+    // Run batch memory copies from a single thread (tid 0, which is
+    // assigned device 0 by main()). Gating on tid keeps the helper
+    // single-threaded regardless of the number of GPUs available, which
+    // keeps the rocprofiler-sdk test counts deterministic on both
+    // single- and multi-GPU runners.
+    if(tid == 0)
     {
         run_hip_memcpy_batch(rank, tid, stream);
     }
