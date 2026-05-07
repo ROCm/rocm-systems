@@ -97,6 +97,12 @@ public:
   /// @returns Workgroup ID.
   uint32_t wg_id() const { return wg_id_; }
 
+  /// @brief Return the per-WG LDS base offset assigned at dispatch.
+  uint32_t lds_base() const { return lds_base_; }
+
+  /// @brief Set the per-WG LDS base offset.
+  void set_lds_base(uint32_t base) { lds_base_ = base; }
+
   /// @brief Return the SGPR register file allocation.
   /// @returns Const reference to the SGPR allocation slice.
   const RegAllocation &sgpr_alloc() const { return sgpr_alloc_; }
@@ -330,9 +336,10 @@ protected:
             uint32_t max_vgprs)
       : cu_(cu), wf_id_(wf_id), wf_size_(wf_size), max_sgprs_(max_sgprs), max_vgprs_(max_vgprs) {}
 
-  ComputeUnitCore &cu_; ///< Parent CU (permanent, set at construction).
-  uint32_t wf_id_ = 0;  ///< Slot index within the CU (permanent).
-  uint32_t wg_id_ = 0;  ///< Workgroup ID (set per dispatch).
+  ComputeUnitCore &cu_;   ///< Parent CU (permanent, set at construction).
+  uint32_t wf_id_ = 0;    ///< Slot index within the CU (permanent).
+  uint32_t wg_id_ = 0;    ///< Workgroup ID (set per dispatch).
+  uint32_t lds_base_ = 0; ///< Per-WG LDS base offset (set per dispatch).
 
   uint32_t wf_size_ = 0;   ///< Lanes per wavefront (ISA-fixed).
   uint32_t num_sgprs_ = 0; ///< Allocated scalar registers (set at dispatch).

@@ -50,16 +50,10 @@ SignalWaitUntilOnStreamTester::SignalWaitUntilOnStreamTester(
 
   // Allocate signal addresses on symmetric heap
   sig_addr =
-      static_cast<uint64_t *>(rocshmem_malloc(num_streams * sizeof(uint64_t)));
+      static_cast<uint64_t *>(alloc_test_buffer(num_streams * sizeof(uint64_t)));
   source_buf =
-      static_cast<uint64_t *>(rocshmem_malloc(num_streams * sizeof(uint64_t)));
-
-  if (sig_addr == nullptr || source_buf == nullptr) {
-    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "sig_addr: " << sig_addr << ", source_buf: " << source_buf
-              << std::endl;
-    rocshmem_global_exit(1);
-  }
+      static_cast<uint64_t *>(alloc_test_buffer((num_streams * sizeof(uint64_t)),
+                                                args.local_buf_type));
 
   streams.resize(num_streams);
   start_events_timed.resize(num_streams);
@@ -77,8 +71,8 @@ SignalWaitUntilOnStreamTester::~SignalWaitUntilOnStreamTester() {
     CHECK_HIP(hipEventDestroy(start_events_timed[i]));
     CHECK_HIP(hipStreamDestroy(streams[i]));
   }
-  rocshmem_free(sig_addr);
-  rocshmem_free(source_buf);
+  free_test_buffer(sig_addr);
+  free_test_buffer(source_buf, args.local_buf_type);
 }
 
 void SignalWaitUntilOnStreamTester::preLaunchKernel() {
@@ -126,7 +120,7 @@ void SignalWaitUntilOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
   for (int i = 0; i < args.skip + loop; i++) {
     // Increment signal value for each iteration
     uint64_t signal_value = i + 1;
-    
+
     for (int stream_id = 0; stream_id < num_streams; stream_id++) {
       // Record start event after warmup on first timed iteration for all streams
       if (i == args.skip) {
@@ -168,7 +162,7 @@ void SignalWaitUntilOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
     for (int j = 0; j < num_streams; j++) {
       CHECK_HIP(hipStreamSynchronize(streams[j]));
     }
-    
+
     // Barrier to ensure all RMA operations completed across all PEs
     rocshmem_barrier_all();
   }

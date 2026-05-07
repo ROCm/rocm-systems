@@ -108,35 +108,37 @@ extern "C"
     void kokkosp_print_help(char*) ROCPROFSYS_PUBLIC_API;
     void kokkosp_parse_args(int, char**) ROCPROFSYS_PUBLIC_API;
     void kokkosp_declare_metadata(const char*, const char*) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_request_tool_settings(const uint32_t,
+    void kokkosp_request_tool_settings(const std::uint32_t,
                                        Kokkos_Tools_ToolSettings*) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_init_library(const int, const uint64_t, const uint32_t,
+    void kokkosp_init_library(const int, const std::uint64_t, const std::uint32_t,
                               void*) ROCPROFSYS_PUBLIC_API;
     void kokkosp_finalize_library() ROCPROFSYS_PUBLIC_API;
-    void kokkosp_begin_parallel_for(const char*, uint32_t,
-                                    uint64_t*) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_end_parallel_for(uint64_t) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_begin_parallel_reduce(const char*, uint32_t,
-                                       uint64_t*) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_end_parallel_reduce(uint64_t) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_begin_parallel_scan(const char*, uint32_t,
-                                     uint64_t*) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_end_parallel_scan(uint64_t) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_begin_fence(const char*, uint32_t, uint64_t*) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_end_fence(uint64_t) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_begin_parallel_for(const char*, std::uint32_t,
+                                    std::uint64_t*) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_end_parallel_for(std::uint64_t) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_begin_parallel_reduce(const char*, std::uint32_t,
+                                       std::uint64_t*) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_end_parallel_reduce(std::uint64_t) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_begin_parallel_scan(const char*, std::uint32_t,
+                                     std::uint64_t*) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_end_parallel_scan(std::uint64_t) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_begin_fence(const char*, std::uint32_t,
+                             std::uint64_t*) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_end_fence(std::uint64_t) ROCPROFSYS_PUBLIC_API;
     void kokkosp_push_profile_region(const char*) ROCPROFSYS_PUBLIC_API;
     void kokkosp_pop_profile_region() ROCPROFSYS_PUBLIC_API;
-    void kokkosp_create_profile_section(const char*, uint32_t*) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_destroy_profile_section(uint32_t) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_start_profile_section(uint32_t) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_stop_profile_section(uint32_t) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_create_profile_section(const char*,
+                                        std::uint32_t*) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_destroy_profile_section(std::uint32_t) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_start_profile_section(std::uint32_t) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_stop_profile_section(std::uint32_t) ROCPROFSYS_PUBLIC_API;
     void kokkosp_allocate_data(const SpaceHandle, const char*, const void* const,
-                               const uint64_t) ROCPROFSYS_PUBLIC_API;
+                               const std::uint64_t) ROCPROFSYS_PUBLIC_API;
     void kokkosp_deallocate_data(const SpaceHandle, const char*, const void* const,
-                                 const uint64_t) ROCPROFSYS_PUBLIC_API;
+                                 const std::uint64_t) ROCPROFSYS_PUBLIC_API;
     void kokkosp_begin_deep_copy(SpaceHandle, const char*, const void*, SpaceHandle,
                                  const char*, const void*,
-                                 uint64_t) ROCPROFSYS_PUBLIC_API;
+                                 std::uint64_t) ROCPROFSYS_PUBLIC_API;
     void kokkosp_end_deep_copy() ROCPROFSYS_PUBLIC_API;
     void kokkosp_profile_event(const char*) ROCPROFSYS_PUBLIC_API;
     void kokkosp_dual_view_sync(const char*, const void* const,

@@ -18,7 +18,7 @@ namespace causal
 namespace sampling
 {
 std::set<int>
-get_signal_types(int64_t _tid);
+get_signal_types(std::int64_t _tid);
 
 void
 block_samples();

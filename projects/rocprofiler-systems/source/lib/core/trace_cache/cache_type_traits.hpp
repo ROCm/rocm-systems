@@ -28,14 +28,14 @@ struct always_false : std::false_type
 
 template <typename T>
 void
-serialize(uint8_t*, const T&)
+serialize(std::uint8_t*, const T&)
 {
     static_assert(type_traits::always_false<T>::value, "serialize<T> not specialized");
 }
 
 template <typename T>
 T
-deserialize(uint8_t*&)
+deserialize(std::uint8_t*&)
 {
     static_assert(type_traits::always_false<T>::value, "deserialize<T> not specialized");
     return T{};
@@ -142,7 +142,7 @@ struct has_serialize : std::false_type
 {};
 
 template <typename T>
-struct has_serialize<T, std::void_t<decltype(serialize(std::declval<uint8_t*>(),
+struct has_serialize<T, std::void_t<decltype(serialize(std::declval<std::uint8_t*>(),
                                                        std::declval<const T&>()))>>
 : std::true_type
 {};
@@ -153,7 +153,7 @@ struct has_deserialize : std::false_type
 
 template <typename T>
 struct has_deserialize<
-    T, void_t<std::is_same<decltype(deserialize<T>(std::declval<uint8_t*&>())), T>>>
+    T, void_t<std::is_same<decltype(deserialize<T>(std::declval<std::uint8_t*&>())), T>>>
 : std::true_type
 {};
 

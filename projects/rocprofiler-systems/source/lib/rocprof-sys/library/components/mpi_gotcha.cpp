@@ -80,10 +80,10 @@ struct comm_rank_data
     }
 };
 
-uint64_t mpip_index        = std::numeric_limits<uint64_t>::max();
-auto     last_comm_record  = comm_rank_data{};
-auto     mproc_comm_record = comm_rank_data{};
-auto     mpi_comm_records  = std::map<uintptr_t, comm_rank_data>{};
+std::uint64_t mpip_index        = std::numeric_limits<std::uint64_t>::max();
+auto          last_comm_record  = comm_rank_data{};
+auto          mproc_comm_record = comm_rank_data{};
+auto          mpi_comm_records  = std::map<uintptr_t, comm_rank_data>{};
 
 using tim::auto_lock_t;
 using tim::type_mutex;
@@ -102,7 +102,7 @@ rocprofsys_mpi_fini(MPI_Comm, int, void*, void*)
     auto _blocked = get_sampling_signals();
     if(!_blocked.empty())
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
-    if(mpip_index != std::numeric_limits<uint64_t>::max())
+    if(mpip_index != std::numeric_limits<std::uint64_t>::max())
         deactivate_mpip<mpip_bundle_t, project::rocprofsys>(mpip_index);
     if(is_root_process()) rocprofsys_finalize_hidden();
     return MPI_SUCCESS;
@@ -289,7 +289,7 @@ mpi_gotcha::audit([[maybe_unused]] const gotcha_data_t& _data, audit::incoming)
     if(!_blocked.empty())
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
 
-    if(mpip_index != std::numeric_limits<uint64_t>::max())
+    if(mpip_index != std::numeric_limits<std::uint64_t>::max())
         deactivate_mpip<mpip_bundle_t, project::rocprofsys>(mpip_index);
 
 #if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)

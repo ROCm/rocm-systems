@@ -366,7 +366,10 @@ SMemtimeSmem::SMemtimeSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SMemtimeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMemtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
     : Smem("s_memrealtime", reinterpret_cast<const OpEncoding *>(inst),
@@ -377,7 +380,10 @@ SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
     : Smem("s_atc_probe", reinterpret_cast<const OpEncoding *>(inst),
@@ -392,7 +398,10 @@ SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
     : Smem("s_atc_probe_buffer", reinterpret_cast<const OpEncoding *>(inst),
@@ -407,7 +416,10 @@ SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SGetWaveidInWorkgroupSmem::SGetWaveidInWorkgroupSmem(const MachineInst *inst)
     : Smem("s_get_waveid_in_workgroup", reinterpret_cast<const OpEncoding *>(inst),
@@ -418,7 +430,10 @@ SGetWaveidInWorkgroupSmem::SGetWaveidInWorkgroupSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SGetWaveidInWorkgroupSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SGetWaveidInWorkgroupSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 } // namespace rdna1
 } // namespace rocjitsu

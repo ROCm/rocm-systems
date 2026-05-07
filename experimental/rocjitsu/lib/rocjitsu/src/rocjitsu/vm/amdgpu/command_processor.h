@@ -82,6 +82,11 @@ public:
   /// GFX9 (CDNA): 4. GFX940+ (CDNA3/CDNA4): 8.
   void set_vgpr_granularity(uint32_t g) { vgpr_granularity_ = g; }
 
+  /// @brief Enable packed workitem IDs (PackedTID target feature).
+  /// @details CDNA3/4 (gfx90a/gfx942/gfx950) pack X/Y/Z workitem IDs into
+  /// VGPR0 as 10-bit fields: [9:0]=X, [19:10]=Y, [29:20]=Z.
+  void set_packed_tid(bool v) { packed_tid_ = v; }
+
   /// @brief Set the base address of the doorbell aperture page for KFD queues.
   ///
   /// @details Called by the driver once after mmap'ing the doorbell page. All KFD
@@ -113,7 +118,9 @@ public:
   void update_queue(uint32_t queue_id, uint64_t ring_base_va, uint32_t ring_size);
 
   /// @brief Set the execution plugin group (shared ownership).
-  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) { plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group(); }
+  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
+    plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
+  }
 
   /// @brief Register a compute unit that this CP can dispatch to.
   ///
@@ -181,17 +188,28 @@ private:
     uint64_t dispatch_ptr = 0;           ///< Host address of the AQL dispatch packet.
     uint64_t queue_ptr = 0;              ///< Host address of the amd_queue_t struct.
     uint32_t workgroup_id_offset = 0;
+    uint32_t grid_wgs_x = 0;
+    uint32_t grid_wgs_y = 1;
+    uint32_t grid_wgs_z = 1;
+    bool enable_wg_id_x = true;
+    bool enable_wg_id_y = false;
+    bool enable_wg_id_z = false;
+    uint8_t enable_vgpr_workitem_id = 0; ///< 0=X, 1=X+Y, 2=X+Y+Z (from compute_pgm_rsrc2)
+    uint16_t workgroup_size_x = 64;      ///< Workgroup dims for workitem ID decomposition.
+    uint16_t workgroup_size_y = 1;
+    uint16_t workgroup_size_z = 1;
     uint64_t completion_signal = 0;    ///< AQL completion signal handle (0 = none).
     uint64_t scratch_backing_addr = 0; ///< GPU VA of scratch backing memory (from amd_queue_t).
     uint32_t private_segment_fixed_size =
-        0;                    ///< Per-lane scratch size in bytes (from kernel descriptor).
-    bool host_signal = false; ///< True if signal is in host memory (KFD path).
-    bool ordered = false;     ///< True for KFD (host-accessible) queue dispatches.
+        0; ///< Per-lane scratch size in bytes (from kernel descriptor).
+    uint32_t group_segment_fixed_size = 0; ///< Per-WG LDS size in bytes (from kernel descriptor).
+    bool host_signal = false;              ///< True if signal is in host memory (KFD path).
+    bool ordered = false;                  ///< True for KFD (host-accessible) queue dispatches.
   };
 
   /// @brief Initialize a wavefront's registers per the AMDHSA ABI.
-  static void init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf, const InternalDispatch &pkt,
-                                  uint32_t global_wg_id, uint32_t wf_index_in_wg);
+  void init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf, const InternalDispatch &pkt,
+                           uint32_t global_wg_id, uint32_t wf_index_in_wg);
 
   /// @brief Doorbell event handler: check HW queues, fetch packets, dispatch, activate CUs.
   void handle_doorbell(simdojo::Tick timestamp);
@@ -238,6 +256,7 @@ private:
   bool is_primary_ = false;          ///< True if CP registered as primary.
   uint32_t workgroup_id_offset_ = 0; ///< Multi-XCD workgroup ID offset.
   uint32_t vgpr_granularity_ = 8;    ///< VGPR allocation granularity (4 for GFX9, 8 for GFX940+).
+  bool packed_tid_ = false;          ///< PackedTID: pack X/Y/Z into VGPR0 as 10-bit fields.
 
   /// @brief Reusable doorbell event. Fired when packets need processing.
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};

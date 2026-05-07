@@ -279,7 +279,7 @@ void GDABackend::setup_host_ctx() {
 
 void GDABackend::setup_default_ctx() {
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
-  default_context_proxy_ = GDADefaultContextProxyT(this, tinfo, gda_provider);
+  default_context_proxy_ = GDADefaultContextProxy(this, tinfo, gda_provider);
 }
 
 void GDABackend::log_ctx_nics([[maybe_unused]] unsigned int ctx_id,
@@ -563,6 +563,17 @@ GDAHostContext *get_internal_gda_net_ctx(Context *ctx) {
 void GDABackend::ctx_destroy(Context *ctx) {
   GDAHostContext *gda_host_ctx{get_internal_gda_net_ctx(ctx)};
   delete gda_host_ctx;
+}
+
+int GDABackend::buffer_register([[maybe_unused]] void *addr,
+                                [[maybe_unused]] size_t length) {
+  LOG_ERROR("GDABackend::buffer_register not supported");
+  return ROCSHMEM_ERROR;
+}
+
+int GDABackend::buffer_unregister([[maybe_unused]] void *addr) {
+  LOG_ERROR("GDABackend::buffer_unregister not supported");
+  return ROCSHMEM_ERROR;
 }
 
 void GDABackend::reset_backend_stats() {

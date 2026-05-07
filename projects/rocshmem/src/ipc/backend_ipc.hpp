@@ -238,7 +238,7 @@ class IPCBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  IPCDefaultContextProxyT default_context_proxy_;  // init handled in constructor
+  IPCDefaultContextProxy default_context_proxy_;  // init handled in constructor
 
   /**
    * @brief An array of @ref ROContexts that backs the context FreeList.
@@ -248,7 +248,7 @@ class IPCBackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<HIPAllocator, IPCContext *> ctx_free_list{};
+  FreeListProxy<IPCContext *> ctx_free_list{};
 
   /**
    * @brief The bitmask representing the availability of teams in the pool

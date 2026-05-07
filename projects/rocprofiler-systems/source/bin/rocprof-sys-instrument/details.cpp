@@ -1224,9 +1224,10 @@ get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentabl
     for(auto* mod : *app_modules)
     {
         if(!mod) continue;
-        auto* procs = mod->getProcedures(include_uninstrumentable);
+        std::unique_ptr<std::vector<procedure_t*>> procs{ mod->getProcedures(
+            include_uninstrumentable) };
         if(procs && !procs->empty())
-            proclist->insert(proclist->end(), procs->begin(), procs->end());
+            proclist.insert(proclist.end(), procs->begin(), procs->end());
     }
 
     _pr.stop();
@@ -1234,14 +1235,8 @@ get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentabl
     verbprintf(1,
                "Fetched procedures from %zu modules: "
                "%zu procedures found (%.3f %s, %.3f %s)\n",
-               app_modules->size(), proclist->size(), _wc.get(),
+               app_modules->size(), proclist.size(), _wc.get(),
                _wc.display_unit().c_str(), _pr.get(), _pr.display_unit().c_str());
-
-    if(proclist->empty())
-    {
-        delete proclist;
-        return nullptr;
-    }
 
     return proclist;
 }
