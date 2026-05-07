@@ -68,6 +68,7 @@ jobs:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
       ROCPROFSYS_VERBOSE: 2
+      ROCPROFSYS_CAUSAL_BACKEND: perf
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
@@ -95,6 +96,8 @@ jobs:
         max_attempts: 5
         command: |
           apt-get update &&
+          apt-get remove -y --purge 'libopenmpi-dev' 'libopenmpi3' 'openmpi-bin' 'openmpi-common' &&
+          apt-get autoremove -y --purge &&
           apt-get upgrade -y &&
           apt-get install -y libomp-dev libmpich-dev mpich gcovr &&
           apt-get autoclean
@@ -148,7 +151,7 @@ jobs:
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
           -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
           -DROCPROFSYS_MAX_THREADS=64 \
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload;lulesh" \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode;openmp" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
           -DCMAKE_PREFIX_PATH=/opt/rocm \
           -DUSE_CLANG_OMP=OFF
