@@ -222,7 +222,12 @@ Pal::IDevice* PalVideoDecoder::GetPalDevice() {
         dev->GetProperties(&dev_props);
 
         InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Device ") + ROCDEC_TOSTR(i) +
-                " VCN level=" + ROCDEC_TOSTR((int)dev_props.vcnLevel));
+                " VCN level=" + ROCDEC_TOSTR((int)dev_props.vcnLevel) +
+                " engineCount[VcnDecode=" + ROCDEC_TOSTR((int)Pal::EngineTypeVcnDecode) + "]=" +
+                    ROCDEC_TOSTR(dev_props.engineProperties[Pal::EngineTypeVcnDecode].engineCount) +
+                " engineCount[VcnUnified=" + ROCDEC_TOSTR((int)Pal::EngineTypeVcnUnified) + "]=" +
+                    ROCDEC_TOSTR(dev_props.engineProperties[Pal::EngineTypeVcnUnified].engineCount) +
+                " EngineTypeCount=" + ROCDEC_TOSTR((int)Pal::EngineTypeCount));
 
         if (dev_props.vcnLevel == Pal::VcnIpLevel::None ||
             dev_props.vcnLevel == Pal::VcnIpLevel::_None) {
@@ -248,7 +253,11 @@ Pal::IDevice* PalVideoDecoder::GetPalDevice() {
         fi.requestedEngineCounts[Pal::EngineTypeUniversal].engines =
             (dev_props.engineProperties[Pal::EngineTypeUniversal].engineCount > 0) ? 1 : 0;
 
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Finalizing device ") + ROCDEC_TOSTR(i) +
+                " with engineType=" + ROCDEC_TOSTR((int)video_engine) +
+                " universalEngines=" + ROCDEC_TOSTR(fi.requestedEngineCounts[Pal::EngineTypeUniversal].engines));
         res = dev->Finalize(fi);
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Finalize result=") + ROCDEC_TOSTR((int)res));
         if (Util::IsErrorResult(res)) {
             continue;
         }
@@ -334,6 +343,9 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
         qci.engineType = eng;
         qci.engineIndex = 0;
         qci.queueType = Pal::QueueTypeVideoDecode;
+
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Queue create - engineType=") + ROCDEC_TOSTR((int)qci.engineType) +
+                " queueType=" + ROCDEC_TOSTR((int)qci.queueType));
 
         size_t sz = device_->GetQueueSize(qci, &res);
         if (Util::IsErrorResult(res)) {
