@@ -174,9 +174,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return result;
   }
   KernelDescriptorTranslator descriptor_translator(guest_arch_, host_arch_);
-  KernelDescriptorTranslationOptions descriptor_options;
   const auto descriptor_translations = descriptor_translator.translate_image(
-      patcher.image_bytes(), patcher.text_offset(), patcher.text_size(), descriptor_options);
+      patcher.image_bytes(), patcher.text_offset(), patcher.text_size(),
+      KernelDescriptorTranslationOptions{});
   bool descriptors_supported = true;
   for (const auto &translation : descriptor_translations) {
     result.warnings.insert(result.warnings.end(), translation.warnings.begin(),
@@ -299,8 +299,16 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
   std::unordered_set<uint64_t> applied_descriptors;
   for (const KdTranslation &translation : descriptor_translations) {
-    if (applied_descriptors.insert(translation.descriptor_file_offset).second)
-      patcher.apply_kernel_descriptor_translation(translation, host_arch_);
+    if (applied_descriptors.insert(translation.descriptor_file_offset).second) {
+      if (!patcher.apply_kernel_descriptor_translation(translation, host_arch_)) {
+        result.warnings.push_back("kernel entry prologue branch exceeds s_branch simm16 range; "
+                                  "leaving code object unchanged");
+        const auto *image = reinterpret_cast<const uint8_t *>(obj.image_data());
+        result.elf_bytes.assign(image, image + obj.image_size());
+        warnings_ = nullptr;
+        return result;
+      }
+    }
   }
 
   // Write cave body into the NOP padding at the end of .text.

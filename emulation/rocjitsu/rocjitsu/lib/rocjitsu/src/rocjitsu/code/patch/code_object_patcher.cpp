@@ -17,6 +17,7 @@ RJ_DIAGNOSTIC_POP
 #include <climits>
 #include <cstring>
 #include <elf.h>
+#include <optional>
 
 namespace rocjitsu {
 namespace {
@@ -85,10 +86,18 @@ void CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset,
   std::memcpy(image_.data() + file_offset, descriptor.data(), descriptor.size());
 }
 
-void CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation &translation,
+bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation &translation,
                                                             rj_code_arch_t target_arch) {
   assert(translation.descriptor_file_offset + sizeof(KD) <= image_.size() &&
          "kernel descriptor translation out of bounds");
+
+  std::optional<uint64_t> prologue_entry;
+  if (!translation.prologue_words.empty()) {
+    prologue_entry = append_kernel_entry_prologue(translation.entry_text_offset,
+                                                  translation.prologue_words, target_arch);
+    if (!prologue_entry)
+      return false;
+  }
 
   auto *desc = reinterpret_cast<KD *>(image_.data() + translation.descriptor_file_offset);
 
@@ -130,17 +139,15 @@ void CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
   AMDHSA_BITS_SET(desc->compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
                   translation.target_private_size != 0 ? 1 : 0);
 
-  if (!translation.prologue_words.empty()) {
-    const uint64_t prologue_entry = append_kernel_entry_prologue(
-        translation.entry_text_offset, translation.prologue_words, target_arch);
+  if (prologue_entry) {
     redirect_kernel_entry(translation.descriptor_file_offset, translation.entry_text_offset,
-                          prologue_entry);
+                          *prologue_entry);
   }
+  return true;
 }
 
-uint64_t CodeObjectPatcher::append_kernel_entry_prologue(uint64_t entry_text_offset,
-                                                         std::span<const uint32_t> prologue_words,
-                                                         rj_code_arch_t arch) {
+std::optional<uint64_t> CodeObjectPatcher::append_kernel_entry_prologue(
+    uint64_t entry_text_offset, std::span<const uint32_t> prologue_words, rj_code_arch_t arch) {
   assert(!prologue_words.empty() && "empty kernel entry prologue");
 
   // A kernel descriptor entry point is a hardware launch address, not an
@@ -152,13 +159,9 @@ uint64_t CodeObjectPatcher::append_kernel_entry_prologue(uint64_t entry_text_off
   const uint64_t required_residue = entry_text_offset % 256;
   const uint64_t alignment_padding = (required_residue + 256 - (current_offset % 256)) % 256;
   assert(alignment_padding % sizeof(uint32_t) == 0 && "unaligned cave padding");
-  if (alignment_padding != 0) {
-    std::vector<uint32_t> padding(alignment_padding / sizeof(uint32_t), build_s_nop(0, arch));
-    append_cave_body(padding);
-  }
 
   std::vector<uint32_t> cave_words(prologue_words.begin(), prologue_words.end());
-  const uint64_t cave_byte_offset = cave_start_ + cave_body_size();
+  const uint64_t cave_byte_offset = current_offset + alignment_padding;
   assert(cave_byte_offset % 256 == required_residue &&
          "kernel descriptor entry lost its 256-byte alignment");
 
@@ -166,9 +169,18 @@ uint64_t CodeObjectPatcher::append_kernel_entry_prologue(uint64_t entry_text_off
   // a final branch from the prologue body to the original, untouched entry.
   const int64_t branch_pc = static_cast<int64_t>(cave_byte_offset + cave_words.size() * 4);
   const int64_t target = static_cast<int64_t>(entry_text_offset);
-  const int64_t target_dwords = (target - (branch_pc + 4)) / 4;
-  assert(target_dwords >= INT16_MIN && target_dwords <= INT16_MAX &&
-         "kernel entry prologue branch exceeds simm16 range");
+  const int64_t target_delta_bytes = target - (branch_pc + 4);
+  if (target_delta_bytes % static_cast<int64_t>(sizeof(uint32_t)) != 0)
+    return std::nullopt;
+
+  const int64_t target_dwords = target_delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
+  if (target_dwords < INT16_MIN || target_dwords > INT16_MAX)
+    return std::nullopt;
+
+  if (alignment_padding != 0) {
+    std::vector<uint32_t> padding(alignment_padding / sizeof(uint32_t), build_s_nop(0, arch));
+    append_cave_body(padding);
+  }
   cave_words.push_back(build_s_branch(static_cast<int16_t>(target_dwords), arch));
 
   append_cave_body(cave_words);
