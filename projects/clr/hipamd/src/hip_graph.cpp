@@ -85,11 +85,12 @@ hipError_t ihipGraphAddKernelNode(hip::GraphNode** pGraphNode, hip::Graph* graph
     return hipErrorInvalidDeviceFunction;
   }
 
+  const amd::Device* device = g_devices[ihipGetDevice()]->devices()[0];
   amd::HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
                                      pNodeParams->gridDim.z, pNodeParams->blockDim.x,
                                      pNodeParams->blockDim.y, pNodeParams->blockDim.z,
-                                     pNodeParams->sharedMemBytes, globalWorkSizeX_remainder,
-                                     globalWorkSizeY_remainder, globalWorkSizeZ_remainder);
+                                     pNodeParams->sharedMemBytes, *device, globalWorkSizeX_remainder,
+                                     globalWorkSizeY_remainder, globalWorkSizeZ_remainder, 1, 1, 1);
   if (!launch_params.IsValidConfig()) {
     return hipErrorInvalidConfiguration;
   }

@@ -8,16 +8,19 @@
 System Speed-of-Light
 =====================
 
-This page lists System Speed-of-Light metrics for RDNA3.5 (gfx1151) when
-you profile with the shipped gfx1151 analysis configuration. The same metric
-keys appear in the RDNA3.5 (gfx1151) tab of the analysis report.
+This page documents System Speed-of-Light metrics for RDNA3.5 (gfx1151) with the
+shipped gfx1151 analysis configuration.
+**System Speed-of-Light** is a high-level summary: it highlights the most important
+metrics for how your workload is performing on the target GPU, so you can spot
+bottlenecks before diving into block-specific panels.
 
 .. Note::
    For AMD Instinct accelerators (CDNA-CDNA4), see
    :doc:`../cdna/system-speed-of-light`.
 
-   Other gfx1151 metric tables grouped by hardware block live under :doc:`wgp`,
-   :doc:`tcp-cache`, :doc:`gl1-cache`, :doc:`gl2-cache`, :doc:`shader-engine`, and :doc:`command-processor`.
+   Other gfx1151 metric tables follow the RDNA3 hierarchy in :doc:`rdna-performance-model`
+   (shader engine: :doc:`spi`, :doc:`wgp`, :doc:`gl0-cache`, :doc:`gl1-cache`; then
+   :doc:`gl2-cache`, :doc:`gcea`, :doc:`command-processor`, :doc:`grbm`).
 
 .. warning::
 

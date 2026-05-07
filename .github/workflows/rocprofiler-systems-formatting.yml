@@ -170,3 +170,15 @@ jobs:
           echo -e "################"
           exit 1
         fi
+
+  fixedwidth-types:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        sparse-checkout: projects/rocprofiler-systems
+    - name: check-fixedwidth-types
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        bash scripts/check-fixedwidth-types.sh

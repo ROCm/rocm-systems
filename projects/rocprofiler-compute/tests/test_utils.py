@@ -5714,7 +5714,7 @@ def test_amdsmi_get_gpu_memory_partition():
 # =============================================================================
 
 
-def test_impute_counters_iteration_multiplex():
+def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
     """Test impute_counters_iteration_multiplex with sample DataFrame."""
     import pandas as pd
 
@@ -5740,7 +5740,7 @@ def test_impute_counters_iteration_multiplex():
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel")
+    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
     assert isinstance(result, pd.DataFrame)
@@ -5751,7 +5751,7 @@ def test_impute_counters_iteration_multiplex():
 
     # For "kernel_launch_params" policy
     result = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params"
+        df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
@@ -5784,7 +5784,7 @@ def test_impute_counters_iteration_multiplex():
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params"
+        df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
@@ -5819,7 +5819,7 @@ def test_impute_counters_iteration_multiplex():
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
-    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel")
+    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
     # Assert Counter1 and Counter2 imputed for first and last dispatches
@@ -5852,7 +5852,7 @@ def test_impute_counters_iteration_multiplex():
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params"
+        df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
@@ -5890,7 +5890,7 @@ def test_impute_counters_iteration_multiplex():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
     result = utils_analysis.impute_counters_iteration_multiplex(
-        df, "kernel_launch_params"
+        df, "kernel_launch_params", tmp_path
     )
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 

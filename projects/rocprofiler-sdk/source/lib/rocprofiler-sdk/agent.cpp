@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -92,6 +93,14 @@ struct cpu_info
         return !(processor < 0 || family < 0 || model < 0 || physical_id < 0 || core_id < 0 ||
                  apicid < 0 || vendor_id.empty() || model_name.empty());
     }
+};
+
+struct bdf_info
+{
+    uint32_t domain{};
+    uint8_t  bus{};
+    uint8_t  device{};
+    uint8_t  function{};
 };
 
 auto
@@ -1031,25 +1040,81 @@ get_agent_mapping()
     return *CHECK_NOTNULL(_v);
 }
 
+bdf_info
+get_bdf_info(const rocprofiler_agent_t* agent)
+{
+    // location_id encodes PCI Bus/Device/Function (BDF) as a 16-bit value:
+    //   bits [15:8] = bus number
+    //   bits  [7:3] = device number
+    //   bits  [2:0] = function number
+    return {.domain   = agent->domain,
+            .bus      = static_cast<uint8_t>((agent->location_id >> 8) & 0xFF),
+            .device   = static_cast<uint8_t>((agent->location_id >> 3) & 0x1F),
+            .function = static_cast<uint8_t>(agent->location_id & 0x07)};
+}
+
 const std::vector<aqlprofile_agent_handle_t>&
 get_aql_handles()
 {
     static auto*& _v =
         common::static_object<std::vector<aqlprofile_agent_handle_t>>::construct([]() {
             std::vector<aqlprofile_agent_handle_t> agent_handles;
+
             for(auto& agent : get_agents())
             {
+                aqlprofile_agent_handle_t handle = {.handle = 0};
+
+                const auto bdf = get_bdf_info(agent);
+                common::consume_args(bdf);
+
+#if ROCPROFILER_EXTERNAL_AQLPROFILE
+                ROCP_TRACE << fmt::format(
+                    "Registering agent {} with external aqlprofile (libhsa-amd-aqlprofile64.so)",
+                    agent->name);
+
                 aqlprofile_agent_info_t agent_info = {
                     .agent_gfxip          = agent->name,
                     .xcc_num              = agent->num_xcc,
                     .se_num               = agent->num_shader_banks,
                     .cu_num               = agent->cu_count,
                     .shader_arrays_per_se = agent->simd_arrays_per_engine};
-                aqlprofile_agent_handle_t handle = {.handle = 0};
+
                 if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
                 {
                     ROCP_WARNING << "Failed to register agent " << agent->name;
                 }
+#else
+
+                ROCP_TRACE << fmt::format(
+                    "Registering agent {:04x}:{:02x}:{:02x}.{:x} :: {} with IP discovery",
+                    bdf.domain,
+                    bdf.bus,
+                    bdf.device,
+                    bdf.function,
+                    agent->name);
+
+                aqlprofile_agent_info_v1_t agent_info = {
+                    .agent_gfxip          = agent->name,
+                    .xcc_num              = agent->num_xcc,
+                    .se_num               = agent->num_shader_banks,
+                    .cu_num               = agent->cu_count,
+                    .shader_arrays_per_se = agent->simd_arrays_per_engine,
+                    .domain               = agent->domain,
+                    .location_id          = agent->location_id,
+                };
+
+                if(aqlprofile_register_agent_info(
+                       &handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) != HSA_STATUS_SUCCESS)
+                {
+                    ROCP_WARNING << fmt::format(
+                        "Failed to register agent {:04x}:{:02x}:{:02x}.{:x} :: {}",
+                        bdf.domain,
+                        bdf.bus,
+                        bdf.device,
+                        bdf.function,
+                        agent->name);
+                }
+#endif
                 agent_handles.push_back(handle);
             }
             return agent_handles;

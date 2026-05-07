@@ -741,6 +741,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   comm->doneEvent = doneEvent;
   comm->lastStream = nullptr;
+  comm->lastStreamValid = false;
   CUDACHECK(cudaGetDevice(&comm->cudaDev));
 
   // RCCL: create persistent stream for calloc
@@ -2309,6 +2310,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   comm->cudaArch = cudaArch;
   comm->archName = archName;
   comm->cuCount = cuCount;
+  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
+  comm->ll128LineElems = rcclLL128LineElemsFromArch(comm->archName);
+  comm->ll128DataElems = rcclLL128DataElemsFromArch(comm->archName);
 
   NCCLCHECKGOTO(initTransportsRank(comm, job->parent, timers), res, fail);
 
@@ -2445,7 +2449,13 @@ exit:
   free(parentRanks);
   return res;
 fail:
-  // archName was allocated but won't be assigned to comm on failure, so free it
+  // archName is assigned to comm->archName before initTransportsRank is called.
+  // If failure occurs after that assignment, commFree() will free comm->archName,
+  // so freeing archName here as well would be a double free. Null it out so that
+  // commFree handles cleanup exclusively.
+  if (archName == comm->archName) {
+    archName = NULL;
+  }
   free(archName);
   comm->initState = res;
   goto exit;

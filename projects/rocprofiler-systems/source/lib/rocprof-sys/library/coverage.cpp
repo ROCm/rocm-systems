@@ -6,6 +6,7 @@
 #include "core/config.hpp"
 #include "library/coverage/impl.hpp"
 #include "library/thread_data.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
@@ -67,7 +68,7 @@ get_coverage_data()
 }
 //
 auto&
-get_coverage_count(int64_t _tid = tim::threading::get_id())
+get_coverage_count(std::int64_t _tid = tim::threading::get_id())
 {
     return coverage_thread_data::instance(construct_on_thread{ _tid });
 }
