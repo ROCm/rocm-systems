@@ -87,9 +87,7 @@ jobs:
 
       - name: Build hipconfig
         run: |
-          cmake -B "${BUILD_DIR}/hipcc" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            TheRock/compiler/amd-llvm/amd/hipcc
+          cmake -B "${BUILD_DIR}/hipcc" -G Ninja -DCMAKE_BUILD_TYPE=Release TheRock/compiler/amd-llvm/amd/hipcc
           cmake --build "${BUILD_DIR}/hipcc" --parallel
           mkdir -p "${BUILD_DIR}/hipcc-install/bin"
           cp "${BUILD_DIR}/hipcc/hipconfig" "${BUILD_DIR}/hipcc-install/bin/"
