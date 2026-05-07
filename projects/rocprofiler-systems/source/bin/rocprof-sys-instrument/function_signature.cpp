@@ -30,11 +30,15 @@ function_signature::function_signature(std::string_view _ret, std::string_view _
                                        bool _info_beg, bool _info_end)
 : function_signature(_ret, _name, _file, _row, _col, _loop, _info_beg, _info_end)
 {
-    m_params = "(";
+    m_params.clear();
+    m_params.push_back('(');
     for(const auto& itr : _params)
-        m_params.append(itr + ", ");
-    if(!_params.empty()) m_params = m_params.substr(0, m_params.length() - 2);
-    m_params += ")";
+    {
+        m_params.append(itr);
+        m_params.append(", ");
+    }
+    if(!_params.empty()) m_params.resize(m_params.length() - 2);
+    m_params.push_back(')');
 }
 
 std::string

@@ -218,7 +218,7 @@ include(Compilers) # compiler identification
 include(BuildSettings) # compiler flags
 
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Object code libraries (lib)" FORCE)
-set(CMAKE_CXX_STANDARD 17 CACHE STRING "CXX language standard")
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "CXX language standard")
 
 rocprofiler_systems_add_feature(CMAKE_BUILD_TYPE "Build optimization level")
 rocprofiler_systems_add_feature(CMAKE_INSTALL_PREFIX "Installation prefix")

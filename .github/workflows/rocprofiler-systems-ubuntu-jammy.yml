@@ -96,7 +96,7 @@ jobs:
           cd projects/rocprofiler-systems/
           apt-get update &&
           apt-get upgrade -y &&
-          apt-get install -y ${{ matrix.compiler }} &&
+          apt-get install -y ${{ matrix.compiler }} texinfo &&
           apt-get autoclean
 
     - name: Install Python Test Dependencies
@@ -292,7 +292,8 @@ jobs:
           apt-get upgrade -y &&
           apt-get install -y g++ \
             binutils-dev libboost-all-dev libtbb-dev \
-            libdw-dev libdwarf-dev libelf-dev libiberty-dev &&
+            libdw-dev libdwarf-dev libelf-dev libiberty-dev \
+            texinfo &&
           apt-get autoclean
 
     - name: Install Python Test Dependencies
@@ -429,7 +430,7 @@ jobs:
           apt-get remove -y --purge 'libopenmpi-dev' 'libopenmpi3' 'openmpi-bin' 'openmpi-common' &&
           apt-get autoremove -y --purge &&
           apt-get upgrade -y &&
-          apt-get install -y libmpich-dev mpich &&
+          apt-get install -y libmpich-dev mpich texinfo &&
           apt-get autoclean
 
     - name: Install Python Test Dependencies

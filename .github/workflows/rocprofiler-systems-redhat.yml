@@ -94,6 +94,11 @@ jobs:
             echo "ROCPROFSYS_TRACE_PROC_SHELL=/opt/trace_processor/bin/trace_processor_shell" >> $GITHUB_ENV
           fi
 
+    - name: Install texinfo
+      shell: bash
+      run: |
+        dnf install -y texinfo
+
     - name: Configure, Build, and Test
       timeout-minutes: 115
       shell: bash

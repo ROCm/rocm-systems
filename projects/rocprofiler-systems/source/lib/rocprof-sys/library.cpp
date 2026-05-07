@@ -190,11 +190,11 @@ ensure_finalization(bool _static_init = false)
     if(config::set_signal_handler(nullptr) != &finalization_handler)
 
         throw std::runtime_error(fmt::format(
-            "Assignment of signal handler failed. signal handler is {:P}, expected "
-            "{:P}",
+            "Assignment of signal handler failed. signal handler is {}, expected "
+            "{}",
             fmt::format("0x{:X}",
-                        reinterpret_cast<void*>(config::set_signal_handler(nullptr))),
-            fmt::format("0x{:X}", reinterpret_cast<void*>(&finalization_handler))));
+                        reinterpret_cast<uintptr_t>(config::set_signal_handler(nullptr))),
+            fmt::format("0x{:X}", reinterpret_cast<uintptr_t>(&finalization_handler))));
 
     const auto& _info = thread_info::init();
     const auto& _tid  = _info->index_data;
