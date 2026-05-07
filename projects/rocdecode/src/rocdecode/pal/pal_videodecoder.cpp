@@ -329,7 +329,7 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
         Pal::QueueCreateInfo qci = {};
         qci.engineType = eng;
         qci.engineIndex = 0;
-        qci.queueType = Pal::QueueTypeUniversal /* TODO: QueueTypeVideoDecode */;
+        qci.queueType = Pal::QueueTypeVideoDecode;
 
         size_t sz = device_->GetQueueSize(qci, &res);
         if (Util::IsErrorResult(res)) {
@@ -390,7 +390,7 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
     {
         Pal::CmdBufferCreateInfo cbci = {};
         cbci.engineType = eng;
-        cbci.queueType = Pal::QueueTypeUniversal /* TODO: QueueTypeVideoDecode */;
+        cbci.queueType = Pal::QueueTypeVideoDecode;
         cbci.pCmdAllocator = cmd_allocator_.Get();
 
         size_t sz = device_->GetCmdBufferSize(cbci, &res);
