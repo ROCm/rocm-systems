@@ -83,6 +83,14 @@ class VirtualGPU : public device::VirtualDevice {
     Queue(const Queue&) = delete;
     Queue& operator=(const Queue&) = delete;
 
+    // This type is allocated exclusively via amd::AllocWithTrailing<Queue>(extSize, ...) so
+    // that a single block holds the wrapper plus PAL's IQueue / ICmdBuffer / IFence objects
+    // placed in the trailing region. Plain new / delete would route through global
+    // ::operator new while DestroyWithTrailing calls std::free — a silent allocator mismatch.
+    // Deleting these forces the contract at compile time.
+    void* operator new(size_t) = delete;
+    void operator delete(void*) = delete;
+
     static Queue* Create(VirtualGPU& gpu,                       //!< ROCCLR virtual GPU object
                          Pal::QueueType queueType,              //!< PAL queue type
                          uint engineIdx,                        //!< Select particular engine index

@@ -243,6 +243,14 @@ class Device : public NullDevice {
     QueueRecycleInfo(const Device& dev)
         : counter_(1), engineType_(Pal::EngineTypeCompute), index_(0), aql_packet_mgmt_(dev) {}
 
+    // Allocated exclusively via amd::AllocWithTrailing<QueueRecycleInfo>(extSize, ...) so the
+    // wrapper can carry an optional PAL IQueue placed in trailing storage. Plain new / delete
+    // would route through global ::operator new while DestroyWithTrailing calls std::free.
+    // Deleting these forces the contract at compile time. Use extSize == 0 on the path that
+    // carries no PAL trailing payload.
+    void* operator new(size_t) = delete;
+    void operator delete(void*) = delete;
+
     //! Returns the MQD's read_dispatch_id's address.
     uintptr_t DebuggerData() const {
       return reinterpret_cast<uintptr_t>(&aql_packet_mgmt_.amd_queue_.read_dispatch_id);
