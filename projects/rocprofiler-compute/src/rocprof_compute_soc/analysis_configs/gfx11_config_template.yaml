@@ -3,7 +3,7 @@ panels:
 - file: top_stats.yaml
   panel_id: 0
   panel_title: Top Stats
-  panel_alias:
+  panel_alias: topstats
   data_sources:
   - type: raw_csv_table
     id: 1
@@ -14,7 +14,7 @@ panels:
 - file: system_info.yaml
   panel_id: 1
   panel_title: System Info
-  panel_alias:
+  panel_alias: sysinfo
   data_sources:
   - type: raw_csv_table
     id: 1
@@ -22,7 +22,7 @@ panels:
 - file: system_speed_of_light.yaml
   panel_id: 2
   panel_title: System Speed-of-Light
-  panel_alias:
+  panel_alias: sol
   data_sources:
   - type: metric_table
     id: 1
@@ -30,7 +30,7 @@ panels:
 - file: memory_chart.yaml
   panel_id: 3
   panel_title: Memory Chart
-  panel_alias:
+  panel_alias: memchart
   data_sources:
   - type: metric_table
     id: 1
@@ -62,7 +62,7 @@ panels:
 - file: roofline.yaml
   panel_id: 4
   panel_title: Roofline
-  panel_alias:
+  panel_alias: roof
   data_sources:
   - type: metric_table
     id: 1
@@ -73,7 +73,7 @@ panels:
 - file: command_processor_cpc.yaml
   panel_id: 5
   panel_title: Command Processor Compute (CPC)
-  panel_alias:
+  panel_alias: cpc
   data_sources:
   - type: metric_table
     id: 1
@@ -93,7 +93,7 @@ panels:
 - file: workgroup_manager_spi.yaml
   panel_id: 6
   panel_title: Workgroup Manager (SPI)
-  panel_alias:
+  panel_alias: spi
   data_sources:
   - type: metric_table
     id: 1
@@ -104,7 +104,7 @@ panels:
 - file: workgroup_processor.yaml
   panel_id: 7
   panel_title: Workgroup Processor (WGP)
-  panel_alias:
+  panel_alias: wgp
   data_sources:
   - type: metric_table
     id: 1
@@ -139,7 +139,7 @@ panels:
 - file: l0_cache.yaml
   panel_id: 9
   panel_title: GL0 Cache (TCP Cache)
-  panel_alias:
+  panel_alias: gl0
   data_sources:
   - type: metric_table
     id: 1
@@ -159,7 +159,7 @@ panels:
 - file: l1_cache.yaml
   panel_id: 11
   panel_title: GL1 Cache (L1)
-  panel_alias:
+  panel_alias: gl1
   data_sources:
   - type: metric_table
     id: 1
@@ -179,7 +179,7 @@ panels:
 - file: l2_cache.yaml
   panel_id: 13
   panel_title: GL2 Cache (L2)
-  panel_alias:
+  panel_alias: gl2
   data_sources:
   - type: metric_table
     id: 1
@@ -193,7 +193,7 @@ panels:
 - file: graphics_core_efficiency_arbiter.yaml
   panel_id: 14
   panel_title: Graphics Core Efficiency Arbiter (GCEA)
-  panel_alias:
+  panel_alias: gcea
   data_sources:
   - type: metric_table
     id: 1
@@ -210,7 +210,7 @@ panels:
 - file: graphics_register_bus_manager.yaml
   panel_id: 17
   panel_title: Graphics Register Bus Manager (GRBM)
-  panel_alias:
+  panel_alias: grbm
   data_sources:
   - type: metric_table
     id: 1
