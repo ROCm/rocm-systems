@@ -18,6 +18,7 @@ Usage (paths relative to project root):
     python $SCRIPT --sync-all $CONFIGS
     python $SCRIPT --validate <arch_name> $CONFIGS
     python $SCRIPT --generate-docs
+    python $SCRIPT --generate-docs --docs-arch gfx1151
 """
 
 from __future__ import annotations
@@ -574,6 +575,16 @@ def main() -> int:
         help="Generate per-arch docs YAMLs from per-arch definitions",
     )
     parser.add_argument(
+        "--docs-arch",
+        action="append",
+        metavar="ARCH",
+        dest="docs_archs",
+        help=(
+            "With --generate-docs, only emit docs for these architectures "
+            "(repeatable). Default: all per-arch *_metrics_description.yaml files."
+        ),
+    )
+    parser.add_argument(
         "configs_dir", nargs="?", help="Path to analysis_configs directory"
     )
     parser.add_argument(
@@ -590,7 +601,10 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.generate_docs:
-        ok = generate_docs_from_per_arch(args.per_arch_output, args.docs_output_dir)
+        target_archs = args.docs_archs if args.docs_archs else None
+        ok = generate_docs_from_per_arch(
+            args.per_arch_output, args.docs_output_dir, target_archs
+        )
         return 0 if ok else 1
 
     if args.sync_arch:

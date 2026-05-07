@@ -1,4 +1,8 @@
 {
+  "metric_descriptions": {
+    "docs/data/metrics/gfx1151_metrics.yaml": "b6f21005715adda9c273fa25136fb653",
+    "tools/per_arch_metric_definitions/gfx1151_metrics_description.yaml": "80e425def77f6f498f8e20c5159b5967"
+  },
   "archs": {
     "gfx1151": {
       "delta_hash": null,
@@ -10,7 +14,7 @@
         "0400_roofline.yaml": "17b62eb17edee43abd833576a7c142a4",
         "0500_command_processor_cpc.yaml": "9de95259d153357dde907a7a410aa1a3",
         "0600_workgroup_manager_spi.yaml": "e0fb474a8a5e97cf26467578f7b5c316",
-        "0700_workgroup_processor.yaml": "928411e61d1d3bbf88f44e07f82de316",
+        "0700_workgroup_processor.yaml": "7d2f83a3f7350facbdea04930cec28a3",
         "0900_l0_cache.yaml": "1cbfbc0badeed8ec0caa178faec2f231",
         "1100_l1_cache.yaml": "7403eeb9b47f69f73cf42eccb984cdf7",
         "1300_l2_cache.yaml": "dd34f4b6cbdbb8afbafa059b58ba9839",

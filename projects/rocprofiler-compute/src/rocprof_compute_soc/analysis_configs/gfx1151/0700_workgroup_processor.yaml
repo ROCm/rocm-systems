@@ -154,6 +154,11 @@ Panel Config:
           min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
           max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
           unit: (Count + $normUnit)
+        Instructions - Dual VALU (VOPD):
+          avg: SUM(SQ_INSTS_DUAL_VALU_WAVE32_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_DUAL_VALU_WAVE32_sum / $denom)
+          max: MAX(SQ_INSTS_DUAL_VALU_WAVE32_sum / $denom)
+          unit: (Count + $normUnit)
         Instructions - VMEM:
           avg: SUM(SQ_INSTS_TEX_sum) / SUM($denom)
           min: MIN(SQ_INSTS_TEX_sum / $denom)
@@ -340,6 +345,10 @@ Panel Config:
       Number of Local Data Share instructions executed. LDS provides fast shared memory
       within a workgroup. High counts indicate active use of shared memory for
       inter-work-item communication.
+    Instructions - Dual VALU (VOPD): >-
+      Dual-issue VALU (VOPD) instructions issued in wave32 mode (SQ_INSTS_DUAL_VALU_WAVE32_sum),
+      per normalization unit. Hardware perf select SQ_PERF_SEL_INSTS_DUAL_VALU_WAVE32 (Strix2 chip
+      interface); emulated counter.
     LDS Direct Load Instructions: >-
       Number of direct LDS load instructions. Direct loads fetch data from LDS without
       address indirection. These are typically faster than indexed LDS operations.

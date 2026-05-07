@@ -288,10 +288,10 @@ Panel YAMLs (src/) → Per-Arch YAMLs (tools/) → Docs YAMLs (docs/) → Sphinx
 **Files:**
 ```bash
 tools/per_arch_metric_definitions/
-  ├── gfx{908,90a,942,950}_metrics_description.yaml   # plain + rst + unit
+  ├── gfx{908,90a,942,950,1151}_metrics_description.yaml   # plain + rst + unit
 
 docs/data/metrics/
-  └── gfx{908,90a,942,950}_metrics.yaml               # rst + unit (generated)
+  └── gfx{908,90a,942,950,1151}_metrics.yaml               # rst + unit (generated)
 ```
 
 **After editing panel `metrics_description` sections:**
@@ -299,5 +299,18 @@ docs/data/metrics/
 python tools/config_management/metric_description_manager.py --sync-all src/rocprof_compute_soc/analysis_configs
 python tools/config_management/metric_description_manager.py --generate-docs
 ```
+
+To regenerate **only selected** docs metrics (for example gfx1151 without rewriting CDNA YAMLs):
+
+```bash
+python tools/config_management/metric_description_manager.py --generate-docs --docs-arch gfx1151
+```
+
+Then refresh **MD5 entries** under `metric_descriptions` in `src/utils/.config_hashes.json` for:
+
+- `tools/per_arch_metric_definitions/gfx1151_metrics_description.yaml`
+- `docs/data/metrics/gfx1151_metrics.yaml`
+
+(`tests/test_autogen_config.py::test_metric_description_hashes_match_files` enforces these when present.)
 
 **RST enhancement:** Edit per-arch YAMLs directly. Framework preserves manual edits (detects when `rst != plain`).
