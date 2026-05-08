@@ -866,8 +866,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_PrimitiveDataType) {
   constexpr size_t sizePerThread = 128;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
 
   SECTION("PerThread - char with malloc") {
@@ -1081,8 +1080,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_ComplexDataType) {
   constexpr size_t sizePerThread = 64;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
 
   SECTION("Struct - malloc") {
@@ -1123,8 +1121,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_CodeObjects) {
   constexpr size_t sizePerThread = 128;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
 
   SECTION("SingleCodeObj - malloc") {
@@ -1200,8 +1197,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_Graph) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   // malloc()/free() tests
   SECTION("Test char datatype allocation with malloc") {
@@ -1233,8 +1229,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_New_PerThread_Graph) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   // new/delete tests
   SECTION("Test char datatype allocation with new") {
@@ -1266,8 +1261,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_DeviceFunc) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
 
   SECTION("Test device function allocation with malloc") {
@@ -1286,8 +1280,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_VirtualFunction) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   int *outputVec_d{nullptr}, *outputVec_h{nullptr};
   constexpr size_t sizeBufferPerThread = 8;
@@ -1322,8 +1315,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_SingKernels_MulThreads) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
 
   SECTION("Test single kernel multi-thread allocation with malloc") {
@@ -1370,8 +1362,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_Malloc_MulCodeObj) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   REQUIRE(true == TestAlloc_Load_MultKernels(TEST_MALLOC_FREE, INT_MAX));
 }
@@ -1384,8 +1375,7 @@ HIP_TEST_CASE(Unit_deviceAllocation_New_MulCodeObj) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   REQUIRE(true == TestAlloc_Load_MultKernels(TEST_NEW_DELETE, INT_MAX));
 }
@@ -1399,8 +1389,7 @@ HIP_TEST_CASE(Unit_deviceAllocationFollowedByDeviceReset) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
   }
   REQUIRE(true == TestAllocInDeviceFunc(TEST_MALLOC_FREE));
   HIP_CHECK(hipDeviceReset());

@@ -28,16 +28,6 @@ static constexpr auto LEN{1024};
 static constexpr auto LARGE_CHUNK_LEN{128 * LEN};
 static constexpr auto SMALL_CHUNK_LEN{8 * LEN};
 
-#if HT_AMD
-#define TEST_SKIP(arch)                                                                            \
-  if (std::string::npos == arch.find("xnack+")) {                                                  \
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);                                \
-    return;                                                                                        \
-  }
-#else
-#define TEST_SKIP(arch)
-#endif
-
 template <typename T> __global__ void SetVal(T* in, T val) {
   int i = threadIdx.x + blockIdx.x * blockDim.x;
   in[i] = val;
@@ -562,9 +552,7 @@ HIP_TEST_CASE(Unit_hipHostRegister_MemAdvise_SetGet) {
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   if (prop.concurrentManagedAccess == 0) {
-    HipTest::HIP_SKIP_TEST(
-        "concurrent managed access is not supported for this test.");
-    return;
+    HIP_SKIP_TEST("concurrent managed access is not supported for this test.");
   }
   int numDevices = HipTest::getDeviceCount();
   size_t sizeBytes{LEN * sizeof(uint8_t)};
