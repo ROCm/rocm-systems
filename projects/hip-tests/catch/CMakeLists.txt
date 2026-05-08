@@ -69,6 +69,8 @@ else() # Win32
   find_program(LLVM_RC_EXEC NAMES llvm-rc llvm-rc.exe
                  PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH})
 endif()
+find_program(CLANG_CPP_EXEC NAMES clang-cpp clang-cpp.exe
+             PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH}/llvm/bin)
 
 message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
 
@@ -343,6 +345,25 @@ endforeach()
 
 # config generation
 add_subdirectory(config)
+
+# Generate config_amd_linux_gfx1250.json and npi_real_hw.json for gfx1250 NPI CI
+if(NOT WIN32 AND CLANG_CPP_EXEC)
+  set(HIP_TEST_CONFIG_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/config)
+  file(MAKE_DIRECTORY ${HIP_TEST_CONFIG_BINARY_DIR})
+  foreach(arch ${HIP_GPU_ARCH_LIST})
+    if(NOT arch STREQUAL "gfx1250")
+      continue()
+    endif()
+    # Standard linux config for gfx1250
+    set(cmd "${CLANG_CPP_EXEC} -P ${ASAN_CONFIG_DEF} -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${CMAKE_CURRENT_SOURCE_DIR}/hipTestMain/config/config_amd_linux>${HIP_TEST_CONFIG_BINARY_DIR}/config_amd_linux_${arch}.json")
+    execute_process(COMMAND bash -c ${cmd} RESULT_VARIABLE json_result)
+    message(STATUS "config_amd_linux_${arch}.json generation result: ${json_result}")
+    # NPI real-HW config for gfx1250 (picked up by CI as npi_real_hw.json)
+    set(cmd "${CLANG_CPP_EXEC} -P ${ASAN_CONFIG_DEF} -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${CMAKE_CURRENT_SOURCE_DIR}/hipTestMain/config/config_amd_linux_npi_hw>${HIP_TEST_CONFIG_BINARY_DIR}/npi_real_hw.json")
+    execute_process(COMMAND bash -c ${cmd} RESULT_VARIABLE json_result)
+    message(STATUS "npi_real_hw.json generation result: ${json_result}")
+  endforeach()
+endif()
 
 # prints the catch info to a file
 string(TIMESTAMP _timestamp UTC)
