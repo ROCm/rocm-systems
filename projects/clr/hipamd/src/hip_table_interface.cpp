@@ -902,6 +902,29 @@ hipError_t hipGraphCreate(hipGraph_t* pGraph, unsigned int flags) {
   return hip::GetHipDispatchTable()->hipGraphCreate_fn(pGraph, flags);
   CATCH;
 }
+hipError_t hipGraphConditionalHandleCreate(hipGraphConditionalHandle* pHandleOut,
+                                           hipGraph_t hGraph,
+                                           unsigned int defaultLaunchValue,
+                                           unsigned int flags) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphConditionalHandleCreate_fn(
+      pHandleOut, hGraph, defaultLaunchValue, flags);
+  CATCH;
+}
+hipError_t hipGraphAddConditionalNode(hipGraphNode_t* pGraphNode,
+                                      hipGraph_t graph,
+                                      const hipGraphNode_t* pDependencies,
+                                      size_t numDependencies,
+                                      hipGraphConditionalHandle handle,
+                                      hipGraphConditionalType type,
+                                      unsigned int numConditionalGraphs,
+                                      hipGraph_t* phConditionalGraphs) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphAddConditionalNode_fn(
+      pGraphNode, graph, pDependencies, numDependencies, handle, type,
+      numConditionalGraphs, phConditionalGraphs);
+  CATCH;
+}
 hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path, unsigned int flags) {
   TRY;
   return hip::GetHipDispatchTable()->hipGraphDebugDotPrint_fn(graph, path, flags);

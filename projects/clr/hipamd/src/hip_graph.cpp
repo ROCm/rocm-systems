@@ -11,6 +11,9 @@
 #include "hip_platform.hpp"
 #include "hip_event.hpp"
 #include "hip_mempool_impl.hpp"
+#include "device/devsignal.hpp"
+#include <hsa/amd_hsa_signal.h>
+#include <cstddef>
 
 namespace hip {
 
@@ -1300,6 +1303,135 @@ hipError_t hipGraphCreate(hipGraph_t* pGraph, unsigned int flags) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   *pGraph = reinterpret_cast<hipGraph_t>(new hip::Graph(hip::getCurrentDevice()));
+  HIP_RETURN(hipSuccess);
+}
+
+// M1: conditional graph handle plumbing only (Option C).
+// Allocates a real device signal whose backing `amd_signal_t::value` cell is
+// exposed to user code via `pHandleOut->device_ptr = signal_handle + 8`. A
+// device kernel can then update the cell with a single store via
+// `hipGraphSetConditional`. In M2 this same cell drives CP-evaluated
+// conditional jump / loop_back packets.
+//
+// The `+8` shortcut is locked in by a static_assert so a future ROCR layout
+// change fails the build loudly instead of silently corrupting an unrelated
+// field of `amd_signal_t`.
+hipError_t hipGraphConditionalHandleCreate(hipGraphConditionalHandle* pHandleOut,
+                                           hipGraph_t hGraph,
+                                           unsigned int defaultLaunchValue,
+                                           unsigned int flags) {
+  HIP_INIT_API(hipGraphConditionalHandleCreate, pHandleOut, hGraph, defaultLaunchValue, flags);
+  static_assert(offsetof(amd_signal_t, value) == 8,
+                "Option C: hipGraphConditionalHandle::device_ptr = signal_handle + 8 "
+                "assumes amd_signal_t::value lives at offset 8");
+  if (pHandleOut == nullptr || flags != 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  hip::Graph* g = reinterpret_cast<hip::Graph*>(hGraph);
+  if (!hip::Graph::isGraphValid(g)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  hip::Device* hipDev = hip::getCurrentDevice();
+  if (hipDev == nullptr || hipDev->devices().empty()) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+  amd::Device* dev = hipDev->devices()[0];
+  amd::device::Signal* sig = dev->createSignal();
+  if (sig == nullptr) {
+    HIP_RETURN(hipErrorOutOfMemory);
+  }
+  if (!sig->Init(*dev, static_cast<uint64_t>(defaultLaunchValue),
+                 amd::device::Signal::WaitState::Active)) {
+    delete sig;
+    HIP_RETURN(hipErrorOutOfMemory);
+  }
+  uint64_t signal_handle = reinterpret_cast<uint64_t>(sig->getHandle());
+  pHandleOut->signal_handle = signal_handle;
+  pHandleOut->device_ptr    = signal_handle + offsetof(amd_signal_t, value);
+  pHandleOut->default_value = defaultLaunchValue;
+  // TODO(M2): register `sig` with the graph so it is destroyed in
+  // hipGraphDestroy. For M1 the smoke test is short-lived and a one-off leak
+  // here is acceptable; lifetime work is tracked under m2_lifetime in the plan.
+  HIP_RETURN(hipSuccess);
+}
+
+// M2: conditional graph node creation.  Validates the requested conditional
+// shape, allocates the body graph(s) the caller will populate, constructs a
+// hip::GraphConditionalNode owning those bodies, and inserts it into the
+// parent graph with the standard dependency wiring.
+//
+// The runtime does not capture body packets here; that happens in
+// GraphExec::Init / IB build under m2_clr_ib_build.  The host-visible
+// hipGraph_t handles written into phConditionalGraphs are owned by the
+// GraphConditionalNode (and therefore by the parent graph).
+hipError_t hipGraphAddConditionalNode(hipGraphNode_t* pGraphNode,
+                                      hipGraph_t graph,
+                                      const hipGraphNode_t* pDependencies,
+                                      size_t numDependencies,
+                                      hipGraphConditionalHandle handle,
+                                      hipGraphConditionalType type,
+                                      unsigned int numConditionalGraphs,
+                                      hipGraph_t* phConditionalGraphs) {
+  HIP_INIT_API(hipGraphAddConditionalNode, pGraphNode, graph, pDependencies, numDependencies,
+               type, numConditionalGraphs, phConditionalGraphs);
+  if (pGraphNode == nullptr || graph == nullptr || phConditionalGraphs == nullptr ||
+      numConditionalGraphs == 0 || (numDependencies > 0 && pDependencies == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (handle.signal_handle == 0 || handle.device_ptr == 0) {
+    // Caller must have populated the handle via hipGraphConditionalHandleCreate.
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  hip::Graph* g = reinterpret_cast<hip::Graph*>(graph);
+  if (!hip::Graph::isGraphValid(g)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  // Validate body graph count vs. conditional type:
+  //  - WHILE                : exactly 1 body
+  //  - IF (with optional ELSE) : 1 or 2 bodies (laid out [else][if] in M2)
+  //  - SWITCH               : not yet supported
+  switch (type) {
+    case hipGraphCondTypeWhile:
+      if (numConditionalGraphs != 1) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      break;
+    case hipGraphCondTypeIf:
+      if (numConditionalGraphs != 1 && numConditionalGraphs != 2) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      break;
+    case hipGraphCondTypeSwitch:
+      HIP_RETURN(hipErrorNotSupported);
+    default:
+      HIP_RETURN(hipErrorInvalidValue);
+  }
+  hip::Device* hipDev = hip::getCurrentDevice();
+  if (hipDev == nullptr) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+  std::vector<hip::Graph*> bodies;
+  bodies.reserve(numConditionalGraphs);
+  for (unsigned int i = 0; i < numConditionalGraphs; ++i) {
+    hip::Graph* body = new hip::Graph(hipDev);
+    bodies.push_back(body);
+    phConditionalGraphs[i] = reinterpret_cast<hipGraph_t>(body);
+  }
+  hip::GraphNode* node = new hip::GraphConditionalNode(handle, type, std::move(bodies));
+  hipError_t status = ihipGraphAddNode(node, g,
+                                       reinterpret_cast<hip::GraphNode* const*>(pDependencies),
+                                       numDependencies, false);
+  if (status != hipSuccess) {
+    // ihipGraphAddNode does not take ownership on failure; reclaim the node
+    // (and via the destructor, the body graphs) so phConditionalGraphs entries
+    // are not left dangling.
+    delete node;
+    for (unsigned int i = 0; i < numConditionalGraphs; ++i) {
+      phConditionalGraphs[i] = nullptr;
+    }
+    HIP_RETURN(status);
+  }
+  *pGraphNode = reinterpret_cast<hipGraphNode_t>(node);
   HIP_RETURN(hipSuccess);
 }
 

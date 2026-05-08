@@ -237,6 +237,18 @@ hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
 hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node, hipGraph_t* pGraph);
 hipError_t hipGraphClone(hipGraph_t* pGraphClone, hipGraph_t originalGraph);
 hipError_t hipGraphCreate(hipGraph_t* pGraph, unsigned int flags);
+hipError_t hipGraphConditionalHandleCreate(hipGraphConditionalHandle* pHandleOut,
+                                           hipGraph_t hGraph,
+                                           unsigned int defaultLaunchValue,
+                                           unsigned int flags);
+hipError_t hipGraphAddConditionalNode(hipGraphNode_t* pGraphNode,
+                                      hipGraph_t graph,
+                                      const hipGraphNode_t* pDependencies,
+                                      size_t numDependencies,
+                                      hipGraphConditionalHandle handle,
+                                      hipGraphConditionalType type,
+                                      unsigned int numConditionalGraphs,
+                                      hipGraph_t* phConditionalGraphs);
 hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path, unsigned int flags);
 hipError_t hipGraphDestroy(hipGraph_t graph);
 hipError_t hipGraphDestroyNode(hipGraphNode_t node);
@@ -1083,6 +1095,8 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGraphChildGraphNodeGetGraph_fn = hip::hipGraphChildGraphNodeGetGraph;
   ptrDispatchTable->hipGraphClone_fn = hip::hipGraphClone;
   ptrDispatchTable->hipGraphCreate_fn = hip::hipGraphCreate;
+  ptrDispatchTable->hipGraphConditionalHandleCreate_fn = hip::hipGraphConditionalHandleCreate;
+  ptrDispatchTable->hipGraphAddConditionalNode_fn = hip::hipGraphAddConditionalNode;
   ptrDispatchTable->hipGraphDebugDotPrint_fn = hip::hipGraphDebugDotPrint;
   ptrDispatchTable->hipGraphDestroy_fn = hip::hipGraphDestroy;
   ptrDispatchTable->hipGraphDestroyNode_fn = hip::hipGraphDestroyNode;
@@ -2223,6 +2237,9 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxWaitEvent_fn, 534);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 29
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetGlobal_fn, 535);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetManaged_fn, 536);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 30
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphConditionalHandleCreate_fn, 537);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphAddConditionalNode_fn, 538);
 
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
@@ -2230,9 +2247,9 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetManaged_fn, 536);
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 537)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 539)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 29,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 30,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

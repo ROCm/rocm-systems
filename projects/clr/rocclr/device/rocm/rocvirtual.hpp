@@ -653,6 +653,24 @@ class VirtualGPU : public device::VirtualDevice {
                                   hsa_signal_condition32_t cond = HSA_SIGNAL_CONDITION_EQ,
                                   bool skipTs = false,
                                   hsa_signal_t completionSignal = hsa_signal_t{0});
+
+ public:
+  //! Emit one vendor cond_jump (HSA_AMD_PACKET_TYPE_DISPATCH_IB_COND_JUMP) on
+  //! gpu_queue_ pointing at @a ib_base_addr.  The CP loads
+  //! @a cond_signal.value, evaluates it against @a test_value with @a cond_op,
+  //! and either runs @a fallthrough_pkts starting at ib_base_addr (FALSE) or
+  //! runs @a jump_pkts starting at ib_base_addr + jump_offset_pkts*64 (TRUE).
+  //! Used by HIP graph IF / WHILE conditional nodes; see
+  //! [hipamd/src/hip_graph_internal.hpp] GraphConditionalNode.
+  void dispatchCondJumpPacket(hsa_signal_t cond_signal,
+                              hsa_signal_value_t test_value,
+                              hsa_signal_condition32_t cond_op,
+                              uint64_t ib_base_addr,
+                              uint32_t fallthrough_pkts,
+                              uint32_t jump_offset_pkts,
+                              uint32_t jump_pkts);
+
+ private:
   void initializeDispatchPacket(hsa_kernel_dispatch_packet_t* packet, amd::NDRangeContainer& sizes);
 
   void resetKernArgPool() { managed_kernarg_buffer_.ResetPool(); }

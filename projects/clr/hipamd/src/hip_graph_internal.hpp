@@ -2883,6 +2883,125 @@ class GraphEmptyNode : public GraphNode {
 };
 
 // ================================================================================================
+//
+// Conditional graph node (HIP graph IF / WHILE).  Owns 1 (WHILE / IF-no-else)
+// or 2 (IF/ELSE) empty body graphs that the caller populates after node
+// creation.  The runtime reads the bodies at GraphExec::Init time to build
+// the per-conditional indirect buffer (see m2_clr_ib_build), and at
+// GraphExec::Run time emits a single vendor cond_jump AQL packet on the
+// launch stream's HW queue (see m2_clr_packet_emit + m2_clr_launch_reset).
+//
+// The CreateCommand override currently emits an amd::Marker as a stand-in so
+// segment scheduling and dependency edges work end-to-end while the IB / packet
+// emission path is still under construction.
+//
+// Lifetime: parent graph owns the GraphConditionalNode, which owns the body
+// hip::Graph objects; ~GraphConditionalNode() deletes the bodies.  The
+// underlying hsa_signal_t in the handle is owned by hipGraphConditionalHandle
+// and freed under m2_lifetime.
+class GraphConditionalNode : public GraphNode {
+ protected:
+  // Copy ctor: deep-clones the body graphs so the GraphExec returned by
+  // hipGraphInstantiate has its own independent body Graph hierarchy.  The
+  // hipGraphConditionalHandle (cond signal) and the conditional type are POD
+  // and shared by value.  IB metadata stays at its default-initialised state
+  // (ib_built_ == false) so the clone's first BuildIB() will materialise a
+  // fresh IB on the GraphExec's kernArgManager pool rather than aliasing the
+  // original's IB allocation.
+  GraphConditionalNode(const GraphConditionalNode& rhs)
+      : GraphNode(rhs),
+        handle_(rhs.handle_),
+        cond_type_(rhs.cond_type_) {
+    bodies_.reserve(rhs.bodies_.size());
+    for (auto* body : rhs.bodies_) {
+      auto* newBody = new Graph(body->Device(), body);
+      body->clone(newBody, /*cloneNodes=*/true);
+      bodies_.push_back(newBody);
+    }
+  }
+
+ public:
+  // Custom amd::Command emitted at graph launch.  submit() resets the cond
+  // signal to its default and rings out one vendor cond_jump AQL packet on
+  // the launch stream's HW queue.  Defined out-of-line in
+  // hip_graph_internal.cpp because submit() needs HSA + rocvirtual headers.
+  class CondJumpCommand : public amd::Command {
+   public:
+    CondJumpCommand(amd::HostQueue& queue, GraphConditionalNode& node);
+    void submit(device::VirtualDevice& device) final;
+
+   private:
+    GraphConditionalNode& node_;
+  };
+
+  GraphConditionalNode(hipGraphConditionalHandle handle,
+                       hipGraphConditionalType cond_type,
+                       std::vector<Graph*> bodies)
+      : GraphNode(hipGraphNodeTypeConditional, "solid", "diamond", "CONDITIONAL"),
+        handle_(handle),
+        cond_type_(cond_type),
+        bodies_(std::move(bodies)) {}
+
+  ~GraphConditionalNode() override;
+
+  GraphConditionalNode& operator=(const GraphConditionalNode&) = delete;
+
+  GraphNode* clone() const override { return new GraphConditionalNode(*this); }
+
+  hipError_t SetParams(GraphNode* node) override {
+    // No mutable parameters yet -- the handle and conditional type are fixed
+    // at node creation time.  Body graphs are mutated by the user via the
+    // hipGraph_t handles returned from hipGraphAddConditionalNode.
+    (void)node;
+    return hipSuccess;
+  }
+
+  // Walks each body Graph, captures kernel-dispatch packets via
+  // GraphNode::CaptureAndFormPacket(kernArgMgr), and assembles a contiguous
+  // IB in coarse-grain VRAM (or pinned host memory on non-largeBar systems).
+  // For WHILE, an hsa_amd_aql_loop_back_t is appended so the CP re-evaluates
+  // the cond signal at the tail of every iteration.  POC: bodies must contain
+  // only kernel nodes.  Idempotent across launches; first call wins.
+  hipError_t BuildIB(GraphKernelArgManager* kernArgMgr, int devId);
+
+  hipError_t CreateCommand(hip::Stream* stream) override {
+    hipError_t status = GraphNode::CreateCommand(stream);
+    if (status != hipSuccess) {
+      return status;
+    }
+    commands_.reserve(1);
+    commands_.emplace_back(new CondJumpCommand(*stream, *this));
+    return hipSuccess;
+  }
+
+  const hipGraphConditionalHandle& GetHandle() const { return handle_; }
+  hipGraphConditionalType GetCondType() const { return cond_type_; }
+  const std::vector<Graph*>& GetBodies() const { return bodies_; }
+
+  // Used by CondJumpCommand::submit().
+  void* GetIbAddr() const { return ib_addr_; }
+  uint32_t GetFallPkts() const { return fall_pkts_; }
+  uint32_t GetJumpOffPkts() const { return jump_off_pkts_; }
+  uint32_t GetJumpPkts() const { return jump_pkts_; }
+  bool IsIbBuilt() const { return ib_built_; }
+
+ private:
+  hipGraphConditionalHandle handle_;
+  hipGraphConditionalType cond_type_;
+  std::vector<Graph*> bodies_;  //!< Owned; deleted in destructor.
+
+  // IB metadata, populated by BuildIB() at instantiate time.
+  void* ib_addr_ = nullptr;        //!< Base of the IB in device-accessible memory.
+  size_t ib_size_bytes_ = 0;       //!< Allocation size for ib_addr_, used by hostFree.
+  size_t ib_size_pkts_ = 0;        //!< Total IB packets including loop_back (WHILE).
+  uint32_t fall_pkts_ = 0;         //!< cond_jump.fallthrough_ib_size_packets
+  uint32_t jump_off_pkts_ = 0;     //!< cond_jump.jump_offset_packets
+  uint32_t jump_pkts_ = 0;         //!< cond_jump.jump_ib_size_packets
+  amd::Device* ib_device_ = nullptr;  //!< Device that allocated ib_addr_.
+  bool ib_built_ = false;
+};
+
+// ================================================================================================
 class GraphMemAllocNode final : public GraphNode {
   hipMemAllocNodeParams node_params_;  // Node parameters for memory allocation
   amd::Memory* va_ = nullptr;          // Memory object, which holds a virtual address

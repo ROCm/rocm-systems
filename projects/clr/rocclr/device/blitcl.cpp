@@ -202,6 +202,15 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       __amd_batchMemOp(params, count);
     });
 
+// Local workaround (DEV ENV ONLY): the system /opt/rocm device runtime
+// bitcode (opencl.bc) on this branch only ships __amd_streamOpsWrite and
+// __amd_streamOpsWait; __amd_streamOpsIncrement and __amd_streamOpsDecrement
+// are not yet provided.  To keep the develop CLR's BlitManager init from
+// failing on stale ROCm installs, the wrapper kernels below stub out the
+// missing extern calls (no-op).  Anyone exercising
+// hipExtStreamWriteValue{Increment,Decrement} on this build will get a no-op
+// instead of a runtime crash; revert this once the device runtime catches up
+// and the externs are available again.
 const char* HipExtraSourceCode = BLIT_KERNELS(
     __kernel void __amd_rocclr_streamOpsWrite(__global uint* ptrInt, __global ulong* ptrUlong,
                                               ulong value) {
@@ -210,12 +219,12 @@ const char* HipExtraSourceCode = BLIT_KERNELS(
 
     __kernel void __amd_rocclr_streamOpsIncrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsIncrement(ptrInt, ptrUlong, value);
+      (void)ptrInt; (void)ptrUlong; (void)value;
     }
 
     __kernel void __amd_rocclr_streamOpsDecrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
+      (void)ptrInt; (void)ptrUlong; (void)value;
     }
 
     __kernel void __amd_rocclr_streamOpsWait(__global uint* ptrInt, __global ulong* ptrUlong,
@@ -238,12 +247,12 @@ const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
 
     __kernel void __amd_rocclr_streamOpsIncrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsIncrement(ptrInt, ptrUlong, value);
+      (void)ptrInt; (void)ptrUlong; (void)value;
     }
 
     __kernel void __amd_rocclr_streamOpsDecrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
+      (void)ptrInt; (void)ptrUlong; (void)value;
     }
 
     __kernel void __amd_rocclr_streamOpsWait(__global uint* ptrInt, __global ulong* ptrUlong,

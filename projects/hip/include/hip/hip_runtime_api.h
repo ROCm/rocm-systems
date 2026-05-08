@@ -1568,8 +1568,44 @@ typedef enum hipGraphNodeType {
   hipGraphNodeTypeMemcpyFromSymbol = 12,   ///< MemcpyFromSymbol node
   hipGraphNodeTypeMemcpyToSymbol = 13,     ///< MemcpyToSymbol node
   hipGraphNodeTypeBatchMemOp = 14,         ///< BatchMemOp node
+  hipGraphNodeTypeConditional = 15,        ///< Conditional (IF / WHILE) node
   hipGraphNodeTypeCount
 } hipGraphNodeType;
+
+/**
+ * Conditional graph handle (M1: handle plumbing only; node support is M2).
+ *
+ * On the AMD path the handle is backed by a real `hsa_signal_t` (Option C):
+ *   `device_ptr   == signal_handle + offsetof(amd_signal_t, value)`
+ * so that a single device-side store via `hipGraphSetConditional` updates
+ * the same cell the GPU CP firmware reads in M2 conditional packets.
+ *
+ * - `device_ptr`: GPU-visible address of the value cell. Kernels write here
+ *   via `hipGraphSetConditional`.
+ * - `default_value`: initial value the runtime stamps into the cell at
+ *   handle-create time and (in M2) at every `hipGraphLaunch`.
+ * - `signal_handle`: opaque `hsa_signal_t.handle` used by the runtime to
+ *   address the underlying signal in M2. Not consumed by user code.
+ */
+typedef struct hipGraphConditionalHandle_st {
+  uint64_t device_ptr;       ///< Device-visible address of the conditional value cell
+  uint64_t default_value;    ///< Initial value of the cell at handle creation
+  uint64_t signal_handle;    ///< Backing hsa_signal_t.handle (runtime-internal)
+} hipGraphConditionalHandle;
+
+/**
+ * @brief Type of conditional graph node.
+ *
+ * Mirrors CUDA's conditional node taxonomy.  AMD currently implements
+ * IF and WHILE via three vendor AQL packets (cond_jump entry packet plus
+ * an optional loop_back tail).  SWITCH is reserved and currently returns
+ * #hipErrorNotSupported from #hipGraphAddConditionalNode.
+ */
+typedef enum hipGraphConditionalType {
+  hipGraphCondTypeIf = 0,        ///< Conditional IF node (1 or 2 body graphs)
+  hipGraphCondTypeWhile = 1,     ///< Conditional WHILE node (1 body graph)
+  hipGraphCondTypeSwitch = 2,    ///< Conditional SWITCH node (not yet supported)
+} hipGraphConditionalType;
 
 typedef void (*hipHostFn_t)(void* userData);
 typedef struct hipHostNodeParams {
@@ -8436,6 +8472,74 @@ hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode);
 hipError_t hipGraphCreate(hipGraph_t* pGraph, unsigned int flags);
 
 /**
+ * @brief Creates a conditional graph handle (M1: handle plumbing only).
+ *
+ * Allocates a runtime-managed cell whose address is exposed via
+ * `pHandleOut->device_ptr` so that a kernel can update the cell by calling
+ * `hipGraphSetConditional`. In M2 the same cell will be polled by the GPU
+ * CP firmware to drive conditional graph nodes (IF / WHILE).
+ *
+ * In M1, `hGraph` is validated but the handle is not yet registered with the
+ * graph for destruction; the backing signal is leaked at process exit. This
+ * is sufficient for the M1 smoke test and is fixed in the M2 lifetime work.
+ *
+ * @param [out] pHandleOut         - Conditional handle to fill in.
+ * @param [in]  hGraph             - Graph that will own this handle (validated only in M1).
+ * @param [in]  defaultLaunchValue - Initial value of the cell.
+ * @param [in]  flags              - Reserved, must be 0.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorOutOfMemory,
+ *          #hipErrorInvalidDevice
+ */
+hipError_t hipGraphConditionalHandleCreate(hipGraphConditionalHandle* pHandleOut,
+                                           hipGraph_t hGraph,
+                                           unsigned int defaultLaunchValue,
+                                           unsigned int flags);
+
+/**
+ * @brief Adds a conditional (IF / WHILE) node to a graph.
+ *
+ * The node owns @a numConditionalGraphs empty body graph(s) returned via
+ * @a phConditionalGraphs that the caller then populates.  At
+ * @ref hipGraphInstantiate time the runtime captures the body graph(s)
+ * into one indirect-buffer per conditional, and at @ref hipGraphLaunch the
+ * runtime resets @a handle's value to its `default_value` and emits a
+ * vendor cond_jump AQL packet so the GPU CP picks the right arm or loop
+ * count (M2).
+ *
+ * Body graph counts:
+ *  - @ref hipGraphCondTypeWhile  : exactly 1.
+ *  - @ref hipGraphCondTypeIf     : 1 (no-else IF) or 2 (IF / ELSE, laid out
+ *                                  as `[else_body][if_body]` in the IB).
+ *  - @ref hipGraphCondTypeSwitch : not currently supported -- returns
+ *                                  #hipErrorNotSupported.
+ *
+ * @param [out] pGraphNode           Created conditional node.
+ * @param [in]  graph                Parent graph.
+ * @param [in]  pDependencies        Dependencies of the new node, may be NULL.
+ * @param [in]  numDependencies      Number of dependencies.
+ * @param [in]  handle               Conditional handle previously created via
+ *                                   @ref hipGraphConditionalHandleCreate.
+ * @param [in]  type                 Conditional node type
+ *                                   (@ref hipGraphConditionalType).
+ * @param [in]  numConditionalGraphs Number of body graphs to create
+ *                                   (1 for WHILE, 1 or 2 for IF).
+ * @param [out] phConditionalGraphs  Caller-provided array of size
+ *                                   @a numConditionalGraphs into which the
+ *                                   runtime writes new empty body graphs.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ */
+hipError_t hipGraphAddConditionalNode(hipGraphNode_t* pGraphNode,
+                                      hipGraph_t graph,
+                                      const hipGraphNode_t* pDependencies,
+                                      size_t numDependencies,
+                                      hipGraphConditionalHandle handle,
+                                      hipGraphConditionalType type,
+                                      unsigned int numConditionalGraphs,
+                                      hipGraph_t* phConditionalGraphs);
+
+/**
  * @brief Destroys a graph
  *
  * @param [in] graph - instance of graph to destroy.
@@ -10093,6 +10197,15 @@ template <typename T> static hipError_t __host__ inline hipOccupancyMaxPotential
   (void)flags;
   return hipOccupancyMaxPotentialBlockSize(gridSize, blockSize, reinterpret_cast<const void*>(f),
                                            dynSharedMemPerBlk, blockSizeLimit);
+}
+
+// Device-side helper to update the conditional cell from a kernel.
+// Single global store at the address the runtime exposed via
+// `hipGraphConditionalHandleCreate`. In M2 the GPU CP firmware reads this
+// same cell to drive conditional graph nodes.
+__device__ static inline void
+hipGraphSetConditional(hipGraphConditionalHandle handle, unsigned long long value) {
+  *reinterpret_cast<volatile unsigned long long*>(handle.device_ptr) = value;
 }
 #endif  // defined(__clang__) && defined(__HIP__)
 

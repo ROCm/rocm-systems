@@ -660,6 +660,8 @@ global:
     hipKernelSetAttribute;
     hipKernelGetFunction;
     hipMemPrefetchBatchAsync;
+    hipGraphConditionalHandleCreate;
+    hipGraphAddConditionalNode;
 local:
     *;
 } hip_7.1;

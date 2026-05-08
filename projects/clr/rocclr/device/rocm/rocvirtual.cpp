@@ -1841,6 +1841,75 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
 }
 
 // ================================================================================================
+// HIP graph conditional node entry packet.  Mirrors dispatchBarrierValuePacket
+// but emits a vendor HSA_AMD_PACKET_TYPE_DISPATCH_IB_COND_JUMP instead.
+//
+// The CP is expected to:
+//   - read cond_signal.value (the cond cell at amd_signal_t +8)
+//   - compare it against test_value with cond_op
+//   - if TRUE, fetch jump_pkts packets from
+//       ib_base_addr + jump_offset_pkts * 64
+//   - if FALSE, fetch fallthrough_pkts packets from ib_base_addr
+//   - then resume from this queue
+//
+// barrier=1 + SYSTEM acquire/release on the header ensures any prior packet
+// (including a kernel that wrote the cond cell) has retired and its store is
+// visible to the CP before the cond load.
+void VirtualGPU::dispatchCondJumpPacket(hsa_signal_t cond_signal,
+                                        hsa_signal_value_t test_value,
+                                        hsa_signal_condition32_t cond_op,
+                                        uint64_t ib_base_addr,
+                                        uint32_t fallthrough_pkts,
+                                        uint32_t jump_offset_pkts,
+                                        uint32_t jump_pkts) {
+  const uint32_t queueSize = gpu_queue_->size;
+  const uint32_t queueMask = queueSize - 1;
+
+  // Header bits: VENDOR_SPECIFIC + barrier + SYSTEM acquire/release fences.
+  // Identical scope choice as barrier_value to make any prior write to the
+  // cond cell visible to the CP load.
+  constexpr uint16_t kVendorSpecificHBits =
+      (HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE);
+  constexpr uint16_t kBarrierHBits = (1 << HSA_PACKET_HEADER_BARRIER);
+  constexpr uint16_t kSystemScopeHBits =
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+  const uint16_t header = kVendorSpecificHBits | kBarrierHBits | kSystemScopeHBits;
+  const uint16_t rest = HSA_AMD_PACKET_TYPE_DISPATCH_IB_COND_JUMP;
+
+  // Build the packet body on the stack first; the slot starts as INVALID and
+  // we publish the real header last via release-store.
+  hsa_amd_dispatch_indirect_buffer_conditional_jump_t pkt;
+  std::memset(&pkt, 0, sizeof(pkt));
+  pkt.condition_signal = cond_signal;
+  pkt.test_value = test_value;
+  pkt.cond_op = cond_op;
+  pkt.fallthrough_ib_size_packets = fallthrough_pkts;
+  pkt.ib_base_addr = ib_base_addr;
+  pkt.jump_offset_packets = jump_offset_pkts;
+  pkt.jump_ib_size_packets = jump_pkts;
+  pkt.completion_signal = hsa_signal_t{0};
+
+  setFenceDirty(true);
+
+  uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
+  while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= queueMask);
+
+  auto* aql_loc = &(reinterpret_cast<hsa_amd_dispatch_indirect_buffer_conditional_jump_t*>(
+      gpu_queue_->base_address))[index & queueMask];
+  *aql_loc = pkt;
+  packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), header, rest);
+  Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+
+  ClPrint(amd::LOG_INFO, amd::LOG_AQL,
+          "[cond_jump] queue=%p index=%lu ib=0x%lx jump_off=%u jump_pkts=%u "
+          "fall_pkts=%u cond_sig=0x%lx test=%ld cond_op=%u",
+          gpu_queue_, index, ib_base_addr, jump_offset_pkts, jump_pkts,
+          fallthrough_pkts, cond_signal.handle, static_cast<long>(test_value),
+          cond_op);
+}
+
+// ================================================================================================
 void VirtualGPU::ResetQueueStates() {
   // Release all memory dependencies
   memoryDependency().clear();
