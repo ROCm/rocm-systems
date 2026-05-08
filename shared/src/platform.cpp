@@ -57,8 +57,8 @@ using namespace std;
 
 __attribute__((visibility("hidden")))
 Platform& Platform::instance() {
-  static Platform platform_;
-  return platform_;
+  static Platform *platform_ = new Platform();
+  return *platform_;
 }
 
 ErrorCode Platform::Init() {
@@ -68,8 +68,10 @@ ErrorCode Platform::Init() {
 void Platform::Destroy() {
   TearDownDevices();
 
-  for (auto i = 0u; i < lda_chain_count_; i++)
+  for (auto i = 0u; i < lda_chain_count_; i++) {
     delete lda_chain_list_[i];
+    lda_chain_list_[i] = nullptr;
+  }
 
   lda_chain_count_ = 0;
 }
@@ -81,10 +83,10 @@ void Platform::TearDownDevices() {
 }
 
 ErrorCode Platform::ReEnumerateDevices() {
-  TearDownDevices();
+  Destroy();
   auto code = reQueryDevices();
   if (code != ErrorCode::Success)
-    TearDownDevices();
+    Destroy();
   return code;
 }
 
@@ -162,6 +164,9 @@ ErrorCode Platform::queryLinkedDevicesInLdaChain(
 
   if (code != ErrorCode::Success)
     return code;
+
+  if (lda_chain_count_ >= MaxDevices)
+    return ErrorCode::InitializationFailed;
 
   auto ctx = std::unique_ptr<thunk_proxy::ChainContext>(
       thunk_proxy::ChainContext::Create(
