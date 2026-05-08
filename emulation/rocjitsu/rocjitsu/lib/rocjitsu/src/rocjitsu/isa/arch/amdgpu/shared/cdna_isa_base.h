@@ -91,6 +91,7 @@ public:
 /// type aliases.
 struct CdnaIsaBase {
   static constexpr uint32_t WF_SIZE = 64;               ///< Lanes per wavefront (Wave64).
+  static constexpr uint32_t WF_SIZE_MAX = 64;           ///< CDNA is Wave64-only.
   static constexpr uint32_t MAX_SGPRS_PER_WF = 102;     ///< SGPRs per wavefront.
   static constexpr uint32_t MAX_VGPRS_PER_WF = 256;     ///< VGPRs per wavefront.
   static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 0;   ///< AccVGPRs (0 = absent; CDNA1 default).

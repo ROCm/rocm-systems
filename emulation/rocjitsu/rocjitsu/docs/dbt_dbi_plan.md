@@ -2230,7 +2230,7 @@ After all instructions are processed, `translate()` calls `CodeObjectPatcher::ap
 
 #### 3.3.2 Code Cave Strategy
 
-> **Implementation note (current state):** The MVP implementation places cave bodies in the NOP padding after `s_endpgm` within the existing `.text` section, rather than in a separate `.rj_translations` section as described below. This works for kernels with sufficient NOP padding (typically 256+ bytes) but will not scale to large expansions. A runtime warning is emitted if the cave body exceeds available padding. The `.rj_translations` approach described below remains the target for production use.
+> **Implementation note (current state):** The MVP implementation places cave bodies in the NOP padding after `s_endpgm` within the existing `.text` section, rather than in a separate `.rj_translations` section as described below. This works for kernels with sufficient NOP padding (typically 256+ bytes) but will not scale to large expansions. If the cave body exceeds available padding, translation emits a warning and returns the original ELF unchanged so no branch or descriptor entry points at missing cave bytes. The `.rj_translations` approach described below remains the target for production use.
 
 Size-expanding legalization (LOWER with size growth, all EXPAND) uses **code caves** to preserve the original `.text` layout. The invariant is:
 
@@ -2632,7 +2632,7 @@ The AMD RDNA ISA specifications confirm that **all four RDNA generations nativel
 > *"Wave64 uses all 64 bits of the exec mask. Wave32 waves use only bits 31:0 and hardware does not act upon the upper bits."*
 > — RDNA3 ISA §3.2.2, RDNA4 ISA §3.2.2
 
-All generations document Wave64-specific VGPR allocation blocks, Wave64-specific instruction skipping behavior, and treat Wave64 as a first-class execution mode. RDNA1 and RDNA2 VGPR allocation is in groups of 4 DWords for Wave64 and 8 for Wave32. RDNA3 and RDNA4 use groups of 8 DWords for Wave64 and 16 for Wave32. The underlying hardware issues Wave64 instructions in two 32-lane passes internally, but this is fully transparent to ISA-level code.
+All generations document Wave64-specific VGPR allocation blocks, Wave64-specific instruction skipping behavior, and treat Wave64 as a first-class execution mode. RDNA1 VGPR allocation is in groups of 4 DWords for Wave64 and 8 for Wave32. RDNA2, RDNA3, and RDNA4 use groups of 8 DWords for Wave64 and 16 for Wave32; some 1536-VGPR/SIMD RDNA3/RDNA4 devices use groups of 12 for Wave64 and 24 for Wave32. These are physical allocation blocks from the ISA manuals. The AMDHSA `GRANULATED_WORKITEM_VGPR_COUNT` descriptor field has its own encoding described later. The underlying hardware issues Wave64 instructions in two 32-lane passes internally, but this is fully transparent to ISA-level code.
 
 **Implication for DBT:** A CDNA Wave64 kernel can run on RDNA hardware in Wave64 mode with no wavefront-count changes. The translator simply sets the Wave64 mode bit in the target kernel descriptor and handles the `s_waitcnt` encoding differences and any missing/changed opcodes. The complex wave-splitting strategies described below are therefore **not needed for the CDNA→RDNA direction** — they are retained only for hypothetical future scenarios where a Wave32-only host is targeted.
 
@@ -2655,15 +2655,15 @@ The AMDGPU kernel descriptor's `COMPUTE_PGM_RSRC1` register contains a wave-size
 kd.kernel_code_properties &= ~(1u << 10);  // clear ENABLE_WAVEFRONT_SIZE32 → Wave64 mode
 ```
 
-**VGPR allocation adjustment:**
+**VGPR descriptor adjustment:**
 
-RDNA allocates VGPRs in different granularities than CDNA. The translated kernel descriptor's `GRANULATED_WAVEFRONT_VGPR_COUNT` field must be recomputed using the RDNA target's block size:
+Physical VGPR allocation blocks differ by ISA and by device, but the translated kernel descriptor's `GRANULATED_WORKITEM_VGPR_COUNT` field must be recomputed using the AMDHSA descriptor formula:
 
 ```cpp
-// CDNA3 (Wave64): VGPR granularity = 4 DWords → ceil(vgpr_count / 4) - 1
-// RDNA3 (Wave64): VGPR granularity = 8 DWords → ceil(vgpr_count / 8) - 1
-uint32_t actual_vgprs = (cdna_gran + 1) * 4;  // recover actual count from CDNA encoding
-uint32_t rdna_gran    = (actual_vgprs + 7) / 8 - 1;  // re-encode for RDNA3 Wave64
+// CDNA3/CDNA4 (Wave64): descriptor granularity = 8 DWords.
+// RDNA GFX10-GFX12 (Wave64): descriptor granularity = 4 DWords.
+uint32_t actual_vgprs = (cdna_gran + 1) * 8;  // recover actual count from CDNA encoding
+uint32_t rdna_gran    = (actual_vgprs + 3) / 4 - 1;  // re-encode for RDNA Wave64
 kd.compute_pgm_rsrc1 = (kd.compute_pgm_rsrc1 & ~vgpr_gran_mask) | (rdna_gran << vgpr_gran_shift);
 ```
 
@@ -3070,24 +3070,24 @@ This approach is informed by state-of-the-art GPU resource virtualization resear
 
 | Tier | Condition | Strategy | Overhead |
 |---|---|---|---|
-| 0 | N ≤ M at desired occupancy | **Direct mapping.** Re-encode `GRANULATED_WAVEFRONT_VGPR_COUNT` in the kernel descriptor using the target ISA's granularity (CDNA3: groups-of-4; RDNA3 Wave64: groups-of-8; RDNA3 Wave32: groups-of-16). | Zero |
+| 0 | N ≤ M at desired occupancy | **Direct mapping.** Re-encode `GRANULATED_WORKITEM_VGPR_COUNT` using the target AMDHSA descriptor encoding, not the target ISA's physical VGPR allocation block. | Zero |
 | 1 | N > M at desired occupancy, but N ≤ M_max | **Accept reduced occupancy.** Set the KD to request N VGPRs. The target runs fewer concurrent wavefronts but the kernel is correct. The occupancy cost is logged as a translation warning. | Occupancy loss; no instruction changes |
 | 2 | N > M_max, but target has spare LDS capacity | **RegDem-style spill to LDS.** Run `LivenessAnalysis` (Pillar 4) to identify cold VGPRs (long live ranges, infrequent accesses). Allocate a reserved LDS zone at the top of the workgroup's LDS allocation. Insert `ds_write_b32` at spill points and `ds_read_b32` at fill points. Update the KD's `group_segment_fixed_size` to include the spill zone. Each spill slot is `wf_size × 4` bytes (one 32-bit value per lane). The reserved zone starts at `original_lds_size` and grows upward. | LDS bandwidth; reduced LDS available to kernel; VGPR count reduced to M_max |
 | 3 | N > M_max and LDS budget exhausted | **Spill to scratch (private memory).** Use `SpillManager` (§2.3) to allocate flat-scratch slots for the coldest remaining VGPRs. Insert `scratch_store_b32` / `scratch_load_b32` at spill/fill points. Update the KD's `private_segment_fixed_size`. | Global memory bandwidth (slowest tier) |
 
 The translator selects the tier at translation time. `LivenessAnalysis` live-before sets identify dead registers that do not need spilling; only truly live registers that exceed the target's capacity are spill candidates. The spill set is computed once per kernel, not per instruction.
 
-**VGPR granularity re-encoding** is always performed regardless of tier, since the granularity block size differs across ISAs:
+**VGPR descriptor re-encoding** is always performed regardless of tier. This uses the AMDHSA `compute_pgm_rsrc1.GRANULATED_WORKITEM_VGPR_COUNT` formula, which is distinct from the physical VGPR allocation block size in the ISA manuals:
 
 ```
-Guest CDNA3 (Wave64): VGPR granularity = 4 DWords
-  actual_vgprs = (cdna3_granulated + 1) × 4
+Guest CDNA3/CDNA4 (Wave64): descriptor granularity = 8 DWords
+  actual_vgprs = (cdna_granulated + 1) × 8
 
-Target RDNA3 (Wave64): VGPR granularity = 8 DWords
-  rdna3_granulated = ceil(actual_vgprs / 8) − 1
+Target RDNA GFX10-GFX12 (Wave64): descriptor granularity = 4 DWords
+  rdna_granulated = ceil(actual_vgprs / 4) − 1
 
-Target RDNA3 (Wave32): VGPR granularity = 16 DWords
-  rdna3_granulated = ceil(actual_vgprs / 16) − 1
+Target RDNA GFX10-GFX12 (Wave32): descriptor granularity = 8 DWords
+  rdna_granulated = ceil(actual_vgprs / 8) − 1
 ```
 
 ##### 3.9.4.2 SGPR Count Mismatch
@@ -3188,7 +3188,7 @@ When `ENABLE_SGPR_FLAT_SCRATCH_INIT` changes between source and target, all subs
 3. If the layouts differ, inject a **prologue shuffle** that moves SGPRs from the source layout to the target layout using `s_mov_b32` instructions. Worst case: ~10 `s_mov_b32` instructions (all user SGPRs shift by 2).
 4. Update `USER_SGPR_COUNT` in the target KD.
 
-The prologue is emitted by `KernelDescriptorTranslator` and prepended to the kernel's `.text` via `CodeObjectPatcher::insert_at(0, ...)`.
+The prologue is emitted by `KernelDescriptorTranslator`, placed in a code cave by `CodeObjectPatcher`, and made the kernel entry by updating the descriptor's `kernel_code_entry_byte_offset`. The original entry instruction is left untouched, so descriptor ABI prologues do not depend on relocating an arbitrary first instruction.
 
 ##### 3.9.4.7 Occupancy Impact
 
@@ -3223,7 +3223,8 @@ namespace rocjitsu {
 /// @brief Per-kernel resource translation result.
 ///
 /// Computed by KernelDescriptorTranslator::translate() and consumed by
-/// BinaryTranslator to (a) patch the kernel descriptor, (b) inject a prologue,
+/// BinaryTranslator to (a) hand descriptor bytes and prologue words to
+/// CodeObjectPatcher, (b) redirect the KD entry point when a prologue is needed,
 /// and (c) decide which VGPR/SGPR spill transformations to apply.
 struct KdTranslation {
   // --- VGPR ---
@@ -3257,7 +3258,7 @@ struct KdTranslation {
 
   // --- Combined prologue ---
   /// All injected prologue instructions (user SGPR shuffle + scratch init + exec mask).
-  /// Prepended to the kernel's .text by CodeObjectPatcher::insert_at(0, ...).
+  /// Placed in a cave by CodeObjectPatcher; the KD entry point is redirected to it.
   std::vector<uint32_t> prologue_words;
 
   // --- Diagnostics ---
@@ -4943,7 +4944,7 @@ No public C API additions — `LivenessAnalysis` is consumed internally by `Spil
 
 | Task | New Files |
 |---|---|
-| Waitcnt decode/encode: GFX9 `s_waitcnt` → GFX12 split `s_wait_*` instructions; workgroup_id SGPR→TTMP rewrite | `dbt/semantic_translator.h/.cpp` |
+| Waitcnt decode/encode: GFX9 `s_waitcnt` → GFX12 split `s_wait_*` instructions; descriptor ABI prologues emitted by `KernelDescriptorTranslator`, placed in caves by `CodeObjectPatcher`, and reached via KD entry redirect | `dbt/semantic_translator.h/.cpp`, `dbt/kernel_descriptor_translator.h/.cpp`, `patch/code_object_patcher.h/.cpp` |
 
 **Tests:**
 - **GFX9 ↔ GFX11 round-trip:** Golden-value round-trip for `vmcnt(0)`, `lgkmcnt(0)`, `expcnt(0)`, combined `vmcnt(15) lgkmcnt(0) expcnt(0)`. Verify GFX9 encoding encodes/decodes for every case.
@@ -5027,14 +5028,14 @@ Note: `BranchFixup` is not needed for DBT — the code cave invariant (§3.3.2) 
 |---|---|
 | `KernelDescriptorTranslator`: systematic KD field patching; VGPR granularity re-encoding; SGPR count adjustment; AccVGPR→VGPR remapping offset calculation; user SGPR layout shuffle generation | `dbt/kernel_descriptor_translator.h/.cpp` |
 | `TargetResourceLimits`: per-ISA hardware resource limits (max VGPRs, SGPRs, LDS, waves/CU, granularity); populated from ISA profile constants or `hsa_agent_get_info` at runtime | `dbt/target_resource_limits.h/.cpp` |
-| VGPR tiered spill logic: tier 0 (direct), tier 1 (reduced occupancy), tier 2 (RegDem-style spill to LDS), tier 3 (spill to scratch) | Inside `kernel_descriptor_translator.cpp` |
-| SGPR spill logic: detect overflow, select coldest SGPRs via liveness, emit `s_store_dword`/`s_load_dword` spill/fill pairs | Inside `kernel_descriptor_translator.cpp` |
-| LDS overflow (Zorua-style): partition LDS address space, generate conditional `ds_*` → `global_load/store` redirect sequences | `dbt/lds_overflow.h/.cpp` |
+| Future: VGPR tiered spill logic: tier 0 (direct), tier 1 (reduced occupancy), tier 2 (RegDem-style spill to LDS), tier 3 (spill to scratch) | `kernel_descriptor_translator.cpp` plus spill insertion support |
+| Future: SGPR spill logic: detect overflow, select coldest SGPRs via liveness, emit `s_store_dword`/`s_load_dword` spill/fill pairs | `kernel_descriptor_translator.cpp` plus spill insertion support |
+| Future: LDS overflow (Zorua-style): partition LDS address space, generate conditional `ds_*` → `global_load/store` redirect sequences | `dbt/lds_overflow.h/.cpp` |
 | Occupancy computation: standard AMDGPU formula for source and target; diagnostic logging | Inside `kernel_descriptor_translator.cpp` |
-| Wire `KdTranslation` into `BinaryTranslator::translate()`: apply KD patch, inject prologue, apply spill/fill insertions | `dbt/binary_translator.cpp` modifications |
+| Wire `KdTranslation` into `BinaryTranslator::translate()`: hand KD patches/prologues to `CodeObjectPatcher`, redirect KD entries for prologues, apply spill/fill insertions | `dbt/binary_translator.cpp` modifications |
 
 **Tests:**
-- **VGPR tier 0:** Translate a CDNA3 kernel using 128 VGPRs to RDNA3 Wave64 (max 512). Assert KD's `GRANULATED_WAVEFRONT_VGPR_COUNT` uses groups-of-8 encoding. Assert no spill instructions inserted.
+- **VGPR tier 0:** Translate a CDNA3 kernel using 128 VGPRs to RDNA3 Wave64 (max 512). Assert KD's `GRANULATED_WORKITEM_VGPR_COUNT` uses AMDHSA GFX10-GFX12 Wave64 `/4` descriptor encoding. Assert no spill instructions inserted.
 - **VGPR tier 1:** Translate a CDNA3 kernel using 384 VGPRs to RDNA3 Wave32 (max 256 at full occupancy, 512 at occupancy=1). Assert KD requests 384 VGPRs. Assert `target_occupancy < source_occupancy` in diagnostics. Assert no spill instructions.
 - **VGPR tier 2:** Synthesize a kernel needing 600 VGPRs on a target with max 512. Assert 88 VGPRs spilled to LDS. Assert `ds_write_b32`/`ds_read_b32` pairs inserted at spill/fill points. Assert `group_segment_fixed_size` increased by `88 × wf_size × 4` bytes.
 - **SGPR spill:** Translate an RDNA kernel using 105 SGPRs to CDNA (max 102). Assert 3 SGPRs spilled to scratch. Assert `s_store_dword`/`s_load_dword` pairs inserted.
@@ -5052,10 +5053,10 @@ Note: `BranchFixup` is not needed for DBT — the code cave invariant (§3.3.2) 
 
 | Task | New Files |
 |---|---|
-| CDNA→RDNA (Wave64 mode): clear `ENABLE_WAVEFRONT_SIZE32` (bit 10 of `kernel_code_properties`) in translated kernel descriptor; re-encode VGPR granularity (CDNA3 groups-of-4 → RDNA3/4 groups-of-8) | Inside `binary_translator.cpp` |
+| CDNA→RDNA (Wave64 mode): clear `ENABLE_WAVEFRONT_SIZE32` (bit 10 of `kernel_code_properties`) in translated kernel descriptor; re-encode `GRANULATED_WORKITEM_VGPR_COUNT` using the AMDHSA descriptor formula (CDNA3/4 Wave64 `/8` → RDNA GFX10-GFX12 Wave64 `/4`) | Inside `binary_translator.cpp` |
 | RDNA→CDNA (Wave32→Wave64 exec-masking shim): inject `s_mov_b32 exec_lo, 0xFFFFFFFF` + `s_mov_b32 exec_hi, 0` at kernel entry; insert `s_mov_b32 exec_hi, 0` after every `v_cmpx` (always writes EXEC) and after every `v_cmp` **whose destination is EXEC** (SDST field == 126); `v_cmp` targeting VCC or a regular SGPR pair does NOT receive the shim | `dbt/wave_shim.h/.cpp` |
 
-**Tests:** Translate a CDNA3 kernel targeting RDNA3. Assert `ENABLE_WAVEFRONT_SIZE32=0` in output kernel descriptor. Assert VGPR granularity field uses groups-of-8 encoding. Translate a simple RDNA3 kernel to CDNA3. Assert exec-mask prologue is present at offset 0 and decodes as exactly two instructions: `s_mov_b32 exec_lo, 0xFFFFFFFF` followed by `s_mov_b32 exec_hi, 0` — not `s_and_b64` or any other sequence. Assert every `v_cmpx` (always writes EXEC unconditionally) and every `v_cmp` whose destination operand is `exec` (SDST encoding value 126) is followed by the exec AND shim (`s_mov_b32 exec_hi, 0`); verify `v_cmp` targeting VCC or a regular SGPR pair does NOT get the shim.
+**Tests:** Translate a CDNA3 kernel targeting RDNA3. Assert `ENABLE_WAVEFRONT_SIZE32=0` in output kernel descriptor. Assert the VGPR descriptor field uses AMDHSA GFX10-GFX12 Wave64 `/4` encoding, not the ISA manual's physical Wave64 allocation block size. Translate a simple RDNA3 kernel to CDNA3. Assert exec-mask prologue is present at offset 0 and decodes as exactly two instructions: `s_mov_b32 exec_lo, 0xFFFFFFFF` followed by `s_mov_b32 exec_hi, 0` — not `s_and_b64` or any other sequence. Assert every `v_cmpx` (always writes EXEC unconditionally) and every `v_cmp` whose destination operand is `exec` (SDST encoding value 126) is followed by the exec AND shim (`s_mov_b32 exec_hi, 0`); verify `v_cmp` targeting VCC or a regular SGPR pair does NOT get the shim.
 
 ---
 
@@ -5310,7 +5311,8 @@ Phase 16: RDNA translation pairs (post-MVP; decoders done in Phase A)
 - New: `lib/rocjitsu/src/rocjitsu/code/patch/code_object_reader_registry.h/.cpp` — reader handle → ELF bytes
 - `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/cdna3/operand_types.h`
 - `lib/rocjitsu/src/rocjitsu/code/dbt/binary_translator.h/.cpp` — ISA-agnostic translation loop using `EncodingTranslateFn`/`LegalizationLookupFn` function pointers; guest/host terminology
-- `lib/rocjitsu/src/rocjitsu/code/dbt/semantic_translator.h/.cpp` — `SemanticRule`, `SemanticTranslator` class; waitcnt GFX9→GFX12 splitting; workgroup_id SGPR→TTMP rewrite; `try_lower_expand()` for instruction lowering (v_lshl_add_u64 etc.)
+- `lib/rocjitsu/src/rocjitsu/code/dbt/semantic_translator.h/.cpp` — `SemanticRule`, `SemanticTranslator` class; waitcnt GFX9→GFX12 splitting; `try_lower_expand()` for instruction lowering (v_lshl_add_u64 etc.)
+- `lib/rocjitsu/src/rocjitsu/code/dbt/kernel_descriptor_translator.h/.cpp` — kernel descriptor ABI/resource translation; kernel-entry prologue generation for guest-visible launch-state values such as CDNA workgroup-id SGPRs on RDNA4's `TTMP9`/packed `TTMP7` payload.
 - `lib/rocjitsu/src/rocjitsu/code/dbt/rj_code_translate.cpp` — `rj_code_translate()` C API implementation
 - `lib/rocjitsu/src/rocjitsu/code/patch/code_object_patcher.h/.cpp` — ELF read/modify/emit with code cave support
 - `lib/rocjitsu/src/rocjitsu/code/patch/instruction_builder.h` — ISA-parameterized instruction encoding helpers (s_branch, s_nop)
