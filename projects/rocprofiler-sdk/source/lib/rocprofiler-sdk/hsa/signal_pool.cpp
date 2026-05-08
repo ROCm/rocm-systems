@@ -95,7 +95,7 @@ signal_pool_fini()
     {
         // only report once
         static auto _once = std::once_flag{};
-        std::call_once(_once, [&]() { ROCP_WARNING << pool->get_usage_report(); });
+        std::call_once(_once, [&]() { ROCP_INFO << pool->get_usage_report(); });
 
         // always try to clear
         pool->clear([](auto& signal) { Queue::destroy_signal(&signal); });
