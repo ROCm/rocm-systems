@@ -8,6 +8,7 @@
 #include <hip/hip_runtime.h>
 
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -26,20 +27,30 @@ namespace RcclUnitTesting {
 
 // Connects to the local RAS server and runs one STATUS query in the requested
 // format ("text" or "json"). Returns the entire response body, or an empty
-// string on connection/protocol failure.
+// string on connection/protocol failure. Uses getaddrinfo so it works whether
+// the RAS listener bound to IPv4 (127.0.0.1) or IPv6 (::1).
 static std::string queryRas(const std::string& format) {
   int sock = -1;
-  for (int attempt = 0; attempt < 20; ++attempt) {
-    sock = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) return {};
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port   = htons(NCCL_RAS_CLIENT_PORT);
-    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-    if (::connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) break;
-    ::close(sock);
-    sock = -1;
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  addrinfo hints{};
+  hints.ai_family   = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  const char* portStr = "28028";  // matches NCCL_RAS_CLIENT_PORT
+
+  for (int attempt = 0; attempt < 20 && sock < 0; ++attempt) {
+    addrinfo* results = nullptr;
+    if (::getaddrinfo("localhost", portStr, &hints, &results) == 0) {
+      for (addrinfo* ai = results; ai != nullptr; ai = ai->ai_next) {
+        int s = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (s < 0) continue;
+        if (::connect(s, ai->ai_addr, ai->ai_addrlen) == 0) {
+          sock = s;
+          break;
+        }
+        ::close(s);
+      }
+      ::freeaddrinfo(results);
+    }
+    if (sock < 0) std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
   if (sock < 0) return {};
 
