@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 27
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 28
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -292,6 +292,18 @@ typedef hipError_t (*t_hipGraphAddMemsetNode)(hipGraphNode_t* pGraphNode, hipGra
 typedef hipError_t (*t_hipGraphChildGraphNodeGetGraph)(hipGraphNode_t node, hipGraph_t* pGraph);
 typedef hipError_t (*t_hipGraphClone)(hipGraph_t* pGraphClone, hipGraph_t originalGraph);
 typedef hipError_t (*t_hipGraphCreate)(hipGraph_t* pGraph, unsigned int flags);
+typedef hipError_t (*t_hipGraphConditionalHandleCreate)(hipGraphConditionalHandle* pHandleOut,
+                                                       hipGraph_t hGraph,
+                                                       unsigned int defaultLaunchValue,
+                                                       unsigned int flags);
+typedef hipError_t (*t_hipGraphAddConditionalNode)(hipGraphNode_t* pGraphNode,
+                                                  hipGraph_t graph,
+                                                  const hipGraphNode_t* pDependencies,
+                                                  size_t numDependencies,
+                                                  hipGraphConditionalHandle handle,
+                                                  hipGraphConditionalType type,
+                                                  unsigned int numConditionalGraphs,
+                                                  hipGraph_t* phConditionalGraphs);
 typedef hipError_t (*t_hipGraphDebugDotPrint)(hipGraph_t graph, const char* path,
                                               unsigned int flags);
 typedef hipError_t (*t_hipGraphDestroy)(hipGraph_t graph);
@@ -1744,8 +1756,12 @@ struct HipDispatchTable {
   t_hipOccupancyMaxPotentialClusterSize hipOccupancyMaxPotentialClusterSize_fn;
   t_hipOccupancyMaxActiveClusters hipOccupancyMaxActiveClusters_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 28
+  t_hipGraphConditionalHandleCreate hipGraphConditionalHandleCreate_fn;
+  t_hipGraphAddConditionalNode hipGraphAddConditionalNode_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 29
 
   // ******************************************************************************************* //
   //

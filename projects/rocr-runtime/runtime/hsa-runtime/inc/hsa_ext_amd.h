@@ -124,6 +124,29 @@ typedef enum {
    */
   HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH = 3,
 
+  /**
+   * Indirect buffer dispatch packet. Causes the packet processor to execute
+   * a contiguous sequence of AQL packets located in a separate (indirect)
+   * buffer. Used as a building block for conditional graph execution.
+   */
+  HSA_AMD_PACKET_TYPE_AQL_INDIRECT_BUFFER = 4,
+
+  /**
+   * Conditional jump-into-IB packet. Reads a signal value, applies a
+   * comparison, and either falls through to one segment of an indirect
+   * buffer or jumps to another segment within the same IB.  Used as the
+   * entry packet for HIP graph IF and WHILE conditional nodes.
+   */
+  HSA_AMD_PACKET_TYPE_DISPATCH_IB_COND_JUMP = 5,
+
+  /**
+   * Loop-back packet. When encountered inside an indirect buffer, the CP
+   * re-evaluates the supplied condition signal; if the condition is still
+   * true, execution restarts at the top of the IB (used for WHILE bodies),
+   * otherwise execution falls through and the parent stream resumes.
+   */
+  HSA_AMD_PACKET_TYPE_AQL_LOOP_BACK = 6,
+
   /* Reserved for a packet that is not yet released */
   HSA_AMD_PACKET_TYPE_RESERVED200 = 200,
 } hsa_amd_packet_type_t;
@@ -215,6 +238,229 @@ typedef struct hsa_amd_barrier_value_packet_s {
    */
   hsa_signal_t completion_signal;
 } hsa_amd_barrier_value_packet_t;
+
+/**
+ * @brief AMD AQL indirect-buffer packet.  Causes the CP to execute
+ * @a ib_size_packets contiguous AQL packets starting at @a ib_base_addr,
+ * then resume the parent queue.  Reserved for future child-graph use; the
+ * IF/WHILE conditional node implementation does not emit this packet.
+ *
+ * Total size: 64 bytes.
+ */
+typedef struct hsa_amd_aql_indirect_buffer_s {
+  /**
+   * AMD vendor-specific packet header.  AmdFormat must be
+   * ::HSA_AMD_PACKET_TYPE_AQL_INDIRECT_BUFFER.
+   */
+  hsa_amd_vendor_packet_header_t header;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  uint32_t reserved0;
+
+  /**
+   * Address of the first AQL packet in the indirect buffer.  Must be
+   * 64-byte aligned and reside in memory accessible to the CP.
+   */
+  uint64_t ib_base_addr;
+
+  /**
+   * Number of 64-byte AQL packets to execute starting at @a ib_base_addr.
+   */
+  uint32_t ib_size_packets;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  uint32_t reserved1;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  uint64_t reserved2;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  uint64_t reserved3;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  uint64_t reserved4;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  uint64_t reserved5;
+
+  /**
+   * Signal used to indicate completion of the IB. The application can use the
+   * special signal handle 0 to indicate that no signal is used.
+   */
+  hsa_signal_t completion_signal;
+} hsa_amd_aql_indirect_buffer_t;
+
+/**
+ * @brief AMD conditional jump-into-IB packet.  Reads the value of
+ * @a condition_signal, evaluates @a cond_op against @a test_value, and:
+ *  - if the comparison is FALSE, executes
+ *    @a fallthrough_ib_size_packets packets starting at @a ib_base_addr;
+ *  - if the comparison is TRUE, executes @a jump_ib_size_packets packets
+ *    starting at @a ib_base_addr + @a jump_offset_packets * 64.
+ *
+ * For HIP graph IF nodes, the IB is laid out as
+ * <tt>[false_arm][true_arm]</tt> with @a cond_op == NE and
+ * @a test_value == 0.  For HIP graph WHILE nodes, the IB is laid out as
+ * <tt>[body][loop_back]</tt> with @a fallthrough_ib_size_packets == 0
+ * (so a 0-iteration WHILE exits without entering the body).
+ *
+ * Total size: 64 bytes.
+ */
+typedef struct hsa_amd_dispatch_indirect_buffer_conditional_jump_s {
+  /**
+   * AMD vendor-specific packet header.  AmdFormat must be
+   * ::HSA_AMD_PACKET_TYPE_DISPATCH_IB_COND_JUMP.
+   */
+  hsa_amd_vendor_packet_header_t header;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  uint32_t reserved0;
+
+  /**
+   * Signal whose value is read by the CP to decide which IB segment to
+   * execute.  A handle of 0 is invalid for this packet.
+   */
+  hsa_signal_t condition_signal;
+
+  /**
+   * Value to compare @a condition_signal's loaded value against.
+   */
+  hsa_signal_value_t test_value;
+
+  /**
+   * Comparison operation.  See ::hsa_signal_condition_t.
+   */
+  hsa_signal_condition32_t cond_op;
+
+  /**
+   * Number of 64-byte AQL packets to execute starting at @a ib_base_addr
+   * when the condition evaluates FALSE.  May be 0 (no-op fall-through,
+   * used by WHILE nodes for the 0-iteration case).
+   */
+  uint32_t fallthrough_ib_size_packets;
+
+  /**
+   * Address of the indirect buffer.  Must be 64-byte aligned and reside in
+   * memory accessible to the CP.
+   */
+  uint64_t ib_base_addr;
+
+  /**
+   * Offset, in 64-byte packets, from @a ib_base_addr to the first packet
+   * executed when the condition evaluates TRUE.
+   */
+  uint32_t jump_offset_packets;
+
+  /**
+   * Number of 64-byte AQL packets to execute starting at
+   * @a ib_base_addr + @a jump_offset_packets * 64 when the condition
+   * evaluates TRUE.
+   */
+  uint32_t jump_ib_size_packets;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  uint64_t reserved1;
+
+  /**
+   * Signal used to indicate completion of the IB.  The application can use
+   * the special signal handle 0 to indicate that no signal is used.
+   */
+  hsa_signal_t completion_signal;
+} hsa_amd_dispatch_indirect_buffer_conditional_jump_t;
+
+/**
+ * @brief AMD AQL loop-back packet.  Placed at the end of an indirect
+ * buffer body, the CP re-loads @a condition_signal and re-evaluates
+ * @a cond_op against @a test_value.  If the comparison is TRUE, the CP
+ * restarts execution at the start of the same IB (the IB is identified by
+ * its size, @a ib_size_packets, and the CP's running PC).  If FALSE, the
+ * CP exits the IB and resumes the parent queue.
+ *
+ * Total size: 64 bytes.
+ */
+typedef struct hsa_amd_aql_loop_back_s {
+  /**
+   * AMD vendor-specific packet header.  AmdFormat must be
+   * ::HSA_AMD_PACKET_TYPE_AQL_LOOP_BACK.
+   */
+  hsa_amd_vendor_packet_header_t header;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  uint32_t reserved0;
+
+  /**
+   * Signal whose value is re-read by the CP each loop iteration.  Must be
+   * the same signal that the entry conditional-jump packet used.
+   */
+  hsa_signal_t condition_signal;
+
+  /**
+   * Value to compare @a condition_signal's loaded value against.
+   */
+  hsa_signal_value_t test_value;
+
+  /**
+   * Comparison operation.  See ::hsa_signal_condition_t.
+   */
+  hsa_signal_condition32_t cond_op;
+
+  /**
+   * Total size, in 64-byte packets, of the IB this loop-back closes
+   * (including this loop-back packet itself).  The CP uses this to compute
+   * the address of the IB's first packet when the loop continues.
+   */
+  uint32_t ib_size_packets;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  uint64_t reserved1;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  uint64_t reserved2;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  uint64_t reserved3;
+
+  /**
+   * Signal used to indicate completion when the loop exits (FALSE branch).
+   * The application can use the special signal handle 0 to indicate that
+   * no signal is used.
+   */
+  hsa_signal_t completion_signal;
+} hsa_amd_aql_loop_back_t;
+
+#ifdef __cplusplus
+static_assert(sizeof(hsa_amd_aql_indirect_buffer_t) == 64,
+              "hsa_amd_aql_indirect_buffer_t must be a 64-byte AQL packet");
+static_assert(sizeof(hsa_amd_dispatch_indirect_buffer_conditional_jump_t) == 64,
+              "hsa_amd_dispatch_indirect_buffer_conditional_jump_t must be a "
+              "64-byte AQL packet");
+static_assert(sizeof(hsa_amd_aql_loop_back_t) == 64,
+              "hsa_amd_aql_loop_back_t must be a 64-byte AQL packet");
+#endif
 
 /**
  * @brief Enumeration constants corresponding to the sub-fields of

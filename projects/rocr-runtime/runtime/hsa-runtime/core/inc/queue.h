@@ -195,6 +195,12 @@ struct AqlPacket {
                  << "\nkernel_object: " << ext_dispatch.kernel_object
                  << "\nkern_arg: " << ext_dispatch.kernarg_address
                  << "\nsignal: " << ext_dispatch.completion_signal.handle;
+        } else if (amd_vendor.format == HSA_AMD_PACKET_TYPE_AQL_INDIRECT_BUFFER) {
+          string << "\nformat: HSA_AMD_PACKET_TYPE_AQL_INDIRECT_BUFFER";
+        } else if (amd_vendor.format == HSA_AMD_PACKET_TYPE_DISPATCH_IB_COND_JUMP) {
+          string << "\nformat: HSA_AMD_PACKET_TYPE_DISPATCH_IB_COND_JUMP";
+        } else if (amd_vendor.format == HSA_AMD_PACKET_TYPE_AQL_LOOP_BACK) {
+          string << "\nformat: HSA_AMD_PACKET_TYPE_AQL_LOOP_BACK";
         }
         break;
       case HSA_PACKET_TYPE_BARRIER_AND:

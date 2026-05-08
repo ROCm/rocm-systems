@@ -10,19 +10,19 @@
 #include "top.hpp"
 
 #if defined(ROCR_DYN_DLL) || defined(ROCR_STATIC_OPEN)
-#include "hsa.h"
-#include "hsa_ext_image.h"
-#include "hsa_ext_amd.h"
-#include "amd_hsa_signal.h"
-#include "hsa_ven_amd_loader.h"
-#include "hsa_ven_amd_aqlprofile.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ext_image.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ext_amd.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/amd_hsa_signal.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ven_amd_loader.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ven_amd_aqlprofile.h"
 #else
-#include "hsa/hsa.h"
-#include "hsa/hsa_ext_image.h"
-#include "hsa/hsa_ext_amd.h"
-#include "hsa/amd_hsa_signal.h"
-#include "hsa/hsa_ven_amd_loader.h"
-#include "hsa/hsa_ven_amd_aqlprofile.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ext_image.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ext_amd.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/amd_hsa_signal.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ven_amd_loader.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ven_amd_aqlprofile.h"
 #endif
 
 namespace amd {
