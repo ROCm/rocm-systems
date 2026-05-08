@@ -200,6 +200,24 @@ jobs:
           ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           ccache-variant: ccache
 
+      - name: Check GPU Firmware
+        shell: bash
+        run: |
+          ROCPROFV3="${{ env.ROCM_PATH }}/bin/rocprofv3"
+          if [ -x "$ROCPROFV3" ]; then
+            fw_warnings=$("$ROCPROFV3" --list-avail 2>&1 >/dev/null | grep "below minimum required version" || true)
+            if [ -n "$fw_warnings" ]; then
+              echo "$fw_warnings" | while IFS= read -r line; do
+                echo "::warning::$line"
+              done
+              echo "::notice::Some tests may fail or be skipped. Please update GPU firmware on this runner."
+            else
+              echo "GPU firmware check passed: all agents meet minimum requirements"
+            fi
+          else
+            echo "GPU firmware check skipped: rocprofv3 not found at $ROCPROFV3"
+          fi
+
       - name: Enable PC Sampling
         if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
         shell: bash
@@ -412,6 +430,24 @@ jobs:
           ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           ccache-variant: sccache
 
+      - name: Check GPU Firmware
+        shell: bash
+        run: |
+          ROCPROFV3="${{ env.ROCM_PATH }}/bin/rocprofv3"
+          if [ -x "$ROCPROFV3" ]; then
+            fw_warnings=$("$ROCPROFV3" --list-avail 2>&1 >/dev/null | grep "below minimum required version" || true)
+            if [ -n "$fw_warnings" ]; then
+              echo "$fw_warnings" | while IFS= read -r line; do
+                echo "::warning::$line"
+              done
+              echo "::notice::Some tests may fail or be skipped. Please update GPU firmware on this runner."
+            else
+              echo "GPU firmware check passed: all agents meet minimum requirements"
+            fi
+          else
+            echo "GPU firmware check skipped: rocprofv3 not found at $ROCPROFV3"
+          fi
+
       - name: Enable PC Sampling
         if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
         shell: bash
@@ -558,6 +594,24 @@ jobs:
         install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
         ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer}}
         ccache-variant: ccache
+
+    - name: Check GPU Firmware
+      shell: bash
+      run: |
+        ROCPROFV3="${{ env.ROCM_PATH }}/bin/rocprofv3"
+        if [ -x "$ROCPROFV3" ]; then
+          fw_warnings=$("$ROCPROFV3" --list-avail 2>&1 >/dev/null | grep "below minimum required version" || true)
+          if [ -n "$fw_warnings" ]; then
+            echo "$fw_warnings" | while IFS= read -r line; do
+              echo "::warning::$line"
+            done
+            echo "::notice::Some tests may fail or be skipped. Please update GPU firmware on this runner."
+          else
+            echo "GPU firmware check passed: all agents meet minimum requirements"
+          fi
+        else
+          echo "GPU firmware check skipped: rocprofv3 not found at $ROCPROFV3"
+        fi
 
     - name: Configure, Build, and Test
       timeout-minutes: 45
