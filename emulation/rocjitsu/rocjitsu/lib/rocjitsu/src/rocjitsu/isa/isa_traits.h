@@ -27,6 +27,7 @@ template <rj_code_arch_t Arch> struct IsaTrait;
 /// @details Requires the static constants and type aliases that all ISA class
 /// templates depend on:
 ///   - `WF_SIZE`               — lanes per wavefront.
+///   - `WF_SIZE_MAX`           — largest supported wavefront size.
 ///   - `MAX_SGPRS_PER_WF`      — maximum scalar GPRs.
 ///   - `MAX_VGPRS_PER_WF`      — maximum vector GPRs.
 ///   - `MAX_ACC_VGPRS_PER_WF`  — maximum accumulator VGPRs (0 if absent).
@@ -38,6 +39,7 @@ template <rj_code_arch_t Arch> struct IsaTrait;
 template <typename Isa>
 concept GpuIsa = requires {
   { Isa::WF_SIZE } -> std::convertible_to<uint32_t>;
+  { Isa::WF_SIZE_MAX } -> std::convertible_to<uint32_t>;
   { Isa::MAX_SGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::MAX_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::MAX_ACC_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
@@ -61,6 +63,11 @@ concept HasAccVgpr = GpuIsa<Isa> && (Isa::MAX_ACC_VGPRS_PER_WF > 0);
 /// S_WAITCNT_VMCNT etc.  False only for RDNA4 which has no S_WAITCNT at all.
 template <typename Isa>
 concept HasMonolithicWaitcnt = GpuIsa<Isa> && (Isa::WAITCNT_LGKMCNT_MASK != 0);
+
+/// @brief Compile-time wave-size support query for one ISA.
+template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
+  return (wf == 32 || wf == 64) && wf >= Isa::WF_SIZE && wf <= Isa::WF_SIZE_MAX;
+}
 
 } // namespace rocjitsu
 

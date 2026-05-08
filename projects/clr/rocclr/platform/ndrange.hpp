@@ -148,14 +148,6 @@ struct LaunchParams {
       grid_[2] = global_[2] / local_[2];
     }
 
-    // Grid Validation.
-    const auto& info = device.info();
-    if (grid_[0] > static_cast<size_t>(info.maxGridDim_[0]) ||
-        grid_[1] > static_cast<size_t>(info.maxGridDim_[1]) ||
-        grid_[2] > static_cast<size_t>(info.maxGridDim_[2])) {
-      validConfig_ = false;
-    }
-
     // If cluster parameters is set, then check if it is divisble by grid (total blocks).
     if (clusterX > 1 || clusterY > 1 || clusterZ > 1) {
       if (!CheckClusterDivisibility(clusterX, clusterY, clusterZ)) {

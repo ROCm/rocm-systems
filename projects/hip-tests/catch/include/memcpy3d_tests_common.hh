@@ -173,10 +173,11 @@ void Memcpy3DDeviceToDeviceShell(F memcpy_func, hipStream_t kernel_stream = null
     int can_access_peer = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
     if (!can_access_peer) {
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       if (device_count > 0 && kernel_stream != nullptr && kernel_stream != hipStreamPerThread) {
-          HIP_CHECK(hipStreamDestroy(kernel_stream));
+        HIP_CHECK(hipStreamDestroy(kernel_stream));
       }
-      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      return;
     }
     HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
   }

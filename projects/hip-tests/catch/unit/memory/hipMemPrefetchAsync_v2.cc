@@ -58,7 +58,8 @@ static std::vector<int> getSupportedDevices() {
 HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
@@ -169,10 +170,12 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
 HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
+    return;
   }
   if (numa_available() < 0) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
+    return;
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
@@ -290,7 +293,8 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
 HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Negative) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
