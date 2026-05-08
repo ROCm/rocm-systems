@@ -55,7 +55,7 @@ struct ncclIbHandle {
   struct ncclIbCommStage stage; // Used by the other side when connecting
 };
 
-NCCL_PARAM(IbCastQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
+NCCL_PARAM(IbCastQpsPerConn, "IB_QPS_PER_CONNECTION", 2);
 extern int64_t rcclParamIbCastQpsPerP2p();
 extern int64_t rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering();
 
