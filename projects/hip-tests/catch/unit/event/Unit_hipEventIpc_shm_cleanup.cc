@@ -49,6 +49,13 @@ std::set<std::string> get_hip_ipc_shm_files() {
 }
 
 HIP_TEST_CASE(Unit_hipEventIpc_shm_cleanup) {
+  hipDeviceProp_t props{};
+  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  if (!props.ipcEventSupported) {
+    HipTest::HIP_SKIP_TEST("IPC events are not supported on this device.");
+    return;
+  }
+
   auto before = get_hip_ipc_shm_files();
 
   int pipefd[2];
