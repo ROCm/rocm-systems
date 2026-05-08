@@ -365,7 +365,7 @@ class Wire_E_GLVS(RectFrame):
             self.x_min + self.text_x_offset,
             self.y_max - 12.0,
             format_text(
-                key="Wt",
+                key="Wr",
                 value=self.vl1_wr,
                 key_step_prec_leftalign=6,
                 value_step_prec_rightalign=4.0,
@@ -867,7 +867,7 @@ class Wire_L2_Fabric(RectFrame):
             ),
         )
         canvas.text(
-            self.x_min + self.text_x_offset - 2, self.y_max - 7.0, "--------------->"
+            self.x_min + self.text_x_offset - 2, self.y_max - 7.0, "<-------------->"
         )
 
 

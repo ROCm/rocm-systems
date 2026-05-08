@@ -1,4 +1,5 @@
-# pylint: disable=C0114,C0115,C0116
+"""Enumerations mirroring hipFile C types."""
+
 from enum import IntEnum
 
 from hipfile._hipfile import (  # pylint: disable=E0401,E0611

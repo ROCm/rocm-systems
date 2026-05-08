@@ -279,6 +279,19 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
   const bool is_system_ram = (ag_type == HSA_DEVICE_TYPE_CPU) || (ag_type == HSA_DEVICE_TYPE_AIE);
   pool_sz = is_system_ram ? std::min(pool_sz, info.totalram / gran_sz) : pool_sz;
 
+  // Neg. test for system RAM: Try to allocate an impossibly large amount (2x total system RAM)
+  // to ensure the runtime fails gracefully without causing system hangs.
+  if (is_system_ram && !rocrtst::pool_size_limit) {
+    uint64_t impossible_size = 2 * info.totalram;
+    err = TestAllocate(pool, impossible_size);
+    EXPECT_TRUE(err == HSA_STATUS_ERROR_OUT_OF_RESOURCES ||
+                err == HSA_STATUS_ERROR_INVALID_ALLOCATION);
+    if (verbosity() > 0) {
+      std::cout << "  Verified impossibly large allocation ("
+                << impossible_size / (1024*1024) << " MB) fails gracefully" << std::endl;
+    }
+  }
+
   // Reduce upper_bound by 30% or 10% for system-RAM, depending on pool size limit. Otherwise
   // Linux OOM-Killer app can be triggered if system has allocated all available physical
   // memory and swap space, and so killing this process.
@@ -288,6 +301,14 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
   }
 
   uint64_t upper_bound = pool_size_limit_ratio * pool_sz;
+
+  // For system RAM, cap the maximum allocation attempt to prevent soft hangs
+  // on large-memory systems. 64GB is a reasonable upper limit for testing.
+  if (is_system_ram && !rocrtst::pool_size_limit) {
+    const uint64_t max_system_ram_test = (64ULL * 1024 * 1024 * 1024) / gran_sz;  // 64 GB
+    upper_bound = std::min(upper_bound, max_system_ram_test);
+  }
+
 #ifdef ROCRTST_ASAN
   // Under ASAN, on large-VRAM GPUs, cap the search range to kMaxTestAllocAsan to avoid
   // shadow-memory OOM errors.

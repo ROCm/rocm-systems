@@ -291,6 +291,12 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   int GetID() const { return id_; }
   /// Returns command for graph node
   virtual std::vector<amd::Command*>& GetCommands() { return commands_; }
+  /// Propagate graph signal pool to all commands owned by this node
+  void SetGraphSignalPoolOnCommands(amd::roc::GraphSignalPool* pool) {
+    for (auto& cmd : commands_) {
+      if (cmd != nullptr) cmd->SetGraphSignalPool(pool);
+    }
+  }
   /// Returns graph node type
   hipGraphNodeType GetType() const { return type_; }
   /// Clone graph node
@@ -1132,6 +1138,10 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   SyncPlan sync_plan_;
 
   void BuildSyncPlan();
+
+  //! Cached signal counts for graph signal pool pre-allocation
+  size_t graph_signal_count_ = 0;      //!< GPU-only signals, cached after first launch
+  size_t graph_irq_signal_count_ = 0;  //!< Interrupt signals, determined at instantiation
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {
@@ -1545,11 +1555,12 @@ class GraphKernelNode : public GraphNode {
       }
     }
 
+    const amd::Device* device = g_devices[dev_id_]->devices()[0];
     amd::HIPLaunchParams launch_params(kernelParams_.gridDim.x, kernelParams_.gridDim.y,
                                        kernelParams_.gridDim.z, kernelParams_.blockDim.x,
                                        kernelParams_.blockDim.y, kernelParams_.blockDim.z,
-                                       kernelParams_.sharedMemBytes, globalWorkSizeX_remainder_,
-                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_);
+                                       kernelParams_.sharedMemBytes, *device, globalWorkSizeX_remainder_,
+                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_, 1, 1, 1);
 
     if (!launch_params.IsValidConfig()) {
       return hipErrorInvalidConfiguration;
@@ -1695,11 +1706,12 @@ class GraphKernelNode : public GraphNode {
   hipError_t validateKernelParams(const hipKernelNodeParams* pNodeParams,
                                   hipFunction_t func, int devId) {
 
+    const amd::Device* device = g_devices[devId]->devices()[0];
     amd::HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
                                        pNodeParams->gridDim.z, pNodeParams->blockDim.x,
                                        pNodeParams->blockDim.y, pNodeParams->blockDim.z,
-                                       pNodeParams->sharedMemBytes, globalWorkSizeX_remainder_,
-                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_);
+                                       pNodeParams->sharedMemBytes, *device, globalWorkSizeX_remainder_,
+                                       globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_, 1, 1, 1);
 
     if (!launch_params.IsValidConfig()) {
       HIP_RETURN(hipErrorInvalidConfiguration);

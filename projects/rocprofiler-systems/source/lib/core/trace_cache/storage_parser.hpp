@@ -66,7 +66,7 @@ public:
 
         sample_header header;
 
-        std::vector<uint8_t> sample;
+        std::vector<std::uint8_t> sample;
         sample.reserve(4096);
         size_t last_capacity = sample.capacity();
 

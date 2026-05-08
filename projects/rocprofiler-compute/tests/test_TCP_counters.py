@@ -1,11 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-import csv
 from pathlib import Path
 
+import common
+import pandas as pd
 import pytest
-import test_utils
 
 config = {}
 config["vseq"] = ["./tests/vsequential_access"]
@@ -29,23 +29,14 @@ def load_metrics(csv_file_path):
             "Metric_2": { ... },
             ...
         }
+    N/A values (unevaluable metrics) are parsed as NaN by pandas.
     """
-    metrics_data = {}
-    with open(csv_file_path, newline="") as csvfile:
-        reader = csv.DictReader(csvfile)  # reads header from first line
-
-        for row in reader:
-            metric_name = row["Metric"].strip()
-            metrics_data[metric_name] = {
-                "Avg": float(row["Avg"]) if row["Avg"] else None,
-                "Min": float(row["Min"]) if row["Min"] else None,
-                "Max": float(row["Max"]) if row["Max"] else None,
-                "Unit": row["Unit"].strip() if row["Unit"] else None,
-            }
-    return metrics_data
+    df = pd.read_csv(csv_file_path, na_values=["N/A"])
+    df["Metric"] = df["Metric"].str.strip()
+    return df.set_index("Metric").to_dict(orient="index")
 
 
-_, soc = test_utils.gpu_soc()
+_, soc = common.gpu_soc()
 
 
 @pytest.mark.L1_cache
@@ -61,7 +52,7 @@ def test_L1_cache_counters(
 
     result = {}
     metrics = ["Read Req", "Write Req", "Cache Hit Rate"]
-    base = Path(test_utils.get_output_dir())
+    base = Path(common.get_output_dir())
 
     for app_name in app_names:
         workload_dir = f"{base}/{app_name}"
@@ -104,9 +95,9 @@ def test_L1_cache_counters(
             result[app_name][metric] = data[metric]["Avg"]
 
         # 4. clean local output
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-        test_utils.clean_output_dir(config["cleanup"], workload_dir_output)
-    test_utils.clean_output_dir(config["cleanup"], base)
+        common.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir_output)
+    common.clean_output_dir(config["cleanup"], base)
 
     # 5. check results are expected
 

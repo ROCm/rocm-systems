@@ -5,6 +5,7 @@
 
 #include "function_signature.hpp"
 #include "fwd.hpp"
+#include <cstdint>
 
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
@@ -81,20 +82,20 @@ struct module_function
     bool is_visibility_constrained() const;
     bool is_linkage_constrained() const;
 
-    size_t                                      start_address     = 0;
-    uint64_t                                    address_range     = 0;
-    uint64_t                                    num_instructions  = 0;
-    module_t*                                   module            = nullptr;
-    procedure_t*                                function          = nullptr;
-    symtab_func_t*                              symtab_function   = nullptr;
-    flow_graph_t*                               flow_graph        = nullptr;
-    string_t                                    module_name       = {};
-    string_t                                    function_name     = {};
-    function_signature                          signature         = {};
-    basic_block_set_t                           basic_blocks      = {};
-    basic_loop_vec_t                            loop_blocks       = {};
-    std::map<instruction_category_t, int64_t>   instruction_types = {};
-    std::vector<std::vector<instr_addr_pair_t>> instructions      = {};
+    size_t                                         start_address     = 0;
+    std::uint64_t                                  address_range     = 0;
+    std::uint64_t                                  num_instructions  = 0;
+    module_t*                                      module            = nullptr;
+    procedure_t*                                   function          = nullptr;
+    symtab_func_t*                                 symtab_function   = nullptr;
+    flow_graph_t*                                  flow_graph        = nullptr;
+    string_t                                       module_name       = {};
+    string_t                                       function_name     = {};
+    function_signature                             signature         = {};
+    basic_block_set_t                              basic_blocks      = {};
+    basic_loop_vec_t                               loop_blocks       = {};
+    std::map<instruction_category_t, std::int64_t> instruction_types = {};
+    std::vector<std::vector<instr_addr_pair_t>>    instructions      = {};
 
     mutable str_msg_vec_t messages = {};
 
