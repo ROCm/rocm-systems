@@ -693,6 +693,16 @@ create_queue_state(const hsa_queue_t* queue, bool overwrite)
 {
     if(!queue) return nullptr;
 
+    // this is needed for OpenMP target offload which, unlike HIP, does not automatically enable
+    // profiler for queues it creates.
+    if(get_amd_ext_table() && get_amd_ext_table()->hsa_amd_profiling_set_profiler_enabled_fn)
+    {
+        ROCP_HSA_TABLE_CALL(WARNING,
+                            get_amd_ext_table()->hsa_amd_profiling_set_profiler_enabled_fn(
+                                const_cast<hsa_queue_t*>(queue), true))
+            << fmt::format("Could not enable profiler for hsa_queue_t{{.id={}}}", queue->id);
+    }
+
     if(!overwrite)
     {
         if(auto existing = lookup_queue_state(queue, false)) return existing;
