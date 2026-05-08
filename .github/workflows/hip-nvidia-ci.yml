@@ -67,6 +67,7 @@ jobs:
       - name: Checkout rocm-systems
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
+          path: rocm-systems
           sparse-checkout: |
             projects/clr
             projects/hip
@@ -87,6 +88,8 @@ jobs:
 
       - name: Fetch hipcc submodule
         run: |
+          pip install -r TheRock/requirements.txt
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
           git config --global --add safe.directory "*"
           git -C "${GITHUB_WORKSPACE}/TheRock" submodule update --init --depth 1 compiler/amd-llvm
 
@@ -105,11 +108,11 @@ jobs:
             -DHIP_PLATFORM=nvidia \
             -DCLR_BUILD_HIP=ON \
             -DCLR_BUILD_OCL=OFF \
-            -DHIP_COMMON_DIR="${GITHUB_WORKSPACE}/projects/hip" \
-            -DHIPNV_DIR="${GITHUB_WORKSPACE}/projects/hipother/hipnv" \
+            -DHIP_COMMON_DIR="${GITHUB_WORKSPACE}/rocm-systems/projects/hip" \
+            -DHIPNV_DIR="${GITHUB_WORKSPACE}/rocm-systems/projects/hipother/hipnv" \
             -DHIPCC_BIN_DIR="${BUILD_DIR}/hipcc-install/bin" \
             -DCMAKE_INSTALL_PREFIX="${BUILD_DIR}/clr-install" \
-            "${GITHUB_WORKSPACE}/projects/clr/"
+            "${GITHUB_WORKSPACE}/rocm-systems/projects/clr/"
 
       - name: Build clr
         run: cmake --build "${BUILD_DIR}/clr" --parallel
@@ -124,7 +127,7 @@ jobs:
             -DHIP_PLATFORM=nvidia \
             -DHIPCC_BIN_DIR="${BUILD_DIR}/clr-install/bin" \
             -DCMAKE_PREFIX_PATH="${BUILD_DIR}/clr-install" \
-            "${GITHUB_WORKSPACE}/projects/hip-tests/catch"
+            "${GITHUB_WORKSPACE}/rocm-systems/projects/hip-tests/catch"
 
       - name: Build hip-tests
         run: cmake --build "${BUILD_DIR}/hip-tests" --parallel
