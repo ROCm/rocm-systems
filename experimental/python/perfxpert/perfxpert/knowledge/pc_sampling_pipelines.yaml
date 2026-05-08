@@ -7,7 +7,7 @@
 
 - name: MATRIX
   instructions: "Matrix FMA instructions (v_mfma_*)"
-  description: "MI300X has 4 MFMA units per CU; high MATRIX samples indicate matrix-math workloads"
+  description: "MI300X matrix pipeline capacity is derived from AMD-published matrix-core and CU counts; high MATRIX samples indicate matrix-math workloads"
   notes: "Also referred to as MFMA pipeline"
 
 - name: SCALAR

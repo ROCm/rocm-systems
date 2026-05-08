@@ -10,8 +10,20 @@ def test_lookup_vgpr_32_gives_8_waves_on_cdna3():
     assert occupancy.lookup_waves_per_eu(32, "gfx942") == 8
 
 
-def test_lookup_vgpr_128_gives_2_waves_on_cdna3():
-    assert occupancy.lookup_waves_per_eu(128, "gfx942") == 2
+def test_lookup_vgpr_64_gives_8_waves_on_cdna3():
+    assert occupancy.lookup_waves_per_eu(64, "gfx942") == 8
+
+
+def test_lookup_vgpr_128_gives_4_waves_on_cdna3():
+    assert occupancy.lookup_waves_per_eu(128, "gfx942") == 4
+
+
+def test_lookup_vgpr_256_gives_2_waves_on_cdna3():
+    assert occupancy.lookup_waves_per_eu(256, "gfx942") == 2
+
+
+def test_lookup_vgpr_128_gives_2_waves_on_cdna1():
+    assert occupancy.lookup_waves_per_eu(128, "gfx908") == 2
 
 
 def test_lookup_unknown_arch_raises():

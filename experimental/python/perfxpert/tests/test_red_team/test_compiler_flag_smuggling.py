@@ -39,6 +39,7 @@ def test_allowlisted_flags_still_work(tmp_path: Path, monkeypatch):
             returncode=0, stdout=b"", stderr=b""
         )),
     )
+    monkeypatch.setattr("perfxpert.tools.compile_runner.require_tool", mock.MagicMock())
     result = compile_runner.build(
         project_root=tmp_path,
         source_rel="src.cpp",

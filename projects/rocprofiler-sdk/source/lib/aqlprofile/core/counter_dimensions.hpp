@@ -22,10 +22,10 @@
 
 #pragma once
 
-#include "hsa_includes.h"
-#include "def/gpu_block_info.h"
-#include "core/aql_profile.hpp"
-#include "core/pm4_factory.h"
+#include "lib/aqlprofile/hsa_includes.h"
+#include "lib/aqlprofile/def/gpu_block_info.h"
+#include "lib/aqlprofile/core/aql_profile.hpp"
+#include "lib/aqlprofile/core/pm4_factory.h"
 
 #include <cstdint>
 #include <string>
@@ -36,40 +36,39 @@
 
 struct EventDimension
 {
-    EventDimension(const EventDimension& other) = default;
-    EventDimension(std::string_view _name, size_t _extent)
-    : id(dimension_table.at(std::string(_name)))
-    , name(_name)
-    , extent(_extent)
-    {}
-
-    uint64_t         id;
-    uint64_t         extent;
-    std::string_view name;
-
-    static std::vector<std::string>                dimension_list;
-    static std::unordered_map<std::string, size_t> dimension_table;
-    static void                                    init()
+    static void        init() {}  // legacy call. replaced by below
+    static const auto& get_dimension_table()
     {
-        if(dimension_list.size()) return;
-
-        dimension_list.push_back("XCD");
-        dimension_list.push_back("AID");
-        dimension_list.push_back("SE");
-        dimension_list.push_back("SA");
-        dimension_list.push_back("WGP");
-        dimension_list.push_back("INSTANCE");
-
-        for(size_t i = 0; i < dimension_list.size(); i++)
-            dimension_table[dimension_list[i]] = i;
+        static auto event_dimension_table = []() {
+            auto _data = std::unordered_map<std::string_view, size_t>{};
+            for(const auto* itr : {"XCD", "AID", "SE", "SA", "WGP", "INSTANCE"})
+                _data.emplace(std::string_view{itr}, _data.size());
+            return _data;
+        }();
+        return event_dimension_table;
     }
+
+    EventDimension(std::string_view _name, size_t _extent)
+    : id{get_dimension_table().at(_name)}
+    , name{_name}
+    , extent{_extent}
+    {}
+    ~EventDimension()                           = default;
+    EventDimension(const EventDimension& other) = default;
+    EventDimension& operator=(const EventDimension& other) = default;
+    EventDimension(EventDimension&& other) noexcept        = default;
+    EventDimension& operator=(EventDimension&& other) noexcept = default;
+
+    uint64_t         id     = 0;
+    uint64_t         extent = 0;
+    std::string_view name   = {};
 };
 
 class EventKey
 {
 public:
-    uint64_t agent;
-    uint64_t block;
+    uint64_t agent = 0;
+    uint64_t block = 0;
 
     bool operator==(const EventKey& other) const
     {
@@ -177,13 +176,13 @@ public:
 private:
     bool HasAttr(CounterBlockAttr attr) const { return (block_info->attr & attr) != 0; }
 
-    EventKey                       key;
+    EventKey                       key        = {};
     const GpuBlockInfo*            block_info = nullptr;
-    hsa_ven_amd_aqlprofile_event_t event{};
+    hsa_ven_amd_aqlprofile_event_t event      = {};
 
-    bool bIsGFX12;
-    bool bIsGFX11;
-    bool bIsGFX9;
+    bool bIsGFX12 = false;
+    bool bIsGFX11 = false;
+    bool bIsGFX9  = false;
 
     bool shader_engine       = false;
     bool shader_array        = false;
@@ -198,22 +197,21 @@ private:
     size_t wgp_num              = 1;
     size_t block_instance_count = 1;
 
-    std::vector<EventDimension> dimensions;
+    std::vector<EventDimension> dimensions = {};
 
 public:
     template <typename AgentType>
     static const EventAttribDimension& get(AgentType                           agent,
                                            hsa_ven_amd_aqlprofile_block_name_t block_name)
     {
-        thread_local std::unordered_map<EventKey, std::shared_ptr<EventAttribDimension>>
-                                                           event_map{};
-        thread_local std::shared_ptr<EventAttribDimension> event_cache{nullptr};
+        thread_local auto event_cache = std::shared_ptr<EventAttribDimension>{nullptr};
+        thread_local auto event_map =
+            std::unordered_map<EventKey, std::shared_ptr<EventAttribDimension>>{};
 
-        EventKey key{agent.handle, (uint64_t) block_name};
+        auto key = EventKey{agent.handle, static_cast<uint64_t>(block_name)};
 
         if(!event_cache || event_cache->key != key)
         {
-            auto it = event_map.find(key);
             if(auto it = event_map.find(key); it != event_map.end())
                 event_cache = it->second;
             else

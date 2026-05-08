@@ -92,7 +92,7 @@ public:
             return;
         }
 
-        // Need to covert interleaved planar to stacked planar, assuming 4:2:0 chroma sampling.
+        // Need to convert interleaved planar to stacked planar, assuming 4:2:0 chroma sampling.
         uint8_t *stacked_ptr = new uint8_t [output_image_size];
         uint8_t *tmp_hst_ptr = hst_ptr;
         int output_stride =  surf_info->output_pitch;

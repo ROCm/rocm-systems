@@ -65,12 +65,18 @@ REJECTION_LANGUAGE_STANZA = """\
 # Tool-priority gate (NON-NEGOTIABLE)
 
 Your response WILL BE REJECTED if you call any tool other than
-`{classify_tool}` before `{classify_tool}` has been observed to
-return in this session. This is mechanically enforced by a
-pre-tool-call hook — the rejection is not advisory.
+`{classify_tool}`{discovery_exception} before `{classify_tool}` has been observed to
+return in this session. This is enforced by the backend pre-tool-call
+hook when that hook surface is available; Codex sessions enforce the
+same rule through this prompt-layer gate.
 
 After `{classify_tool}` returns, any tool is permitted for the
 rest of the session.
+
+If `{classify_tool}` is not available or not exposed in the current
+backend session, {missing_tool_action}. Do not fall back to native
+execution tools, including local shells, SSH commands, remote-host
+builds, or profiling commands.
 """
 
 
@@ -124,6 +130,7 @@ def render_prompt(
     known_tools: tuple[str, ...],
     reject_language: bool = True,
     classify_tool: str = "intent_classify",
+    discovery_tools: tuple[str, ...] = (),
 ) -> str:
     """Render a source prompt file into the backend-specific form.
 
@@ -139,7 +146,9 @@ def render_prompt(
 
     The `classify_tool` kwarg lets the caller pass a pre-rendered
     tool name (e.g. `mcp__perfxpert__intent_classify`) so the stanza
-    refers to the exact name the backend exposes.
+    refers to the exact name the backend exposes. `discovery_tools`
+    names backend-native metadata search tools that may be called only
+    to expose a deferred PerfXpert classify tool before the gate opens.
     """
     if isinstance(source, Path):
         raw = source.read_text(encoding="utf-8")
@@ -151,7 +160,24 @@ def render_prompt(
 
     if reject_language:
         rendered_classify = tool_name_template.format(tool=classify_tool)
-        stanza = REJECTION_LANGUAGE_STANZA.format(classify_tool=rendered_classify)
+        discovery_exception = ""
+        missing_tool_action = "STOP with a PerfXpert configuration error"
+        if discovery_tools:
+            rendered_discovery = ", ".join(f"`{tool}`" for tool in discovery_tools)
+            discovery_exception = (
+                " or one of the discovery-only metadata tools "
+                f"{rendered_discovery} solely to search for the PerfXpert "
+                "classify/workflow MCP tools"
+            )
+            missing_tool_action = (
+                "use the discovery exception above if it is available; "
+                "otherwise STOP with a PerfXpert configuration error"
+            )
+        stanza = REJECTION_LANGUAGE_STANZA.format(
+            classify_tool=rendered_classify,
+            discovery_exception=discovery_exception,
+            missing_tool_action=missing_tool_action,
+        )
         return stanza + "\n" + substituted
     return substituted
 

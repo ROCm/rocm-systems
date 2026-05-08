@@ -91,7 +91,7 @@ static uint32_t kernelMask_user() {
 }
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
-NCCL_PARAM(SymLL, "SYM_LL", 0)
+NCCL_PARAM(SymLL, "SYM_LL", 1)
 
 static double softmin(double x, double ceiling, double softness) {
   // looks like a smooth version of: min(x, ceiling)

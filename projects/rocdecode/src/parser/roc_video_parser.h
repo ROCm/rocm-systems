@@ -117,7 +117,7 @@ public:
     virtual rocDecStatus UnInitialize() = 0;     // pure virtual: implemented by derived class
     /**
      * @brief function to to release surface with pic_idx and mark it for reuse, can be called from a different thread than decode thread
-     * @brief calling thread is responsible for syncronizing
+     * @brief calling thread is responsible for synchronizing
      * \param [in] pic_idx surface index for the picture to be released
      * 
      * @return rocDecStatus 
@@ -153,7 +153,7 @@ protected:
      * is used to retrieve the VA surface Id.
      */
     std::vector<DecodeFrameBuffer> decode_buffer_pool_;
-    uint32_t num_output_pics_;  // number of pictures that are ready to be ouput
+    uint32_t num_output_pics_;  // number of pictures that are ready to be output
     std::vector<uint32_t> output_pic_list_; // sorted output frame index to decode_buffer_pool_
 
     RocdecTimeStamp curr_pts_;
@@ -195,7 +195,7 @@ protected:
     void CheckAndAdjustDecBufPoolSize(int dpb_size);
 
     /*! \brief Callback function to output decoded pictures from DPB for post-processing.
-     * \param [in] no_delay Indicator to override the display delay parameter wth no delay
+     * \param [in] no_delay Indicator to override the display delay parameter with no delay
      * \return <tt>ParserResult</tt>
      */
     ParserResult OutputDecodedPictures(bool no_delay);
@@ -207,7 +207,7 @@ protected:
 
     /*! \brief Function to convert from Encapsulated Byte Sequence Packets to Raw Byte Sequence Payload
      * 
-     * \param [inout] stream_buffer A pointer of <tt>uint8_t</tt> for the converted RBSP buffer.
+     * \param [in,out] stream_buffer A pointer of <tt>uint8_t</tt> for the converted RBSP buffer.
      * \param [in] begin_bytepos Start position in the EBSP buffer to convert
      * \param [in] end_bytepos End position in the EBSP buffer to convert, generally it's size.
      * \return Returns the size of the converted buffer in <tt>size_t</tt>

@@ -58,3 +58,22 @@ class TestMergeCollisionDetection:
         from perfxpert.connection import merge_sqlite_dbs
         merged = tmp_path / "merged.db"
         merge_sqlite_dbs([str(db0), str(db1)], str(merged))
+
+    def test_merge_quotes_unusual_table_and_column_names(self, tmp_path):
+        """Input database identifiers must be quoted, not interpolated raw."""
+        db0 = tmp_path / "shard0.db"
+        db1 = tmp_path / "shard1.db"
+        for path, row_id in [(db0, 1), (db1, 2)]:
+            conn = sqlite3.connect(str(path))
+            conn.execute('CREATE TABLE "odd table;name" ("row id" INTEGER PRIMARY KEY, value TEXT)')
+            conn.execute('INSERT INTO "odd table;name" VALUES (?, ?)', (row_id, f"v{row_id}"))
+            conn.commit()
+            conn.close()
+
+        from perfxpert.connection import merge_sqlite_dbs
+        merged = tmp_path / "merged.db"
+        merge_sqlite_dbs([str(db0), str(db1)], str(merged))
+
+        conn = sqlite3.connect(str(merged))
+        count = conn.execute('SELECT COUNT(*) FROM "odd table;name"').fetchone()[0]
+        assert count == 2

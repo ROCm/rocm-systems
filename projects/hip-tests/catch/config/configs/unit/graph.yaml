@@ -1078,21 +1078,6 @@ graph:
   Unit_hipGraphLaunch_Functional_MultipleLaunch:
     <<: *level_2
     tags: [exec]
-  Unit_hipGraphLaunch_ProfilingTimestamps_SmallGraph:
-    <<: *level_2
-    tags: [exec]
-  Unit_hipGraphLaunch_ProfilingTimestamps_LargeGraph:
-    <<: *level_2
-    tags: [exec]
-  Unit_hipGraphLaunch_PerKernelTiming_SmallGraph:
-    <<: *level_2
-    tags: [exec]
-  Unit_hipGraphLaunch_TimingConsistency_SmallGraph:
-    <<: *level_2
-    tags: [exec]
-  Unit_hipGraphLaunch_TimingConsistency_LargeGraph:
-    <<: *level_2
-    tags: [exec]
   Unit_hipGraphMemcpyNodeSetParams1D_Positive_Basic:
     <<: *level_2
     tags: [node]

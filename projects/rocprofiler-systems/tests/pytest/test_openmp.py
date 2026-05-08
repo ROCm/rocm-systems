@@ -124,6 +124,7 @@ class TestOpenMPCG(RocprofsysTest):
         r"sampling_wall_clock\.(json|txt)",
     ]
 
+    @pytest.mark.timeout(180)
     @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
     def test(self, mode, ompt_env):
         env = ompt_env.copy()
@@ -135,27 +136,26 @@ class TestOpenMPCG(RocprofsysTest):
             "openmp-cg",
             env=env,
             rewrite_args=self.REWRITE_ARGS,
-            timeout=180,
         )
         self.assert_regex(result)
 
+    @pytest.mark.timeout(300)
     @pytest.mark.sampling_duration
     def test_sampling_duration(self, ompt_sampling_env):
         result = self.run_test(
             "sampling",
             target="openmp-cg",
             env=ompt_sampling_env,
-            timeout=300,
         )
         self.assert_regex(result, pass_regex=self.DURATION_SAMPLING_PASS_REGEX)
 
+    @pytest.mark.timeout(300)
     @pytest.mark.no_tmp_files
     def test_no_tmp_files(self, ompt_no_tmp_env):
         result = self.run_test(
             "sampling",
             target="openmp-cg",
             env=ompt_no_tmp_env,
-            timeout=300,
         )
         self.assert_regex(result, pass_regex=self.NOTMP_SAMPLING_FILE_REGEX)
         self.assert_perfetto(result)
@@ -185,6 +185,7 @@ class TestOpenMPLU(RocprofsysTest):
         r"sampling_wall_clock\.(json|txt)",
     ]
 
+    @pytest.mark.timeout(180)
     @pytest.mark.parametrize("mode", ["baseline", "sampling", "binary_rewrite"])
     def test(self, mode, ompt_env):
         env = ompt_env.copy()
@@ -197,7 +198,6 @@ class TestOpenMPLU(RocprofsysTest):
             "openmp-lu",
             env=env,
             rewrite_args=self.REWRITE_ARGS,
-            timeout=180,
         )
         self.assert_regex(
             result,
@@ -206,13 +206,13 @@ class TestOpenMPLU(RocprofsysTest):
             rewrite_fail_regex=self.REWRITE_FAIL_REGEX,
         )
 
+    @pytest.mark.timeout(300)
     @pytest.mark.sampling_duration
     def test_sampling_duration(self, ompt_sampling_env):
         result = self.run_test(
             "sampling",
             target="openmp-lu",
             env=ompt_sampling_env,
-            timeout=300,
         )
         self.assert_regex(result, pass_regex=self.DURATION_SAMPLING_PASS_REGEX)
 
@@ -222,7 +222,9 @@ class TestOpenMPLU(RocprofsysTest):
 # ============================================================================
 
 
-@pytest.mark.ci_disable("all")
+@pytest.mark.ci_disable("all")  # TODO: Deprecate once TheRock switches to CTest
+@pytest.mark.rocm
+@pytest.mark.class_name("openmp-target")
 class TestOpenMPTarget(RocprofsysTest):
     @pytest.mark.parametrize(
         "mode",
@@ -288,7 +290,6 @@ class TestOpenMPVV(RocprofsysTest):
             env=env,
             rewrite_args=REWRITE_ARGS,
             runtime_args=RUNTIME_ARGS,
-            runtime_timeout=300,
         )
         self.assert_regex(
             result,
@@ -307,7 +308,13 @@ class TestOpenMPVV(RocprofsysTest):
             "sys_run",
             pytest.param(
                 "runtime_instrument",
-                marks=[pytest.mark.slow, pytest.mark.ci_disable("all")],
+                marks=[
+                    pytest.mark.slow,
+                    pytest.mark.serialize,
+                    pytest.mark.ci_disable(
+                        "all"
+                    ),  # TODO: Deprecate once TheRock switches to CTest
+                ],
             ),
         ],
     )
@@ -333,7 +340,6 @@ class TestOpenMPVV(RocprofsysTest):
             target,
             env=env,
             rewrite_args=REWRITE_ARGS,
-            timeout=300,
             check_target_arch=True,
         )
         self.assert_regex(

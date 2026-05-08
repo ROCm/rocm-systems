@@ -966,6 +966,7 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
 
   comm->nChannels = std::min(treeGraph.nChannels, ringGraph.nChannels);
   TRACE(NCCL_INIT,"treeGraph.nChannels: %d , ringGraph.nChannels: %d", treeGraph.nChannels, ringGraph.nChannels);
+  allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
   NCCLCHECKGOTO(ncclTopoPreset(comm, graphs, &allGather3Data[rank].topoRanks), ret, fail);
 fail:
   return ret;

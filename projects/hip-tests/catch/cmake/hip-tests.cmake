@@ -55,11 +55,11 @@ function(hip_gen_exe_target)
     "${args}"
     "${list_args}"
   )
-  foreach(SRC_NAME ${TEST_SRC})
+  foreach(SRC_NAME ${_TEST_SRC})
 
     if(NOT _STANDALONE_FLAG EQUAL "1")
       set(_EXE_NAME ${_NAME})
-      set(SRC_NAME ${TEST_SRC})
+      set(SRC_NAME ${_TEST_SRC})
     else()
       # strip extension of src and use exe name as src name
       get_filename_component(_EXE_NAME ${SRC_NAME} NAME_WLE)

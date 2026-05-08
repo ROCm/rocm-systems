@@ -4,12 +4,12 @@
 #
 # Fields
 # ------
-#   xgmi_peak_gbps    : aggregate bidirectional XGMI bandwidth per GPU (GB/s)
-#   xgmi_links        : number of XGMI links wired per GPU
-#   xgmi_per_link_gbps: per-link bidirectional peak (GB/s)
+#   xgmi_peak_gbps    : aggregate AMD-published or explicitly derived IF/XGMI bandwidth per GPU (GB/s)
+#   xgmi_links        : number of IF/XGMI links wired per GPU
+#   xgmi_per_link_gbps: per-link vendor-published IF/XGMI peak (GB/s)
 #   pcie_tier         : PCIe generation / width (human-readable label)
-#   pcie_peak_gbps    : PCIe aggregate peak (GB/s)
-#   achievable_gbps   : typical RCCL AllReduce busBW observed in practice
+#   pcie_peak_gbps    : PCIe theoretical one-way peak (GB/s)
+#   achievable_gbps   : empirical RCCL AllReduce busBW observed in practice
 #   source_url        : vendor / reference source for the published number
 #   measured_with     : short description of the measurement context
 #
@@ -25,47 +25,47 @@
 
 gfx908:
   name: "MI100"
-  xgmi_peak_gbps: 276.0         # 3 links x 92 GB/s bidirectional
+  xgmi_peak_gbps: 276.0         # 3 links x 92 GB/s vendor-published IF link bandwidth
   xgmi_links: 3
   xgmi_per_link_gbps: 92.0
   pcie_tier: "PCIe Gen4 x16"
   pcie_peak_gbps: 32.0
   achievable_gbps: 180.0
-  source_url: "https://www.amd.com/en/products/server-accelerators/instinct-mi100"
-  measured_with: "vendor datasheet (CDNA1)"
+  source_url: "https://www.amd.com/en/products/accelerators/instinct/mi100.html"
+  measured_with: "AMD product specs (CDNA1)"
 
 gfx90a:
   name: "MI250X"
-  xgmi_peak_gbps: 400.0         # 8 links x ~50 GB/s bidirectional (aggregate)
+  xgmi_peak_gbps: 800.0         # 8 links x 100 GB/s vendor-published IF link bandwidth
   xgmi_links: 8
-  xgmi_per_link_gbps: 50.0
+  xgmi_per_link_gbps: 100.0
   pcie_tier: "PCIe Gen4 x16"
   pcie_peak_gbps: 32.0
   achievable_gbps: 200.0
-  source_url: "https://www.amd.com/en/products/server-accelerators/instinct-mi250x"
-  measured_with: "vendor datasheet (CDNA2) + RCCL AllReduce"
+  source_url: "https://www.amd.com/en/products/accelerators/instinct/mi200/mi250x.html"
+  measured_with: "AMD product specs (CDNA2): 8 external IF links at 100 GB/s each"
 
 gfx942:
   name: "MI300X"
-  xgmi_peak_gbps: 448.0         # 7 links x ~64 GB/s bidirectional
-  xgmi_links: 7
-  xgmi_per_link_gbps: 64.0
+  xgmi_peak_gbps: 1024.0        # 8 links x 128 GB/s vendor-published IF peak
+  xgmi_links: 8
+  xgmi_per_link_gbps: 128.0
   pcie_tier: "PCIe Gen5 x16"
   pcie_peak_gbps: 64.0
   achievable_gbps: 340.0
   source_url: "https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html"
-  measured_with: "vendor datasheet (CDNA3) + RCCL AllReduce, 8-GPU ring"
+  measured_with: "AMD product specs (CDNA3) + RCCL AllReduce, 8-GPU ring"
 
 gfx950:
   name: "MI350X"
-  xgmi_peak_gbps: 896.0         # doubled vs CDNA3 (CDNA4 projection)
+  xgmi_peak_gbps: 1071.0        # 7 links x 153 GB/s vendor-published IF peak
   xgmi_links: 7
-  xgmi_per_link_gbps: 128.0
+  xgmi_per_link_gbps: 153.0
   pcie_tier: "PCIe Gen5 x16"
   pcie_peak_gbps: 64.0
   achievable_gbps: 650.0
-  source_url: "https://www.amd.com/en/products/accelerators/instinct/mi350.html"
-  measured_with: "vendor datasheet (CDNA4)"
+  source_url: "https://www.amd.com/en/products/accelerators/instinct/mi350/mi350x.html"
+  measured_with: "AMD product specs (CDNA4) + projected RCCL baseline"
 
 gfx1030:
   name: "RX 6900 XT"
@@ -75,8 +75,8 @@ gfx1030:
   pcie_tier: "PCIe Gen4 x16"
   pcie_peak_gbps: 32.0
   achievable_gbps: 24.0
-  source_url: "https://www.amd.com/en/products/graphics/amd-radeon-rx-6900-xt"
-  measured_with: "vendor datasheet (RDNA2)"
+  source_url: "https://www.amd.com/en/products/graphics/desktops/radeon/6000-series/amd-radeon-rx-6900-xt.html"
+  measured_with: "AMD product specs (RDNA2)"
 
 gfx1100:
   name: "RX 7900 XTX"
@@ -86,8 +86,8 @@ gfx1100:
   pcie_tier: "PCIe Gen4 x16"
   pcie_peak_gbps: 32.0
   achievable_gbps: 24.0
-  source_url: "https://www.amd.com/en/products/graphics/amd-radeon-rx-7900xtx"
-  measured_with: "vendor datasheet (RDNA3)"
+  source_url: "https://www.amd.com/en/products/graphics/desktops/radeon/7000-series/amd-radeon-rx-7900xtx.html"
+  measured_with: "AMD product specs (RDNA3)"
 
 # -- Inter-node NIC entries -----------------------------------------------
 # Selected explicitly via interconnect.lookup_peaks("connectx7") etc.

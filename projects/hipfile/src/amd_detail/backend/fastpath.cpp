@@ -196,17 +196,23 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
         hip_inited = true;
     }
 
-    switch (type) {
-        case IoType::Read:
-            nbytes = Context<Hip>::get()->hipAmdFileRead(handle, devptr, size, file_offset);
-            ioTracker.complete(nbytes);
-            break;
-        case IoType::Write:
-            nbytes = Context<Hip>::get()->hipAmdFileWrite(handle, devptr, size, file_offset);
-            ioTracker.complete(nbytes);
-            break;
-        default:
-            throw std::runtime_error("Invalid IoType");
+    try {
+        switch (type) {
+            case IoType::Read:
+                nbytes = Context<Hip>::get()->hipAmdFileRead(handle, devptr, size, file_offset);
+                ioTracker.complete(nbytes);
+                break;
+            case IoType::Write:
+                nbytes = Context<Hip>::get()->hipAmdFileWrite(handle, devptr, size, file_offset);
+                ioTracker.complete(nbytes);
+                break;
+            default:
+                throw std::runtime_error("Invalid IoType");
+        }
+    }
+    catch (...) {
+        Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size);
+        throw;
     }
     return static_cast<ssize_t>(nbytes);
 }

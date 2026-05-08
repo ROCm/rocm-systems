@@ -226,7 +226,7 @@ void MPITransport::submitRequestsToMPI() {
   }
 }
 
-void MPITransport::initTransport(int num_queues, BackendProxyT *proxy) {
+void MPITransport::initTransport(int num_queues, BackendProxy *proxy) {
   waiting_quiet.resize(num_queues, std::vector<volatile char *>());
   outstanding.resize(num_queues, 0);
   transport_up = false;

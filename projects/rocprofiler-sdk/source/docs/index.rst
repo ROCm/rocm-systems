@@ -46,6 +46,7 @@ The documentation is structured as follows:
     * :ref:`using-rocprofv3-with-mpi`
     * :ref:`using-rocprofv3-with-openmp`
     * :ref:`using-pc-sampling`
+    * :ref:`cdna3-cdna4-pc-sampling`
     * :ref:`using-thread-trace`
 
   .. grid-item-card:: API reference

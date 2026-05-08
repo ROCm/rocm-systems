@@ -244,7 +244,7 @@ out = api.agent_compute_specialist(
     input={
         "gfx_id": "gfx942",
         "hot_kernels": [{"name": "gemm_k0", "duration_ns": 12000000}],
-        "counter_data": {"vgpr_used": 128, "waves_per_eu": 2},
+        "counter_data": {"vgpr_used": 128, "waves_per_eu": 4},
         "source_hints": {},
     },
     airgap=True,

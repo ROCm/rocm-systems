@@ -1,0 +1,185 @@
+# ROC Runtime Test Platform Configuration
+# ==========================================
+# This file defines which tests can run on different platform types.
+#
+# OVERVIEW:
+# ---------
+# Tests are organized into logical groups (Core, Extended, Atomics, etc.).
+# Each platform type (FFM_SIMULATOR, EMULATOR, REAL_HARDWARE) specifies which
+# groups are allowed and which individual tests are blocked.
+#
+# FILTERING SEMANTICS:
+# --------------------
+# For a test to RUN, it must pass ALL of these checks:
+#   1. NOT in the platform's blocked_tests list
+#   2. If ROCRTST_TEST_GROUPS env var is set: test must be in one of those groups
+#   3. Test's group must be in the platform's allowed_groups
+#   4. If platform has allowed_tests list: test must be in that list
+#
+# ALLOWED_GROUPS:
+# ---------------
+# - ["*"] means ALL groups are allowed (no group-based filtering)
+# - [Core, Extended] means ONLY tests in Core or Extended groups will run
+# - Tests not in any group are treated as ungrouped and follow platform rules
+#
+# BLOCKED_TESTS:
+# --------------
+# - Individual tests that should NEVER run on this platform
+# - Takes precedence over allowed_groups (blocked tests won't run even if in allowed group)
+# - Useful for tests that crash, hang, or are incompatible with the platform
+#
+# EXAMPLE SCENARIOS:
+# ------------------
+# 1. FFM_SIMULATOR with allowed_groups: [Core, Extended]
+#    - Only tests in Core or Extended groups will run
+#    - All other tests (Atomics, Performance, ungrouped) are skipped
+#
+# 2. EMULATOR with allowed_groups: ["*"] and blocked_tests: [test1, test2]
+#    - All tests run EXCEPT test1 and test2
+#    - Group membership doesn't matter (all groups allowed)
+#
+# 3. REAL_HARDWARE with allowed_groups: ["*"] and blocked_tests: []
+#    - All tests run (no filtering)
+#
+# ENVIRONMENT VARIABLE OVERRIDES:
+# --------------------------------
+# - ROCRTST_PLATFORM_OVERRIDE: Override platform detection
+#   Values: FFM_SIMULATOR, EMULATOR, REAL_HARDWARE (or short: FFM, EMU, REAL, HW)
+#
+# - ROCRTST_PLATFORM_CONFIG: Use custom config file path
+#   Example: ROCRTST_PLATFORM_CONFIG=/path/to/custom.yaml
+#
+# - ROCRTST_TEST_GROUPS: Run only specific groups (comma-separated)
+#   Example: ROCRTST_TEST_GROUPS=Core,Extended
+#   Note: This further restricts tests beyond platform's allowed_groups
+
+# ==============================================================================
+# TEST GROUP DEFINITIONS
+# ==============================================================================
+# Groups organize tests by functionality or stability level.
+# A test can belong to multiple groups, but typically belongs to one.
+#
+# GROUP NAMING CONVENTIONS:
+# - Core: Essential functionality tests that should always pass
+# - Extended: Additional functionality tests, stable but less critical
+# - Atomics: Atomic operation tests (may not work on all platforms)
+# - Performance: Performance measurement tests (may be slow or unstable)
+# - Experimental: New/unstable tests under development
+#
+groups:
+  Core:
+    - rocrtst.Test_Example
+    - rocrtstFunc.MemoryAccessTests
+    - rocrtstFunc.GroupMemoryAllocationTest
+    - rocrtstFunc.MemoryAllocateAndFreeTest
+    - rocrtstFunc.MemoryAllocateContiguousTest
+    - rocrtstFunc.Concurrent_Init_Test
+    - rocrtstFunc.Concurrent_Init_Shutdown_Test
+    - rocrtstFunc.Concurrent_Shutdown
+    - rocrtstFunc.Reference_Count
+    - rocrtstFunc.Max_Reference_Count
+    - rocrtstFunc.Signal_Destroy_Concurrently
+    - rocrtstFunc.Signal_Max_Consumer
+    - rocrtstFunc.Signal_Create_Concurrently
+    - rocrtstFunc.Memory_Available
+    - rocrtstPerf.Memory_Async_Copy
+
+  Extended:
+    - rocrtstNeg.Memory_Negative_Tests
+    - rocrtstNeg.Queue_Validation_InvalidDimension
+    - rocrtstNeg.Queue_Validation_InvalidGroupMemory
+    - rocrtstNeg.Queue_Validation_InvalidKernelObject
+    - rocrtstNeg.Queue_Validation_InvalidPacket
+
+  Atomics:
+    - rocrtstFunc.Memory_Atomic_Add_Test
+    - rocrtstFunc.Memory_Atomic_Sub_Test
+    - rocrtstFunc.Memory_Atomic_And_Test
+    - rocrtstFunc.Memory_Atomic_Or_Test
+    - rocrtstFunc.Memory_Atomic_Xor_Test
+    - rocrtstFunc.Memory_Atomic_Min_Test
+    - rocrtstFunc.Memory_Atomic_Max_Test
+    - rocrtstFunc.Memory_Atomic_Inc_Test
+    - rocrtstFunc.Memory_Atomic_Dec_Test
+    - rocrtstFunc.Memory_Atomic_Xchg_Test
+
+  Performance:
+    - rocrtstPerf.Memory_Async_Copy_On_Engine
+    - rocrtstPerf.ENQUEUE_LATENCY
+    - rocrtstPerf.AQL_Dispatch_Time_Single_SpinWait
+    - rocrtstPerf.AQL_Dispatch_Time_Single_Interrupt
+    - rocrtstPerf.AQL_Dispatch_Time_Multi_SpinWait
+    - rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt
+    - rocrtstPerf.Agent_Preload_Latency
+
+# ==============================================================================
+# PLATFORM-SPECIFIC TEST CONFIGURATIONS
+# ==============================================================================
+# Each platform type specifies which test groups are allowed and which
+# individual tests should be blocked.
+#
+platforms:
+  # Real hardware - all tests allowed
+  REAL_HARDWARE:
+    allowed_groups: ["*"]
+    blocked_tests: []
+
+  # Emulator - most tests work, but some are blocked
+  EMULATOR:
+    allowed_groups: ["*"]
+    blocked_tests:
+      - rocrtstFunc.IPC
+      - rocrtstFunc.DISABLED_Signal_Kernel_Set
+      - rocrtstFunc.DISABLED_Signal_Kernel_Multi_Set
+      - rocrtstFunc.DISABLED_Signal_Kernel_Wait
+      - rocrtstFunc.DISABLED_Signal_Kernel_Multi_Wait
+      - rocrtstFunc.DISABLED_Aql_Barrier_Bit_Set
+      - rocrtstFunc.DISABLED_Aql_Barrier_Bit_Not_Set
+      - rocrtstFunc.Memory_Max_Mem
+      - rocrtstFunc.Memory_Available
+      - rocrtstFunc.Memory_Atomic_Add_Test
+      - rocrtstFunc.Memory_Atomic_Sub_Test
+      - rocrtstFunc.Memory_Atomic_And_Test
+      - rocrtstFunc.Memory_Atomic_Or_Test
+      - rocrtstFunc.Memory_Atomic_Xor_Test
+      - rocrtstFunc.Memory_Atomic_Min_Test
+      - rocrtstFunc.Memory_Atomic_Max_Test
+      - rocrtstFunc.Memory_Atomic_Inc_Test
+      - rocrtstFunc.Memory_Atomic_Dec_Test
+      - rocrtstFunc.Memory_Atomic_Xchg_Test
+      - rocrtstFunc.DISABLED_DebugBasicTests
+      - rocrtstFunc.Memory_Alignment_Test
+      - rocrtstFunc.Deallocation_Notifier_Test
+      - rocrtstFunc.AgentPropertiesTests
+      - rocrtstFunc.SvmMemory_Basic_Test
+      - rocrtstFunc.SvmMemory_Negative_Test
+      - rocrtstFunc.VirtMemory_Basic_Test
+      - rocrtstFunc.VirtMemory_Access_Test
+      - rocrtstFunc.VirtMemory_Accounting_Test
+      - rocrtstFunc.VirtMemory_Aliasing_Test
+      - rocrtstFunc.VirtMemory_Interprocess_Test
+      - rocrtstFunc.Filter_Devices_Test
+      - rocrtstFunc.GpuCoreDump_DefaultPattern
+      - rocrtstFunc.GpuCoreDump_CustomPattern
+      - rocrtstFunc.GpuCoreDump_DisableFlag
+      - rocrtstFunc.GpuCoreDump_PatternSubstitution
+      - rocrtstFunc.GpuCoreDump_InvalidPath
+      - rocrtstFunc.GpuCoreDump_ContentIntegrity
+      - rocrtstFunc.GpuCoreDump_PipePattern
+      - rocrtstPerf.Memory_Async_Copy_On_Engine
+      - rocrtstNeg.Memory_Negative_Tests
+      - rocrtstNeg.Queue_Validation_InvalidDimension
+      - rocrtstNeg.Queue_Validation_InvalidGroupMemory
+      - rocrtstNeg.Queue_Validation_InvalidKernelObject
+      - rocrtstNeg.Queue_Validation_InvalidPacket
+      - rocrtstStress.Memory_Concurrent_Allocate_Test
+      - rocrtstStress.Memory_Concurrent_Free_Test
+      - rocrtstStress.Memory_Concurrent_Pool_Info_Test
+      - rocrtstStress.Queue_Add_Write_Index_ConcurrentTest
+      - rocrtstStress.Queue_CAS_Write_Index_ConcurrentTest
+      - rocrtstStress.Queue_LoadStore_Write_Index_ConcurrentTest
+
+  # FFM Simulator - only Core and Extended groups allowed
+  FFM_SIMULATOR:
+    allowed_groups: [Core, Extended]
+    blocked_tests: []

@@ -4,8 +4,8 @@
 #pragma once
 
 #include "common.hpp"
+#include "common/defines.h"
 #include "components/fwd.hpp"
-#include "defines.hpp"
 
 #include <timemory/api.hpp>
 #include <timemory/backends/process.hpp>

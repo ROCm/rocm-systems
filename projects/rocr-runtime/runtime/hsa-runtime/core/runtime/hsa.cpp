@@ -2806,6 +2806,12 @@ hsa_status_t hsa_status_string(
           "HSA_STATUS_ERROR_OUT_OF_REGISTERS: Kernel has requested more VGPRs than are available "
           "on this agent";
       break;
+    case HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS:
+      *status_string =
+          "HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS: Kernel dispatch packet parameters "
+          "exceed hardware limits for this agent (e.g. register usage, work-group dimensions, "
+          "or other dispatch constraints)";
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }

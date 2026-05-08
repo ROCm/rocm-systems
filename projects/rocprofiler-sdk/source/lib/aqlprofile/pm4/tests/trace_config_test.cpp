@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
-#include "../trace_config.h"
+#include "lib/aqlprofile/pm4/trace_config.h"
 
 namespace pm4_builder
 {

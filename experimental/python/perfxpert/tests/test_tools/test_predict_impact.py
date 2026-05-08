@@ -21,6 +21,18 @@ def _clear_prediction_store():
 # --------------------------------------------------------------------- #
 
 
+def test_readonly_sqlite_uri_escapes_path_metacharacters(tmp_path):
+    db = tmp_path / "trace db#1.db"
+    uri = predict_impact._readonly_sqlite_uri(str(db))
+    assert uri.startswith("file:")
+    assert uri.endswith("?mode=ro")
+    assert "trace%20db%231.db" in uri
+
+
+def test_baseline_has_counters_empty_path_returns_false():
+    assert predict_impact._baseline_has_counters("") is False
+
+
 def test_predict_change_impact_vgpr_reduction_returns_bracket(tmp_path):
     """Fake DB path; bypass DB probes via change_params. Assert bracket > 0."""
     result = predict_impact.predict_change_impact(

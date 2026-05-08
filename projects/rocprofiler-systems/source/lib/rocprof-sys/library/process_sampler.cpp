@@ -5,6 +5,7 @@
 #include "core/config.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 
@@ -76,7 +77,8 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
 
     auto _now = std::chrono::steady_clock::now();
     auto _end =
-        _now + std::chrono::nanoseconds{ static_cast<uint64_t>(_duration * units::sec) };
+        _now +
+        std::chrono::nanoseconds{ static_cast<std::uint64_t>(_duration * units::sec) };
     while(_state && _state->load() < State::Finalized && get_state() < State::Finalized)
     {
         std::this_thread::sleep_until(_now);
@@ -138,8 +140,8 @@ sampler::setup()
 
     polling_finished = std::make_unique<promise_t>();
 
-    auto     _freq      = get_process_sampling_freq();
-    uint64_t _msec_freq = (1.0 / _freq) * 1.0e3;
+    auto          _freq      = get_process_sampling_freq();
+    std::uint64_t _msec_freq = (1.0 / _freq) * 1.0e3;
 
     polling_finished = std::make_unique<promise_t>();
 
@@ -167,7 +169,7 @@ sampler::shutdown()
     {
         size_t           _nitr     = 0;
         constexpr size_t _nitr_max = 100;
-        uint64_t         _freq     = (1.0 / get_process_sampling_freq()) * 1.0e3;
+        std::uint64_t    _freq     = (1.0 / get_process_sampling_freq()) * 1.0e3;
 
         // wait until the sampler is no longer sampling
         std::this_thread::sleep_for(msec_t{ _freq });

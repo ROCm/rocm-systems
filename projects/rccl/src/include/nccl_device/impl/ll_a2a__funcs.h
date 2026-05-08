@@ -26,9 +26,11 @@ NCCL_DEVICE_INLINE void amdLLA2aStoreLine(uint32_t* dst, uint32_t a0, uint32_t a
   __builtin_nontemporal_store(a2, (u32_gptr)dst + 2);
   __builtin_nontemporal_store(a3, (u32_gptr)dst + 3);
 #endif
+  asm volatile("" ::: "memory");
 }
 
 NCCL_DEVICE_INLINE void amdLLA2aLoadLine(const uint32_t* src, uint32_t& o0, uint32_t& o1, uint32_t& o2, uint32_t& o3) {
+  asm volatile("" ::: "memory");
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   union { v4u v; uint32_t w[4]; } u;
   u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
