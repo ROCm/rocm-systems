@@ -1606,8 +1606,8 @@ void GraphExec::PacketBatch::appendPacketToFlatBuffer(const uint8_t* pkt_raw,
   // packet until the valid header is committed with release semantics during
   // dispatch. Using type=0 (VENDOR_SPECIFIC) would be a processable packet type
   // that the CP could attempt to execute with incomplete body data.
-  static constexpr uint16_t kInvalidAqlHeader =
-      1;  // HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE
+  static constexpr uint16_t kInvalidAqlHeader = 1;
+       //HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE;
   memcpy(dst, &kInvalidAqlHeader, sizeof(kInvalidAqlHeader));
   // Zero completion signal; ApplyHwEventPatches re-patches it directly via flat_packet pointers.
   memset(dst + kSigOff, 0, sizeof(uint64_t));

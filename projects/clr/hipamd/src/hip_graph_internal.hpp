@@ -3046,9 +3046,9 @@ class GraphMemFreeNode : public GraphNode {
         hip::setCurrentDevice(device_id_);
       }
       auto device_id = phys_mem_obj->getUserData().deviceId;
-      // event markers enqeued by FreeMemory is not required in graph path
+      // event markers enqueued by FreeMemory is not required in graph path
       // on non DD path. Its causing deadlock in command queue thread.
-      // Packet batch flat is already ensuring barriers packets are added
+      // Graph Packet Batch is already ensuring barriers packets are added
       // before/after the AQL packet batch.
       bool kSkipEvent =  !AMD_DIRECT_DISPATCH;
       if (!g_devices[device_id]->FreeMemory(phys_mem_obj,

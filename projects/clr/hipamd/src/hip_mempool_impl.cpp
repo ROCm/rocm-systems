@@ -297,26 +297,27 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, b
       // The stream of destruction is a safe stream, because the app must handle sync
       ts.AddSafeStream(stream);
 
-      // Graph path: skip marker creation and blocking waits to avoid deadlocking
-      // the non-direct-dispatch queue thread. Markers enqueued during submit() land
-      // behind commands in the FIFO that depend on them, causing a deadlock.
-      // The safe stream added above is sufficient for reuse checks in FindMemory.
-      if (!skip_event) {
-        if (event == nullptr) {
-          // Add a marker to the stream to trace availability of this memory
-          Event* e = new hip::Event(0);
-          if (hipSuccess == e->addMarker(stream, nullptr)) {
-            ts.SetEvent(e);
-            // Make sure runtime sends a notification
-            auto result = e->ready();
-          }
-        } else {
-          ts.SetEvent(event);
+      // Preserve any caller-provided completion event even when marker creation is
+      // skipped. A null event is reserved for the explicit host-safe free path below.
+      if (event != nullptr) {
+        // If event is provided, then use it to track memory availability
+        ts.SetEvent(event);
+      } else if (!skip_event) {
+        // Add a marker to the stream to trace availability of this memory
+        // Graph path: skip marker creation and blocking waits to avoid deadlocking
+        // the non-direct-dispatch queue thread. Markers enqueued during submit() land
+        // behind commands in the FIFO that depend on them, causing a deadlock.
+        // The safe stream added above is sufficient for reuse checks in FindMemory.
+        Event* e = new hip::Event(0);
+        if (hipSuccess == e->addMarker(stream, nullptr)) {
+          ts.SetEvent(e);
+          // Make sure runtime sends a notification
+          auto result = e->ready();
         }
+      } else {
+        // Assume a safe release from hipFree() if stream is nullptr
+        ts.SetEvent(nullptr);
       }
-    } else {
-      // Assume a safe release from hipFree() if stream is nullptr
-      ts.SetEvent(nullptr);
     }
     free_heap_.AddMemory(memory, ts);
   }
