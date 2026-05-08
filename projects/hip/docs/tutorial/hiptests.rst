@@ -1,16 +1,16 @@
 .. meta::
-  :description: The SAXPY tutorial on HIP
-  :keywords: AMD, ROCm, HIP, SAXPY, tutorial
+  :description: Using HIP tests
+  :keywords: AMD, ROCm, HIP, rocminfo, hipInfo, GPU diagnostics, device properties tutorial
 
 *******************************************************************************
-Working with HIP Tests
+Working with HIP tests
 *******************************************************************************
 
 This tutorial introduces the HIP tests component available alongside the HIP API and runtime.
 HIP tests are not installed as part of the standard ROCm installation, but you
 can build ``rocm-systems/projects/hip-tests`` as described in :ref:`build-tests`.
 
-The catch tests and samples provided in ``hip-tests`` are both a diagnostic tool and a learning toolkit.
+The catch tests and samples provided in ``hip-tests`` serve as both a diagnostic tool and a learning toolkit.
 You can use the tools and tests to validate your own system environment and HIP installation. You can
 also review the code and see how specific aspects of the HIP API are used under different conditions. 
 
@@ -19,22 +19,22 @@ Running HIP tests
 
 The HIP tests are catch tests provided alongside the HIP component, letting you test your
 system and the HIP runtime. In addition, HIP tests provide some sample applications and
-utilities that can be individually built and run as needed. 
+utilities that can be built and run individually as needed.
 
 The top level of ``rocm-systems/projects/hip-tests`` is organized around one purpose: it is the official unit‑test
 and sample suite for HIP. The ``rocm-systems/projects/hip-tests/catch`` folder contains the lightweight Catch2-based
 C++ testing library unit test framework used by HIP tests. It provides the test harness for HIP API tests and lets
 you see how HIP functions are used and validated in isolation.
 
-The catch tests of ``hip-tests`` serves two complementary purposes: provides a comprehensive diagnostic suite for your
-HIP installation, and executable examples of how to write catch tests for your own code. The tests show:
+The ``hip-tests`` catch tests serve two complementary purposes: they provide a comprehensive diagnostic suite for your
+HIP installation, and executable examples of how to write catch tests for your own code. The tests show how to:
 
-* How to structure a HIP unit test
-* How to wrap HIP API calls with assertions
-* How to test kernels deterministically
-* How to test memory behavior, events, streams, and error handling
-* How to isolate failures cleanly
-* How to write reproducible GPU tests that don’t depend on timing or scheduling quirks
+* Structure a HIP unit test
+* Wrap HIP API calls with assertions
+* Test kernels deterministically
+* Test memory behavior, events, streams, and error handling
+* Isolate failures cleanly
+* Write reproducible GPU tests that don’t depend on timing or scheduling quirks
 
 Follow the instructions in :ref:`build-tests`, and run the tests using the ``ctest`` command from the ``build`` folder. The command runs more than 4,000 tests and writes results in the ``build/Testing/Temporary/LastTest.log`` file. You can also build and run individual tests as explained in the build instructions. 
 
@@ -47,7 +47,7 @@ The ROCm/hip-tests/samples folder is organized into a set of small utilities tha
 
   - ``samples/0_Intro/bit_extract``: Runs a small HIP kernel that extracts specific bits from integers. It demonstrates writing a small kernel, launching the kernel, managing memory, and validating results on the host.
   - ``samples/0_Intro/generic_target``: Demonstrates building code for generic GPU targets rather than for specific architectures. This is useful when you want to distribute HIP binaries that run on a variety of AMD GPUs without recompiling. 
-  - ``samples/0_Intro/module_api``: Shows how to use the HIP module API, which is analogous to CUDA’s driver API. It demonstrates loading precompiled code objects (.co or .hsaco) and launching kernels via the module API instead of the runtime API.
+  - ``samples/0_Intro/module_api``: Shows how to use the HIP module API. It demonstrates loading precompiled code objects (.co or .hsaco) and launching kernels via the module API instead of the runtime API.
   - ``samples/0_Intro/module_api_global``: Extends the module API example to show how to access global variables defined inside a GPU module, use global variables to configure the kernel, and copy data to and from those global variables. 
   - ``samples/0_Intro/square``: Implements a small kernel that squares each element of an array. It demonstrates minimal kernel structure, memory allocation, launch parameters, and verifying results on the host. 
 

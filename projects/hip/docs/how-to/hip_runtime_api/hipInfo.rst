@@ -23,7 +23,7 @@ Using hipInfo
 hipInfo command
 ----------------
 
-The command requires no arguments and will automatically detect and report information for all available AMD GPU devices.
+The command requires no arguments and automatically detects and reports information for all available AMD GPU devices.
 
 .. code-block:: bash
 
@@ -35,7 +35,7 @@ Output Information
 ``hipInfo`` reports support for various GPU features, such as:
 
 * Atomic operations (int32, int64, float)
-* Double precision floating point
+* Double-precision floating point
 * Warp/wavefront operations (vote, ballot, shuffle)
 * Thread fence operations
 * 3D grid support
@@ -47,7 +47,7 @@ The tool also displays the following categories of information for each detected
 
    * **Name**: GPU device name
    * **pciBusID, pciDeviceID, pciDomainID**: PCI location identifiers
-   * **gcnArchName**: AMD GCN architecture name (for example: gfx906, gfx90a, gfx1100)
+   * **gcnArchName**: AMD architecture name (for example: gfx906, gfx90a, gfx1100)
 
 - Compute Capabilities
 
@@ -118,7 +118,7 @@ Example Output
 
 .. _hip-v-rocm-info:
 
-Comparing hipinfo and rocminfo
+Comparing hipInfo and rocminfo
 ------------------------------
 
 While both ``hipInfo`` and ``rocminfo`` provide GPU device information, they serve different purposes:
@@ -139,6 +139,6 @@ While both ``hipInfo`` and ``rocminfo`` provide GPU device information, they ser
 * Reports hardware topology and NUMA relationships
 * Includes ISA details and agent characteristics
 
-Use ``hipInfo`` when you need to quickly assess GPU compute capabilities and memory, check device capabilities for HIP programming decisions, and verify device properties available to your HIP applications. 
+Use ``hipInfo`` to quickly assess GPU compute capabilities and memory, check device capabilities for HIP programming decisions, and verify the device properties available to your HIP applications. 
 
 Use ``rocminfo`` to understand detailed system topology with comprehensive hardware specifications, verify HSA runtime functionality, or diagnose low-level hardware detection or configuration issues. For more information, see `ROCmInfo documentation <https://rocm.docs.amd.com/projects/rocminfo/en/latest/index.html>`__.

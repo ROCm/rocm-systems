@@ -9,7 +9,7 @@ Build HIP from source
 Prerequisites
 =================================================
 
-HIP code can be developed on AMD ROCm platform using `HIP-Clang compiler <https://rocm.docs.amd.com/projects/llvm-project/en/latest/index.html>`__.
+HIP code can be developed on AMD ROCm platform using the `HIP-Clang compiler <https://rocm.docs.amd.com/projects/llvm-project/en/latest/index.html>`__.
 Before building and running HIP, ensure drivers and prebuilt packages are properly
 installed on the platform.
 
@@ -41,10 +41,10 @@ Building the HIP runtime
 As of ROCM 7.1, HIP is integrated into the core ROCm projects resides in the ``rocm-systems`` monorepository.
 In addition, the following components are also part of the monorepository:
 
-* ``clr``, AMD's Compute Language Runtime, includes ROCclr, HIPAMD and OpenCl.
+* ``clr``, AMD's Compute Language Runtime, includes ROCclr, HIPAMD and OpenCL.
 * ``hip-tests``, the HIP testing suite.
 
-Set the repository branch using the variable: ``ROCM_BRANCH``. For example, for ROCM 7.1, use:
+Set the repository branch using the variable: ``ROCM_BRANCH``. For example, for ROCm 7.1, use:
 
 .. code-block:: shell
 
@@ -194,9 +194,9 @@ HIP catch tests utilize the Catch2 testing framework.
       cd $HIPTESTS_DIR/build/catch_tests/unit/texture
       ./TextureTest
 
-#. Build a standalone HIP Catch2 test.
+#. Build a standalone HIP catch test.
 
-   HIP Catch2 supports compiling standalone tests using ``amdclang++``. For example:
+   HIP catch tests support compiling standalone tests using ``amdclang++``. For example:
 
    .. code-block:: shell
 
