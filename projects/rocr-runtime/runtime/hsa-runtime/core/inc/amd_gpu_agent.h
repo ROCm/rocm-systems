@@ -325,7 +325,7 @@ class GpuAgent : public GpuAgentInt {
   // a coordinator engine so it rotates independently of body assignments.
   inline uint32_t PickSdmaEngine(uint32_t engine_mask, bool advance = true) {
     if (!engine_mask) return 0;
-    int count = __builtin_popcount(engine_mask);
+    int count = rocr::os::Popcount(engine_mask);
     if (count == 1) return rocr::os::Ffs(engine_mask);
     uint32_t rr = advance ? sdma_rr_index_.fetch_add(1, std::memory_order_relaxed)
                           : sdma_rr_index_.load(std::memory_order_relaxed);
