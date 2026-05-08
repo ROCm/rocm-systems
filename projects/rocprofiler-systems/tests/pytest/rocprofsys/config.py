@@ -224,10 +224,21 @@ class RocprofsysConfig:
             "TERM": os.environ.get("TERM", ""),
             "LANG": os.environ.get("LANG", ""),
         }
-        # To maintain a stable environment, only inherit OMPI_ and ROCPROFSYS_ env vars
+        # Rocprofsys and OMPI env var for RUN_AS_ROOT
         for key, value in os.environ.items():
             if key.startswith(("OMPI_", "ROCPROFSYS_")):
                 env[key] = value
+
+        # Open MPI bakes its build-time install prefix into its binaries as
+        # string literals. When the binaries are relocated that path no
+        # longer exists, so these override the baked-in prefix at runtime.
+        for key in (
+            "OPAL_PREFIX",
+            "PRTE_PREFIX",
+            "PMIX_PREFIX",
+        ):
+            if key in os.environ:
+                env[key] = os.environ[key]
 
         # Forward sanitizer runtime options so pytest-launched binaries honor
         # the suppression files / exitcode set by the CI workflow.

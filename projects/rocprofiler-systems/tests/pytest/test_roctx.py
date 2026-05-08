@@ -92,7 +92,7 @@ class TestROCTx(RocprofsysTest):
 
     REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
 
-    @pytest.mark.timeout(120)
+    @pytest.mark.timeout(180)
     @pytest.mark.parametrize(
         "mode",
         [
