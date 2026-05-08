@@ -32,30 +32,10 @@ Thread trace profiling is performed in the following steps:
 
 Tracing and decoding is handled by ``rocprofv3`` while visualization is handled by the ROCprof Compute Viewer.
 
-Prerequisites
-=========
-
-- aqlprofile:
-
-  * ROCm 7.x build, or
-
-  * Early release can be `built from source <https://github.com/ROCm/rocm-systems/tree/develop/projects/aqlprofile>`_
-
-  * Otherwise, ``rocprofv3`` throws error "INVALID_SHADER_DATA" or "Agent not supported".
-
-- Installation of ROCprof Trace Decoder component:
-
-  * For binary files, see `ROCprof trace decoder release page <https://github.com/ROCm/rocprof-trace-decoder/releases>`_.
-
-  * Default install location is ``/opt/rocm/lib``
-
-  * For custom location, use parameter ``--att-library-path``
-
-
 .. _thread-trace-parameters:
 
 rocprofv3 parameters for thread tracing
-============================
+========================================
 
 To collect thread trace with default parameters, use:
 
@@ -147,7 +127,7 @@ As explained in the preceding section, you can specify parameters on the command
   }
 
 Thread tracing for multiple kernel instances
-=============================
+=============================================
 
 By default, ``rocprofv3`` enables thread trace only once per kernel instance. This implies that if an application launches the same kernel multiple times, only the first instance will be traced.
 To enable thread trace for multiple kernel instances, use the ``kernel-iteration-range`` parameter.
