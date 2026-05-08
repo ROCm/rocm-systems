@@ -79,8 +79,9 @@ static_assert(false, "Operating System not detected!");
 #endif
 
 /// @brief: Loads dynamic library based on file name. Return value will be NULL
-/// if failed. Uses RTLD_NODELETE to keep the library mapped after dlclose,
-/// preventing crashes when libraries have circular dependencies back to ROCR.
+/// if failed. Uses platform-specific mechanisms to keep the library mapped
+/// after close (RTLD_NODELETE on Linux, module pinning on Windows) to prevent
+/// crashes when libraries have circular dependencies back to ROCR.
 /// @param: filename(Input), file name of the library.
 /// @return: LibHandle.
 LibHandle LoadLib(std::string filename);
