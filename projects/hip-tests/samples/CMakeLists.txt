@@ -26,12 +26,6 @@ if(NOT DEFINED HIP_PATH)
     endif()
 endif()
 
-if(UNIX)
-  set(HIPCONFIG_EXEC "hipconfig")
-else()
-  set(HIPCONFIG_EXEC "hipconfig.bat")
-endif()
-
 # both are not set
 if(NOT DEFINED HIP_PATH AND NOT DEFINED ROCM_PATH)
     if(WIN32)
@@ -47,30 +41,22 @@ if(NOT DEFINED HIP_PATH AND NOT DEFINED ROCM_PATH)
         set(ROCM_PATH "/opt/rocm")
     endif()
 elseif(DEFINED HIP_PATH AND NOT DEFINED ROCM_PATH)
-    if(WIN32)
-        # On Windows, ROCM_PATH is typically the same as HIP_PATH
-        set(ROCM_PATH ${HIP_PATH} CACHE STRING "ROCM Path")
-    else()
-        execute_process(COMMAND ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --rocmpath
-                    OUTPUT_VARIABLE ROCM_PATH
-                    OUTPUT_STRIP_TRAILING_WHITESPACE)
-    endif()
+    set(ROCM_PATH ${HIP_PATH} CACHE STRING "ROCM Path")
 elseif(DEFINED ROCM_PATH AND NOT DEFINED HIP_PATH)
     set(HIP_PATH ${ROCM_PATH})
 endif()
 message(STATUS "HIP_PATH: ${HIP_PATH}")
 message(STATUS "ROCM_PATH: ${ROCM_PATH}")
 
-execute_process(COMMAND ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --version
-                OUTPUT_VARIABLE HIP_VERSION
-                OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-string(REPLACE "." ";" VERSION_LIST ${HIP_VERSION})
+# Use find_package(hip) to get HIP version instead of hipconfig (deprecated).
+find_package(hip REQUIRED CONFIG PATHS "${ROCM_PATH}")
+string(REPLACE "." ";" VERSION_LIST ${hip_VERSION})
 list(GET VERSION_LIST 0 HIP_VERSION_MAJOR)
 list(GET VERSION_LIST 1 HIP_VERSION_MINOR)
 list(GET VERSION_LIST 2 HIP_VERSION_PATCH_GITHASH)
 string(REPLACE "-" ";" VERSION_LIST ${HIP_VERSION_PATCH_GITHASH})
 list(GET VERSION_LIST 0 HIP_VERSION_PATCH)
+set(HIP_VERSION ${hip_VERSION})
 
 
 if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
