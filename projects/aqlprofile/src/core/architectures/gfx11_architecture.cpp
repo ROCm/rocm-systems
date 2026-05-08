@@ -21,7 +21,7 @@
 // THE SOFTWARE.
 
 #include "core/architectures/gfx11_architecture.hpp"
-#include "core/gfx11_factory.h"
+#include "aqlprofile-sdk/aql_profile_v2.h"
 #include "def/gfx11_def.h"
 #include "pm4/gfx11_cmd_builder.h"
 #include "pm4/gfx11_primitives_provider.hpp"
@@ -87,8 +87,44 @@ void Gfx11Architecture::InitializeRegisterSchema() {
 }
 
 void Gfx11Architecture::InitializeBlockTable() {
-  // Gfx11Factory::block_table_ is the shared static GFX11 block table.
-  block_table_ = Gfx11Factory::block_table_;
+  static const GpuBlockInfo* table[AQLPROFILE_BLOCKS_NUMBER] = {
+      &CpcCounterBlockInfo,       // CPC
+      &CpfCounterBlockInfo,       // CPF
+      &GdsCounterBlockInfo,       // GDS
+      &GrbmCounterBlockInfo,      // GRBM
+      NULL,                       // GRBMSe
+      &SpiCounterBlockInfo,       // SPI
+      &SqCounterBlockInfo,        // SQ
+      NULL,                       // SQCs
+      NULL,                       // SRBM
+      &SxCounterBlockInfo,        // SX
+      &TaCounterBlockInfo,        // TA
+      NULL,                       // TCA
+      NULL,                       // TCC
+      &TcpCounterBlockInfo,       // TCP
+      NULL,                       // TD
+      // MC blocks
+      NULL,                       // MC_ARB
+      NULL,                       // MC_HUB
+      NULL,                       // MC_MCBVM
+      NULL,                       // MC_SEQ
+      NULL,                       // McVmL2
+      NULL,                       // MC_XBAR
+      NULL,                       // ATC
+      NULL,                       // ATCL2
+      &GceaCounterBlockInfo,      // GCEA
+      NULL,                       // RPB
+      // System blocks
+      NULL,                       // SDMA
+      // New Navi blocks
+      &Gl1aCounterBlockInfo,      // GL1A
+      &Gl1cCounterBlockInfo,      // GL1C
+      &Gl2aCounterBlockInfo,      // GL2A
+      &Gl2cCounterBlockInfo,      // GL2C
+      &GcrCounterBlockInfo,       // GCR
+      &GusCounterBlockInfo,       // GUS
+  };
+  block_table_ = table;
   block_count_ = AQLPROFILE_BLOCKS_NUMBER;
 }
 

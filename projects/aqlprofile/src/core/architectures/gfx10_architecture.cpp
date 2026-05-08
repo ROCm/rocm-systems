@@ -28,12 +28,6 @@
 
 namespace aql_profile {
 
-// Forward declaration to access the shared static GFX10 block table.
-class Gfx10Factory {
- public:
-  static const GpuBlockInfo* block_table_[];
-};
-
 using namespace gfxip::gfx10;
 
 Gfx10Architecture::Gfx10Architecture(const AgentInfo* agent_info)
@@ -94,8 +88,44 @@ void Gfx10Architecture::InitializeRegisterSchema() {
 }
 
 void Gfx10Architecture::InitializeBlockTable() {
-  // Gfx10Factory::block_table_ is the shared static GFX10 block table.
-  block_table_ = Gfx10Factory::block_table_;
+  static const GpuBlockInfo* table[AQLPROFILE_BLOCKS_NUMBER] = {
+      &CpcCounterBlockInfo,       // CPC
+      &CpfCounterBlockInfo,       // CPF
+      &GdsCounterBlockInfo,       // GDS
+      &GrbmCounterBlockInfo,      // GRBM
+      NULL,                       // GRBMSe
+      &SpiCounterBlockInfo,       // SPI
+      &SqCounterBlockInfo,        // SQ
+      NULL,                       // SQCs
+      NULL,                       // SRBM
+      &SxCounterBlockInfo,        // SX
+      &TaCounterBlockInfo,        // TA
+      NULL,                       // TCA
+      NULL,                       // TCC
+      NULL,                       // TCP
+      NULL,                       // TD
+      // MC blocks
+      NULL,                       // MC_ARB
+      NULL,                       // MC_HUB
+      NULL,                       // MC_MCBVM
+      NULL,                       // MC_SEQ
+      NULL,                       // McVmL2
+      NULL,                       // MC_XBAR
+      NULL,                       // ATC
+      NULL,                       // ATCL2
+      &GceaCounterBlockInfo,      // GCEA
+      NULL,                       // RPB
+      // System blocks
+      NULL,                       // SDMA
+      // New Navi blocks
+      &Gl1aCounterBlockInfo,      // GL1A
+      &Gl1cCounterBlockInfo,      // GL1C
+      &Gl2aCounterBlockInfo,      // GL2A
+      &Gl2cCounterBlockInfo,      // GL2C
+      &GcrCounterBlockInfo,       // GCR
+      &GusCounterBlockInfo,       // GUS
+  };
+  block_table_ = table;
   block_count_ = AQLPROFILE_BLOCKS_NUMBER;
 }
 

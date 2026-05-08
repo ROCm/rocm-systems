@@ -22,29 +22,43 @@
 
 #include "pm4_factory.h"
 
-#include <mutex>
 #include <shared_mutex>
 #include <vector>
 
 #include "core/architecture_init.hpp"
-#include "core/pm4_factory_adapter.hpp"
 #include "pm4/pmc_builder.h"
 #include "pm4/spm_builder.h"
 #include "pm4/sqtt_builder.h"
 
 namespace aql_profile {
 
+Pm4Factory::Pm4Factory(HardwareArchitecture* arch, const AgentInfo* agent_info)
+    : cmd_builder_(NULL), pmc_builder_(NULL), spm_builder_(NULL), sqtt_builder_(NULL),
+      concurrent_mode_(concurrent_create_mode_),
+      architecture_(arch), prims_(nullptr) {
+  static bool spm_kfd = getenv("ROCP_SPM_KFD_MODE") != NULL;
+  spm_kfd_mode_ = spm_kfd;
+  InitializeBuilders(agent_info);
+}
+
+void Pm4Factory::InitializeBuilders(const AgentInfo* agent_info) {
+  cmd_builder_ = architecture_->CreateCmdBuilder();
+  prims_        = architecture_->CreatePrimitivesProvider();
+  const auto& config = architecture_->GetConfig();
+  pmc_builder_  = new pm4_builder::GpuPmcBuilder(config, cmd_builder_, prims_, concurrent_mode_);
+  spm_builder_  = new pm4_builder::GpuSpmBuilder(cmd_builder_, prims_);
+  sqtt_builder_ = new pm4_builder::GpuSqttBuilder(config, cmd_builder_, prims_, agent_info->timestamp_freq);
+}
+
 Pm4Factory::~Pm4Factory() {
   delete cmd_builder_;
   delete pmc_builder_;
   delete spm_builder_;
   delete sqtt_builder_;
+  delete prims_;
+  delete architecture_;
 }
 
-int Pm4Factory::GetNumWGPs() const {
-  if (pmc_builder_) return pmc_builder_->GetNumWGPs();
-  return 1;
-}
 namespace {
 struct locked_agent_cache {
   std::shared_mutex mutex;
@@ -111,7 +125,6 @@ const AgentInfo* GetAgentInfo(aqlprofile_agent_handle_t agent_id) {
 }
 
 Pm4Factory* Pm4Factory::Create(const hsa_agent_t agent, bool concurrent) {
-  std::lock_guard<mutex_t> lck(mutex_);
   const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(agent);
 
   hsa_status_t status = HSA_STATUS_ERROR;
@@ -130,32 +143,20 @@ Pm4Factory* Pm4Factory::Create(const hsa_agent_t agent, bool concurrent) {
     throw aql_profile_exc_msg("Pm4Factory::Create() bad agent");
   }
 
-  static bool use_new_arch = getenv("AQLPROFILE_USE_NEW_ARCH") != NULL;
-  if (use_new_arch) {
-    concurrent_create_mode_ = concurrent;
-    HardwareArchitecture* arch = CreateArchitectureForAgent(agent_info);
-    if (arch) return new Pm4FactoryAdapter(arch, agent_info);
-    // Fall through to legacy path if architecture not recognised
-  }
-
-  const gpu_id_t gpu_id = GetGpuId(agent_name.data());
-  return Pm4Factory::Create(agent_info, gpu_id, concurrent);
+  concurrent_create_mode_ = concurrent;
+  HardwareArchitecture* arch = CreateArchitectureForAgent(agent_info);
+  if (!arch) throw aql_profile_exc_msg("Pm4Factory::Create() unrecognised GPU");
+  return new Pm4Factory(arch, agent_info);
 }
 
 Pm4Factory* Pm4Factory::Create(aqlprofile_agent_handle_t agent_info, bool concurrent) {
   const auto* info = GetAgentInfo(agent_info);
   if (info == NULL) throw aql_profile_exc_val<uint64_t>("Bad agent handle", agent_info.handle);
 
-  static bool use_new_arch = getenv("AQLPROFILE_USE_NEW_ARCH") != NULL;
-  if (use_new_arch) {
-    concurrent_create_mode_ = concurrent;
-    HardwareArchitecture* arch = CreateArchitectureForAgent(info);
-    if (arch) return new Pm4FactoryAdapter(arch, info);
-    // Fall through to legacy path if architecture not recognised
-  }
-
-  const gpu_id_t gpu_id = GetGpuId(info->gfxip);
-  return Pm4Factory::Create(info, gpu_id, concurrent);
+  concurrent_create_mode_ = concurrent;
+  HardwareArchitecture* arch = CreateArchitectureForAgent(info);
+  if (!arch) throw aql_profile_exc_msg("Pm4Factory::Create() unrecognised GPU");
+  return new Pm4Factory(arch, info);
 }
 
 }  // namespace aql_profile

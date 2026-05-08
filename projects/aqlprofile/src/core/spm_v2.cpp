@@ -4,6 +4,7 @@
 #include "memorymanager.hpp"
 #include "core/commandbuffermgr.hpp"
 
+#include <cassert>
 #include <thread>
 #include <condition_variable>
 

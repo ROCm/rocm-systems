@@ -23,22 +23,20 @@
 #ifndef SRC_CORE_PM4_FACTORY_H_
 #define SRC_CORE_PM4_FACTORY_H_
 
-#include <assert.h>
 #include "hsa_includes.h"
 #include <stdint.h>
 #include <string.h>
 
 #include <climits>
-#include <map>
-#include <mutex>
-#include <sstream>
 #include <string>
 
 #include "aqlprofile-sdk/aql_profile_v2.h"
 #include "core/aql_profile.hpp"
 #include "core/aql_profile_exception.h"
+#include "core/hardware_architecture.hpp"
 #include "def/gpu_block_info.h"
 #include "pm4/cmd_builder.h"
+#include "pm4/primitives_provider.hpp"
 #include "util/hsa_rsrc_factory.h"
 
 namespace pm4_builder {
@@ -49,341 +47,110 @@ class SqttBuilder;
 
 namespace aql_profile {
 
-struct pm4_agent_info {
-  std::string agent_gfxip;
-  uint32_t cu_num;
-  uint32_t se_num;
-  uint32_t shader_arrays_per_se;
-  uint32_t xcc_num;
-};
-
 const AgentInfo* GetAgentInfo(aqlprofile_agent_handle_t agent_id);
 
 aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_info);
 
-// GPU enumeration
-enum gpu_id_t {
-  INVAL_GPU_ID,  // invalid GPU id
-  GFX9_GPU_ID,   // generic Gfx9 id
-  MI100_GPU_ID,  // Mi100 GPU id
-  MI200_GPU_ID,  // Mi200 GPU id
-  MI300_GPU_ID,  // Mi300 GPU id
-  MI350_GPU_ID,  // Mi350 GPU id
-  GFX10_GPU_ID,  // generic Gfx10 id
-  GFX11_GPU_ID,  // generic Gfx11 id
-  GFX115X_GPU_ID,  // Gfx11.5x id
-  GFX12_GPU_ID,  // generic Gfx12 id
-  MI450_GPU_ID,  // Mi450 GPU id
-};
-
-// Block info map class
-class BlockInfoMap {
- public:
-  BlockInfoMap(const GpuBlockInfo** table, const uint32_t& size)
-      : block_table_(table), block_count_(size / sizeof(uintptr_t)) {}
-  BlockInfoMap(const BlockInfoMap& map)
-      : block_table_(map.block_table_), block_count_(map.block_count_) {}
-
-  // Get block info for a given block id
-  const GpuBlockInfo* Get(const uint32_t& block_id) const {
-    return (block_id < block_count_) ? block_table_[block_id] : NULL;
-  }
-
-  // Find block by name
-  // Return block id or UINT32_MAX if not found
-  uint32_t Find(const char* name) const {
-    uint32_t index = 0;
-    while (index < block_count_) {
-      const GpuBlockInfo* entry = block_table_[index];
-      if (entry) {
-        if (strcmp(name, entry->name) == 0) break;
-      }
-      ++index;
-    }
-    return (index == block_count_) ? UINT32_MAX : index;
-  }
-
- private:
-  // Block info table
-  const GpuBlockInfo** const block_table_;
-  // Number of elements in the block info table
-  const uint32_t block_count_;
-};
-
-// Factory of PM4 builders
+// Factory of PM4 builders — owns the HardwareArchitecture and all PM4 builder objects.
 class __attribute__((visibility("default"))) Pm4Factory {
  public:
-  typedef std::mutex mutex_t;
-
+  // Create factory for a given agent handle
   static Pm4Factory* Create(aqlprofile_agent_handle_t agent_info, bool concurrent = false);
-  static Pm4Factory* Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent);
-  // Create factory for a given agent
+  // Create factory for a given HSA agent
   static Pm4Factory* Create(const hsa_agent_t agent, const bool concurrent = false);
   // Create factory for a given profile
   static Pm4Factory* Create(const profile_t* profile) {
-    // First check and save the mode
     return Create(profile->agent, CheckConcurrent(profile));
   }
-  // Destroy factory
-  static void Destroy();
+  // Destroy factory (no-op: callers own factory objects)
+  static void Destroy() {}
 
-  // Return gpu id
-  virtual gpu_id_t GetGpuId() const { return gpu_id_; }
-  // Is pmc to be profiled concurrently?
   virtual bool IsConcurrent() const { return concurrent_mode_; }
-  // Is getting SPM data using driver public API?
   virtual bool SpmKfdMode() const { return spm_kfd_mode_; }
 
-  // Return PM4 command builder
   virtual pm4_builder::CmdBuilder* GetCmdBuilder() const { return cmd_builder_; }
-  // Return PMC PM4 packets builder
   virtual pm4_builder::PmcBuilder* GetPmcBuilder() const { return pmc_builder_; }
-  // Return SPM PM4 packets builder
   virtual pm4_builder::SpmBuilder* GetSpmBuilder() const { return spm_builder_; }
-  // Return SQTT PM4 packets builder
   virtual pm4_builder::SqttBuilder* GetSqttBuilder() const { return sqtt_builder_; }
 
-  // Return Shader Engines number
-  virtual uint32_t GetShaderEnginesNumber() const { return agent_info_->se_num; }
-  virtual uint32_t GetShaderArraysNumber() const { return agent_info_->shader_arrays_per_se; }
-  virtual uint32_t GetComputeUnitNumber() const { return agent_info_->cu_num; }
-  // Return SQTT buffer alignment
+  virtual uint32_t GetShaderEnginesNumber() const { return architecture_->GetConfig().se_count; }
+  virtual uint32_t GetShaderArraysNumber() const { return architecture_->GetConfig().sa_per_se_count; }
+  virtual uint32_t GetComputeUnitNumber() const { return architecture_->GetConfig().cu_count; }
   virtual uint32_t GetSQTTBufferAlignment() const { return 0x1000; }
-  virtual const char* GetGFX() const { return agent_info_->name; }
-  virtual bool IsGFX9() const { return false; }
-  virtual bool IsGFX10() const { return false; }
-  virtual bool IsGFX11() const { return false; }
-  virtual bool IsGFX12() const { return false; }
-  // Return number of XCC on the GPU
-  virtual uint32_t GetXccNumber() const { return agent_info_->xcc_num; }
-  // Return number of XCC per AID
-  uint32_t GetXccPerAid() const { return agent_info_->xcc_per_aid; }
+  virtual const char* GetGFX() const {
+    gfx_name_ = architecture_->GetConfig().name;
+    return gfx_name_.c_str();
+  }
+  virtual bool IsGFX9() const { return architecture_->IsGFX9(); }
+  virtual bool IsGFX10() const { return architecture_->IsGFX10(); }
+  virtual bool IsGFX11() const { return architecture_->IsGFX11(); }
+  virtual bool IsGFX12() const { return architecture_->IsGFX12(); }
+  virtual uint32_t GetXccNumber() const { return architecture_->GetConfig().xcc_count; }
+  virtual uint32_t GetXccPerAid() const { return architecture_->GetConfig().xcc_per_aid; }
 
-  // SPM specific
-  virtual uint32_t GetSpmSampleDelayMax() { return 0; }
+  virtual uint32_t GetSpmSampleDelayMax() { return architecture_->GetSpmSampleDelayMax(); }
 
-  // Capability flags (legacy defaults derived from gpu_id_; overridden by Pm4FactoryAdapter)
-  virtual bool HasSpmCore1() const {
-    return gpu_id_ == MI100_GPU_ID || gpu_id_ == MI200_GPU_ID;
-  }
-  virtual bool HasSqttStatus2Register() const { return gpu_id_ >= GFX12_GPU_ID; }
-  virtual bool HasWptrRelativeAddressing() const { return gpu_id_ == GFX11_GPU_ID; }
-  virtual bool NeedsSqttHeaderPacket() const { return gpu_id_ < GFX10_GPU_ID; }
-  virtual bool SupportsSpmV2() const {
-    return gpu_id_ >= MI200_GPU_ID && gpu_id_ <= MI350_GPU_ID;
-  }
-  virtual uint32_t GetSqttHeaderVersion() const {
-    if (gpu_id_ == MI300_GPU_ID) return 5;
-    if (gpu_id_ == MI350_GPU_ID) return 6;
-    return 4;  // Generic GFX9 (MI100, MI200, plain GFX9)
-  }
+  virtual bool HasSpmCore1() const { return architecture_->GetConfig().has_spm_core1; }
+  virtual bool HasSqttStatus2Register() const { return architecture_->GetConfig().has_sqtt_status2_register; }
+  virtual bool HasWptrRelativeAddressing() const { return architecture_->GetConfig().has_wptr_relative_addressing; }
+  virtual bool NeedsSqttHeaderPacket() const { return architecture_->GetConfig().needs_sqtt_header_packet; }
+  virtual bool SupportsSpmV2() const { return architecture_->GetConfig().supports_spm_v2; }
+  virtual uint32_t GetSqttHeaderVersion() const { return architecture_->GetSqttHeaderVersion(); }
 
   virtual const GpuBlockInfo* GetBlockInfo(const aqlprofile_pmc_event_t* event) const {
-    const GpuBlockInfo* info = block_map_.Get(event->block_name);
-    if (info == NULL) throw std::runtime_error("Bad Block");
-    // Checking that the block index is in proper range
-    if (event->block_index >= info->instance_count) throw std::runtime_error("Bad Index");
-      // Checking that the counter event index is in proper range
-#if 0
-    if (event->counter_id > info->event_id_max)
-      throw event_exception(std::string("Bad event ID, "), *event);
-#endif
-    return info;
+    return architecture_->GetBlockInfo(event->block_name);
   }
-
-  // Return block info foor a given event
   virtual const GpuBlockInfo* GetBlockInfo(const event_t* event) const {
-    const GpuBlockInfo* info = block_map_.Get(event->block_name);
-    if (info == NULL) throw event_exception(std::string("Bad block, "), *event);
-    // Checking that the block index is in proper range
-    if (event->block_index >= info->instance_count)
-      throw event_exception(std::string("Bad block index, "), *event);
-      // Checking that the counter event index is in proper range
-#if 0
-    if (event->counter_id > info->event_id_max)
-      throw event_exception(std::string("Bad event ID, "), *event);
-#endif
-    return info;
+    return architecture_->GetBlockInfo(event->block_name);
   }
-
-  // Return block info for a given block id
   virtual const GpuBlockInfo* GetBlockInfo(const uint32_t& block_id) const {
-    return block_map_.Get(block_id);
+    return architecture_->GetBlockInfo(block_id);
   }
 
   virtual size_t GetNumEvents(uint32_t block_name) const {
-    size_t se_number = GetShaderEnginesNumber() / GetXccNumber();
-    size_t sa_number = GetShaderArraysNumber();
-    size_t block_samples_count = 1;
-    auto* block_info = GetBlockInfo(block_name);
-
-    if (block_info->attr & CounterBlockSeAttr)
-      block_samples_count *= se_number;
-    if (block_info->attr & CounterBlockSaAttr)
-      block_samples_count *= sa_number;
-    if (block_info->attr & CounterBlockWgpAttr)
-      block_samples_count *= GetNumWGPs();
-    return block_samples_count;
+    return architecture_->GetNumEventsForBlock(block_name);
   }
-
   virtual size_t GetBytesNeeded(uint32_t block_name) const {
-    return GetNumEvents(block_name) * GetXccNumber() * sizeof(uint64_t);
+    return architecture_->GetBytesNeededForBlock(block_name);
   }
 
-  // Return block id for a given block name string
-  virtual uint32_t FindBlock(const char* name) const { return block_map_.Find(name); }
+  virtual uint32_t FindBlock(const char* name) const {
+    return architecture_->FindBlockByName(name);
+  }
 
-  /// Workaround for GFX11. PMC Builder overrides this.
-  virtual int GetNumWGPs() const;
+  virtual int GetNumWGPs() const { return architecture_->GetNumWGPs(); }
+  virtual int GetAccumLowID() const { return architecture_->GetAccumLowID(); }
+  virtual int GetAccumHiID() const { return architecture_->GetAccumHiID(); }
 
-  virtual int GetAccumLowID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
-  virtual int GetAccumHiID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
+  const HardwareArchitecture* GetArchitecture() const { return architecture_; }
 
  protected:
-  explicit Pm4Factory(const BlockInfoMap& map)
-      : cmd_builder_(NULL),
-        pmc_builder_(NULL),
-        spm_builder_(NULL),
-        sqtt_builder_(NULL),
-        agent_info_(NULL),
-        concurrent_mode_(concurrent_create_mode_),
-        block_map_(map) {}
+  // Production constructor — called by Create().
+  Pm4Factory(HardwareArchitecture* arch, const AgentInfo* agent_info);
+  // No-arg constructor for test mocks only; architecture_ is null.
+  explicit Pm4Factory()
+      : cmd_builder_(NULL), pmc_builder_(NULL), spm_builder_(NULL), sqtt_builder_(NULL),
+        concurrent_mode_(concurrent_create_mode_), architecture_(nullptr), prims_(nullptr) {}
 
   virtual ~Pm4Factory();
 
-  // PM4 command builder
   pm4_builder::CmdBuilder* cmd_builder_;
-  // PMC PM4 packets builder
   pm4_builder::PmcBuilder* pmc_builder_;
-  // SPM PM4 packets builder
   pm4_builder::SpmBuilder* spm_builder_;
-  // SQTT PM4 packets builder
   pm4_builder::SqttBuilder* sqtt_builder_;
-  // agent info
-  const AgentInfo* agent_info_;
-  gpu_id_t gpu_id_;
-  // Concurrent mode
+
   static bool concurrent_create_mode_;
   static bool spm_kfd_mode_;
   bool concurrent_mode_;
 
  private:
-  // PM4 factory instance map type
-  struct instances_fncomp_t {
-    bool operator()(const AgentInfo& a, const AgentInfo& b) const {
-      // using name instead of gfxip due to backward compatability with rocprofv2, 
-      // as in newer api which rocprofv3 uses both name and gfxip strings are same for a agent.
-      int cmp = strcmp(a.name, b.name); 
-      if (cmp < 0) return true;
-      if (cmp > 0) return false;
-      // If gfxip strings are equal, compare cu_num
-      return a.cu_num < b.cu_num;
-    }
-  };
-  typedef std::map<AgentInfo, Pm4Factory*, instances_fncomp_t> instances_t;
-
-  // Create GFX9 generic factory
-  static Pm4Factory* Gfx9Create(const AgentInfo* agent_info);
-  // Create GFX10 generic factory
-  static Pm4Factory* Gfx10Create(const AgentInfo* agent_info);
-  // Create GFX11 generic factory
-  static Pm4Factory* Gfx11Create(const AgentInfo* agent_info);
-  // Create GFX11.5 factory
-  static Pm4Factory* Gfx115xCreate(const AgentInfo* agent_info);
-  // Create GFX12 generic factory
-  static Pm4Factory* Gfx12Create(const AgentInfo* agent_info);
-  // Create MI100 factory
-  static Pm4Factory* Mi100Create(const AgentInfo* agent_info);
-  // Create MI200 factory
-  static Pm4Factory* Mi200Create(const AgentInfo* agent_info);
-  // Create MI300 factory
-  static Pm4Factory* Mi300Create(const AgentInfo* agent_info);
-  // Create MI350 factory
-  static Pm4Factory* Mi350Create(const AgentInfo* agent_info);
-  // Create MI450 factory
-  static Pm4Factory* Mi450Create(const AgentInfo* agent_info);
-  // Return GPU id for a given agent
-  static gpu_id_t GetGpuId(std::string_view);
-
+  void InitializeBuilders(const AgentInfo* agent_info);
   static bool CheckConcurrent(const profile_t* profile);
 
-  // Mutex for inter thread synchronization for the instances create/destroy
-  static mutex_t mutex_;
-  // Factory instances container
-  static instances_t* instances_;
-  // Block info container
-  const BlockInfoMap block_map_;
+  HardwareArchitecture* architecture_;
+  pm4_builder::PrimitivesProvider* prims_;
+  mutable std::string gfx_name_;
 };
-
-inline Pm4Factory* Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id,
-                                      bool concurrent) {
-  // Check if we have the instance already created
-  if (instances_ == NULL) instances_ = new instances_t;
-  const auto ret = instances_->insert({*agent_info, NULL});
-  instances_t::iterator it = ret.first;
-
-  concurrent_create_mode_ = concurrent;
-  static bool spm_kfd = getenv("ROCP_SPM_KFD_MODE") != NULL;
-  spm_kfd_mode_ = spm_kfd;
-
-  // Create a factory implementation for the GPU id
-  if (ret.second) {
-    switch (gpu_id) {
-      // Create Gfx9 generic factory
-      case GFX9_GPU_ID:
-        it->second = Gfx9Create(agent_info);
-        break;
-      // Create Gfx10 generic factory
-      case GFX10_GPU_ID:
-        it->second = Gfx10Create(agent_info);
-        break;
-      // Create Gfx11 generic factory
-      case GFX11_GPU_ID:
-        it->second = Gfx11Create(agent_info);
-        break;
-      // Create Gfx11.5 factory
-      case GFX115X_GPU_ID:
-        it->second = Gfx115xCreate(agent_info);
-        break;
-      case GFX12_GPU_ID:
-        it->second = Gfx12Create(agent_info);
-        break;
-      // Create MI100 generic factory
-      case MI100_GPU_ID:
-        it->second = Mi100Create(agent_info);
-        break;
-      case MI200_GPU_ID:
-        it->second = Mi200Create(agent_info);
-        break;
-      case MI300_GPU_ID:
-        it->second = Mi300Create(agent_info);
-        break;
-      case MI350_GPU_ID:
-        it->second = Mi350Create(agent_info);
-        break;
-      case MI450_GPU_ID:
-        it->second = Mi450Create(agent_info);
-        break;
-      default:
-        throw aql_profile_exc_val<gpu_id_t>("GPU id error", gpu_id);
-    }
-  }
-
-  if (it->second == NULL) throw aql_profile_exc_msg("Pm4Factory::Create() failed");
-  it->second->gpu_id_ = gpu_id;
-  return it->second;
-}
-
-// Destroy PM4 factory
-inline void Pm4Factory::Destroy() {
-  std::lock_guard<mutex_t> lck(mutex_);
-
-  if (instances_ != NULL) {
-    for (auto& item : *instances_) delete item.second;
-    delete instances_;
-    instances_ = NULL;
-  }
-}
 
 // Check the setting of pmc profiling mode
 inline bool Pm4Factory::CheckConcurrent(const profile_t* profile) {
@@ -391,28 +158,7 @@ inline bool Pm4Factory::CheckConcurrent(const profile_t* profile) {
        p < (profile->parameters + profile->parameter_count); ++p) {
     if (p->parameter_name == HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_K_CONCURRENT) return true;
   }
-
   return false;
-}
-
-// Return GPU id for a given agent
-inline gpu_id_t Pm4Factory::GetGpuId(std::string_view gfx_ip) {
-  // More specific GPU IDs must come before less specific IDs.
-  std::vector<std::pair<std::string, gpu_id_t>> gfxip_map = {
-      {"gfx908", MI100_GPU_ID}, {"gfx90a", MI200_GPU_ID}, {"gfx900", GFX9_GPU_ID},
-      {"gfx902", GFX9_GPU_ID},  {"gfx906", GFX9_GPU_ID},  {"gfx94", MI300_GPU_ID},
-      {"gfx95", MI350_GPU_ID},  {"gfx10", GFX10_GPU_ID},
-      {"gfx115", GFX115X_GPU_ID}, {"gfx11", GFX11_GPU_ID},
-      {"gfx125", MI450_GPU_ID}, {"gfx12", GFX12_GPU_ID},
-  };
-
-  for (const auto& [name, id] : gfxip_map) {
-    if (gfx_ip.rfind(name, 0) == 0) {
-      return id;
-    }
-  }
-
-  return INVAL_GPU_ID;
 }
 
 }  // namespace aql_profile

@@ -134,7 +134,6 @@ SET(AQLPROFILE_PM4_FACTORY_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../architecture_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../architecture_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../hardware_architecture.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../pm4_factory_adapter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi100_architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi200_architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi300_architecture.cpp
@@ -221,7 +220,6 @@ SET(AQLPROFILE_V2_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../architecture_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../architecture_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../hardware_architecture.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../pm4_factory_adapter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi100_architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi200_architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi300_architecture.cpp

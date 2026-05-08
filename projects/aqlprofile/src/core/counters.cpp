@@ -24,6 +24,7 @@
 #include "aqlprofile-sdk/aql_profile_v2.h"
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <future>

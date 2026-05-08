@@ -28,19 +28,10 @@ set ( LIB_SRC
   ${LIB_DIR}/core/architectures/mi450_architecture.cpp
   ${LIB_DIR}/core/architectures/gfx10_architecture.cpp
   ${LIB_DIR}/core/architectures/gfx11_architecture.cpp
+  ${LIB_DIR}/core/architectures/gfx115x_architecture.cpp
   ${LIB_DIR}/core/architectures/gfx12_architecture.cpp
-  # PM4 factory (legacy)
+  # PM4 factory
   ${LIB_DIR}/core/pm4_factory.cpp
-  ${LIB_DIR}/core/pm4_factory_adapter.cpp
-  ${LIB_DIR}/core/gfx9_factory.cpp
-  ${LIB_DIR}/core/gfx908_factory.cpp
-  ${LIB_DIR}/core/gfx90a_factory.cpp
-  ${LIB_DIR}/core/gfx940_factory.cpp
-  ${LIB_DIR}/core/gfx10_factory.cpp
-  ${LIB_DIR}/core/gfx11_factory.cpp
-  ${LIB_DIR}/core/gfx115x_factory.cpp
-  ${LIB_DIR}/core/gfx12_factory.cpp
-  ${LIB_DIR}/core/gfx1250_factory.cpp
   # PM4 builders
   ${LIB_DIR}/pm4/pmc_builder.cpp
   ${LIB_DIR}/pm4/spm_builder.cpp

@@ -21,9 +21,14 @@
 // THE SOFTWARE.
 
 #include "core/architectures/mi200_architecture.hpp"
-#include "core/gfx9_factory.h"
+#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "def/gfx9_def.h"
+
+#include <mutex>
 
 namespace aql_profile {
+
+using namespace gfxip::gfx9;
 
 Mi200Architecture::Mi200Architecture(const AgentInfo* agent_info) {
   InitializeConfig(agent_info);
@@ -41,11 +46,68 @@ void Mi200Architecture::InitializeConfig(const AgentInfo* agent_info) {
 }
 
 void Mi200Architecture::InitializeBlockTable() {
-  // Gfx9Factory::block_table_ is the shared static GFX9 block table.
-  // Mi200Factory modifies block entries in-place (SDMA instance_count=5,
-  // UMC counter_count=9, etc.) so this pointer reflects those overrides
-  // once the factory has been constructed for this agent.
-  block_table_ = Gfx9Factory::block_table_;
+  static const GpuBlockInfo* table[AQLPROFILE_BLOCKS_NUMBER]{};
+  static std::once_flag init_flag;
+
+  std::call_once(init_flag, []() {
+    static const GpuBlockInfo* gfx9_base[AQLPROFILE_BLOCKS_NUMBER] = {
+        &CpcCounterBlockInfo,       // CPC
+        &CpfCounterBlockInfo,       // CPF
+        &GdsCounterBlockInfo,       // GDS
+        &GrbmCounterBlockInfo,      // GRBM
+        &GrbmSeCounterBlockInfo,    // GRBMSe
+        &SpiCounterBlockInfo,       // SPI
+        &SqCounterBlockInfo,        // SQ
+        &SqCsCounterBlockInfo,      // SQCs
+        NULL,                       // SRBM
+        &SxCounterBlockInfo,        // SX
+        &TaCounterBlockInfo,        // TA
+        &TcaCounterBlockInfo,       // TCA
+        &TccCounterBlockInfo,       // TCC
+        &TcpCounterBlockInfo,       // TCP
+        &TdCounterBlockInfo,        // TD
+        // MC blocks
+        NULL,                       // MC_ARB
+        NULL,                       // MC_HUB
+        NULL,                       // MC_MCBVM
+        NULL,                       // MC_SEQ
+        &McVmL2CounterBlockInfo,    // McVmL2
+        NULL,                       // MC_XBAR
+        &AtcCounterBlockInfo,       // ATC
+        &AtcL2CounterBlockInfo,     // ATCL2
+        &GceaCounterBlockInfo,      // GCEA
+        &RpbCounterBlockInfo,       // RPB
+        // System blocks
+        NULL,                       // SDMA
+        NULL,                       // GL1A
+        NULL,                       // GL1C
+        NULL,                       // GL2A
+        NULL,                       // GL2C
+        NULL,                       // GCR
+        NULL,                       // GUS
+        NULL,                       // UMC
+    };
+
+    for (unsigned i = 0; i < AQLPROFILE_BLOCKS_NUMBER; ++i)
+      table[i] = gfx9_base[i];
+
+    // Apply MI200-specific overrides (ported from Mi200Factory constructor).
+    auto copy = [&](unsigned id) -> GpuBlockInfo* {
+      if (id < AQLPROFILE_BLOCKS_NUMBER && gfx9_base[id])
+        return new GpuBlockInfo(*gfx9_base[id]);
+      return nullptr;
+    };
+
+    if (auto* b = copy(SqCounterBlockId))   { b->event_id_max = 303;                         table[SqCounterBlockId]   = b; }
+    if (auto* b = copy(TcpCounterBlockId))  { b->event_id_max = 87;                          table[TcpCounterBlockId]  = b; }
+    if (auto* b = copy(TccCounterBlockId))  { b->instance_count = 32; b->event_id_max = 295; table[TccCounterBlockId]  = b; }
+    if (auto* b = copy(TcaCounterBlockId))  { b->instance_count = 32; b->event_id_max = 58;  table[TcaCounterBlockId]  = b; }
+    if (auto* b = copy(GceaCounterBlockId)) { b->instance_count = 32; b->event_id_max = 83;  table[GceaCounterBlockId] = b; }
+    if (auto* b = copy(SdmaCounterBlockId)) { b->instance_count = 5;                         table[SdmaCounterBlockId] = b; }
+    if (auto* b = copy(UmcCounterBlockId))  { b->counter_count  = 9;                         table[UmcCounterBlockId]  = b; }
+  });
+
+  block_table_ = table;
   block_count_ = AQLPROFILE_BLOCKS_NUMBER;
 }
 

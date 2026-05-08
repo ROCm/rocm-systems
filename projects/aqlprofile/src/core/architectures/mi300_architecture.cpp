@@ -21,10 +21,16 @@
 // THE SOFTWARE.
 
 #include "core/architectures/mi300_architecture.hpp"
-#include "core/gfx9_factory.h"
+#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "def/gfx9_def.h"
 #include "def/gpu_block_info.h"
+#include "pm4/pmc_builder.h"
+
+#include <mutex>
 
 namespace aql_profile {
+
+using namespace gfxip::gfx9;
 
 Mi300Architecture::Mi300Architecture(const AgentInfo* agent_info) {
   InitializeConfig(agent_info);
@@ -47,11 +53,71 @@ void Mi300Architecture::InitializeConfig(const AgentInfo* agent_info) {
 }
 
 void Mi300Architecture::InitializeBlockTable() {
-  // Gfx9Factory::block_table_ is the shared static GFX9 block table.
-  // Mi300Factory modifies block entries in-place (RPB/ATC instances, SDMA/UMC
-  // per-AID instance counts, event_id_max overrides) so this pointer reflects
-  // those overrides once the factory has been constructed for this agent.
-  block_table_ = Gfx9Factory::block_table_;
+  static const GpuBlockInfo* table[AQLPROFILE_BLOCKS_NUMBER]{};
+  static std::once_flag init_flag;
+
+  std::call_once(init_flag, []() {
+    static const GpuBlockInfo* gfx9_base[AQLPROFILE_BLOCKS_NUMBER] = {
+        &CpcCounterBlockInfo,       // CPC
+        &CpfCounterBlockInfo,       // CPF
+        &GdsCounterBlockInfo,       // GDS
+        &GrbmCounterBlockInfo,      // GRBM
+        &GrbmSeCounterBlockInfo,    // GRBMSe
+        &SpiCounterBlockInfo,       // SPI
+        &SqCounterBlockInfo,        // SQ
+        &SqCsCounterBlockInfo,      // SQCs
+        NULL,                       // SRBM
+        &SxCounterBlockInfo,        // SX
+        &TaCounterBlockInfo,        // TA
+        &TcaCounterBlockInfo,       // TCA
+        &TccCounterBlockInfo,       // TCC
+        &TcpCounterBlockInfo,       // TCP
+        &TdCounterBlockInfo,        // TD
+        // MC blocks
+        NULL,                       // MC_ARB
+        NULL,                       // MC_HUB
+        NULL,                       // MC_MCBVM
+        NULL,                       // MC_SEQ
+        &McVmL2CounterBlockInfo,    // McVmL2
+        NULL,                       // MC_XBAR
+        &AtcCounterBlockInfo,       // ATC
+        &AtcL2CounterBlockInfo,     // ATCL2
+        &GceaCounterBlockInfo,      // GCEA
+        &RpbCounterBlockInfo,       // RPB
+        // System blocks
+        NULL,                       // SDMA
+        NULL,                       // GL1A
+        NULL,                       // GL1C
+        NULL,                       // GL2A
+        NULL,                       // GL2C
+        NULL,                       // GCR
+        NULL,                       // GUS
+        NULL,                       // UMC
+    };
+
+    for (unsigned i = 0; i < AQLPROFILE_BLOCKS_NUMBER; ++i)
+      table[i] = gfx9_base[i];
+
+    // Apply MI300-specific overrides (ported from Mi300Factory constructor).
+    auto copy = [&](unsigned id) -> GpuBlockInfo* {
+      if (id < AQLPROFILE_BLOCKS_NUMBER && gfx9_base[id])
+        return new GpuBlockInfo(*gfx9_base[id]);
+      return nullptr;
+    };
+
+    if (auto* b = copy(SqCounterBlockId))   { b->event_id_max = 373;                                              table[SqCounterBlockId]   = b; }
+    if (auto* b = copy(TcpCounterBlockId))  { b->event_id_max = 84;                                               table[TcpCounterBlockId]  = b; }
+    if (auto* b = copy(TccCounterBlockId))  { b->instance_count = 16;  b->event_id_max = 199;                     table[TccCounterBlockId]  = b; }
+    if (auto* b = copy(TcaCounterBlockId))  { b->instance_count = 32;  b->event_id_max = 34;                      table[TcaCounterBlockId]  = b; }
+    if (auto* b = copy(GceaCounterBlockId)) { b->instance_count = 32;  b->event_id_max = 82;                      table[GceaCounterBlockId] = b; }
+    if (auto* b = copy(SdmaCounterBlockId)) { b->instance_count = 4 * pm4_builder::MAX_AID;                       table[SdmaCounterBlockId] = b; }
+    if (auto* b = copy(UmcCounterBlockId))  { b->counter_count  = 11;  b->instance_count = 32 * pm4_builder::MAX_AID; table[UmcCounterBlockId]  = b; }
+    // RPB and ATC: MI300 has 4 instances each (vs. 1 in base GFX9).
+    { auto* b = new GpuBlockInfo(RpbCounterBlockInfo); b->instance_count = 4; table[RpbCounterBlockId] = b; }
+    { auto* b = new GpuBlockInfo(AtcCounterBlockInfo); b->instance_count = 4; table[AtcCounterBlockId] = b; }
+  });
+
+  block_table_ = table;
   block_count_ = AQLPROFILE_BLOCKS_NUMBER;
 }
 

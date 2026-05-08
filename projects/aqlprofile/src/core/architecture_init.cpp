@@ -47,6 +47,7 @@ static std::string_view GetGfxIpPrefix(std::string_view gfxip) {
   if (gfxip.rfind("gfx906", 0) == 0) return "gfx906";  // Vega20
   if (gfxip.rfind("gfx90", 0) == 0) return "gfx90";    // Generic GFX9
   if (gfxip.rfind("gfx10", 0) == 0) return "gfx10";    // Generic GFX10
+  if (gfxip.rfind("gfx115", 0) == 0) return "gfx115";  // GFX11.5x (RDNA 3.5)
   if (gfxip.rfind("gfx11", 0) == 0) return "gfx11";    // Generic GFX11
   if (gfxip.rfind("gfx125", 0) == 0) return "gfx125";  // MI450 (gfx1250)
   if (gfxip.rfind("gfx12", 0) == 0) return "gfx12";    // Generic GFX12
@@ -78,6 +79,8 @@ HardwareArchitecture* CreateArchitectureForAgent(const AgentInfo* agent_info) {
     return new Gfx9Architecture(agent_info);
   } else if (prefix == "gfx10") {
     return new Gfx10Architecture(agent_info);
+  } else if (prefix == "gfx115") {
+    return new Gfx115xArchitecture(agent_info);
   } else if (prefix == "gfx11") {
     return new Gfx11Architecture(agent_info);
   } else if (prefix == "gfx125") {

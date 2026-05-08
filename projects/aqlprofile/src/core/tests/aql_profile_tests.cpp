@@ -41,14 +41,12 @@ using namespace testing;
 namespace aql_profile {
 bool Pm4Factory::concurrent_create_mode_ = false;
 bool Pm4Factory::spm_kfd_mode_ = false;
-Pm4Factory::mutex_t Pm4Factory::mutex_;
-Pm4Factory::instances_t* Pm4Factory::instances_ = nullptr;
 }
 
 // Mock classes to simulate Pm4Factory and related functionality
 class MockPm4Factory : public Pm4Factory {
  public:
-  MockPm4Factory() : Pm4Factory(BlockInfoMap(nullptr, 0)) {}
+  MockPm4Factory() : Pm4Factory() {}
   MOCK_METHOD(const GpuBlockInfo*, GetBlockInfo, (const hsa_ven_amd_aqlprofile_event_t*), (const));
   MOCK_METHOD(bool, IsGFX9, (), (const));
   MOCK_METHOD(bool, IsConcurrent, (), (const));

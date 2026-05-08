@@ -23,6 +23,7 @@
 #include "core/aql_profile.hpp"
 #include "aqlprofile-sdk/aql_profile_v2.h"
 
+#include <cassert>
 #include <cstdint>
 #include <future>
 #include <map>
@@ -166,8 +167,6 @@ Logger::mutex_t Logger::mutex_;
 Logger* Logger::instance_ = NULL;
 bool Pm4Factory::concurrent_create_mode_ = false;
 bool Pm4Factory::spm_kfd_mode_ = false;
-Pm4Factory::mutex_t Pm4Factory::mutex_;
-Pm4Factory::instances_t* Pm4Factory::instances_ = NULL;
 bool read_api_enabled = true;
 
 CONSTRUCTOR_API void constructor() {

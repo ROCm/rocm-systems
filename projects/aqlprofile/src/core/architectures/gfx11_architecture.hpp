@@ -53,12 +53,22 @@ class Gfx11Architecture : public HardwareArchitecture {
  protected:
   void InitializeConfig(const AgentInfo* agent_info);
   void InitializeRegisterSchema();
-  void InitializeBlockTable();
+  virtual void InitializeBlockTable();
 
   HardwareConfig config_;
   RegisterSchema register_schema_;
   const GpuBlockInfo** block_table_;
   uint32_t block_count_;
+};
+
+/// GFX11.5x architecture implementation (RDNA 3.5 / gfx1150, gfx1151)
+class Gfx115xArchitecture : public Gfx11Architecture {
+ public:
+  explicit Gfx115xArchitecture(const AgentInfo* agent_info);
+  virtual ~Gfx115xArchitecture() = default;
+
+ protected:
+  void InitializeBlockTable() override;
 };
 
 }  // namespace aql_profile
