@@ -30,6 +30,7 @@ subtrees:
     subtrees:
     - entries:
       - file: how-to/hip_runtime_api/initialization
+      - file: how-to/hip_runtime_api/hipInfo
       - file: how-to/hip_runtime_api/memory_management
         subtrees:
         - entries:
@@ -118,6 +119,7 @@ subtrees:
     title: HIP basic examples
   - url: https://github.com/ROCm/rocm-examples
     title: HIP examples
+  - file: tutorial/hiptests
   - file: tutorial/saxpy
   - file: tutorial/programming-patterns
     subtrees:

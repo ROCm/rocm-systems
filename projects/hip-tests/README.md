@@ -1,4 +1,4 @@
-## What is this repository for?
+# What is the hip-tests repository for?
 
 This repository provides unit tests for [HIP](../hip) implementation.
 
@@ -12,15 +12,15 @@ The information presented in this document is for informational purposes only an
 
 The hip-tests repository maintains several branches. The branches that are of importance are:
 
-* Main branch: This is the stable branch. It is up to date with the latest release branch, for example, if the latest release is rocm-5.4, main branch will be the repository based on this release.
+* Main branch: This is the stable branch. It is up to date with the latest release branch, for example, if the latest release is `release/rocm-rel-7.2`, the `main` branch will be based on this release branch.
 * Develop branch: This is the default branch, on which the new features are still under development and visible. While this may be of interest to many, it should be noted that this branch and the features under development might not be stable.
-* Release branches. These are branches corresponding to each ROCM release, listed with release tags, such as rocm-5.4, etc.
+* Release branches: These are branches corresponding to each ROCM release, listed with release tags, such as `rocm-7.2.0`.
 
 ## Release tagging
 
-hip-tests releases typically follow a naming convention for each ROCM release to help differentiate them.
+`hip-tests` releases typically follow a naming convention for each ROCM release to help differentiate them.
 
-* rocm x.yy: These are the stable releases based on the ROCM release.
+* `rocm-x.yy`: These are the stable releases based on the ROCM release.
   This type of release is typically made once a month.
 
 ## Build HIP Catch tests
@@ -35,8 +35,9 @@ $ git clone -b develop https://github.com/ROCm/rocm-systems.git
 $ cd rocm-systems/projects/hip-tests
 $ export HIP_TESTS_DIR="$(readlink -f .)"
 ```
-`hip-tests` for AMD platform now rely on `amdclang` to build, which is shipped with ROCm installation.
-Although individual tests will compile with `hipcc`, ideally you should use `amdclang++`.
+
+`hip-tests` for AMD platform now use `amdclang++` to compile code. This is included with the ROCm installation.
+Although individual tests can be compiled with `hipcc`, ideally you should use `amdclang++`.
 
 2. Build the catch tests
 ```bash
@@ -66,7 +67,9 @@ HIP catch tests are built under the folder `$HIP_TESTS_DIR/build`.
 
 ### Build HIP Catch2 standalone test
 
-`standalone_main.cc`, which was previously used, has been removed. We now rely on the main function provided by Catch2 to build standalone tests. The test suite has been upgraded to Catch2 v3 (specifically v3.8.1). This transition from v2 to v3 introduced several significant changes in how Catch2 integrates with hip-tests. Most importantly, Catch2 is no longer a single-header library; it is now a compiled library that must be linked into the test executable.
+The main function provided by `Catch2` is now used to build standalone tests. The test suite has been upgraded to Catch2 v3 (specifically v3.8.1). This transition from v2 to v3 introduced several significant changes in how Catch2 integrates with hip-tests. Most importantly, Catch2 is no longer a single-header library; it is now a compiled library that must be linked into the test executable.
+
+Note: `standalone_main.cc` which was previously used, has been removed. 
 
 #### Getting Catch2
 

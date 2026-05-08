@@ -9,9 +9,9 @@ Build HIP from source
 Prerequisites
 =================================================
 
-HIP code can be developed on AMD ROCm platform using HIP-Clang compiler.
-Before building and running HIP, make sure drivers and prebuilt packages are
-installed properly on the platform.
+HIP code can be developed on AMD ROCm platform using `HIP-Clang compiler <https://rocm.docs.amd.com/projects/llvm-project/en/latest/index.html>`__.
+Before building and running HIP, ensure drivers and prebuilt packages are properly
+installed on the platform.
 
 You also need to install Python 3, which includes the ``CppHeaderParser`` package.
 Install Python 3 using the following command:
@@ -38,28 +38,17 @@ Install ``ROCm LLVM`` package using the command:
 Building the HIP runtime
 ==========================================================
 
-HIP is one of the core ROCm projects and resides in the rocm-systems monorepository.
-In addition, the monorepository also includes the following components:
+As of ROCM 7.1, HIP is integrated into the core ROCm projects resides in the ``rocm-systems`` monorepository.
+In addition, the following components are also part of the monorepository:
 
-* ``clr``, AMD’s Compute Language Runtime, which contains ROCclr, HIPAMD, and OpenCL.
+* ``clr``, AMD's Compute Language Runtime, includes ROCclr, HIPAMD and OpenCl.
 * ``hip-tests``, the HIP testing suite.
 
-Beginning with the TheRock 7.13 release, the rocm-systems codebase is also integrated into the TheRock repository.
-Developers may build HIP using one of two methods:
+Set the repository branch using the variable: ``ROCM_BRANCH``. For example, for ROCM 7.1, use:
 
-* From ``rocm-systems`` monorepository
-* From the ROCm ``TheRock`` repository
+.. code-block:: shell
 
-This document provides instructions for building HIP from the ``rocm-systems`` monorepository.
-For guidance on building HIP using TheRock, see the build documentation included with `TheRock <https://github.com/ROCm/TheRock/blob/main/README.md>`_.
-
-#. Set the repository branch
-
-   Set the branch using the variable: ``ROCM_BRANCH``. For example, for TheRock 7.13, use:
-
-   .. code-block:: shell
-
-      export ROCM_BRANCH=release/therock-7.13
+   export ROCM_BRANCH=release/rocm-rel-7.1
 
 #. Get HIP source code.
 
@@ -73,22 +62,14 @@ For guidance on building HIP using TheRock, see the build documentation included
 
       export CLR_DIR="$(readlink -f rocm-systems/projects/clr)"
       export HIP_DIR="$(readlink -f rocm-systems/projects/hip)"
-      export ROCM_PATH=/opt/rocm
 
 #. Build HIP.
 
    .. code-block:: shell
 
       cd "$CLR_DIR"
-      mkdir -p build && cd build
-      cmake \
-        -DHIP_COMMON_DIR="$HIP_DIR" \
-        -DHIP_PLATFORM=amd \
-        -DCMAKE_PREFIX_PATH="/opt/rocm/" \
-        -DCMAKE_INSTALL_PREFIX="$PWD/install" \
-        -DCLR_BUILD_HIP=ON \
-        -DCLR_BUILD_OCL=OFF \
-        ..
+      mkdir -p build; cd build
+      cmake -DHIP_COMMON_DIR=$HIP_DIR -DHIP_PLATFORM=amd -DCMAKE_PREFIX_PATH="/opt/rocm/" -DCMAKE_INSTALL_PREFIX=$PWD/install -DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=OFF ..
       make -j$(nproc)
       sudo make install
 
@@ -101,16 +82,21 @@ For guidance on building HIP using TheRock, see the build documentation included
 
    Default paths and environment variables:
 
-   * HIP is installed into ``<ROCM_PATH>``. This can be overridden by setting the ``INSTALL_PREFIX`` as the command option.
+   * HIP is installed into ``<ROCM_PATH>``. This can be overridden by setting the ``INSTALL_PREFIX`` as a command option.
 
    * HSA is in ``<ROCM_PATH>``. This can be overridden by setting the ``HSA_PATH``
      environment variable.
+
+   * Clang is in ``<ROCM_PATH>/llvm/bin``. This can be overridden by setting the
+     ``HIP_CLANG_PATH`` environment variable.
 
    * The device library is in ``<ROCM_PATH>/lib``. This can be overridden by setting the
      ``DEVICE_LIB_PATH`` environment variable.
 
    * Optionally, you can add ``<ROCM_PATH>/bin`` to your ``PATH``, which can make it easier to
      use the tools.
+
+   * Optionally, you can set ``HIPCC_VERBOSE=7`` to output the command line for compilation.
 
    After you run the ``make install`` command, HIP is installed to ``<ROCM_PATH>`` by default, or ``$PWD/install/hip`` while ``INSTALL_PREFIX`` is defined.
 
@@ -126,16 +112,16 @@ For guidance on building HIP using TheRock, see the build documentation included
 
    .. code-block:: shell
 
-      hip_prof_gen.py [-v] <input HIP API .h file> <patched srcs path> <previous output> [<output>]
+      `hip_prof_gen.py [-v] <input HIP API .h file> <patched srcs path> <previous output> [<output>]`
 
-   Flags:
+      Flags:
 
-   * ``-v``: Verbose messages
-   * ``-r``: Process source directory recursively
-   * ``-t``: API types matching check
-   * ``--priv``: Private API check
-   * ``-e``: On error exit mode
-   * ``-p``: ``HIP_INIT_API`` macro patching mode
+         * ``-v``: Verbose messages
+         * ``-r``: Process source directory recursively
+         * ``-t``: API types matching check
+         * ``--priv``: Private API check
+         * ``-e``: On error exit mode
+         * ``-p``: ``HIP_INIT_API`` macro patching mode
 
    Example usage:
 
@@ -145,55 +131,95 @@ For guidance on building HIP using TheRock, see the build documentation included
       <hipamd>/src <hipamd>/include/hip/amd_detail/hip_prof_str.h \
       <hipamd>/include/hip/amd_detail/hip_prof_str.h.new
 
+.. _build-tests:
+
 Build HIP tests
 =================================================
 
-**Build HIP catch tests.**
-
-HIP catch tests are built using AMD's ``amdclang`` compiler.
-
-#. Get HIP tests source code.
+To start, you must set up the environment needed to build the HIP tests by setting the ``ROCM_PATH`` environment variable to point to the current ROCm installation:
 
    .. code-block:: shell
 
-      git clone -b "$ROCM_BRANCH" git@github.com:ROCm/rocm-systems.git
-      export HIPTESTS_DIR="$(readlink -f rocm-systems/projects/hip-tests)"
+      export ROCM_PATH=/opt/rocm # or the appropriate path for your installation
+      echo $ROCM_PATH
 
-#. Build HIP tests from source.
+HIP catch tests utilize the Catch2 testing framework.
+
+#. Clone the ``hip-tests`` project as part of the ``rocm-systems`` repository, specifying the branch of interest. The default branch is `develop`, as an example:
+
+   .. code-block:: shell
+
+      git clone -b release/rocm-rel-7.2 https://github.com/ROCm/rocm-systems.git
+
+   Alternatively, you can clone the ``hip-tests`` package separately using sparse-checkout as described in the `Contributing to <https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md>`__ documentation. 
+
+   .. code-block:: shell
+
+      git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+      cd rocm-systems
+      git sparse-checkout init --cone
+      git sparse-checkout set projects/hip-tests
+      git checkout release/rocm-rel-7.2 # or the specific branch of interest
+
+
+#. Set the ``HIPTESTS_DIR`` environment variable by running the following from outside the ``hip-tests`` folder: 
+
+   .. code-block:: shell
+
+      export HIPTESTS_DIR="$(readlink -f hip-tests)"
+      echo $HIPTESTS_DIR
+
+
+#. Build HIP all tests from source.
 
    .. code-block:: shell
 
       cd "$HIPTESTS_DIR"
       mkdir -p build; cd build
+      cmake ../catch -DHIP_PLATFORM=amd -DHIP_PATH=$CLR_DIR/build/install  # or any path where HIP is installed; for example: ``/opt/rocm``
       export ROCM_PATH=/opt/rocm
-      cmake ../catch \
-        -DHIP_PLATFORM=amd \
-        -DCMAKE_PREFIX_PATH=$CLR_DIR/build/install \
-        -DCMAKE_CXX_COMPILER=$ROCM_PATH/bin/amdclang++ \
-        -DCMAKE_C_COMPILER=$ROCM_PATH/bin/amdclang \
-        -DCMAKE_HIP_COMPILER=$ROCM_PATH/bin/amdclang++ \
-        -DOFFLOAD_ARCH_STR="--offload-arch=<selected-gpu-arch>"
-      make build_tests
-      ctest # run tests
+      make -j$(nproc) build_tests
+      ctest # run all tests
 
-   Note: The value of ``OFFLOAD_ARCH_STR`` should match the GPU architecture present on your system (e.g., gfx1200).
-   You can determine the correct architecture by running the ``rocminfo`` command.
+   HIP catch source files are found in ``$HIPTESTS_DIR/catch``. Catch tests are built under the folder ``$HIPTESTS_DIR/build/catch_tests``.
 
-   HIP catch tests are built in ``$HIPTESTS_DIR/build``.
+   .. note::
+      
+      To build catch tests with `Address Sanitizer <https://rocm.docs.amd.com/projects/llvm-project/en/latest/conceptual/using-gpu-sanitizer.html>`__ options, add the cmake option ``-DENABLE_ADDRESS_SANITIZER=ON``.
 
-   To run any single catch test, use this example:
+   To run any single built catch test, use this example:
 
    .. code-block:: shell
 
       cd $HIPTESTS_DIR/build/catch_tests/unit/texture
       ./TextureTest
 
-#. Build a HIP Catch standalone test.
+#. Build a standalone HIP Catch2 test.
 
-   For detailed instructions on building the standalone Catch tests, consult the `hip-tests README.md at <https://github.com/ROCm/rocm-systems/tree/release/therock-7.13/projects/hip-tests/README.md>`_.
+   HIP Catch2 supports compiling standalone tests using ``amdclang++``. For example:
+
+   .. code-block:: shell
+
+      amdclang++ -D__HIP_PLATFORM_AMD__ -x hip ./catch/unit/memory/hipPointerGetAttributes.cc \
+     -I ./catch/include ./catch/hipTestMain/standalone_main.cc -I ./catch/external/Catch2 \
+     -I $ROCM_PATH/include -L$ROCM_PATH/lib -lamdhip64 -o hipPointerGetAttributes
+
+   Or using ``hipcc``:
+
+   .. code-block:: shell
+
+      hipcc ./catch/unit/memory/hipPointerGetAttributes.cc -I ./catch/include \
+      ./catch/hipTestMain/standalone_main.cc -I ./catch/external/Catch2 -o hipPointerGetAttributes
+
+   And then run the test:
+
+   .. code-block:: shell
+
+      ./hipPointerGetAttributes
+
 
 Run HIP
 =================================================
 
-After installation and building HIP, you can compile your application and run.
+After installing and building HIP, you can compile and run your application.
 Simple examples can be found in the `ROCm-examples repository <https://github.com/ROCm/rocm-examples>`_.

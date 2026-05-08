@@ -26,6 +26,7 @@ The HIP runtime API backends are summarized in the following figure:
 Here are the various HIP Runtime API high level functions:
 
 * :doc:`./hip_runtime_api/initialization`
+* :doc:`./hip_runtime_api/hipInfo`
 * :doc:`./hip_runtime_api/memory_management`
 * :doc:`./hip_runtime_api/error_handling`
 * :doc:`./hip_runtime_api/asynchronous`
