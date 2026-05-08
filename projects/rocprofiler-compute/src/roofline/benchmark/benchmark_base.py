@@ -819,7 +819,7 @@ class Bench_base(ABC):
     def dump_csv(self, metrics: dict[PerfMetrics], file_path: str) -> None:
         """Generate a csv file containing the collected benchmark metrics."""
         # TODO: Better way to map CSV column names?
-        with open(file_path, "w", encoding="utf-8") as f:
+        with open(file_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
 
             types = self.csv_cols_map.keys()

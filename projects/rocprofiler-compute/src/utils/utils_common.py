@@ -1116,7 +1116,7 @@ def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, s
 
     # Validate CSV structure
     try:
-        with open(benchmark_results, encoding="utf-8") as csvfile:
+        with open(benchmark_results, newline="", encoding="utf-8") as csvfile:
             csv_reader = csv.reader(csvfile, delimiter=",")
             row_count = 0
             num_headers = 0
