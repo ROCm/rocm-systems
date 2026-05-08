@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -41,6 +22,36 @@ namespace rocprofsys
 {
 namespace trace_cache
 {
+
+class output_file_sink_view
+{
+public:
+    using register_file_fn_t = void (*)(void*, std::string, output_format);
+
+    template <typename SinkT>
+    // Non-owning sink view. The referenced sink object must outlive any
+    // unified_memory_processor_t storing this view.
+    output_file_sink_view(SinkT& sink) noexcept
+    : m_object{ std::addressof(sink) }
+    , m_register_file_impl{ +[](void* obj, std::string path, output_format format) {
+        static_cast<SinkT*>(obj)->register_file(std::move(path), format);
+    } }
+    {}
+
+    output_file_sink_view(const output_file_sink_view&) noexcept            = default;
+    output_file_sink_view(output_file_sink_view&&) noexcept                 = default;
+    output_file_sink_view& operator=(const output_file_sink_view&) noexcept = default;
+    output_file_sink_view& operator=(output_file_sink_view&&) noexcept      = default;
+
+    void register_file(std::string path, output_format format) const
+    {
+        m_register_file_impl(m_object, std::move(path), format);
+    }
+
+private:
+    void*              m_object;
+    register_file_fn_t m_register_file_impl;
+};
 
 struct migration_stats
 {
@@ -131,14 +142,11 @@ static_assert(kTriggerTable.back().kfd_name == nullptr,
 
 // NOT thread-safe. handle() and finalize_processing() must be called from a
 // single thread; finalize_processing() is not idempotent.
-template <typename AgentManagerT   = agent_manager,
-          typename OutputRegistryT = output_file_registry>
-class unified_memory_processor_t
-: public processor_t<unified_memory_processor_t<AgentManagerT, OutputRegistryT>>
+class unified_memory_processor_t : public processor_t<unified_memory_processor_t>
 {
 public:
-    unified_memory_processor_t(std::shared_ptr<AgentManagerT> agent_mgr, int pid,
-                               std::string output_dir, OutputRegistryT& output_registry);
+    unified_memory_processor_t(std::shared_ptr<agent_manager> agent_mgr, int pid,
+                               std::string output_dir, output_file_sink_view output_sink);
 
     unified_memory_processor_t(const unified_memory_processor_t&)            = delete;
     unified_memory_processor_t(unified_memory_processor_t&&)                 = delete;
@@ -197,16 +205,14 @@ private:
     void write_json_output(std::ostream& out) const;
 
     unified_memory_data            m_data;
-    std::shared_ptr<AgentManagerT> m_agent_manager;
+    std::shared_ptr<agent_manager> m_agent_manager;
     int                            m_pid;
     std::string                    m_output_dir;
-    OutputRegistryT&               m_output_registry;
+    output_file_sink_view          m_output_sink;
 
     std::unordered_map<uint32_t, agent_type>  m_node_type_cache;
     std::unordered_map<uint32_t, std::string> m_gpu_name_cache;
 };
-
-extern template class unified_memory_processor_t<>;
 
 }  // namespace trace_cache
 }  // namespace rocprofsys

@@ -10,13 +10,6 @@
 namespace rocprofsys
 {
 
-struct output_file
-{
-    std::string label;
-    std::string path;
-    std::string viewer;
-};
-
 enum class output_format
 {
     perfetto,
@@ -25,6 +18,13 @@ enum class output_format
     text,
     causal_json,
     causal_text
+};
+
+struct output_file
+{
+    std::string label;
+    std::string path;
+    std::string viewer;
 };
 
 /**
