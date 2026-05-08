@@ -19,11 +19,15 @@ and custom reduction operators.
 from nccl._version import __version__
 
 # Register the local HIP-backed cuda.core shim under the `cuda.core`
-# namespace as a fallback for the case where the user reaches nccl
-# before importing cuda.core (e.g. via `from nccl.core import ...`).
-# A real on-disk `cuda/core/__init__.py` shipped alongside this package
-# also handles the public path `from cuda.core import ...`; whichever
-# loads first wins, both routes are idempotent.
+# namespace via sys.modules. Idempotent and gated on
+# `"cuda.core" not in sys.modules`, so it is a no-op if a real
+# cuda-core / cuda-bindings package has already populated the
+# namespace. After this runs, `from cuda.core import ...` resolves
+# to the HIP shim. The shim is **not** shipped as a regular
+# top-level `cuda` package on disk (a regular non-PEP-420
+# `cuda/__init__.py` would shadow co-installed distributions that
+# legitimately contribute to `cuda.*`), so users must `import nccl`
+# before reaching `cuda.core`.
 from nccl._hip_compat.cuda_core_shim import _register_as_cuda_core as _register_cuda_core_shim
 
 _register_cuda_core_shim()
@@ -32,9 +36,7 @@ del _register_cuda_core_shim
 
 # Re-export get_version() lazily. Importing nccl alone does not load
 # librccl.so — that happens only on first access of ``nccl.get_version``
-# or any ``nccl.bindings.*`` symbol. Keeps `import nccl` cheap so it can
-# safely run as a side-effect of cuda.core resolution
-# (`cuda/core/__init__.py` imports nccl._hip_compat).
+# or any ``nccl.bindings.*`` symbol. Keeps `import nccl` cheap.
 def __getattr__(name):
     if name == "get_version":
         from nccl.bindings import get_version

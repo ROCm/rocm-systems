@@ -15,7 +15,14 @@ Pythonic API for RCCL collective operations.
 - **HIP-backed `cuda.core` shim:** ROCm hosts get
   `from cuda.core import ...` resolved via
   `nccl._hip_compat.cuda_core_shim` (backed by `hip-python`)
-  without pulling NVIDIA `cuda-bindings` / `cuda-core`.
+  without pulling NVIDIA `cuda-bindings` / `cuda-core`. The shim
+  is registered in `sys.modules` on `import nccl`, so `from
+  cuda.core import ...` resolves to the HIP backend after
+  `import nccl` has run; it is **not** shipped as a top-level
+  `cuda` package on disk to avoid shadowing co-installed
+  distributions that contribute to the `cuda.*` namespace
+  (`cuda-bindings` pulled transitively by PyTorch / RAPIDS /
+  Triton / nsight tooling).
 - **RCCL-only collectives:** wrappers for
   `ncclAllReduceWithBias` and `ncclAllToAllv` (which exist in
   `librccl.so` but have no upstream NCCL equivalent) are exposed
@@ -99,12 +106,11 @@ mpirun -np 2 python examples/01_basic/02_send_recv.py
   patches needed to drop the CUDA driver-types include and to
   resolve `librccl.so` via `dlopen`.
 - [`nccl/_hip_compat/`](nccl/_hip_compat/) - HIP/ROCm-only
-  compatibility layer; not a public API.
+  compatibility layer; not a public API. Hosts the
+  `cuda_core_shim` package registered in `sys.modules` as
+  `cuda.core` by `nccl/__init__.py`.
 - [`nccl/core/`](nccl/core/) - the high-level Pythonic surface
   (Communicator, Buffer, Group, ...).
-- [`cuda/`](cuda/) - on-disk `cuda.core` shim shipped alongside
-  the `nccl` package so that `import cuda.core` resolves on a
-  ROCm host even before `import nccl`.
 
 ## References
 

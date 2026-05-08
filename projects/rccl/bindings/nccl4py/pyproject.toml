@@ -63,10 +63,20 @@ build-backend = "setuptools.build_meta"
 include-package-data = false
 
 [tool.setuptools.packages.find]
-# Ship the local `cuda.core` shim package alongside `nccl` so
-# `from cuda.core import ...` resolves on a ROCm host without pulling
-# the upstream NVIDIA cuda-core / cuda-bindings packages.
-include = ["nccl*", "cuda*"]
+# Only the `nccl` package is shipped on disk. The HIP-backed
+# `cuda.core` surface is registered in `sys.modules` lazily on
+# `import nccl` (see `nccl/__init__.py` -> `_register_as_cuda_core`)
+# so we do NOT install a top-level `cuda` package here. A regular
+# (non PEP 420) `cuda/__init__.py` would shadow co-installed
+# distributions that legitimately contribute to the `cuda.*`
+# namespace (`cuda-bindings` pulled by PyTorch / RAPIDS / Triton /
+# nsight tooling, etc.); whichever package wins the `__init__.py`
+# race in `site-packages` silently hides the loser's `cuda.core`.
+# `from cuda.core import ...` therefore resolves only after
+# `import nccl` has run; users who reach `cuda.core` first get
+# whatever package owns the namespace on disk, which is the
+# correct behavior.
+include = ["nccl*"]
 
 [tool.setuptools.package-data]
 "nccl.bindings" = ["cynccl.pxd"]
