@@ -567,11 +567,6 @@ rocprofsys_init_tooling_hidden(void)
         return false;
     }
 
-    dynamic_library _amdhip64{ "ROCPROFSYS_ROCTRACER_LIBAMDHIP64",
-                               find_library_path("libamdhip64.so",
-                                                 { "ROCPROFSYS_ROCM_PATH", "ROCM_PATH" },
-                                                 { ROCPROFSYS_DEFAULT_ROCM_PATH }) };
-
     auto _debug_init = get_debug_init();
 
     if(_debug_init)
