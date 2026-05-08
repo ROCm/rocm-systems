@@ -356,8 +356,7 @@ class MIGPUSpecs:
         RDNA: Check for the MCD count. *supported products at this time are APUs,
         which do not have MCD concept like dGPUs- force to "1" to signal unified memory.
         """
-        gpu_series = cls._gpu_series_dict[gpu_arch]
-        if cls.get_gpu_series(gpu_series) == "navi3":
+        if cls.get_gpu_series(gpu_arch).lower() == "navi3":
             return cls._gpu_design[gpu_model.lower()]["memory_die"]
         else:
             return (
