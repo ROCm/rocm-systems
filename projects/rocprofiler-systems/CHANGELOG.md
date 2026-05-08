@@ -8,6 +8,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
+- GPU graphics and memory clock frequency metrics (`gfx_clock`, `mem_clock`) via AMD SMI, exposing `current_gfxclk` and `current_uclk` in MHz as PMC samples. Configure via `ROCPROFSYS_AMD_SMI_METRICS=gfx_clock,mem_clock`.
 - Kernel Fusion Driver (KFD) event tracing support to capture page faults, page migrations, queue evictions, GPU unmap events, and dropped events. Requires ROCProfiler-SDK 1.2.1 or later. Enable with `ROCPROFSYS_ROCM_DOMAINS=kfd_events`.
 - Support for pause and resume of profiling via `roctxProfilerPause` and `roctxProfilerResume`.
 - Support for selective region tracing via the `ROCPROFSYS_SELECTED_REGIONS` environment variable, limiting tracing to specified regions.

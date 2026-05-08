@@ -54,6 +54,8 @@ const auto JPEG_BUSY_VALUE     = make_metric_value({ 11 });    // jpeg_busy (MI3
 const auto XGMI_VALUE          = make_metric_value({ 12 });    // xgmi
 const auto PCIE_VALUE          = make_metric_value({ 13 });    // pcie
 const auto SDMA_USAGE_VALUE    = make_metric_value({ 14 });    // sdma_usage
+const auto GFX_CLOCK_VALUE     = make_metric_value({ 15 });    // gfx_clock
+const auto MEM_CLOCK_VALUE     = make_metric_value({ 16 });    // mem_clock
 
 inline std::unordered_map<std::uint32_t, track_description>
 make_default_tracks()
@@ -72,6 +74,8 @@ make_default_tracks()
         { XGMI_VALUE, { "XGMI", "", {} } },
         { PCIE_VALUE, { "PCIe", "", {} } },
         { SDMA_USAGE_VALUE, { "SDMA Usage", "%", {} } },
+        { GFX_CLOCK_VALUE, { "GFX Clock", "MHz", {} } },
+        { MEM_CLOCK_VALUE, { "Memory Clock", "MHz", {} } },
     };
 }
 
@@ -450,6 +454,26 @@ private:
                 "device_sdma_usage",
                 counter_track::at(device_index, sdma_it->second.track_indexes[0]), ts,
                 static_cast<double>(metric_values.sdma_usage));
+        }
+
+        auto gfx_clock_it = tracks.find(detail::GFX_CLOCK_VALUE);
+        if(effective_metrics.bits.gfx_clock && gfx_clock_it != tracks.end() &&
+           !gfx_clock_it->second.track_indexes.empty())
+        {
+            TRACE_COUNTER(
+                "device_gfx_clock",
+                counter_track::at(device_index, gfx_clock_it->second.track_indexes[0]),
+                ts, static_cast<double>(metric_values.gfx_clock_mhz));
+        }
+
+        auto mem_clock_it = tracks.find(detail::MEM_CLOCK_VALUE);
+        if(effective_metrics.bits.mem_clock && mem_clock_it != tracks.end() &&
+           !mem_clock_it->second.track_indexes.empty())
+        {
+            TRACE_COUNTER(
+                "device_mem_clock",
+                counter_track::at(device_index, mem_clock_it->second.track_indexes[0]),
+                ts, static_cast<double>(metric_values.mem_clock_mhz));
         }
     }
 
