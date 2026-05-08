@@ -34,8 +34,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Basic) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
 
   int numElements = 64 * 1024 * 1024;
@@ -91,8 +90,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicAlloc) {
 
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int* notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -180,8 +178,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicTrim) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int* notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -268,8 +265,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicReuse) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int* notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -343,8 +339,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Opportunistic) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified1 = nullptr, *notified2 = nullptr;
   HIP_CHECK(hipHostMalloc(&notified1, sizeof(unsigned int)));
@@ -500,8 +495,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Default) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int* notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));

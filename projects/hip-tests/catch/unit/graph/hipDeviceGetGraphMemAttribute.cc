@@ -206,10 +206,7 @@ static void hipDeviceGetGraphMemAttribute_Functional_Test(unsigned deviceId = 0)
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(
-        "Runtime doesn't support Memory Pool."
-        " Skip the test case.");
-    return;
+    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;
@@ -302,7 +299,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device) {
       hipDeviceGetGraphMemAttribute_Functional_Test(i);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 }
 

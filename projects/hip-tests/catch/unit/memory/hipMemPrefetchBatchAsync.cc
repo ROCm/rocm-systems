@@ -38,8 +38,7 @@ constexpr size_t kTestBufferBytes = kTestBufferElements * sizeof(int);
   int device_var = 0;                                                                              \
   HIP_CHECK(hipSetDevice(device_var));                                                             \
   if (!DeviceAttributesSupport(device_var, hipDeviceAttributeConcurrentManagedAccess)) {           \
-    HipTest::HIP_SKIP_TEST("Device does not support concurrent managed access");                   \
-    return;                                                                                        \
+    HIP_SKIP_TEST("Device does not support concurrent managed access");                            \
   }
 
 }  // namespace
@@ -575,8 +574,7 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_MultiDevice") {
   HIP_CHECK(hipGetDeviceCount(&device_count));
 
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("Multi-device test requires at least 2 GPUs");
-    return;
+    HIP_SKIP_TEST("Multi-device test requires at least 2 GPUs");
   }
 
   std::vector<int> supported_devices;
@@ -587,9 +585,7 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_MultiDevice") {
   }
 
   if (supported_devices.size() < 2) {
-    HipTest::HIP_SKIP_TEST(
-        "Multi-device test requires at least 2 GPUs with concurrent managed access");
-    return;
+    HIP_SKIP_TEST("Multi-device test requires at least 2 GPUs with concurrent managed access");
   }
 
   int device = supported_devices[0];

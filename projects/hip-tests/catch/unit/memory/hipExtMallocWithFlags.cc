@@ -52,8 +52,7 @@ HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Alignment) {
   const auto flag = GENERATE(hipDeviceMallocDefault, hipDeviceMallocFinegrained);
   if (flag == hipDeviceMallocFinegrained &&
       !DeviceAttributesSupport(0, hipDeviceAttributeFineGrainSupport)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
   HIP_CHECK(hipExtMallocWithFlags(&ptr1, 1, flag));
   HIP_CHECK(hipExtMallocWithFlags(&ptr2, 10, flag));

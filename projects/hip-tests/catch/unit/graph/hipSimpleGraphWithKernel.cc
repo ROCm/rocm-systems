@@ -146,8 +146,7 @@ static void hipTestWithoutGraph() {
 #ifdef KERNEL_ARG_PREFETCH
 TEST_CASE("Unit_hipGraph_SimpleGraphWithKernel_kernel_arg_prefetch") {
   if (!HipTest::isKernelArgPrefetchSupported()) {
-    HipTest::HIP_SKIP_TEST("Kernel arg prefetch is not supported on the device. Skipped.");
-    return;
+    HIP_SKIP_TEST("Kernel arg prefetch is not supported on the device. Skipped.");
   }
 #else
 TEST_CASE("Unit_hipGraph_SimpleGraphWithKernel") {

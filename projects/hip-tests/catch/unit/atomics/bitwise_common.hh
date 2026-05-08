@@ -345,8 +345,7 @@ void SingleDeviceMultipleKernelTest(const unsigned int kernel_count, const unsig
   int concurrent_kernels = 0;
   HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, 0));
   if (!concurrent_kernels) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentKernelExecutionUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentKernelExecutionUnsupported);
   }
 
   TestParams params;
@@ -373,14 +372,12 @@ void MultipleDeviceMultipleKernelTest(const unsigned int num_devices,
                                       const unsigned int pitch) {
   if (num_devices > 1) {
     if (HipTest::getDeviceCount() < num_devices) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiredDeviceCountNotMet);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kRequiredDeviceCountNotMet);
     }
   }
 
   if (!HipTest::checkConcurrentKernels(num_devices)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentKernelExecutionUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentKernelExecutionUnsupported);
   }
 
   TestParams params;
