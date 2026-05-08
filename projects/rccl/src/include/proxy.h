@@ -356,7 +356,6 @@ struct ncclProxyState {
 
   uint32_t* abortFlag;
   bool directMode;
-  struct ncclMemManager* memManager;  // Shared memory manager for proxy allocations
   // Service threads
   pthread_t thread;
   pthread_t threadUDS;

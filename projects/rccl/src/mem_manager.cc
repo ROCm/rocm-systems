@@ -109,6 +109,12 @@ ncclResult_t ncclMemManagerDestroy(struct ncclComm* comm) {
       free(entry->desc.local.exportedPeerRanks);
     }
 
+    // RCCL: release VA reservation for entries that were Suspended
+    // (state == Released) but never Resumed before Destroy.
+    if (entry->state == ncclDynMemStateReleased && entry->ptr != nullptr) {
+      CUCHECKIGNORE(cuMemAddressFree((CUdeviceptr)entry->ptr, entry->size));
+    }
+
     // Free the entry itself
     free(entry);
     entry = next;
@@ -267,7 +273,7 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
 
   // Variables to save values before releasing lock
   size_t entrySize = 0;
-  [[maybe_unused]] int numEntries = 0;  // May be unused if TRACE compiled out
+  int numEntries = 0; // May be unused if TRACE compiled out (silenced via (void) below)
   bool isImportedFromPeer = false;
   ncclMemType_t memType = ncclMemScratch;
 
@@ -346,6 +352,7 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t si
 
     TRACE(NCCL_ALLOC, "MemManager: Untrack ptr=%p size=%zu entries=%d",
           ptr, entrySize, numEntries);
+    (void)numEntries; // suppress unused-variable warning when TRACE expands to no-op in Release
   } else {
     // Entry not found in linked list - must be persistent memory
     (void)__atomic_sub_fetch(&manager->totalPersist, size, __ATOMIC_RELAXED);
@@ -423,8 +430,7 @@ ncclResult_t ncclDynMemMarkExportToPeer(struct ncclMemManager* manager, void* pt
  * 2. Second pass: Offload local buffers to CPU and suspend physical memory
  */
 ncclResult_t ncclCommMemSuspend(struct ncclComm* comm) {
-  if (ncclParamMemManagerDisable())
-  {
+  if (ncclParamMemManagerDisable()) {
     WARN("MemManager: Suspend failed, memory manager is disabled");
     return ncclInvalidUsage;
   }
@@ -449,6 +455,10 @@ ncclResult_t ncclCommMemSuspend(struct ncclComm* comm) {
   NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, 0xBEEF), ret, fail);
 
   // Step 1: Unmap all peer-imported buffers first
+  // RCCL: surface unmap failures instead of swallowing
+  // them with CUCHECKIGNORE. If unmap fails the mapping is still live, so we leave
+  // the entry in Active state so Resume will not try to remap on top of it; the
+  // function returns the first error after best-effort teardown of the rest.
   entry = manager->entries;
   while (entry != nullptr) {
     if (entry->isImportedFromPeer && entry->state == ncclDynMemStateActive) {
@@ -456,12 +466,24 @@ ncclResult_t ncclCommMemSuspend(struct ncclComm* comm) {
             entry->ptr, entry->desc.imported.ownerRank);
 
       // Unmap our local mapping of the peer's memory
-      CUCHECKIGNORE(cuMemUnmap((CUdeviceptr)entry->ptr, entry->size));
+      hipError_t unmapErr = cuMemUnmap((CUdeviceptr)entry->ptr, entry->size);
+      if (unmapErr != hipSuccess) {
+        WARN("MemManager: cuMemUnmap failed during Suspend for peer-imported ptr=%p size=%zu from rank=%d: '%s' (entry kept Active, handle preserved)",
+             entry->ptr, entry->size, entry->desc.imported.ownerRank, hipGetErrorString(unmapErr));
+        if (ret == ncclSuccess) ret = ncclUnhandledCudaError;
+        entry = entry->next;
+        continue;
+      }
 
       // Release our reference to the peer's handle if we have one
       // For same-process imports, handle may be 0 if the reference was already released after mapping
       if (entry->handle != 0) {
-        CUCHECKIGNORE(cuMemRelease(entry->handle));
+        hipError_t relErr = cuMemRelease(entry->handle);
+        if (relErr != hipSuccess) {
+          WARN("MemManager: cuMemRelease failed during Suspend for peer-imported ptr=%p handle=%llu: '%s' (handle ref leaked in driver, marking Released)",
+               entry->ptr, (unsigned long long)entry->handle, hipGetErrorString(relErr));
+          if (ret == ncclSuccess) ret = ncclUnhandledCudaError;
+        }
         entry->handle = 0;  // Clear invalid handle
       }
 
@@ -521,11 +543,27 @@ ncclResult_t ncclCommMemSuspend(struct ncclComm* comm) {
       entry->desc.local.shareableHandleValid = false;
     }
 
-    // Unmap physical memory but keep virtual address reservation
-    CUCHECKIGNORE(cuMemUnmap((CUdeviceptr)entry->ptr, entry->size));
+    // Unmap physical memory but keep virtual address reservation.
+    // RCCL: if unmap fails the physical handle is still mapped and
+    // any cpuBackup we just produced is still meaningful.
+    // Leave the entry Active so Resume will skip it (no re-create on top
+    // of a live mapping); cpuBackup will be freed by Destroy.
+    hipError_t unmapErr = cuMemUnmap((CUdeviceptr)entry->ptr, entry->size);
+    if (unmapErr != hipSuccess) {
+      WARN("MemManager: cuMemUnmap failed during Suspend for local ptr=%p size=%zu type=%d: '%s' (entry kept Active, handle preserved)",
+           entry->ptr, entry->size, entry->memType, hipGetErrorString(unmapErr));
+      if (ret == ncclSuccess) ret = ncclUnhandledCudaError;
+      entry = entry->next;
+      continue;
+    }
 
     // Release physical memory handle
-    CUCHECKIGNORE(cuMemRelease(entry->handle));
+    hipError_t relErr = cuMemRelease(entry->handle);
+    if (relErr != hipSuccess) {
+      WARN("MemManager: cuMemRelease failed during Suspend for local ptr=%p handle=%llu: '%s' (handle ref leaked in driver, marking Released)",
+           entry->ptr, (unsigned long long)entry->handle, hipGetErrorString(relErr));
+      if (ret == ncclSuccess) ret = ncclUnhandledCudaError;
+    }
     entry->handle = 0;  // Clear invalid handle
 
     entry->state = ncclDynMemStateReleased;
@@ -534,12 +572,19 @@ ncclResult_t ncclCommMemSuspend(struct ncclComm* comm) {
     entry = entry->next;
   }
 
-  manager->released = 1;
+  // RCCL: Only mark the manager as released if every entry was successfully torn
+  // down. Otherwise leave released=0 so the caller can either retry Suspend
+  // (Active entries that failed will be revisited) or fall through to Destroy.
+  if (ret == ncclSuccess) {
+    manager->released = 1;
+    INFO(NCCL_ALLOC, "MemManager: rank %d suspended %d local + %d peer entries (scratch=%zu, offload=%zu, peerImport=%zu, cpuBackup=%zu)",
+         comm->rank, releasedCount, peerImportCount, releasedScratch, releasedOffload, releasedPeerImport, manager->cpuBackupUsage);
+  } else {
+    WARN("MemManager: rank %d Suspend completed with errors (released %d local + %d peer entries before first failure); manager left in unsuspended state, retry Suspend or call Destroy",
+         comm->rank, releasedCount, peerImportCount);
+  }
 
-  INFO(NCCL_ALLOC, "MemManager: rank %d suspended %d local + %d peer entries (scratch=%zu, offload=%zu, peerImport=%zu, cpuBackup=%zu)",
-       comm->rank, releasedCount, peerImportCount, releasedScratch, releasedOffload, releasedPeerImport, manager->cpuBackupUsage);
-
-  return ncclSuccess;
+  return ret;
 
 fail:
   return ret;
@@ -554,8 +599,7 @@ fail:
  * 3. Second pass: Re-import peer buffers using new handles
  */
 ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
-  if (ncclParamMemManagerDisable())
-  {
+  if (ncclParamMemManagerDisable()) {
     WARN("MemManager: Resume failed, memory manager is disabled");
     return ncclInvalidUsage;
   }
@@ -857,6 +901,8 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
       if (matchedInfo == nullptr) {
         WARN("MemManager: Could not find matching handle info for ptr=%p from rank %d",
              entry->ptr, entry->desc.imported.ownerRank);
+        // RCCL: surface partial-failure so released stays 1 below
+        if (ret == ncclSuccess) ret = ncclSystemError;
         entry = entry->next;
         continue;
       }
@@ -873,6 +919,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
             comm->peerInfo[entry->desc.imported.ownerRank].hostHash != comm->peerInfo[comm->rank].hostHash) {
           WARN("MemManager: Cannot re-import peer buffer from rank %d (different node) using POSIX FD - skipping",
                entry->desc.imported.ownerRank);
+          if (ret == ncclSuccess) ret = ncclInvalidUsage;
           entry = entry->next;
           continue;
         }
@@ -887,6 +934,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
         if (ret != ncclSuccess || fd < 0) {
           WARN("MemManager: Failed to get FD from rank %d for ptr=%p",
                entry->desc.imported.ownerRank, entry->ptr);
+          if (ret == ncclSuccess) ret = ncclSystemError;  // fd < 0 with success ret
           entry = entry->next;
           continue;
         }
@@ -900,6 +948,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
                                                 CU_MEM_HANDLE_TYPE_FABRIC));
       } else {
         WARN("MemManager: Unknown handle type %d for peer import", matchedInfo->handleType);
+        if (ret == ncclSuccess) ret = ncclInvalidUsage;
         entry = entry->next;
         continue;
       }
@@ -907,6 +956,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
       if (curet != CUDA_SUCCESS) {
         WARN("MemManager: cuMemImportFromShareableHandle failed for ptr=%p (curet=%d)",
              entry->ptr, curet);
+        if (ret == ncclSuccess) ret = ncclUnhandledCudaError;
         entry = entry->next;
         continue;
       }
@@ -917,6 +967,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
         CUCHECKIGNORE(cuMemRelease(newHandle));
         entry->handle = 0;
         WARN("MemManager: ncclCuMemMapAndSetAccess failed for re-imported ptr=%p", entry->ptr);
+        if (ret == ncclSuccess) ret = mapResult;
         entry = entry->next;
         continue;
       }
@@ -932,14 +983,26 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
     entry = entry->next;
   }
 
-  manager->released = 0;
+  // RCCL: only flip released back to 0 when every entry was restored. Each
+  // failing peer-import branch above leaves the entry in ncclDynMemStateReleased
+  if(ret == ncclSuccess) {
+    manager->released = 0;
+  } else {
+    WARN("MemManager: rank %d Resume completed with errors "
+         "(restored %d local + %d peer entries before first failure); "
+         "manager left in suspended state, retry Resume or call Destroy",
+         comm->rank, restoredLocalCount, restoredPeerCount);
+    manager->released = 1;
+  }
 
   // Final barrier to ensure all ranks have completed peer import setup
   if (comm->bootstrap != nullptr) {
     INFO(NCCL_ALLOC, "MemManager: rank %d resumed %d local + %d peer entries (%zu + %zu bytes)",
          comm->rank, restoredLocalCount, restoredPeerCount, restoredLocalBytes, restoredPeerBytes);
-    ret = bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, 0xCAFE);
-    if (ret != ncclSuccess) {
+    ncclResult_t barrierRet = bootstrapBarrier(comm->bootstrap, comm->rank, 
+                                               comm->nRanks, 0xCAFE);
+    if (barrierRet != ncclSuccess) {
+      if (ret == ncclSuccess) ret = barrierRet;
       // Cleanup
       if (allCounts) free(allCounts);
       if (localInfos) free(localInfos);
@@ -954,7 +1017,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
   if (localInfos) free(localInfos);
   if (allInfos) free(allInfos);
 
-  return ncclSuccess;
+  return ret;
 
 fail:
   if (allCounts) free(allCounts);
@@ -996,7 +1059,7 @@ ncclResult_t ncclCommMemStats(struct ncclComm* comm, ncclCommMemStat_t stat, uin
       return ncclSuccess;
     case ncclStatGpuMemSuspended:
       // Boolean: 0=active, 1=suspended
-      *value = manager->released ? 1 : 0;
+      *value = __atomic_load_n(&manager->released, __ATOMIC_ACQUIRE) ? 1 : 0;
       return ncclSuccess;
     default:
       return ncclInvalidArgument;
