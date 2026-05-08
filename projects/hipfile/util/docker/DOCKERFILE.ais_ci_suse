@@ -122,5 +122,9 @@ RUN zypper install -y \
         nvidia-compute-G06=575.57.08-1 \
         nvidia-open-driver-G06=575.57.08-1
 
+# Repair set alternative in case above zypper install
+# broke the symlink.
+RUN update-alternatives --auto gcc
+
 # Add CUDA bin directory to the path
 ENV PATH=/usr/local/cuda/bin:${PATH}
