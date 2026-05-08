@@ -58,12 +58,14 @@ def export_sqlite_query(
     Returns the path to the exported file (or None if nothing was exported).
 
     Supported export_format values (case-insensitive):
-        - "csv"
-        - "html"
-        - "md"   (markdown)
-        - "pdf"
-        - "dashboard"   (templated HTML dashboard)
-        - "clipboard"
+        - "console"     (default; prints to stdout — no pandas required)
+        - "csv"         (no pandas required)
+        - "json"        (no pandas required)
+        - "html"        (no pandas required)
+        - "md"          (markdown — no pandas required)
+        - "pdf"         (requires pandas + reportlab)
+        - "dashboard"   (templated HTML dashboard — requires pandas + jinja2)
+        - "clipboard"   (requires pandas)
 
     If export_format == "dashboard", you may optionally pass a
     dashboard_template_path (a Jinja2 template file). If omitted,
@@ -71,13 +73,31 @@ def export_sqlite_query(
     """
     try:
         import pandas as pd
+
+        _pandas_available = True
     except ImportError as e:
-        raise ImportError(
-            "pandas module not found. Please install it using 'pip install pandas' to export to other formats"
-        ) from e
+        _pandas_available = False
 
     try:
         conn = conn.connection if isinstance(conn, RocpdImportData) else conn
+
+        normalized_format = export_format.lower() if export_format else None
+        _stdlib_formats = {None, "console", "csv", "json", "html", "md"}
+
+        if not _pandas_available:
+            if normalized_format in _stdlib_formats:
+                print(
+                    "Module 'pandas' not found. Install it with: pip install pandas. Using fallback path.\n"
+                )
+                return _export_without_pandas(
+                    conn, query, params, normalized_format, export_path, **kwargs
+                )
+            else:
+                print(
+                    f"Export format '{normalized_format}' requires pandas. "
+                    "Install it with: pip install pandas"
+                )
+                return None
 
         # 1) Run the query via pandas
         df = pd.read_sql_query(query, conn, params=params)
@@ -160,6 +180,85 @@ def export_sqlite_query(
     except Exception as e:
         print(f"Error: {e}")
         return None
+
+
+def _export_without_pandas(conn, query, params, export_format, export_path, **kwargs):
+    """
+    Execute a SQLite query and export results using only the standard library.
+    Handles: console, csv, json, html, md.
+    """
+    import csv as _csv
+    import json
+    import html as _html
+
+    cursor = conn.cursor()
+    cursor.execute(query, params if params else ())
+    rows = cursor.fetchall()
+    col_names_raw = [desc[0] for desc in cursor.description] if cursor.description else []
+
+    if not rows:
+        sys.stderr.write(f"No results found for query: {query}\n")
+        sys.stderr.flush()
+        return None
+
+    if export_format in (None, "console"):
+        str_rows = [[str(v) for v in row] for row in rows]
+        col_widths = [len(c) for c in col_names_raw]
+        for row in str_rows:
+            for i, v in enumerate(row):
+                col_widths[i] = max(col_widths[i], len(v))
+        header = "  ".join(c.ljust(col_widths[i]) for i, c in enumerate(col_names_raw))
+        print(header)
+        for row in str_rows:
+            print("  ".join(v.ljust(col_widths[i]) for i, v in enumerate(row)))
+        return None
+
+    ext = export_format
+    export_path = export_path or f"query_output.{ext}"
+    if not export_path.endswith(f".{ext}"):
+        export_path = f"{export_path}.{ext}"
+    export_path = os.path.abspath(libpyrocpd.format_path(export_path, "rocpd"))
+    os.makedirs(os.path.dirname(export_path), exist_ok=True)
+
+    if export_format == "csv":
+        title_columns = kwargs.get("title_columns", True)
+        col_names = (
+            [c.title() for c in col_names_raw] if title_columns else col_names_raw[:]
+        )
+        with open(export_path, "w", newline="") as f:
+            writer = _csv.writer(f, quoting=_csv.QUOTE_NONNUMERIC)
+            writer.writerow(col_names)
+            writer.writerows(rows)
+
+    elif export_format == "json":
+        records = [dict(zip(col_names_raw, row)) for row in rows]
+        with open(export_path, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=2, default=str)
+            f.write("\n")
+
+    elif export_format == "html":
+        lines = ['<table border="1" class="dataframe">', "  <thead>", "    <tr>"]
+        for col in col_names_raw:
+            lines.append(f"      <th>{_html.escape(str(col))}</th>")
+        lines += ["    </tr>", "  </thead>", "  <tbody>"]
+        for row in rows:
+            lines.append("    <tr>")
+            for v in row:
+                lines.append(f"      <td>{_html.escape(str(v))}</td>")
+            lines.append("    </tr>")
+        lines += ["  </tbody>", "</table>"]
+        with open(export_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+
+    elif export_format == "md":
+        with open(export_path, "w", encoding="utf-8") as f:
+            f.write("| " + " | ".join(col_names_raw) + " |\n")
+            f.write("|" + "|".join("---" for _ in col_names_raw) + "|\n")
+            for row in rows:
+                f.write("| " + " | ".join(str(v) for v in row) + " |\n")
+
+    print(f"Exported to: {export_path}\n")
+    return export_path
 
 
 def _df_to_markdown_fallback(df, path: str):

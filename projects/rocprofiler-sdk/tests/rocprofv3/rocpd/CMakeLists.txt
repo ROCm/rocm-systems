@@ -529,3 +529,25 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED "${MULTIPROC_IS_DISABLED}"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-merge-generation-using-package-multiproc)
+
+#########################################################################################
+#
+# Query SQL string without pandas (stdlib-only fallback path)
+#
+#########################################################################################
+
+foreach(_fmt console csv json html md)
+    rocprofiler_add_integration_execute_test(
+        rocprofv3-test-rocpd-query-no-pandas-${_fmt}
+        COMMAND
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_rocpd_no_pandas.py
+            query -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/merged_db.db --query
+            "SELECT id, type FROM rocpd_info_agent LIMIT 10;" --format ${_fmt} -d
+            ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/query-no-pandas
+        DEPENDS rocprofiler-sdk::rocprofv3
+        TIMEOUT 60
+        LABELS "integration-tests;rocpd"
+        ENVIRONMENT "${rocprofv3-rocpd-env}"
+        FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+        FIXTURES_REQUIRED rocprofv3-test-rocpd-merge-generation-using-package)
+endforeach()
