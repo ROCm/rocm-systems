@@ -11,6 +11,7 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
+      - '.github/scripts/rocprofiler_sdk_s3_handoff.py'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
       - '!**/*.md'
       - '!**/*.rtf'
@@ -25,6 +26,7 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
+      - '.github/scripts/rocprofiler_sdk_s3_handoff.py'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
       - '!**/*.md'
       - '!**/*.rtf'
@@ -73,10 +75,17 @@ env:
   ENABLE_ROCJPEG_BUILD: "true"
   INSTALL_NIGHTLY_ROCM: "true"
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
+  ROCPROFILER_SDK_ARTIFACT_BUCKET: "therock-ci-artifacts-external"
+  # Configure the bucket lifecycle for this prefix with Expiration.Days = 7.
+  ROCPROFILER_SDK_ARTIFACT_PREFIX: "ROCm-rocm-systems/rocprofiler-sdk/ci-handoff/${{ github.run_id }}"
+  ROCPROFILER_SDK_ARTIFACT_REGION: "us-east-2"
 
 jobs:
   build-code-coverage:
     name: Build Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -91,12 +100,14 @@ jobs:
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
       env:
         DEBIAN_FRONTEND: noninteractive
+      options: -v /runner/config:/home/awsconfig/
 
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       GPU_RUNNER: ${{ matrix.system.gpu }}
       GCC_COMPILER_VERSION: 11
+      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
 
     steps:
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
@@ -104,6 +115,7 @@ jobs:
       with:
         sparse-checkout: |
           .github/actions/rocprofiler-sdk-util
+          .github/scripts
           projects/rocprofiler-sdk
           projects/aqlprofile
           projects/rocprofiler-register
@@ -232,17 +244,28 @@ jobs:
         tar -czf rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
           -C /opt rocm
 
-    - name: Cache build artifact
-      uses: actions/cache/save@v4
-      with:
-        key: build-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-        path: projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+    - name: Install S3 handoff dependencies
+      shell: bash
+      run: |
+        python3 -m pip install -U --user \
+          'boto3>=1.21.0,<1.24; python_version < "3.7"' \
+          'boto3>=1.26.0; python_version >= "3.7"'
 
-    - name: Cache ROCm dependencies
-      uses: actions/cache/save@v4
+    - name: Configure AWS Credentials
+      if: ${{ always() && !github.event.pull_request.head.repo.fork }}
+      uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
       with:
-        key: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-        path: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+        aws-region: ${{ env.ROCPROFILER_SDK_ARTIFACT_REGION }}
+        role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+
+    - name: Upload build handoff artifacts to S3
+      shell: bash
+      run: |
+        python3 .github/scripts/rocprofiler_sdk_s3_handoff.py upload \
+          --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
+          --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/code-coverage/build-code-coverage/${{ matrix.system.os }}/${{ matrix.system.gpu }}" \
+          --file "projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz" \
+          --file "rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz"
 
   code-coverage:
     name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
@@ -277,23 +300,19 @@ jobs:
       uses: actions/checkout@v6
       with:
         sparse-checkout: |
+          .github/scripts
           projects/rocprofiler-sdk
         submodules: false
         set-safe-directory: true
 
-    - name: Restore build artifact
-      uses: actions/cache/restore@v4
-      with:
-        key: build-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-        path: projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
-        fail-on-cache-miss: true
-
-    - name: Restore ROCm dependencies
-      uses: actions/cache/restore@v4
-      with:
-        key: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-        path: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
-        fail-on-cache-miss: true
+    - name: Download build handoff artifacts from S3
+      shell: bash
+      run: |
+        python3 .github/scripts/rocprofiler_sdk_s3_handoff.py download \
+          --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
+          --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/code-coverage/build-code-coverage/${{ matrix.system.os }}/${{ matrix.system.gpu }}" \
+          --file "projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz" \
+          --file "rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz"
 
     - name: Extract build artifacts
       shell: bash

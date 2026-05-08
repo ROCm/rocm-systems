@@ -8,6 +8,7 @@ on:
     branches: [ develop ]
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - '.github/scripts/rocprofiler_sdk_s3_handoff.py'
       - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
       - '!**/*.md'
       - '!**/*.rtf'
@@ -21,6 +22,7 @@ on:
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - '.github/scripts/rocprofiler_sdk_s3_handoff.py'
       - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
       - '!**/*.md'
       - '!**/*.rtf'
@@ -80,6 +82,10 @@ env:
   INSTALL_NIGHTLY_ROCM: "true"
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
+  ROCPROFILER_SDK_ARTIFACT_BUCKET: "therock-ci-artifacts-external"
+  # Configure the bucket lifecycle for this prefix with Expiration.Days = 7.
+  ROCPROFILER_SDK_ARTIFACT_PREFIX: "ROCm-rocm-systems/rocprofiler-sdk/ci-handoff/${{ github.run_id }}"
+  ROCPROFILER_SDK_ARTIFACT_REGION: "us-east-2"
 jobs:
   # =============================================================================
   # BUILD JOBS - Run on CPU runners to avoid blocking GPU queues
@@ -90,6 +96,10 @@ jobs:
   # -----------------------------------------------------------------------------
   build-deb:
     name: Build • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -106,16 +116,19 @@ jobs:
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
       env:
         DEBIAN_FRONTEND: noninteractive
+      options: -v /runner/config:/home/awsconfig/
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       CORE_EXT_RUNNER: mi325
       GPU_RUNNER: ${{ matrix.system.gpu }}
+      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
         uses: actions/checkout@v6
         with:
           sparse-checkout: |
             .github/actions/rocprofiler-sdk-util
+            .github/scripts
 
             projects/rocprofiler-sdk
             projects/aqlprofile
@@ -261,20 +274,31 @@ jobs:
           tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
             -C /opt rocm
 
-      # Cache the handoff tarballs instead of using actions/upload-artifact for ~10x faster transfer.
-      # Keys are scoped to this run+attempt to avoid collisions between workflow runs.
-      # *.deb / *.rpm / *.tgz packages live inside build/ which is already in the tarball.
-      - name: Cache build artifact
-        uses: actions/cache/save@v4
-        with:
-          key: build-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+      - name: Install S3 handoff dependencies
+        shell: bash
+        run: |
+          python3 -m pip install -U --user \
+            'boto3>=1.21.0,<1.24; python_version < "3.7"' \
+            'boto3>=1.26.0; python_version >= "3.7"'
 
-      - name: Cache ROCm dependencies
-        uses: actions/cache/save@v4
+      - name: Configure AWS Credentials
+        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
-          key: rocm-deps-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+          aws-region: ${{ env.ROCPROFILER_SDK_ARTIFACT_REGION }}
+          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+
+      # Run-scoped build handoff. The bucket lifecycle policy should expire this
+      # prefix after 7 days; these tarballs only need to survive delayed GPU jobs
+      # and short rerun/debug windows.
+      - name: Upload build handoff artifacts to S3
+        shell: bash
+        run: |
+          python3 .github/scripts/rocprofiler_sdk_s3_handoff.py upload \
+            --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
+            --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/continuous-integration/build-deb/${{ matrix.system.os }}/${{ matrix.system.gpu }}" \
+            --file "projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz" \
+            --file "rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz"
 
   # -----------------------------------------------------------------------------
   # Ubuntu / DEB Test job(s) - Run on GPU runners
@@ -311,23 +335,19 @@ jobs:
         uses: actions/checkout@v6
         with:
           sparse-checkout: |
+            .github/scripts
             projects/rocprofiler-sdk
           submodules: false
           set-safe-directory: true
 
-      - name: Restore build artifact
-        uses: actions/cache/restore@v4
-        with:
-          key: build-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
-          fail-on-cache-miss: true
-
-      - name: Restore ROCm dependencies
-        uses: actions/cache/restore@v4
-        with:
-          key: rocm-deps-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
-          fail-on-cache-miss: true
+      - name: Download build handoff artifacts from S3
+        shell: bash
+        run: |
+          python3 .github/scripts/rocprofiler_sdk_s3_handoff.py download \
+            --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
+            --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/continuous-integration/build-deb/${{ matrix.system.os }}/${{ matrix.system.gpu }}" \
+            --file "projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz" \
+            --file "rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz"
 
       - name: Extract build artifacts
         shell: bash
@@ -449,6 +469,10 @@ jobs:
   # -----------------------------------------------------------------------------
   build-rpm:
     name: Build • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -462,16 +486,19 @@ jobs:
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      options: -v /runner/config:/home/awsconfig/
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       OS_TYPE: ${{ matrix.system.os }}
       GPU_RUNNER: ${{ matrix.system.gpu }}
+      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
         uses: actions/checkout@v6
         with:
           sparse-checkout: |
             .github/actions/rocprofiler-sdk-util
+            .github/scripts
             projects/rocprofiler-sdk
             projects/aqlprofile
             projects/rocprofiler-register
@@ -582,17 +609,30 @@ jobs:
           tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
             -C /opt rocm
 
-      - name: Cache build artifact
-        uses: actions/cache/save@v4
-        with:
-          key: build-rpm-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+      - name: Install S3 handoff dependencies
+        shell: bash
+        run: |
+          source projects/rocprofiler-sdk/${{ env.PYTHON_VENV_ACTIVATE }}
+          python3 -m pip install -U \
+            'boto3>=1.21.0,<1.24; python_version < "3.7"' \
+            'boto3>=1.26.0; python_version >= "3.7"'
 
-      - name: Cache ROCm dependencies
-        uses: actions/cache/save@v4
+      - name: Configure AWS Credentials
+        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
-          key: rocm-deps-rpm-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+          aws-region: ${{ env.ROCPROFILER_SDK_ARTIFACT_REGION }}
+          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+
+      - name: Upload build handoff artifacts to S3
+        shell: bash
+        run: |
+          source projects/rocprofiler-sdk/${{ env.PYTHON_VENV_ACTIVATE }}
+          python3 .github/scripts/rocprofiler_sdk_s3_handoff.py upload \
+            --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
+            --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/continuous-integration/build-rpm/${{ matrix.system.os }}/${{ matrix.system.gpu }}" \
+            --file "projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz" \
+            --file "rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz"
 
   # -----------------------------------------------------------------------------
   # RHEL/SLES (RPM) Test job(s) - Run on GPU runners
@@ -626,23 +666,19 @@ jobs:
         uses: actions/checkout@v6
         with:
           sparse-checkout: |
+            .github/scripts
             projects/rocprofiler-sdk
           submodules: false
           set-safe-directory: true
 
-      - name: Restore build artifact
-        uses: actions/cache/restore@v4
-        with:
-          key: build-rpm-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
-          fail-on-cache-miss: true
-
-      - name: Restore ROCm dependencies
-        uses: actions/cache/restore@v4
-        with:
-          key: rocm-deps-rpm-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
-          fail-on-cache-miss: true
+      - name: Download build handoff artifacts from S3
+        shell: bash
+        run: |
+          python3 .github/scripts/rocprofiler_sdk_s3_handoff.py download \
+            --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
+            --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/continuous-integration/build-rpm/${{ matrix.system.os }}/${{ matrix.system.gpu }}" \
+            --file "projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz" \
+            --file "rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz"
 
       - name: Extract build artifacts
         shell: bash
@@ -696,6 +732,10 @@ jobs:
   # -----------------------------------------------------------------------------
   build-sanitizers:
     name: Build • ${{ matrix.system.sanitizer }} • ${{ matrix.system.os }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -714,11 +754,13 @@ jobs:
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
       env:
         DEBIAN_FRONTEND: noninteractive
+      options: -v /runner/config:/home/awsconfig/
 
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       GCC_COMPILER_VERSION: 12
       GPU_RUNNER: ${{ matrix.system.gpu }}
+      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
 
     steps:
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
@@ -726,6 +768,7 @@ jobs:
       with:
         sparse-checkout: |
           .github/actions/rocprofiler-sdk-util
+          .github/scripts
           projects/rocprofiler-sdk
           projects/aqlprofile
           projects/rocprofiler-register
@@ -830,17 +873,28 @@ jobs:
         tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz \
           -C /opt rocm
 
-    - name: Cache build artifact
-      uses: actions/cache/save@v4
-      with:
-        key: build-sanitizers-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}-${{ github.run_id }}-${{ github.run_attempt }}
-        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz
+    - name: Install S3 handoff dependencies
+      shell: bash
+      run: |
+        python3 -m pip install -U --user \
+          'boto3>=1.21.0,<1.24; python_version < "3.7"' \
+          'boto3>=1.26.0; python_version >= "3.7"'
 
-    - name: Cache ROCm dependencies
-      uses: actions/cache/save@v4
+    - name: Configure AWS Credentials
+      if: ${{ always() && !github.event.pull_request.head.repo.fork }}
+      uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
       with:
-        key: rocm-deps-sanitizers-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}-${{ github.run_id }}-${{ github.run_attempt }}
-        path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz
+        aws-region: ${{ env.ROCPROFILER_SDK_ARTIFACT_REGION }}
+        role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+
+    - name: Upload build handoff artifacts to S3
+      shell: bash
+      run: |
+        python3 .github/scripts/rocprofiler_sdk_s3_handoff.py upload \
+          --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
+          --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/continuous-integration/build-sanitizers/${{ matrix.system.os }}/${{ matrix.system.gpu }}/${{ matrix.system.sanitizer }}" \
+          --file "projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz" \
+          --file "rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz"
 
   # -----------------------------------------------------------------------------
   # Sanitizers Test job - Run ALL sanitizer tests on a SINGLE GPU runner
@@ -875,46 +929,33 @@ jobs:
       uses: actions/checkout@v6
       with:
         sparse-checkout: |
+          .github/scripts
           projects/rocprofiler-sdk
         submodules: false
         set-safe-directory: true
 
-    # Restore all 4 sanitizer build artifacts from cache
-    - name: Restore AddressSanitizer build artifact
-      uses: actions/cache/restore@v4
-      with:
-        key: build-sanitizers-ubuntu-22.04-mi325-AddressSanitizer-${{ github.run_id }}-${{ github.run_attempt }}
-        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-AddressSanitizer.tar.gz
-        fail-on-cache-miss: true
-
-    - name: Restore ThreadSanitizer build artifact
-      uses: actions/cache/restore@v4
-      with:
-        key: build-sanitizers-ubuntu-22.04-mi325-ThreadSanitizer-${{ github.run_id }}-${{ github.run_attempt }}
-        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-ThreadSanitizer.tar.gz
-        fail-on-cache-miss: true
-
-    - name: Restore LeakSanitizer build artifact
-      uses: actions/cache/restore@v4
-      with:
-        key: build-sanitizers-ubuntu-22.04-mi325-LeakSanitizer-${{ github.run_id }}-${{ github.run_attempt }}
-        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-LeakSanitizer.tar.gz
-        fail-on-cache-miss: true
-
-    - name: Restore UndefinedBehaviorSanitizer build artifact
-      uses: actions/cache/restore@v4
-      with:
-        key: build-sanitizers-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer-${{ github.run_id }}-${{ github.run_attempt }}
-        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer.tar.gz
-        fail-on-cache-miss: true
-
-    # Restore ROCm dependencies (any sanitizer's deps tarball is functionally identical; pick AddressSanitizer)
-    - name: Restore ROCm dependencies
-      uses: actions/cache/restore@v4
-      with:
-        key: rocm-deps-sanitizers-ubuntu-22.04-mi325-AddressSanitizer-${{ github.run_id }}-${{ github.run_attempt }}
-        path: rocm-deps-ubuntu-22.04-mi325-AddressSanitizer.tar.gz
-        fail-on-cache-miss: true
+    # Download all 4 sanitizer build artifacts. ROCm dependencies are identical;
+    # pick AddressSanitizer's dependency tarball for the shared test setup.
+    - name: Download sanitizer handoff artifacts from S3
+      shell: bash
+      run: |
+        python3 .github/scripts/rocprofiler_sdk_s3_handoff.py download \
+          --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
+          --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/continuous-integration/build-sanitizers/ubuntu-22.04/mi325/AddressSanitizer" \
+          --file "projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-AddressSanitizer.tar.gz" \
+          --file "rocm-deps-ubuntu-22.04-mi325-AddressSanitizer.tar.gz"
+        python3 .github/scripts/rocprofiler_sdk_s3_handoff.py download \
+          --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
+          --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/continuous-integration/build-sanitizers/ubuntu-22.04/mi325/ThreadSanitizer" \
+          --file "projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-ThreadSanitizer.tar.gz"
+        python3 .github/scripts/rocprofiler_sdk_s3_handoff.py download \
+          --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
+          --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/continuous-integration/build-sanitizers/ubuntu-22.04/mi325/LeakSanitizer" \
+          --file "projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-LeakSanitizer.tar.gz"
+        python3 .github/scripts/rocprofiler_sdk_s3_handoff.py download \
+          --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
+          --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/continuous-integration/build-sanitizers/ubuntu-22.04/mi325/UndefinedBehaviorSanitizer" \
+          --file "projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer.tar.gz"
 
     - name: Extract ROCM dependencies
       shell: bash
