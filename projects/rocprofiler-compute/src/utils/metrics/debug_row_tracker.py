@@ -72,7 +72,7 @@ def _extract_column_data(
     col_name: str,
     raw_pmc_df: pd.DataFrame,
 ) -> Optional[list[Any]]:
-    """Extract column data from a flat single-index ``raw_pmc_df``."""
+    """Extract column data from a dataframe raw_pmc_df."""
     if col_name not in raw_pmc_df.columns:
         return None
     series = raw_pmc_df[col_name]

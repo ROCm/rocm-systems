@@ -190,8 +190,7 @@ def validate() -> list[str]:
 
             counters = extract_counters("\n".join(formula_texts))
             # *_ACCUM is the per-bucket alias for SQ_ACCUM_PREV_HIRES, which is
-            # injected automatically by the profiler for level counters and is
-            # not counted against the per-block hardware limits.
+            # injected automatically by the profiler for level counters
             counters = {c for c in counters if not c.endswith("_ACCUM")}
             block_counters: dict[str, set[str]] = defaultdict(set)
             for c in counters:

@@ -298,65 +298,26 @@ def create_df_pmc(
     def create_single_df_pmc(
         raw_data_dir: str, node_name: Optional[str], kernel_verbose: int, verbose: int
     ) -> pd.DataFrame:
-        dfs: list[pd.DataFrame] = []
-
-        coll_level_map = {}
-        for file_name in Path(raw_data_dir).rglob("*.csv"):
-            # In csv format accumulator counters are specified as
-            # SQ_ACCUM_PREV_HIRES counter in the coll_level specific csv
-            if config_dict.get(
-                "format_rocprof_output"
-            ) == "csv" and file_name.name.startswith("pmc_perf_SQ"):
-                coll_level_map[file_name] = file_name.name[
-                    len("pmc_perf_") : -len(".csv")
-                ]
-
-            if file_name.name == f"{schema.PMC_PERF_FILE_PREFIX}.csv":
-                coll_level_map[file_name] = schema.PMC_PERF_FILE_PREFIX
-
-        for csv_file, coll_level in coll_level_map.items():
-            tmp_df = pd.read_csv(csv_file)
-
-            if config_dict.get("format_rocprof_output") == "rocpd":
-                tmp_df = utils_analysis.process_rocpd_csv(tmp_df)
-
-            # Demangle original KernelNames
-            # Skip for Standalone Roofline with -1 to keep full kernel names
-            if kernel_verbose >= 0:
-                kernel_name_shortener(tmp_df, kernel_verbose)
-
-            # Disambiguate the SQ_ACCUM_PREV_HIRES counter, which appears in
-            # every pmc_perf_<bucket>.csv file, by suffixing it with the
-            # collection level (e.g. SQ_INST_LEVEL_VMEM_ACCUM). Analysis
-            # YAML formulas reference the renamed columns directly.
-            if (
-                coll_level != schema.PMC_PERF_FILE_PREFIX
-                and "SQ_ACCUM_PREV_HIRES" in tmp_df.columns
-            ):
-                tmp_df = tmp_df.rename(
-                    columns={"SQ_ACCUM_PREV_HIRES": f"{coll_level}_ACCUM"}
-                )
-
-            if (
-                csv_file.name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
-                and node_name is not None
-            ):
-                tmp_df.insert(0, "Node", node_name)
-
-            dfs.append(tmp_df)
-
-        if not dfs:
+        pmc_perf_path = Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+        if not pmc_perf_path.is_file():
             return pd.DataFrame()
 
-        # Join all per-bucket frames horizontally on the row index. Shared
-        # metadata columns (Dispatch_ID, Kernel_Name, ...) are deduplicated
-        # by keeping the first occurrence; counter columns are unique after
-        # the SQ_ACCUM_PREV_HIRES rename above.
-        final_df = pd.concat(dfs, axis=1, join="inner", copy=False)
-        final_df = final_df.loc[:, ~final_df.columns.duplicated()]
+        df = pd.read_csv(pmc_perf_path)
+
+        if config_dict.get("format_rocprof_output") == "rocpd":
+            df = utils_analysis.process_rocpd_csv(df)
+
+        # Demangle original KernelNames
+        # Skip for Standalone Roofline with -1 to keep full kernel names
+        if kernel_verbose >= 0:
+            kernel_name_shortener(df, kernel_verbose)
+
+        if node_name is not None:
+            df.insert(0, "Node", node_name)
+
         if verbose >= 2:
-            console_debug(f"pmc_raw_data final_single_df {final_df.info}")
-        return final_df
+            console_debug(f"pmc_raw_data final_single_df {df.info}")
+        return df
 
     root_path = Path(raw_data_root_dir)
 

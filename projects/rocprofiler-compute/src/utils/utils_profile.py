@@ -355,7 +355,7 @@ def run_prof(
             # copy and remove out directory if needed
             shutil.copyfile(
                 f"{workload_dir}/out/pmc_1/results_{fbase}.csv",
-                f"{workload_dir}/{fbase}.csv",
+                f"{workload_dir}/results_{fbase}.csv",
             )
             # Remove temp directory
             shutil.rmtree(f"{workload_dir}/out")
@@ -383,7 +383,7 @@ def run_prof(
             "SCR": "Scratch_Per_Workitem",
             "ACCUM_VGPR": "Accum_VGPR",
         }
-        csv_path = Path(workload_dir) / f"{fbase}.csv"
+        csv_path = Path(workload_dir) / f"results_{fbase}.csv"
         rows, _ = csv_ops.read_csv_as_dicts(str(csv_path))
         csv_ops.rename_columns(rows, output_headers)
         csv_ops.write_csv_from_dicts(str(csv_path), rows)

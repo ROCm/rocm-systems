@@ -573,9 +573,7 @@ def is_workload_empty(path: str) -> None:
     if pmc_perf_path.is_file():
         files_to_check = [pmc_perf_path]
     else:
-        pmc_files = list(workload_dir.glob("pmc_perf_*.csv"))
-        results_files = list(workload_dir.glob("results_*.csv"))
-        files_to_check = pmc_files if pmc_files else results_files
+        files_to_check = list(workload_dir.glob("results_*.csv"))
 
     if not files_to_check:
         console_error("analysis", "No profiling data found.")
@@ -599,11 +597,6 @@ def impute_counters_iteration_multiplex(
 ) -> pd.DataFrame:
     """
     Perform data imputation for missing counter values due to iteration multiplexing.
-
-    Operates on the flat single-index ``raw_pmc`` DataFrame produced by
-    ``file_io.create_df_pmc``. Counter columns whose value is missing for a
-    given dispatch are filled by propagating the matching value from a
-    sibling dispatch in the same multiplex round-robin bucket.
     """
     # Counter buckets configured for the workload. A kernel needs at least
     # this many dispatches to cover every bucket.
