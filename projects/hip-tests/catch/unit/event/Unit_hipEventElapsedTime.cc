@@ -95,7 +95,8 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_DisableTiming) {
 HIP_TEST_CASE(Unit_hipEventElapsedTime_DifferentDevices) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   // create event on dev=0

@@ -206,7 +206,8 @@ HIP_TEST_CASE(Unit_hipFuncSetAttribute_Negative_Parameters) {
  */
 HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_Supported) {
 #if HT_NVIDIA
-  HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
+  return;
 #endif
 
   hipFuncAttributes old_attributes;
@@ -237,7 +238,8 @@ HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_S
  */
 HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout_Not_Supported) {
 #if HT_NVIDIA
-  HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
+  return;
 #endif
 
   hipFuncAttributes old_attributes;

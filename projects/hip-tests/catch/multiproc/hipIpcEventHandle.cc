@@ -235,7 +235,8 @@ HIP_TEST_CASE(Unit_hipIpcEventHandle_Functional) {
   getDevices(shmDevices);
 
   if (shmDevices->count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   g_processCnt = (shmDevices->count > MAX_DEVICES) ? MAX_DEVICES : shmDevices->count;

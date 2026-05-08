@@ -235,7 +235,8 @@ HIP_TEST_CASE(Unit_svm_fine_grain_memory_consistency) {
     int pcieAtomic = 0;
     HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id));
     if (!pcieAtomic) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+      return;
     }
   }
   const int num_elements = 2167;

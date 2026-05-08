@@ -166,7 +166,8 @@ HIP_TEST_CASE(Unit_svm_shared_address_space_fine_grain_buffers) {
     int pcieAtomic = 0;
     HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id));
     if (!pcieAtomic) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+      return;
     }
   }
 
@@ -253,14 +254,16 @@ HIP_TEST_CASE(Unit_svm_shared_address_space_fine_grain_system) {
     int pcieAtomic = 0;
     HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id));
     if (!pcieAtomic) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+      return;
     }
 
     int pageableAccess = 0;
     // This need xnack+ on MiXXX. If xnack is off on MiXXX, try ENV HSA_XNACK=1
     HIP_CHECK(hipDeviceGetAttribute(&pageableAccess, hipDeviceAttributePageableMemoryAccess, id));
     if (!pageableAccess) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
+      return;
     }
   }
 

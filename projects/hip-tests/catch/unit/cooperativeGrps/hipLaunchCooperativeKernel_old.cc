@@ -55,7 +55,8 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Basic) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   size_t buffer_size = kBufferLen * sizeof(int);

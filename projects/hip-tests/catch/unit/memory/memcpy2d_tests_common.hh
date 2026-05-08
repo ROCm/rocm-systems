@@ -61,7 +61,8 @@ void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
     int can_access_peer = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
     if (!can_access_peer) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      return;
     }
   }
 

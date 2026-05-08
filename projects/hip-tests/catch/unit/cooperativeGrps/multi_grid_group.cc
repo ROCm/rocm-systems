@@ -152,7 +152,8 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Basic) {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+      return;
     }
   }
   const auto test_case = GENERATE(range(0, 20));
@@ -298,7 +299,8 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Base_Type) {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+      return;
     }
   }
 
@@ -419,7 +421,8 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Non_Member_Functions) {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+      return;
     }
   }
   const auto test_case = GENERATE(range(0, 20));
@@ -530,7 +533,8 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Positive_Sync) {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+      return;
     }
   }
   auto loops = GENERATE(2, 4, 8);

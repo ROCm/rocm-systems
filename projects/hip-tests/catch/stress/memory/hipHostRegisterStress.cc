@@ -45,7 +45,8 @@ HIP_TEST_CASE(Stress_hipHostRegister_Oversubscription) {
   std::string arch = prop.gcnArchName;
 #if HT_AMD
   if (std::string::npos == arch.find("xnack+")) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+    return;
   }
 #endif
   size_t maxGpuMem = 0, availableMem = 0;
@@ -67,7 +68,8 @@ HIP_TEST_CASE(Stress_hipHostRegister_Oversubscription) {
   INFO("Free Host Memory = " << hostMemFree);
   // Ensure that allocsize < hostMemFree
   if (allocsize >= hostMemFree) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kNotEnoughFreeHostMemory);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNotEnoughFreeHostMemory);
+    return;
   }
   uint8_t* A = reinterpret_cast<uint8_t*>(malloc(allocsize));
   uint8_t* ptr;

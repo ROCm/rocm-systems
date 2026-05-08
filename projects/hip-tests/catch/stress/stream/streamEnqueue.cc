@@ -115,7 +115,8 @@ HIP_TEST_CASE(Stress_StreamEnqueue_DifferentThreads_MultiGPU) {
 
   // Skip the test if devices less than 2
   if (deviceCount <= 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   constexpr size_t streamPerGPU{3};  // Stream per gpu

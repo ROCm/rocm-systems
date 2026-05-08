@@ -93,7 +93,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_Warp_Shfl_Up_Positive_Basic, int, unsigned int, long
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.arch.hasWarpShuffle) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kWarpShuffleUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kWarpShuffleUnsupported);
+    return;
   }
 
   SECTION("Shfl Up with specified active mask and input values") {

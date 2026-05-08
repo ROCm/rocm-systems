@@ -93,6 +93,6 @@ HIP_TEST_CASE(Stress_HMM_OverSubscriptionTst) {
     HIP_CHECK_THREAD_FINALIZE();
     REQUIRE(proc.wait() == 0);
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }

@@ -36,7 +36,8 @@ static constexpr auto kernel_name = "cooperativeKernelEx";
  */
 HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_NegTsts) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
   int totalThreads = 64;
   int blockSize = 16;
@@ -205,7 +206,8 @@ bool runTestDrvLaunch(const char* testName, std::string kernelFunc, int totalThr
  */
 HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_Functional) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
   REQUIRE(runTestDrvLaunch("hipDrvLaunchKernelEx", kernel_name, 64, 16, 2222) == true);
 }
@@ -228,7 +230,8 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_Functional) {
 HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_Different_Kernels) {
   CTX_CREATE();
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   hipModule_t module;
@@ -307,7 +310,8 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_Different_Kernels) {
 HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs) {
   CTX_CREATE();
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   hipModule_t module;
@@ -382,7 +386,8 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs) {
 HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_With_MaxBlockDims) {
   CTX_CREATE();
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   hipModule_t module;

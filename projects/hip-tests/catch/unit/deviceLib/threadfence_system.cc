@@ -42,7 +42,8 @@ HIP_TEST_CASE(Unit_threadfence_system) {
 
   volatile int* data = nullptr;
   if (hipHostMalloc(&data, sizeof(int), hipHostMallocCoherent) != hipSuccess) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
+    return;
   }
 
   constexpr int init_data = 1000;
@@ -50,8 +51,9 @@ HIP_TEST_CASE(Unit_threadfence_system) {
 
   volatile int* flag = nullptr;
   if (hipHostMalloc(&flag, sizeof(int), hipHostMallocCoherent) != hipSuccess) {
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
     HIP_CHECK(hipHostFree((void*)data));
-    HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
+    return;
   }
   *flag = 0;
 

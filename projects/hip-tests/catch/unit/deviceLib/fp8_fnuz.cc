@@ -35,7 +35,8 @@ std::string get_arch_type() {
 #define FP8_FNUZ_SKIP_TEST                                                                         \
   std::string gfxName = get_arch_type();                                                           \
   if (!(ARCH_TYPE_GFX940(gfxName))) {                                                              \
-    HIP_SKIP_TEST("this test requires gfx942 architecture.");                                      \
+    HipTest::HIP_SKIP_TEST("this test requires gfx942 architecture.");                            \
+    return;                                                                                        \
   }
 
 #define __FP8_DEVICE__ __device__ static inline

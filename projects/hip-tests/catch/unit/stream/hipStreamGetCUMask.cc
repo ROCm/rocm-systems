@@ -32,7 +32,8 @@ HIP_TEST_CASE(Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask) {
   int nGpu = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpu));
   if (nGpu < 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    return;
   }
 
   HIP_CHECK(hipSetDevice(0));

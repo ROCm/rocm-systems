@@ -411,7 +411,8 @@ void HipFunctorTests::TestForFunctorContainInStructObj(void) {
  */
 TEST_CASE("Unit_hipLaunchParmFunctor_kernel_arg_prefetch") {
   if (!HipTest::isKernelArgPrefetchSupported()) {
-    HIP_SKIP_TEST("Kernel arg prefetch is not supported on the device. Skipped.");
+    HipTest::HIP_SKIP_TEST("Kernel arg prefetch is not supported on the device. Skipped.");
+    return;
   }
 #else
 TEST_CASE("Unit_hipLaunchParmFunctor") {

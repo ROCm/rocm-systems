@@ -183,7 +183,8 @@ HIP_TEST_CASE(Unit_hipCGThreadBlockType) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   ThreadBlockTypeTests test_type = ThreadBlockTypeTests::basicApi;

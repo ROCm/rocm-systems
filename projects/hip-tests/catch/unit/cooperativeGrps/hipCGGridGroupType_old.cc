@@ -316,7 +316,8 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_Basic) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   void* kernel_func;
@@ -361,7 +362,8 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_DataSharing) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   int loops = GENERATE(1, 2, 3, 4);
@@ -440,7 +442,8 @@ HIP_TEST_CASE(Unit_hipCGGridGroupType_Barrier) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   uint32_t loops = GENERATE(1, 2, 3, 4);

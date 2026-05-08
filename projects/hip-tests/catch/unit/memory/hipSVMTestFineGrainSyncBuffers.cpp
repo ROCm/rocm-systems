@@ -75,7 +75,8 @@ HIP_TEST_CASE(Unit_svm_fine_grain_sync_buffers) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    return;
   }
   size_t num_pixels = 1024 * 1024 * 2;
   hipStream_t stream;

@@ -156,7 +156,8 @@ static void testValidDevices(int numDevices, bool useRocrEnv, int* deviceList,
   std::string visibleDeviceString;
 
   if ((NULL == deviceList) || ((deviceListLength < 1) || deviceListLength > numDevices)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kRequiredDeviceCountNotMet);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiredDeviceCountNotMet);
+    return;
   }
 
   for (int i = 0; i < deviceListLength; i++) {

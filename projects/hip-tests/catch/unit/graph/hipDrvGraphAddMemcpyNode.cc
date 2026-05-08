@@ -365,7 +365,8 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_MulitDevice) {
       hipDrvGraphAddMemcpyNode_test(device);
     }
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 }
 #endif

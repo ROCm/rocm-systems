@@ -76,7 +76,8 @@ HIP_TEST_CASE(Unit_svm_byte_granularity) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    return;
   }
   const int num_elements = 2048;
   int num_devices = 0;

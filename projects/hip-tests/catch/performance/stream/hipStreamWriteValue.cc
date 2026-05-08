@@ -99,9 +99,10 @@ HIP_TEST_CASE(Performance_hipStreamWriteValue32) {
 HIP_TEST_CASE(Performance_hipStreamWriteValue64) {
 #if HT_NVIDIA
   if (!IsStreamWriteValueSupported(0)) {
-    HIP_SKIP_TEST(
+    HipTest::HIP_SKIP_TEST(
         "GPU 0 doesn't support hipStreamWriteValue64() function. "
-        "Hence skipping the testing with Pass result.");
+        "Hence skipping the testing with Pass result.\n");
+    return;
   }
 #endif
   size_t array_size = GENERATE(4_KB, 4_MB, 16_MB);

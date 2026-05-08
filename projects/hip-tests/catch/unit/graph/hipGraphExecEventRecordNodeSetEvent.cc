@@ -177,7 +177,8 @@ HIP_TEST_CASE(Unit_hipGraphExecEventRecordNodeSetEvent_VerifyEventNotChanged) {
 HIP_TEST_CASE(Unit_hipGraphExecEventRecordNodeSetEvent_Positive_DifferentDevices) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
   hipGraphExec_t graphExec;
   hipStream_t streamForGraph;

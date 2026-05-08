@@ -286,7 +286,8 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_MultiDevice) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   for (int deviceId = 0; deviceId < deviceCount; deviceId++) {
@@ -408,7 +409,8 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_MultiDeviceMultiOperation) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   int currentDevice = 0;
@@ -529,7 +531,8 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsEachOneDiffOperation) {
   const unsigned int threadsSupported = std::thread::hardware_concurrency();
 
   if (threadsSupported < 2) {
-    HIP_SKIP_TEST("machine does not support two concurrent hardware threads.");
+    HipTest::HIP_SKIP_TEST("machine does not support two concurrent hardware threads.");
+    return;
   }
 
   int* hostArrSrc = new int[N];
@@ -580,7 +583,8 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   // Set arrays in device 0
@@ -664,7 +668,8 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsInTwoDevicesEachOneDiffOperation) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   // Set arrays in device 0

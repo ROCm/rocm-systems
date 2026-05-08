@@ -39,7 +39,8 @@ HIP_TEST_CASE(Unit_Printf_ManyDevicesTest) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    return;
   }
   uint num_blocks = 14;
   uint threads_per_block = 250;

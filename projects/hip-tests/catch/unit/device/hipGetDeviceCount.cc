@@ -46,7 +46,8 @@ HIP_TEST_CASE(Unit_hipGetDeviceCount_NegTst) {
 HIP_TEST_CASE(Unit_hipGetDeviceCount_HideDevices) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   for (int i = deviceCount; i >= 1; i--) {

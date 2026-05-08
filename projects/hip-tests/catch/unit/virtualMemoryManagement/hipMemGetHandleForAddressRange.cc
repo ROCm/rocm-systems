@@ -458,7 +458,8 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice) 
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   constexpr int srcDeviceId = 0;
@@ -512,7 +513,8 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   constexpr int srcDeviceId = 0;

@@ -85,7 +85,8 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
   unsigned int blocks = 16;  // DEBUG_CLR_LIMIT_BLIT_WG
   HIP_CHECK(hipGetDeviceCount(&nGpus));
   if (nGpus < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 #if 0
   if (kernelCopy) {
