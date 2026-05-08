@@ -63,53 +63,20 @@ if(NOT DEFINED ROCM_PATH)
 endif()
 message(STATUS "ROCM_PATH: ${ROCM_PATH}")
 
-# Attempt to auto-detect HIP_PLATFORM by interrogating hipconfig. This is kept
-# for compatibility: users are advised to pass HIP_PLATFORM explicitly.
-# Sets the HIP_PLATFORM variable in the parent scope.
-function(_hip_clr_auto_detect_hip_platform)
-    if (UNIX)
-      set(HIPCC_EXECUTABLE "hipcc")
-      set(HIPCONFIG_EXECUTABLE "hipconfig")
-    else()
-      set(HIPCC_EXECUTABLE "hipcc.exe")
-      set(HIPCONFIG_EXECUTABLE "hipconfig.exe")
-    endif()
-
-    # Set default HIPCC_BIN_DIR to ${ROCM_PATH}/bin
-    if(NOT DEFINED HIPCC_BIN_DIR AND UNIX)
-        set(HIPCC_BIN_DIR "${ROCM_PATH}/bin")
-    endif()
-    message(STATUS "Auto-detect HIP_PLATFORM from HIPCC Binary Directory: ${HIPCC_BIN_DIR}")
-
-    if(NOT EXISTS ${HIPCC_BIN_DIR}/${HIPCONFIG_EXECUTABLE})
-        message(FATAL_ERROR "Please pass hipcc/build or hipcc/bin using -DHIPCC_BIN_DIR.")
-    endif()
-
-    # Determine HIP_PLATFORM
-    if(NOT DEFINED HIP_PLATFORM)
-        if(NOT DEFINED ENV{HIP_PLATFORM})
-            execute_process(COMMAND ${HIPCC_BIN_DIR}/${HIPCONFIG_EXECUTABLE} --platform
-                OUTPUT_VARIABLE _detected_hip_platform
-                RESULT_VARIABLE result
-                OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-	    if(result AND NOT result EQUAL 0)
-                message(FATAL_ERROR "Failure trying to auto-detect HIP_PLATFORM via command: ${HIPCC_BIN_DIR}/${HIPCONFIG_EXECUTABLE} --platform: ${result}")
-	    endif()
-
-            set(HIP_PLATFORM "${_detected_hip_platform}" PARENT_SCOPE)
-        else()
-            set(HIP_PLATFORM "$ENV{HIP_PLATFORM}" PARENT_SCOPE)
-        endif()
-    endif()
-endfunction()
 if(CLR_BUILD_HIP)
     message(STATUS "HIP Common Directory: ${HIP_COMMON_DIR}")
     if(NOT DEFINED HIP_COMMON_DIR)
         message(FATAL_ERROR "Please pass HIP using -DHIP_COMMON_DIR. HIP_COMMON_DIR is incorrect")
     endif()
+    # Determine HIP_PLATFORM: prefer explicit -DHIP_PLATFORM, then env var, then default to "amd".
+    # hipconfig-based auto-detection is removed as hipconfig is deprecated.
     if(NOT DEFINED HIP_PLATFORM)
-        _hip_clr_auto_detect_hip_platform()
+        if(DEFINED ENV{HIP_PLATFORM})
+            set(HIP_PLATFORM "$ENV{HIP_PLATFORM}")
+        else()
+            set(HIP_PLATFORM "amd")
+        endif()
+        message(STATUS "HIP_PLATFORM set to: ${HIP_PLATFORM}")
     endif()
 endif()
 
