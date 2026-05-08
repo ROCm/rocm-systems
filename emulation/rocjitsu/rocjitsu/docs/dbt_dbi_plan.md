@@ -2230,7 +2230,7 @@ After all instructions are processed, `translate()` calls `CodeObjectPatcher::ap
 
 #### 3.3.2 Code Cave Strategy
 
-> **Implementation note (current state):** The MVP implementation places cave bodies in the NOP padding after `s_endpgm` within the existing `.text` section, rather than in a separate `.rj_translations` section as described below. This works for kernels with sufficient NOP padding (typically 256+ bytes) but will not scale to large expansions. A runtime warning is emitted if the cave body exceeds available padding. The `.rj_translations` approach described below remains the target for production use.
+> **Implementation note (current state):** The MVP implementation places cave bodies in the NOP padding after `s_endpgm` within the existing `.text` section, rather than in a separate `.rj_translations` section as described below. This works for kernels with sufficient NOP padding (typically 256+ bytes) but will not scale to large expansions. If the cave body exceeds available padding, translation emits a warning and returns the original ELF unchanged so no branch or descriptor entry points at missing cave bytes. The `.rj_translations` approach described below remains the target for production use.
 
 Size-expanding legalization (LOWER with size growth, all EXPAND) uses **code caves** to preserve the original `.text` layout. The invariant is:
 

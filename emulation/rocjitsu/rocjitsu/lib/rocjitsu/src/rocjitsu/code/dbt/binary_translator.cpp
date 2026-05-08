@@ -160,6 +160,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   result.host_arch = host_arch_;
   warnings_ = &result.warnings;
 
+  auto leave_unchanged = [&]() {
+    const auto *image = reinterpret_cast<const uint8_t *>(obj.image_data());
+    result.elf_bytes.assign(image, image + obj.image_size());
+    warnings_ = nullptr;
+    return result;
+  };
+
   CodeObjectPatcher patcher(obj);
   auto text = patcher.text_bytes();
   if (text.empty()) {
@@ -301,12 +308,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   for (const KdTranslation &translation : descriptor_translations) {
     if (applied_descriptors.insert(translation.descriptor_file_offset).second) {
       if (!patcher.apply_kernel_descriptor_translation(translation, host_arch_)) {
-        result.warnings.push_back("kernel entry prologue branch exceeds s_branch simm16 range; "
+        result.warnings.push_back("kernel descriptor translation could not be applied safely; "
                                   "leaving code object unchanged");
-        const auto *image = reinterpret_cast<const uint8_t *>(obj.image_data());
-        result.elf_bytes.assign(image, image + obj.image_size());
-        warnings_ = nullptr;
-        return result;
+        return leave_unchanged();
       }
     }
   }
@@ -320,13 +324,16 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   const auto &cave = patcher.cave_body();
   if (!cave.empty()) {
     const uint64_t cave_start = patcher.cave_start();
-    if (cave_start + cave.size() > text.size()) {
+    const uint64_t text_size = static_cast<uint64_t>(text.size());
+    const uint64_t cave_size = static_cast<uint64_t>(cave.size());
+    const uint64_t available = cave_start <= text_size ? text_size - cave_start : 0;
+    if (cave_size > available) {
       result.warnings.push_back("cave body (" + std::to_string(cave.size()) +
-                                " bytes) exceeds .text NOP padding (" +
-                                std::to_string(text.size() - cave_start) + " bytes available)");
-    } else {
-      std::memcpy(translated_text.data() + cave_start, cave.data(), cave.size());
+                                " bytes) exceeds .text NOP padding (" + std::to_string(available) +
+                                " bytes available); leaving code object unchanged");
+      return leave_unchanged();
     }
+    std::memcpy(translated_text.data() + cave_start, cave.data(), cave.size());
   }
 
   patcher.overwrite_text(translated_text);
