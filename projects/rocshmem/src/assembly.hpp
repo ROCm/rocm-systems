@@ -802,6 +802,8 @@ struct AsmAccess<16, Policy> {
                      : "v"(dst), "v"(val)
                      : "memory");
       }
+#else
+      *reinterpret_cast<type*>(dst) = val;
 #endif
     }
   }
@@ -922,6 +924,8 @@ struct AsmAccess<8, Policy> {
                      : "v"(dst), "v"(val)
                      : "memory");
       }
+#else
+      *reinterpret_cast<type*>(dst) = val;
 #endif
     }
   }
@@ -1042,6 +1046,8 @@ struct AsmAccess<4, Policy> {
                      : "v"(dst), "v"(val)
                      : "memory");
       }
+#else
+      *reinterpret_cast<type*>(dst) = val;
 #endif
     }
   }
@@ -1198,6 +1204,8 @@ struct AsmAccess<2, Policy> {
                      : "memory");
       }
   #endif
+#else
+      *reinterpret_cast<type*>(dst) = val;
 #endif
     }
   }
@@ -1354,6 +1362,8 @@ struct AsmAccess<1, Policy> {
                      : "memory");
       }
   #endif
+#else
+      *reinterpret_cast<type*>(dst) = val;
 #endif
     }
   }
