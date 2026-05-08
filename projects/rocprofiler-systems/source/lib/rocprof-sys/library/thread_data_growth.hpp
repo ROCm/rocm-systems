@@ -11,7 +11,7 @@
 
 namespace rocprofsys
 {
-using grow_functor_t = int64_t (*)(int64_t);
+using grow_functor_t = std::int64_t (*)(std::int64_t);
 
 inline auto&
 grow_functors()
@@ -23,20 +23,20 @@ grow_functors()
 inline auto&
 get_peak_num_threads_callback()
 {
-    static std::function<int64_t()> _v = []() -> int64_t {
-        return static_cast<int64_t>(max_supported_threads);
+    static std::function<std::int64_t()> _v = []() -> std::int64_t {
+        return static_cast<std::int64_t>(max_supported_threads);
     };
     return _v;
 }
 
-inline int64_t
+inline std::int64_t
 get_current_peak_num_threads()
 {
     return get_peak_num_threads_callback()();
 }
 
 inline void
-set_peak_num_threads_callback(std::function<int64_t()> _cb)
+set_peak_num_threads_callback(std::function<std::int64_t()> _cb)
 {
     get_peak_num_threads_callback() = std::move(_cb);
 }

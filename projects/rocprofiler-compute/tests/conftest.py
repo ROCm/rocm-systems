@@ -12,11 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
-ROOT = os.path.dirname(os.path.dirname(__file__))
-SRC = os.path.join(ROOT, "src")
-if SRC not in sys.path:
-    sys.path.insert(0, SRC)
+from common import ROOT
 
 # Determine script path
 rocprof_compute_script_path = Path(ROOT) / "src/rocprof-compute"

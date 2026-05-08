@@ -5,8 +5,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import common
 import pandas as pd
-import test_utils
 
 from utils.rocpd_data import (
     COUNTERS_COLLECTION_QUERY,
@@ -175,7 +175,7 @@ def create_rocpd_test_db(workload_dir):
 
 def test_counter_csv_has_correlation_id_from_stack_id():
     """Test that the counter CSV has correlation_id from stack_id."""
-    workload_dir = test_utils.get_output_dir()
+    workload_dir = common.get_output_dir()
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
     counter_csv = str(Path(workload_dir) / "counter_collection.csv")
@@ -190,12 +190,12 @@ def test_counter_csv_has_correlation_id_from_stack_id():
     expected_ids = [row[2] for row in COUNTER_ROWS]
     assert list(df["Correlation_Id"]) == expected_ids
 
-    test_utils.clean_output_dir(True, workload_dir)
+    common.clean_output_dir(True, workload_dir)
 
 
 def test_marker_csv_has_correlation_id_from_stack_id():
     """Test that the marker CSV has correlation_id from stack_id."""
-    workload_dir = test_utils.get_output_dir()
+    workload_dir = common.get_output_dir()
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
     counter_csv = str(Path(workload_dir) / "counter_collection.csv")
@@ -210,7 +210,7 @@ def test_marker_csv_has_correlation_id_from_stack_id():
     expected_ids = sorted(row[4] for row in MARKER_ROWS)
     assert sorted(df["Correlation_Id"].tolist()) == expected_ids
 
-    test_utils.clean_output_dir(True, workload_dir)
+    common.clean_output_dir(True, workload_dir)
 
 
 # ---- process_torch_trace_output parity for rocpd vs csv layouts ----
@@ -362,8 +362,8 @@ def build_kernel_top_df():
 
 def test_torch_trace_output_same_for_rocpd_and_csv():
     """Test that the torch trace output is the same for rocpd and csv files."""
-    rocpd_dir = test_utils.get_output_dir(suffix="_rocpd")
-    csv_dir = test_utils.get_output_dir(suffix="_csv")
+    rocpd_dir = common.get_output_dir(suffix="_rocpd")
+    csv_dir = common.get_output_dir(suffix="_csv")
 
     Path(rocpd_dir).mkdir(parents=True, exist_ok=True)
     Path(csv_dir).mkdir(parents=True, exist_ok=True)
@@ -418,5 +418,5 @@ def test_torch_trace_output_same_for_rocpd_and_csv():
             obj=filename,
         )
 
-    test_utils.clean_output_dir(True, rocpd_dir)
-    test_utils.clean_output_dir(True, csv_dir)
+    common.clean_output_dir(True, rocpd_dir)
+    common.clean_output_dir(True, csv_dir)

@@ -14,11 +14,11 @@ namespace causal
 {
 namespace
 {
-auto samples = std::map<uint32_t, std::map<uintptr_t, uint64_t>>{};
+auto samples = std::map<std::uint32_t, std::map<uintptr_t, std::uint64_t>>{};
 }
 
 std::vector<sample_data>
-get_samples(uint32_t _index)
+get_samples(std::uint32_t _index)
 {
     auto _data = std::vector<sample_data>{};
     _data.reserve(samples.at(_index).size());
@@ -29,10 +29,10 @@ get_samples(uint32_t _index)
     return _data;
 }
 
-std::map<uint32_t, std::vector<sample_data>>
+std::map<std::uint32_t, std::vector<sample_data>>
 get_samples()
 {
-    auto _data = std::map<uint32_t, std::vector<sample_data>>{};
+    auto _data = std::map<std::uint32_t, std::vector<sample_data>>{};
 
     for(const auto& itr : samples)
     {
@@ -43,20 +43,20 @@ get_samples()
 }
 
 void
-add_sample(uint32_t _index, uintptr_t _addr, uint64_t _count)
+add_sample(std::uint32_t _index, uintptr_t _addr, std::uint64_t _count)
 {
     samples[_index][_addr] += _count;
 }
 
 void
-add_samples(uint32_t _index, const std::vector<uintptr_t>& _v)
+add_samples(std::uint32_t _index, const std::vector<uintptr_t>& _v)
 {
     for(const auto& itr : _v)
         add_sample(_index, itr);
 }
 
 void
-add_samples(uint32_t _index, const std::map<uintptr_t, uint64_t>& _v)
+add_samples(std::uint32_t _index, const std::map<uintptr_t, std::uint64_t>& _v)
 {
     for(const auto& itr : _v)
         add_sample(_index, itr.first, itr.second);

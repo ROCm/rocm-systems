@@ -486,7 +486,7 @@ class TestMetricEvaluator:
         eval_str = self._to_eval_str("SUM(100 * BUSY) / SUM(TOTAL)")
         result = evaluator.eval_expression(eval_str)
         assert isinstance(result, float)
-        assert abs(result - 60.0) < 1e-9, (
+        assert result == pytest.approx(60.0), (
             "SUM(100*[800,600,400]) / SUM([1000,1000,1000]) should be 60.0, "
             f"got {result}"
         )
@@ -522,7 +522,7 @@ class TestMetricEvaluator:
         eval_str = self._to_eval_str("SUM(X_sum) / SUM(Y_sum)")
         result = evaluator.eval_expression(eval_str)
         assert isinstance(result, float)
-        assert abs(result - 10.0) < 1e-9, (
+        assert result == pytest.approx(10.0), (
             f"SUM([100,NaN,300]) / SUM([10,0,30]) should be 10.0, got {result}"
         )
 
@@ -535,7 +535,7 @@ class TestMetricEvaluator:
         eval_str = self._to_eval_str("SUM(COUNTER) / $var")
         result = evaluator.eval_expression(eval_str)
         assert isinstance(result, float)
-        assert abs(result - 60.0) < 1e-9, (
+        assert result == pytest.approx(60.0), (
             f"SUM([100,200]) / 5 should be 60.0, got {result}"
         )
 
@@ -548,6 +548,6 @@ class TestMetricEvaluator:
         eval_str = self._to_eval_str("SUM(LEVEL) / SUM(REQ)")
         result = evaluator.eval_expression(eval_str)
         assert isinstance(result, float)
-        assert abs(result - 40.0) < 1e-9, (
+        assert result == pytest.approx(40.0), (
             f"SUM([100,200,300]) / SUM([10,0,5]) should be 40.0, got {result}"
         )

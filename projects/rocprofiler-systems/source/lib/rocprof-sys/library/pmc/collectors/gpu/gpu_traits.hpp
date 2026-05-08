@@ -108,7 +108,7 @@ struct gpu_traits
      */
     [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&      device,
                                                const enabled_metrics_t& enabled,
-                                               uint64_t                 timestamp)
+                                               std::uint64_t            timestamp)
     {
         return device->get_gpu_metrics(enabled, timestamp);
     }
