@@ -20,10 +20,10 @@ namespace rocprofiler_sdk
 {
 struct version_info
 {
-    uint32_t major     = 0;
-    uint32_t minor     = 0;
-    uint32_t patch     = 0;
-    uint32_t formatted = 0;  // major * 10000 + minor * 100 + patch
+    std::uint32_t major     = 0;
+    std::uint32_t minor     = 0;
+    std::uint32_t patch     = 0;
+    std::uint32_t formatted = 0;  // major * 10000 + minor * 100 + patch
 };
 
 void
@@ -38,10 +38,10 @@ get_callback_domains();
 std::unordered_set<rocprofiler_buffer_tracing_kind_t>
 get_buffered_domains();
 
-std::vector<int32_t>
+std::vector<std::int32_t>
 get_operations(rocprofiler_callback_tracing_kind_t kindv);
 
-std::vector<int32_t>
+std::vector<std::int32_t>
 get_operations(rocprofiler_buffer_tracing_kind_t kindv);
 
 std::vector<std::string>
@@ -50,10 +50,10 @@ get_rocm_events();
 bool
 get_group_by_queue();
 
-std::unordered_set<int32_t>
+std::unordered_set<std::int32_t>
 get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv);
 
-std::unordered_set<int32_t>
+std::unordered_set<std::int32_t>
 get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv);
 
 }  // namespace rocprofiler_sdk

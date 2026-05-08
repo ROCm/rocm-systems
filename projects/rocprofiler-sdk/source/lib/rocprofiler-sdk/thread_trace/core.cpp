@@ -258,6 +258,21 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
     control_packet_copy->populate_before();
     control_packet_copy->populate_after();
 
+    // Warmup the async copy so we dont wait too long for the flip.
+    if(params.triple_buffering)
+    {
+        auto& buffer = queue->triple_buffer_memory;
+        auto  signal = signal_create();
+        copy_data_sync(buffer.at(0),
+                       buffer.at(1),
+                       queue->near_cpu,
+                       queue->hsa_agent,
+                       MIN_BUFFER_SIZE,
+                       &signal);
+        signal_wait(signal);
+        signal_destroy(signal);
+    }
+
     // Submit the start packets without waiting: the producer thread (triple-buffer
     // path) and DeviceThreadTracer::start_context (single-buffer path) wait on the
     // returned signal so multiple agents can be launched in parallel.

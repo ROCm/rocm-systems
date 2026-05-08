@@ -8,6 +8,7 @@
 #include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/macros.hpp>
@@ -65,8 +66,8 @@ vaapi_gotcha::configure()
         vaapi_gotcha_t::configure<9, VAStatus, VADisplay, VAContextID>(
             "vaDestroyContext");
         vaapi_gotcha_t::configure<10, VAStatus, VADisplay, VAContextID>("vaEndPicture");
-        vaapi_gotcha_t::configure<11, VAStatus, VADisplay, VASurfaceID, uint32_t,
-                                  uint32_t, void*>("vaExportSurfaceHandle");
+        vaapi_gotcha_t::configure<11, VAStatus, VADisplay, VASurfaceID, std::uint32_t,
+                                  std::uint32_t, void*>("vaExportSurfaceHandle");
         vaapi_gotcha_t::configure<12, VAStatus, VADisplay, VAProfile, VAEntrypoint,
                                   VAConfigAttrib*, int>("vaGetConfigAttributes");
         vaapi_gotcha_t::configure<13, VAStatus, VADisplay, int*, int*>("vaInitialize");
@@ -275,7 +276,7 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
 // vaExportSurfaceHandle
 void
 vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
-                    VASurfaceID surface_id, uint32_t mem_type, uint32_t flags,
+                    VASurfaceID surface_id, std::uint32_t mem_type, std::uint32_t flags,
                     void* descriptor)
 {
     category_region<category::vaapi>::start(

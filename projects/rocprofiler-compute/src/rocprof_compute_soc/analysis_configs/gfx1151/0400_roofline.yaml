@@ -77,7 +77,7 @@ Panel Config:
   metrics_description:
     VALU FLOPs (F16): >-
       The total 16-bit floating-point operations executed per second on the VALU.
-      Theoretical FP16 throughput is 2× the FP32 FMA peak (packed half on Navi3 / RDNA3-class VALU).
+      Theoretical FP16 throughput is 2* the FP32 FMA peak (packed half on Navi3 / RDNA3-class VALU).
       This is presented with the value of the peak empirical F16 FLOPs achievable
       on the specific accelerator.
     VALU FLOPs (F32): >-

@@ -54,7 +54,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   poll_block_count_ = envvar::max_num_contexts;
 
-  profiler_proxy_ = ProfilerProxyT(envvar::max_num_contexts);
+  profiler_proxy_ = ProfilerProxy(envvar::max_num_contexts);
 
   int device_id;
   CHECK_HIP(hipGetDevice(&device_id));
@@ -89,8 +89,8 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   bp->heap_ptr = &heap;
 
-  ro_window_proxy_ = new WindowProxyT(&heap, transport_->get_world_comm(),
-                                      num_windows_);
+  ro_window_proxy_ = new WindowProxy(&heap, transport_->get_world_comm(),
+                                     num_windows_);
 
   bp->heap_window_info = ro_window_proxy_->get();
 
@@ -104,7 +104,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque = default_host_ctx.get();
 
-  team_world_proxy_ = new ROTeamProxy<HIPAllocator>(
+  team_world_proxy_ = new ROTeamProxy(
       this, transport_->get_world_comm(), my_pe, num_pes);
   team_tracker.set_team_world(team_world_proxy_->get());
 
@@ -127,7 +127,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
 
-  default_context_proxy_ = DefaultContextProxyT(this, tinfo);
+  default_context_proxy_ = DefaultContextProxy(this, tinfo);
 
   block_handle_proxy_ = BlockHandleProxyT(g_ret_buffer_.get(),
                         atomic_ret_buffer_.get(), &queue_,
@@ -375,9 +375,9 @@ void ROBackend::ro_net_free_runtime() {
   }
   transport_->finalizeTransport();
 
-  ro_window_proxy_->~WindowProxyT();
-  team_world_proxy_->~ROTeamProxy<HIPAllocator>();
-  transport_->~MPITransport();
+  delete ro_window_proxy_;
+  delete team_world_proxy_;
+  delete transport_;
   /*
    * Free the profiler statistics structure.
    */

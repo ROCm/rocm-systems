@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/json_config.hpp"
+#include <cstdint>
 
 #include "common/env_vars.hpp"
 
@@ -98,7 +99,7 @@ json_value_to_string(const nlohmann::json& val)
     else if(val.is_boolean())
         return val.get<bool>() ? "true" : "false";
     else if(val.is_number_integer())
-        return std::to_string(val.get<int64_t>());
+        return std::to_string(val.get<std::int64_t>());
     else if(val.is_number_float())
         return std::to_string(val.get<double>());
     else if(val.is_array())
