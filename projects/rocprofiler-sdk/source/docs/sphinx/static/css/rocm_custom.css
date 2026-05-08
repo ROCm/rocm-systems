@@ -1,0 +1,51 @@
+/* Override PyData Sphinx Theme default colors */
+html[data-theme='light'] {
+    --pst-color-table-row-hover-bg: #E2E8F0;
+}
+
+html[data-theme='dark'] {
+    --pst-color-table-row-hover-bg: #1E293B;
+}
+
+a svg {
+  color: var(--pst-color-text-base);
+}
+
+a svg:hover {
+  color: var(--pst-color-link-hover);
+}
+
+/* Adds container for big tables, used for Compatibility Matrix */
+.format-big-table {
+    white-space: nowrap;
+}
+
+/* Collapse borders on the table element itself */
+table.compat-matrix {
+  border-collapse: collapse;
+}
+
+/* Header separator (cover both th and td to be safe) */
+.compat-matrix thead :is(th, td) {
+  border-bottom: 2px solid var(--pst-color-primary) !important;
+}
+
+/* Blue separator above rows that start a version group:
+   - Works whether the first cell is a <td> or <th>.
+   - Works whether the span is wrapped in <p> or not.
+   - Applies to all cells in that row.
+*/
+.compat-matrix tbody tr:has(> :is(td, th):first-child :is(span.version-start, .version-start)) > :is(td, th) {
+  border-top: 1px solid var(--pst-color-primary) !important;
+
+  /* Fallback visual line if border-collapsing/overrides get in the way */
+  background-image: linear-gradient(to bottom, var(--pst-color-primary), var(--pst-color-primary));
+  background-size: 100% 1px;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+}
+
+/* If your table lives inside .bd-content (PyData Sphinx Theme), this extra specificity helps override theme rules */
+.bd-content table.compat-matrix thead :is(th, td) {
+  border-bottom-color: var(--pst-color-primary) !important;
+}
