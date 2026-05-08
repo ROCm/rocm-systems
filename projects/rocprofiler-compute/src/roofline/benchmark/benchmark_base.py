@@ -260,7 +260,7 @@ class Bench_base(ABC):
         for level in ["L1", "L2", "MALL"]:
             if level in self.cache_sizes.keys():
                 self.cache_kernel_selector[level] = (
-                    "Cache_bw<float, " + str(self.cache_sizes[level]) + ", 256>"
+                    f"Cache_bw<float, {self.cache_sizes[level]}, 256>"
                 )
 
     def run_get_samples(
