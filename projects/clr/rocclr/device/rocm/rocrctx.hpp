@@ -97,6 +97,8 @@ struct RocrEntryPoints {
   decltype(hsa_amd_ipc_memory_create)* hsa_amd_ipc_memory_create_;
   decltype(hsa_amd_ipc_memory_attach)* hsa_amd_ipc_memory_attach_;
   decltype(hsa_amd_ipc_memory_detach)* hsa_amd_ipc_memory_detach_;
+  decltype(hsa_amd_ipc_signal_create)* hsa_amd_ipc_signal_create_;
+  decltype(hsa_amd_ipc_signal_attach)* hsa_amd_ipc_signal_attach_;
   decltype(hsa_amd_signal_create)* hsa_amd_signal_create_;
   decltype(hsa_amd_register_system_event_handler)* hsa_amd_register_system_event_handler_;
   decltype(hsa_amd_queue_set_priority)* hsa_amd_queue_set_priority_;
@@ -407,6 +409,13 @@ class Hsa : public amd::AllStatic {
   }
   static hsa_status_t ipc_memory_detach(void* mapped_ptr) {
     return ROCR_DYN(hsa_amd_ipc_memory_detach)(mapped_ptr);
+  }
+  static hsa_status_t ipc_signal_create(hsa_signal_t signal, hsa_amd_ipc_signal_t* handle) {
+    return ROCR_DYN(hsa_amd_ipc_signal_create)(signal, handle);
+  }
+  static hsa_status_t ipc_signal_attach(const hsa_amd_ipc_signal_t* handle,
+                                        hsa_signal_t* signal) {
+    return ROCR_DYN(hsa_amd_ipc_signal_attach)(handle, signal);
   }
   static hsa_status_t signal_create(hsa_signal_value_t initial_value, uint32_t num_consumers,
     const hsa_agent_t* consumers, uint64_t attributes, hsa_signal_t* signal) {

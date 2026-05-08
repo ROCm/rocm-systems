@@ -72,6 +72,7 @@ public:
     };
 
     int userdata3_count = 0;
+    bool userdata3_known = false;
     std::array<size_t, RT_LAST> userdata3_values{};
 };
 

@@ -852,6 +852,12 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
   }
   external_signals_.clear();
 
+  // Append raw signals added via AddDynamicQueueWait (e.g. IPC dep signals)
+  for (auto& s : dynamic_queue_waits_) {
+    waiting_signals_.push_back(s);
+  }
+  dynamic_queue_waits_.clear();
+
   // Return the array of waiting HSA signals
   return waiting_signals_;
 }
@@ -1707,7 +1713,9 @@ bool VirtualGPU::dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet,
 
 // ================================================================================================
 void VirtualGPU::WaitCompleteSignal(hsa_signal_t signal) {
-  barrier_packet_.dep_signal[0] = signal;
+  // Add the signal as a dynamic dependency so WaitingSignal() includes it
+  // alongside any pending external signals in the barrier's dep_signal list.
+  Barriers().AddDynamicQueueWait(signal);
   dispatchBarrierPacket(kBarrierPacketHeader, false);
 }
 
@@ -4200,6 +4208,10 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
           // Initialize hidden heap buffer
           if (!isGraphCapture) {
             const_cast<Device&>(dev()).HiddenHeapInit(*this);
+            if (!heap_init_fence_emitted_) {
+              addSystemScope();
+              heap_init_fence_emitted_ = true;
+            }
           }
           // Add heap pointer to the code
           size_t heap_ptr = static_cast<size_t>(dev().HeapBuffer()->virtualAddress());
@@ -4574,10 +4586,31 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     flush(vcmd.GetBatchHead());
   } else {
     profilingBegin(vcmd);
-    if (timestamp_ != nullptr) {
-      const Settings& settings = dev().settings();
-      int32_t releaseFlags = vcmd.getCommandEntryScope();
+    const Settings& settings = dev().settings();
+    hsa_signal_t ipc_s{0};
+    if (vcmd.ipcCompletionSignal() != nullptr) {
+      ipc_s.handle = static_cast<uint64_t>(
+          reinterpret_cast<uintptr_t>(vcmd.ipcCompletionSignal()->getGpuHandle()));
+    }
 
+    if (vcmd.ipcDepSignal() != nullptr) {
+      hsa_signal_t s;
+      s.handle = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
+          vcmd.ipcDepSignal()->getGpuHandle()));
+      WaitCompleteSignal(s);
+    } else if (timestamp_ != nullptr || ipc_s.handle != 0) {
+      // IPC event record: if ipc_s is non-zero, first dispatch a NOP barrier with
+      // the IPC signal as completion_signal; it fires when prior work completes.
+      if (ipc_s.handle != 0) {
+        if (settings.barrier_value_packet_) {
+          dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, false, hsa_signal_t{0}, 0,
+                                     0, HSA_SIGNAL_CONDITION_EQ, true, ipc_s);
+        } else {
+          dispatchBarrierPacket(kNopPacketHeader, true, ipc_s);
+        }
+      }
+
+      int32_t releaseFlags = vcmd.getCommandEntryScope();
       if (releaseFlags == Device::CacheState::kCacheStateIgnore) {
         if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
           dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
