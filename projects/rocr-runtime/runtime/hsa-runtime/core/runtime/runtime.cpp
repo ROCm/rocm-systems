@@ -1512,14 +1512,17 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
         return -1;
       }
 
-      // Store the buffer object handle in allocation map for later use
+      // Store the buffer object handle in allocation map for later use.
+      // If a stale entry exists at this VA (from a previous import that was
+      // never detached), free the old BO first to avoid leaking it.
       if (status == HSAKMT_STATUS_SUCCESS) {
         std::lock_guard<std::shared_mutex> lock(memory_lock_);
         auto [it, inserted] = allocation_map_.try_emplace(
         *importAddress, nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
-        if (inserted) {
-          it->second.thunk_bo = res.buf_handle;
+        if (!inserted && it->second.thunk_bo) {
+          HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
         }
+        it->second.thunk_bo = res.buf_handle;
       }
       runtime_singleton_->DmaBufClose(static_cast<int>(dmabuf_fd));
     }
@@ -1622,6 +1625,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
 
     // Create a shared cpu access pointer for user
     void *cpuPtr;
+    void* intermediateAddr = importAddress;
     HsaMemoryObjectHandle bo = allocation_map_[importAddress].thunk_bo;
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryCpuMap(bo, &cpuPtr));
     if (status != HSAKMT_STATUS_SUCCESS) {
@@ -1634,6 +1638,14 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     }
     importAddress = cpuPtr;
     fixFragment(bo);
+
+    // Remove the stale intermediate entry created by IPCClientImport.
+    // The canonical entry now lives at cpuPtr (set by fixFragment above).
+    if (intermediateAddr != importAddress) {
+      std::lock_guard<std::shared_mutex> lock(memory_lock_);
+      allocation_map_.erase(intermediateAddr);
+    }
+
     *mapped_ptr = importAddress;
     return HSA_STATUS_SUCCESS;
   }

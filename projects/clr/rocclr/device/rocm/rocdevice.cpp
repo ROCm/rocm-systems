@@ -3484,6 +3484,9 @@ void Device::getGlobalCUMask(std::string_view cuMaskStr) {
 device::Signal* Device::createSignal() const { return new roc::Signal(); }
 
 // ================================================================================================
+device::Signal* Device::createIpcSignal() const { return new roc::IpcSignal(); }
+
+// ================================================================================================
 hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, void* data) {
   cl_int gpu_error = CL_SUCCESS;
   switch (event->event_type) {
