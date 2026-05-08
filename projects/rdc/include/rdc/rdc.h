@@ -155,6 +155,11 @@ typedef enum { INTEGER = 0, DOUBLE, STRING, BLOB } rdc_field_type_t;
 #define RDC_MAX_VERSION_STR_LENGTH 60
 
 /**
+ * @brief Max number of GPUs tracked per job
+ */
+#define RDC_MAX_NUM_GPUS_PER_JOB 16
+
+/**
  * @brief Max configuration can be collected using the configuration get
  */
 #define RDC_MAX_CONFIG_SETTINGS 32
@@ -551,11 +556,11 @@ typedef struct {
  * @brief The structure to hold the job stats
  */
 typedef struct {
-  uint32_t num_gpus;              //!< Number of GPUs used by job
-  rdc_gpu_usage_info_t summary;   //!< Job usage summary statistics
-                                  //!< (overall)
-  rdc_gpu_usage_info_t gpus[16];  //!< Job usage summary statistics by GPU
-  uint32_t num_processes;         //!< Number of processes tracked
+  uint32_t num_gpus;                                    //!< Number of GPUs used by job
+  rdc_gpu_usage_info_t summary;                         //!< Job usage summary statistics
+                                                        //!< (overall)
+  rdc_gpu_usage_info_t gpus[RDC_MAX_NUM_GPUS_PER_JOB];  //!< Job usage summary statistics by GPU
+  uint32_t num_processes;                               //!< Number of processes tracked
   rdc_process_status_info_t
       processes[RDC_MAX_NUM_PROCESSES_STATUS];  //!< Array to track process start/stop times
 } rdc_job_info_t;
