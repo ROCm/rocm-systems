@@ -6,7 +6,7 @@
 # For each gpu_arch (see mi_gpu_spec.yaml), ``same_bucket_priority_metric_ids``
 # maps metric id token -> metadata. Keys are the metric ids used by the
 # allocator (e.g. filter strings like "2.1.3"); ``name`` matches the analysis
-# YAML metric label for that arch (documentation / review only — runtime uses
+# YAML metric label for that arch (documentation / review only - runtime uses
 # ids only).
 #
 # Semantics: listed metrics get coalescing tier 0 (packed before others).
