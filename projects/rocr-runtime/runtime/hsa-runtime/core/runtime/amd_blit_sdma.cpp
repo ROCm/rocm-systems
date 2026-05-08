@@ -1753,9 +1753,9 @@ void BlitSdma<useGCR, scopeFields>::UpdateWriteAndDoorbellRegister(uint64_t curr
       // Keep compiler ordering between wptr and doorbell writes. On x86 with
       // WB/coherent queue state, hardware ordering ensures the device observes
       // the wptr update before processing the doorbell.
-      std::atomic_thread_fence(std::memory_order_release);
-
-      *queue_doorbell_ = new_index;
+      // this is ensured by release semantics
+      // Atomic write to prevent TSAN race when multiple threads ring doorbell
+      atomic::Store(queue_doorbell_, new_index, std::memory_order_release);
       if (needs_kmt_doorbell_) {
         HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_resource_.QueueId, new_index));
       }

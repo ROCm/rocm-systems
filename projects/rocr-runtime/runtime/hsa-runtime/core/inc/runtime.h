@@ -626,7 +626,7 @@ class Runtime {
     void Shutdown();
 
     hsa_signal_t wake;
-    bool exit;
+    std::atomic<bool> exit;
 
     private:
     AsyncEventsInfo* info_;

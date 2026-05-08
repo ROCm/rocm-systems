@@ -1315,7 +1315,9 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
 bool GpuAgent::DmaEngineIsFree(uint32_t engine_offset) {
   SetCopyStatusCheckRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyStatusCheckRefCount(false); });
-  bool is_free = !!!(sdma_blit_used_mask_ & (1 << engine_offset)) ||
+  // Atomic load to pair with atomic write in GetBlitObject
+  uint32_t mask = sdma_blit_used_mask_.load(std::memory_order_relaxed);
+  bool is_free = !!!(mask & (1 << engine_offset)) ||
                     (blits_[engine_offset]->isSDMA() &&
                      !!!blits_[engine_offset]->PendingBytes());
   return is_free;
@@ -3256,7 +3258,7 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
 }
 
 lazy_ptr<core::Blit>& GpuAgent::GetBlitObject(uint32_t engine_offset) {
-  sdma_blit_used_mask_ |= 1 << engine_offset;
+  sdma_blit_used_mask_.fetch_or(1 << engine_offset, std::memory_order_relaxed);
   return blits_[engine_offset];
 }
 

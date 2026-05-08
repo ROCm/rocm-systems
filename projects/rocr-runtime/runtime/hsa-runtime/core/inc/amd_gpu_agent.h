@@ -882,7 +882,7 @@ class GpuAgent : public GpuAgentInt {
   std::atomic<int> pending_copy_stat_check_ref_;
 
   // Tracks what SDMA blits have been used since initialization.
-  uint32_t sdma_blit_used_mask_;
+  std::atomic<uint32_t> sdma_blit_used_mask_;
 
   // Scratch limit thresholds when async scratch is enabled.
   uint64_t scratch_limit_async_threshold_;
