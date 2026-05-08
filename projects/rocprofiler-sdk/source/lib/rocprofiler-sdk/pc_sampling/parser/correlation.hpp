@@ -222,11 +222,24 @@ using address_range_t = rocprofiler::sdk::codeobj::segment::address_range_t;
 // =====================================================================================
 // Traits for determining sample validity across old and new record types.
 //
-// Old records (host_trap_v0, stochastic_v0) use `size == 0` as the invalid sentinel.
-// New records (V0, V1, V2) don't have a `size` member; for V2 (stochastic), the
-// zero-init'd record (all fields 0) is the invalid sentinel -- we check
-// `timestamp == 0 && exec_mask == 0` as the invalid marker.
-// V0 and V1 are host-trap only and copySample never produces invalid records for them.
+// The parser pre-allocates a homogeneously-typed array of PcSamplingRecordT via the
+// callback in add_upcoming_samples(). The hardware delivers N raw samples, some of
+// which may be invalid (valid bit = 0 in perf_snapshot_data). Because the array is
+// typed as PcSamplingRecordT[], we cannot store a different type (e.g.
+// rocprofiler_pc_sampling_record_invalid_t) in the same array. Instead, copySample()
+// zero-inits the entire struct for invalid samples, and we detect them here using a
+// sentinel field check. Downstream code (when emplacing into the SDK buffer, which
+// supports heterogeneous records) replaces them with proper record_invalid_t entries.
+//
+// Old records (host_trap_v0, stochastic_v0) have a `size` member and use `size == 0`
+// as the invalid sentinel.
+//
+// New stochastic records (V2, V4) don't have a `size` member; we use `timestamp == 0`
+// as the sentinel. The GPU timestamp counter is never zero during actual kernel
+// execution, so a zero timestamp reliably identifies the zero-init'd invalid record.
+//
+// New host-trap records (V0, V1, V3) never produce invalid samples -- the host-trap
+// mechanism always delivers valid data.
 // =====================================================================================
 
 template <typename PcSamplingRecordT>
@@ -259,8 +272,8 @@ inline bool
 is_invalid_sample<rocprofiler_pc_sampling_record_v2_t>(
     const rocprofiler_pc_sampling_record_v2_t& sample)
 {
-    // V2 invalid samples are zero-init'd by copySample
-    return sample.timestamp == 0 && sample.exec_mask == 0;
+    // V2 invalid samples are zero-init'd by copySample; timestamp is never 0 for valid samples
+    return sample.timestamp == 0;
 }
 
 template <>
@@ -277,8 +290,8 @@ inline bool
 is_invalid_sample<rocprofiler_pc_sampling_record_v4_t>(
     const rocprofiler_pc_sampling_record_v4_t& sample)
 {
-    // V4 invalid samples are zero-init'd by copySample (same pattern as V2)
-    return sample.timestamp == 0 && sample.exec_mask == 0;
+    // V4 invalid samples are zero-init'd by copySample; timestamp is never 0 for valid samples
+    return sample.timestamp == 0;
 }
 
 /**
