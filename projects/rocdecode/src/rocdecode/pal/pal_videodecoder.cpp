@@ -409,16 +409,13 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
         *cmd_allocator_.MemAddr() = mem;
     }
 
-    // Create command buffer
-    // Pass the allocator at creation time (internalCmdMgr pattern).
-    // videoCmdList uses nullptr and provides it at Reset() — both are valid per PAL docs.
-    // We use non-null here since it ensures PAL validates the engine/queue combination with
-    // an actual allocator context, which avoids ErrorInvalidOrdinal on some PAL builds.
+    // Create command buffer (DXCP videoCmdList pattern: pCmdAllocator=nullptr at creation,
+    // allocator bound at Reset() time before each frame recording).
     {
         Pal::CmdBufferCreateInfo cbci = {};
         cbci.engineType = eng;
         cbci.queueType = Pal::QueueTypeVideoDecode;
-        cbci.pCmdAllocator = cmd_allocator_.Get();
+        cbci.pCmdAllocator = nullptr;
 
         InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: CmdBuffer create - engineType=") + ROCDEC_TOSTR((int)cbci.engineType) +
                 " queueType=" + ROCDEC_TOSTR((int)cbci.queueType) +
@@ -427,8 +424,12 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
                 " QueueTypeVideoDecode=" + ROCDEC_TOSTR((int)Pal::QueueTypeVideoDecode) + ")");
 
         size_t sz = device_->GetCmdBufferSize(cbci, &res);
-        if (Util::IsErrorResult(res)) {
-            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: GetCmdBufferSize failed with result ") + ROCDEC_TOSTR((int)res));
+        if (Util::IsErrorResult(res) || sz == 0) {
+            // size=0 with Success means PAL was built without PAL_BUILD_VIDEO_DECODER — the
+            // video decode command buffer code is not compiled into the library.
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: GetCmdBufferSize failed - result=") + ROCDEC_TOSTR((int)res) +
+                        " size=" + ROCDEC_TOSTR(sz) +
+                        " (size=0 indicates PAL library was built without PAL_BUILD_VIDEO_DECODER=1)");
             return ROCDEC_RUNTIME_ERROR;
         }
         InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: CmdBuffer size = ") + ROCDEC_TOSTR(sz));
