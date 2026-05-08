@@ -28,6 +28,7 @@ from libc.stdint cimport intptr_t
 
 from .cynccl cimport (
     ncclResult_t,
+    ncclInvalidArgument,
     ncclDataType_t,
     ncclRedOp_t,
     ncclComm_t,
@@ -203,6 +204,14 @@ cpdef all_to_all_v(
         raise NotImplementedError(
             "function ncclAllToAllv is not found in the loaded RCCL library"
         )
+    # RCCL 2.27.x's `ncclAlltoAllv_impl` derefs `comm->rank`, `sendcounts`,
+    # `recvcounts` in its NVTX payload before any null-check (see
+    # `projects/rccl/src/collectives.cc:276-278`); a NULL on any required
+    # pointer segfaults inside librccl. Pre-validate here for a controlled
+    # `NCCLError(InvalidArgument)` and a cross-RCCL-version-safe contract.
+    if (comm == 0 or sendbuff == 0 or sendcounts == 0 or sdispls == 0
+            or recvbuff == 0 or recvcounts == 0 or rdispls == 0):
+        check_status(<int>ncclInvalidArgument)
     with nogil:
         status = (<ncclResult_t (*)(
             const void*, const size_t*, const size_t*,
