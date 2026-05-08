@@ -30,6 +30,15 @@ typedef struct hipMemFabricHandle_st {
 } hipMemFabricHandle_compat_t;
 #else
 typedef hipMemFabricHandle_t hipMemFabricHandle_compat_t;
+#ifdef __cplusplus
+// Guard against silent ABI drift if HIP ever changes the FABRIC handle layout:
+// our compat type is hard-coded to 64 bytes (HIP_IPC_HANDLE_SIZE), so any
+// future divergence in the real hipMemFabricHandle_t size must trip this
+// assert and be addressed explicitly.
+static_assert(sizeof(hipMemFabricHandle_compat_t) == 64,
+              "hipMemFabricHandle_t size diverged from the 64-byte compat layout; "
+              "update HIP_IPC_HANDLE_SIZE / serialization code in mem_manager.{h,cc}");
+#endif
 #endif
 
 struct ncclComm;
