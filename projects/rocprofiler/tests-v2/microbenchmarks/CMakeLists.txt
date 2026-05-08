@@ -1,25 +1,16 @@
 find_library(ROCM_SMI_LIB rocm_smi64 HINTS ${ROCM_PATH}/lib)
 
 if(ROCM_SMI_LIB)
-    # Set the HIP language runtime link flags as FindHIP does not set them.
     set(CMAKE_INSTALL_TESTDIR test/${PROJECT_NAME})
-    set(CMAKE_EXECUTABLE_RUNTIME_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RUNTIME_CXX_FLAG})
-    set(CMAKE_EXECUTABLE_RUNTIME_HIP_FLAG_SEP
-        ${CMAKE_SHARED_LIBRARY_RUNTIME_CXX_FLAG_SEP})
-    set(CMAKE_EXECUTABLE_RPATH_LINK_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RPATH_LINK_CXX_FLAG})
-
-    set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${ROCM_PATH}/lib/cmake/hip")
-    set(CMAKE_HIP_ARCHITECTURES OFF)
-    if(DEFINED ROCM_PATH)
-        set(HIP_ROOT_DIR "${ROCM_PATH}/bin")
-    endif()
-    find_package(HIP REQUIRED MODULE)
+    find_package(hip CONFIG REQUIRED PATHS "${ROCM_PATH}")
+    enable_language(HIP)
 
     set(TEST_DIR ${PROJECT_SOURCE_DIR}/tests-v2/microbenchmarks)
     file(GLOB TEST_SRC_FILE ${TEST_DIR}/*.cpp)
 
-    set_source_files_properties(${TEST_SRC_FILE} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-    hip_add_executable(pcie_bw_test ${TEST_SRC_FILE})
+    set_source_files_properties(${TEST_SRC_FILE} PROPERTIES LANGUAGE HIP)
+    add_executable(pcie_bw_test ${TEST_SRC_FILE})
+    target_link_libraries(pcie_bw_test PRIVATE hip::device)
     add_test(
         NAME pcie_bw_test
         COMMAND $<TARGET_FILE:pcie_bw_test>
