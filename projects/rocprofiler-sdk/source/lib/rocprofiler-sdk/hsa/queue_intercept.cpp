@@ -750,9 +750,10 @@ destroy_queue_state(const hsa_queue_t* queue)
 namespace
 {
 // --- add_write_index wrappers (4) ---
-
+namespace impl
+{
 uint64_t
-wrap_add_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
+queue_add_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
 {
     if(should_bypass_inline_intercept())
         return get_next_table()->hsa_queue_add_write_index_relaxed_fn(q, v);
@@ -764,7 +765,7 @@ wrap_add_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
 }
 
 uint64_t
-wrap_add_write_index_scacq_screl(const hsa_queue_t* q, uint64_t v)
+queue_add_write_index_scacq_screl(const hsa_queue_t* q, uint64_t v)
 {
     if(should_bypass_inline_intercept())
         return get_next_table()->hsa_queue_add_write_index_scacq_screl_fn(q, v);
@@ -776,7 +777,7 @@ wrap_add_write_index_scacq_screl(const hsa_queue_t* q, uint64_t v)
 }
 
 uint64_t
-wrap_add_write_index_scacquire(const hsa_queue_t* q, uint64_t v)
+queue_add_write_index_scacquire(const hsa_queue_t* q, uint64_t v)
 {
     if(should_bypass_inline_intercept())
         return get_next_table()->hsa_queue_add_write_index_scacquire_fn(q, v);
@@ -788,7 +789,7 @@ wrap_add_write_index_scacquire(const hsa_queue_t* q, uint64_t v)
 }
 
 uint64_t
-wrap_add_write_index_screlease(const hsa_queue_t* q, uint64_t v)
+queue_add_write_index_screlease(const hsa_queue_t* q, uint64_t v)
 {
     if(should_bypass_inline_intercept())
         return get_next_table()->hsa_queue_add_write_index_screlease_fn(q, v);
@@ -802,7 +803,7 @@ wrap_add_write_index_screlease(const hsa_queue_t* q, uint64_t v)
 // --- store_write_index wrappers (2) ---
 
 void
-wrap_store_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
+queue_store_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
 {
     if(should_bypass_inline_intercept())
     {
@@ -820,7 +821,7 @@ wrap_store_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
 }
 
 void
-wrap_store_write_index_screlease(const hsa_queue_t* q, uint64_t v)
+queue_store_write_index_screlease(const hsa_queue_t* q, uint64_t v)
 {
     if(should_bypass_inline_intercept())
     {
@@ -840,7 +841,7 @@ wrap_store_write_index_screlease(const hsa_queue_t* q, uint64_t v)
 // --- cas_write_index wrappers (4) ---
 
 uint64_t
-wrap_cas_write_index_relaxed(const hsa_queue_t* q, uint64_t expected, uint64_t value)
+queue_cas_write_index_relaxed(const hsa_queue_t* q, uint64_t expected, uint64_t value)
 {
     if(should_bypass_inline_intercept())
         return get_next_table()->hsa_queue_cas_write_index_relaxed_fn(q, expected, value);
@@ -852,7 +853,7 @@ wrap_cas_write_index_relaxed(const hsa_queue_t* q, uint64_t expected, uint64_t v
 }
 
 uint64_t
-wrap_cas_write_index_scacq_screl(const hsa_queue_t* q, uint64_t expected, uint64_t value)
+queue_cas_write_index_scacq_screl(const hsa_queue_t* q, uint64_t expected, uint64_t value)
 {
     if(should_bypass_inline_intercept())
         return get_next_table()->hsa_queue_cas_write_index_scacq_screl_fn(q, expected, value);
@@ -864,7 +865,7 @@ wrap_cas_write_index_scacq_screl(const hsa_queue_t* q, uint64_t expected, uint64
 }
 
 uint64_t
-wrap_cas_write_index_scacquire(const hsa_queue_t* q, uint64_t expected, uint64_t value)
+queue_cas_write_index_scacquire(const hsa_queue_t* q, uint64_t expected, uint64_t value)
 {
     if(should_bypass_inline_intercept())
         return get_next_table()->hsa_queue_cas_write_index_scacquire_fn(q, expected, value);
@@ -876,7 +877,7 @@ wrap_cas_write_index_scacquire(const hsa_queue_t* q, uint64_t expected, uint64_t
 }
 
 uint64_t
-wrap_cas_write_index_screlease(const hsa_queue_t* q, uint64_t expected, uint64_t value)
+queue_cas_write_index_screlease(const hsa_queue_t* q, uint64_t expected, uint64_t value)
 {
     if(should_bypass_inline_intercept())
         return get_next_table()->hsa_queue_cas_write_index_screlease_fn(q, expected, value);
@@ -890,7 +891,7 @@ wrap_cas_write_index_screlease(const hsa_queue_t* q, uint64_t expected, uint64_t
 // --- load_write_index wrappers (2) ---
 
 uint64_t
-wrap_load_write_index_relaxed(const hsa_queue_t* q)
+queue_load_write_index_relaxed(const hsa_queue_t* q)
 {
     if(should_bypass_inline_intercept())
         return get_next_table()->hsa_queue_load_write_index_relaxed_fn(q);
@@ -902,7 +903,7 @@ wrap_load_write_index_relaxed(const hsa_queue_t* q)
 }
 
 uint64_t
-wrap_load_write_index_scacquire(const hsa_queue_t* q)
+queue_load_write_index_scacquire(const hsa_queue_t* q)
 {
     if(should_bypass_inline_intercept())
         return get_next_table()->hsa_queue_load_write_index_scacquire_fn(q);
@@ -916,7 +917,7 @@ wrap_load_write_index_scacquire(const hsa_queue_t* q)
 // --- signal_store wrappers (2) ---
 
 void
-wrap_signal_store_relaxed(hsa_signal_t sig, hsa_signal_value_t val)
+signal_store_relaxed(hsa_signal_t sig, hsa_signal_value_t val)
 {
     if(should_bypass_inline_intercept())
     {
@@ -938,7 +939,7 @@ wrap_signal_store_relaxed(hsa_signal_t sig, hsa_signal_value_t val)
 }
 
 void
-wrap_signal_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
+signal_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
 {
     if(should_bypass_inline_intercept())
     {
@@ -958,6 +959,7 @@ wrap_signal_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
 
     get_next_table()->hsa_signal_store_screlease_fn(sig, val);
 }
+}  // namespace impl
 }  // namespace
 
 bool
@@ -1002,24 +1004,24 @@ intercept_init(CoreApiTable* core_table, bool enabled)
     // mark that intercept has been installed
     s_intercept_installed.store(true, std::memory_order_release);
 
-    core_table->hsa_queue_add_write_index_relaxed_fn     = wrap_add_write_index_relaxed;
-    core_table->hsa_queue_add_write_index_scacq_screl_fn = wrap_add_write_index_scacq_screl;
-    core_table->hsa_queue_add_write_index_scacquire_fn   = wrap_add_write_index_scacquire;
-    core_table->hsa_queue_add_write_index_screlease_fn   = wrap_add_write_index_screlease;
+    core_table->hsa_queue_add_write_index_relaxed_fn     = impl::queue_add_write_index_relaxed;
+    core_table->hsa_queue_add_write_index_scacq_screl_fn = impl::queue_add_write_index_scacq_screl;
+    core_table->hsa_queue_add_write_index_scacquire_fn   = impl::queue_add_write_index_scacquire;
+    core_table->hsa_queue_add_write_index_screlease_fn   = impl::queue_add_write_index_screlease;
 
-    core_table->hsa_queue_store_write_index_relaxed_fn   = wrap_store_write_index_relaxed;
-    core_table->hsa_queue_store_write_index_screlease_fn = wrap_store_write_index_screlease;
+    core_table->hsa_queue_store_write_index_relaxed_fn   = impl::queue_store_write_index_relaxed;
+    core_table->hsa_queue_store_write_index_screlease_fn = impl::queue_store_write_index_screlease;
 
-    core_table->hsa_queue_cas_write_index_relaxed_fn     = wrap_cas_write_index_relaxed;
-    core_table->hsa_queue_cas_write_index_scacq_screl_fn = wrap_cas_write_index_scacq_screl;
-    core_table->hsa_queue_cas_write_index_scacquire_fn   = wrap_cas_write_index_scacquire;
-    core_table->hsa_queue_cas_write_index_screlease_fn   = wrap_cas_write_index_screlease;
+    core_table->hsa_queue_cas_write_index_relaxed_fn     = impl::queue_cas_write_index_relaxed;
+    core_table->hsa_queue_cas_write_index_scacq_screl_fn = impl::queue_cas_write_index_scacq_screl;
+    core_table->hsa_queue_cas_write_index_scacquire_fn   = impl::queue_cas_write_index_scacquire;
+    core_table->hsa_queue_cas_write_index_screlease_fn   = impl::queue_cas_write_index_screlease;
 
-    core_table->hsa_queue_load_write_index_relaxed_fn   = wrap_load_write_index_relaxed;
-    core_table->hsa_queue_load_write_index_scacquire_fn = wrap_load_write_index_scacquire;
+    core_table->hsa_queue_load_write_index_relaxed_fn   = impl::queue_load_write_index_relaxed;
+    core_table->hsa_queue_load_write_index_scacquire_fn = impl::queue_load_write_index_scacquire;
 
-    core_table->hsa_signal_store_relaxed_fn   = wrap_signal_store_relaxed;
-    core_table->hsa_signal_store_screlease_fn = wrap_signal_store_screlease;
+    core_table->hsa_signal_store_relaxed_fn   = impl::signal_store_relaxed;
+    core_table->hsa_signal_store_screlease_fn = impl::signal_store_screlease;
 
     // mark that intercept has been activated
     s_intercept_active.store(enabled, std::memory_order_release);
