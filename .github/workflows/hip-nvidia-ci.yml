@@ -87,6 +87,7 @@ jobs:
 
       - name: Fetch hipcc submodule
         run: |
+          ls -la
           cd TheRock
           git submodule update --init --depth 1 compiler/amd-llvm
 
