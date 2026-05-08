@@ -86,7 +86,9 @@ jobs:
           apt-get install -y --no-install-recommends git cmake ninja-build llvm-dev libnuma-dev libelf-dev libdrm-dev pkg-config
 
       - name: Fetch hipcc submodule
-        run: git -C TheRock submodule update --init --depth 1 compiler/amd-llvm
+        run: |
+          cd TheRock
+          git submodule update --init --depth 1 compiler/amd-llvm
 
       - name: Build hipconfig
         run: |
