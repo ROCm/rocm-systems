@@ -112,6 +112,12 @@ class TestTranspose(RocprofsysTest):
         "uniform_int_distribution",
     ]
     LOOPS_RUN_ARGS = ["2", "100", "50"]
+    SAMPLING_RUN_ARGS = ["4", "500", "100"]
+    SAMPLING_ENV = {
+        "ROCPROFSYS_SAMPLING_REALTIME": "ON",
+        "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "300",
+        "ROCPROFSYS_SAMPLING_CPUTIME": "OFF",
+    }
 
     @pytest.mark.parametrize(
         "mode",
@@ -145,10 +151,13 @@ class TestTranspose(RocprofsysTest):
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("transpose_env")
     def test_sampling(self, transpose_env, transpose_rules, num_processes):
+        env = transpose_env.copy()
+        env.update(self.SAMPLING_ENV)
         result = self.run_test(
             "sampling",
             target="transpose",
-            env=transpose_env,
+            env=env,
+            run_args=self.SAMPLING_RUN_ARGS,
             check_target_arch=True,
             launcher="mpi",
             num_procs=num_processes,
