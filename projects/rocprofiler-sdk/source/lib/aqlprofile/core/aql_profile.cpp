@@ -377,7 +377,7 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
                                 trace_config.perfcounters.push_back({p->value, 0xF});
                             break;
                         default:
-                            ERR_LOGGING("Bad trace parameter name ({})", p->parameter_name);
+                            ERR_LOGGING("Bad trace parameter name ({})", static_cast<int>(p->parameter_name));
                             return HSA_STATUS_ERROR_INVALID_ARGUMENT;
                     }
                 }
@@ -417,7 +417,7 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
         }
         else
         {
-            ERR_LOGGING("Bad profile type ({})", profile->type);
+            ERR_LOGGING("Bad profile type ({})", static_cast<int>(profile->type));
             return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
 
@@ -626,7 +626,7 @@ hsa_ven_amd_aqlprofile_get_info(const hsa_ven_amd_aqlprofile_profile_t* profile,
             }
             default:
                 status = HSA_STATUS_ERROR_INVALID_ARGUMENT;
-                ERR_LOGGING("Invalid attribute ({})", attribute);
+                ERR_LOGGING("Invalid attribute ({})", static_cast<int>(attribute));
         }
     } catch(std::exception& e)
     {
@@ -903,7 +903,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                         }
                         if(status != HSA_STATUS_SUCCESS)
                         {
-                            ERR_LOGGING("SQTT data callback error, sample_id({}) status({})", i, status);
+                            ERR_LOGGING("SQTT data callback error, sample_id({}) status({})", i, static_cast<int>(status));
                             break;
                         }
                         sample_ptr = reinterpret_cast<char*>(sample_ptr) + sample_capacity;
@@ -917,7 +917,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
         }
         else
         {
-            ERR_LOGGING("Bad profile type ({})", profile->type);
+            ERR_LOGGING("Bad profile type ({})", static_cast<int>(profile->type));
             status = HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
     } catch(std::exception& e)

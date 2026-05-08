@@ -31,10 +31,6 @@ target_link_libraries(
             GTest::gmock
             GTest::gtest_main)
 
-# Ensure hsa runtime is in DT_NEEDED
-target_link_options(aqlprofile-pm4-tests PRIVATE -Wl,--no-as-needed
-                    $<TARGET_FILE:hsa-runtime64::hsa-runtime64> -Wl,--as-needed)
-
 rocprofiler_add_unit_test(
     TARGET aqlprofile-pm4-tests
     SOURCES ${AQLPROFILE_PM4_TEST_SOURCES}

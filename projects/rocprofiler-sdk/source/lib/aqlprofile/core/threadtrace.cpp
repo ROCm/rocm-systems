@@ -252,7 +252,7 @@ _internal_aqlprofile_att_create_packets(aqlprofile_handle_t*                  ha
                     trace_config.perfcounters.push_back({p->counter_id, p->simd_mask});
                     break;
                 default:
-                    ERR_LOGGING("Bad trace parameter name ({})", p->parameter_name);
+                    ERR_LOGGING("Bad trace parameter name ({})", static_cast<int>(p->parameter_name));
                     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
             }
 

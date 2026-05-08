@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "lib/aqlprofile/core/last_error.hpp"
+#include "lib/aqlprofile/core/logger.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -16,31 +17,31 @@ namespace aql_profile
 TEST(ErrorApiTest, SetAndGetLastError)
 {
     set_last_error("hello world");
-    EXPECT_EQ(get_last_error(), "hello world");
+    EXPECT_STREQ(get_last_error(), "hello world");
 }
 
 TEST(ErrorApiTest, TruncatesLongMessage)
 {
     std::string long_msg(2048, 'A');
     set_last_error(long_msg);
-    EXPECT_LT(get_last_error().size(), long_msg.size());
-    EXPECT_FALSE(get_last_error().empty());
+    EXPECT_LT(std::strlen(get_last_error()), long_msg.size());
+    EXPECT_GT(std::strlen(get_last_error()), 0u);
 }
 
 TEST(ErrorApiTest, SetLastErrorOverwrites)
 {
     set_last_error("first message");
-    EXPECT_EQ(get_last_error(), "first message");
+    EXPECT_STREQ(get_last_error(), "first message");
 
     set_last_error("second message");
-    EXPECT_EQ(get_last_error(), "second message");
+    EXPECT_STREQ(get_last_error(), "second message");
 }
 
 TEST(ErrorApiTest, EmptyMessage)
 {
     set_last_error("something");
     set_last_error("");
-    EXPECT_EQ(get_last_error(), "");
+    EXPECT_STREQ(get_last_error(), "");
 }
 
 TEST(ErrorApiTest, ThreadLocal)
@@ -54,7 +55,7 @@ TEST(ErrorApiTest, ThreadLocal)
     });
     t.join();
 
-    EXPECT_EQ(get_last_error(), "main_thread");
+    EXPECT_STREQ(get_last_error(), "main_thread");
     EXPECT_EQ(child_msg, "child_thread");
 }
 
@@ -69,7 +70,7 @@ TEST(ErrorApiTest, ErrLoggingMacro)
 TEST(ErrorApiTest, ErrLoggingPlainString)
 {
     ERR_LOGGING("simple error message");
-    EXPECT_EQ(get_last_error(), "simple error message");
+    EXPECT_STREQ(get_last_error(), "simple error message");
 }
 
 }  // namespace aql_profile
