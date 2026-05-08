@@ -182,7 +182,7 @@ For each code object:
 6. **Patch:** Update ELF flags, write descriptor byte patches, write cave body.
 7. **Emit:** Return the modified ELF bytes.
 
-**Code cave sizing:** The cave body is placed in the NOP padding after `s_endpgm`. If the cave exceeds available padding, a warning is emitted. Future work will allocate a new `.text` section for large expansions.
+**Code cave sizing:** The cave body is placed in the NOP padding after `s_endpgm`. If the cave exceeds available padding, translation emits a warning and returns the original ELF unchanged so no descriptor or branch stub points at bytes that were not written. Future work will allocate a new `.text` section for large expansions.
 
 ---
 

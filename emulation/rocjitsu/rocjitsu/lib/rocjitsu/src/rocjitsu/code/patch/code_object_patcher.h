@@ -30,7 +30,8 @@ public:
 
   void update_elf_flags(uint32_t new_flags);
 
-  void patch_kernel_descriptor(uint64_t file_offset, std::span<const uint8_t> descriptor);
+  [[nodiscard]] bool patch_kernel_descriptor(uint64_t file_offset,
+                                             std::span<const uint8_t> descriptor);
 
   /// @brief Apply a descriptor translation plan to the in-memory ELF image.
   ///
@@ -56,8 +57,9 @@ public:
   /// AMDHSA stores the entry as a signed KD-relative byte offset. The
   /// text-offset delta is the same delta in KD-relative coordinates, so the
   /// patcher does not need symbol virtual addresses here.
-  void redirect_kernel_entry(uint64_t descriptor_file_offset, uint64_t old_entry_text_offset,
-                             uint64_t new_entry_text_offset);
+  [[nodiscard]] bool redirect_kernel_entry(uint64_t descriptor_file_offset,
+                                           uint64_t old_entry_text_offset,
+                                           uint64_t new_entry_text_offset);
 
   void append_cave_body(std::span<const uint32_t> words);
 

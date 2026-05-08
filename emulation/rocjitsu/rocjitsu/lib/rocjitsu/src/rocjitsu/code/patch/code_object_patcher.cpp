@@ -15,6 +15,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <cassert>
 #include <climits>
+#include <cstddef>
 #include <cstring>
 #include <elf.h>
 #include <optional>
@@ -48,6 +49,11 @@ namespace kd = rocr::llvm::amdhsa;
              : 0;
 }
 
+[[nodiscard]] bool image_contains_range(size_t image_size, uint64_t file_offset, uint64_t size) {
+  const uint64_t limit = static_cast<uint64_t>(image_size);
+  return file_offset <= limit && size <= limit - file_offset;
+}
+
 } // namespace
 
 CodeObjectPatcher::CodeObjectPatcher(const AmdGpuCodeObject &obj)
@@ -79,17 +85,19 @@ void CodeObjectPatcher::update_elf_flags(uint32_t new_mach) {
   ehdr->e_flags = (ehdr->e_flags & ~0xFFu) | (new_mach & 0xFFu);
 }
 
-void CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset,
+bool CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset,
                                                 std::span<const uint8_t> descriptor) {
-  assert(file_offset + descriptor.size() <= image_.size() &&
-         "kernel descriptor patch out of bounds");
+  if (!image_contains_range(image_.size(), file_offset, descriptor.size()))
+    return false;
+
   std::memcpy(image_.data() + file_offset, descriptor.data(), descriptor.size());
+  return true;
 }
 
 bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation &translation,
                                                             rj_code_arch_t target_arch) {
-  assert(translation.descriptor_file_offset + sizeof(KD) <= image_.size() &&
-         "kernel descriptor translation out of bounds");
+  if (!image_contains_range(image_.size(), translation.descriptor_file_offset, sizeof(KD)))
+    return false;
 
   std::optional<uint64_t> prologue_entry;
   if (!translation.prologue_words.empty()) {
@@ -140,8 +148,9 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
                   translation.target_private_size != 0 ? 1 : 0);
 
   if (prologue_entry) {
-    redirect_kernel_entry(translation.descriptor_file_offset, translation.entry_text_offset,
-                          *prologue_entry);
+    if (!redirect_kernel_entry(translation.descriptor_file_offset, translation.entry_text_offset,
+                               *prologue_entry))
+      return false;
   }
   return true;
 }
@@ -187,11 +196,11 @@ std::optional<uint64_t> CodeObjectPatcher::append_kernel_entry_prologue(
   return cave_byte_offset;
 }
 
-void CodeObjectPatcher::redirect_kernel_entry(uint64_t descriptor_file_offset,
+bool CodeObjectPatcher::redirect_kernel_entry(uint64_t descriptor_file_offset,
                                               uint64_t old_entry_text_offset,
                                               uint64_t new_entry_text_offset) {
-  assert(descriptor_file_offset + sizeof(KD) <= image_.size() &&
-         "kernel descriptor redirect out of bounds");
+  if (!image_contains_range(image_.size(), descriptor_file_offset, sizeof(KD)))
+    return false;
 
   auto *desc = reinterpret_cast<KD *>(image_.data() + descriptor_file_offset);
   const int64_t delta =
@@ -201,6 +210,7 @@ void CodeObjectPatcher::redirect_kernel_entry(uint64_t descriptor_file_offset,
   // after the descriptor in virtual address order. Preserve that signed value
   // when applying the text-relative delta.
   desc->kernel_code_entry_byte_offset = redirected;
+  return true;
 }
 
 void CodeObjectPatcher::append_cave_body(std::span<const uint32_t> words) {

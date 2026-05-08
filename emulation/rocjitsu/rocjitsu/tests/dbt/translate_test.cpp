@@ -781,6 +781,71 @@ TEST(CodeObjectPatcher, KernelEntryPrologueRejectsOutOfRangeBranch) {
   EXPECT_EQ(patcher.cave_body_size(), 0u);
 }
 
+TEST(CodeObjectPatcher, RejectsOutOfRangeKernelDescriptorUpdates) {
+  Executable exec(kernel_path("vector_add"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+
+  rocjitsu::CodeObjectPatcher patcher(*co);
+  std::array<uint8_t, sizeof(rocr::llvm::amdhsa::kernel_descriptor_t)> descriptor{};
+  const uint64_t image_size = static_cast<uint64_t>(co->image_size());
+
+  EXPECT_FALSE(patcher.patch_kernel_descriptor(image_size, descriptor));
+  EXPECT_FALSE(patcher.patch_kernel_descriptor(image_size - 1, descriptor));
+
+  rocjitsu::KdTranslation invalid;
+  invalid.descriptor_file_offset = image_size;
+  EXPECT_FALSE(patcher.apply_kernel_descriptor_translation(invalid, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_TRUE(patcher.cave_body().empty());
+}
+
+TEST(BinaryTranslatorE2E, CaveOverflowLeavesCodeObjectUnchanged) {
+  Executable exec(kernel_path("vector_add"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+  ASSERT_FALSE(co->text_sections().empty());
+
+  std::vector<uint8_t> image(co->image_size());
+  std::memcpy(image.data(), co->image_data(), image.size());
+
+  const auto *text = co->text_sections()[0];
+  uint8_t *text_bytes = image.data() + text->sectionOffset();
+  const size_t word_count = text->size() / sizeof(uint32_t);
+  const uint32_t nop = rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t filler = rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
+
+  size_t overwritten_padding_words = 0;
+  for (size_t i = word_count; i > 0; --i) {
+    uint32_t word = 0;
+    std::memcpy(&word, text_bytes + (i - 1) * sizeof(uint32_t), sizeof(word));
+    if (word != nop)
+      break;
+    std::memcpy(text_bytes + (i - 1) * sizeof(uint32_t), &filler, sizeof(filler));
+    ++overwritten_padding_words;
+  }
+  ASSERT_GT(overwritten_padding_words, 0u);
+
+  rocjitsu::AmdGpuCodeObject no_padding(image.data(), image.size());
+  ASSERT_TRUE(no_padding.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(no_padding);
+
+  EXPECT_EQ(result.elf_bytes, image);
+  const bool warned =
+      std::any_of(result.warnings.begin(), result.warnings.end(), [](const std::string &warning) {
+        return warning.find("cave body") != std::string::npos &&
+               warning.find("leaving code object unchanged") != std::string::npos;
+      });
+  EXPECT_TRUE(warned);
+}
+
 TEST(BinaryTranslatorE2E, OutputDecodesAsValidRdna4) {
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid());
