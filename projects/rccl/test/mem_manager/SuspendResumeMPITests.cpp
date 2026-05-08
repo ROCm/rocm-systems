@@ -498,12 +498,11 @@ TEST_F(MemManagerTwoRank, SuspendResume_LocalOnly)
     releaseVmm(&a);
 }
 
-// Inject a synthetic stale peer-imported entry on rank 1 with an ownerPtr
-// that rank 0 does not own. Resume Step 3 will gather (allCounts == 0, since
-// neither rank has exports), Step 4's matching loop on rank 1 will fail to
-// find a matching ncclDynMemP2pHandleInfo, log a WARN, and skip the entry
-// without crashing. Verifies the negative branch of the matching loop.
-TEST_F(MemManagerTwoRank, Resume_PeerImport_NoMatch_SkipsGracefully)
+// Inject a synthetic peer-imported entry on rank 1 whose ownerPtr has no
+// matching local export on rank 0. Resume Step 4 must surface this as
+// ncclSystemError on rank 1 (RCCL divergence from NCCL upstream silent skip)
+// and leave the entry in Released state. Rank 0 has no entries -> ncclSuccess.
+TEST_F(MemManagerTwoRank, Resume_PeerImport_NoMatch_ReturnsErrorEntryStaysReleased)
 {
     ncclComm_t comm = getActiveCommunicator();
     ASSERT_NE(comm->memManager, nullptr);
@@ -532,16 +531,27 @@ TEST_F(MemManagerTwoRank, Resume_PeerImport_NoMatch_SkipsGracefully)
     // Drive the full Suspend / Resume cycle. We expect:
     //   - Suspend on both ranks succeeds (rank 1's "released" entry is skipped
     //     in Pass 1 since state already == Released; rank 0 has no entries).
-    //   - Resume on both ranks succeeds; rank 1's Step 4 logs a WARN and
-    //     leaves the entry in the Released state.
+    //   - Resume on rank 0 succeeds (no peer-imports to re-map).
+    //   - Resume on rank 1 returns ncclSystemError because the fake entry has
+    //     no matching broadcast info; entry stays Released so caller can clean
+    //     up via Destroy.
     ASSERT_EQ(ncclCommMemSuspend(comm), ncclSuccess);
-    ASSERT_EQ(ncclCommMemResume(comm), ncclSuccess);
+    ncclResult_t resumeRet = ncclCommMemResume(comm);
 
-    if (rank == 1) {
+    if (rank == 0) {
+        ASSERT_EQ(resumeRet, ncclSuccess) << "Rank 0 has no entries, Resume must succeed";
+    } else {
+        ASSERT_EQ(resumeRet, ncclSystemError)
+            << "Rank 1 has a no-match peer-import; Resume must surface the error";
+
         ncclDynMemEntry* entry = comm->memManager->entries;
         ASSERT_NE(entry, nullptr);
         EXPECT_EQ(entry->state, ncclDynMemStateReleased)
-            << "Resume must NOT mark a no-match peer entry Active";
+            << "Resume must leave a no-match peer entry in Released state";
+
+        // released flag must remain set so the manager is in a clearly
+        // suspended state and the caller knows to retry or Destroy.
+        EXPECT_EQ(comm->memManager->released, 1);
 
         // Cleanup: drop the fake entry and free the VA reservation.
         ASSERT_EQ(ncclMemUntrack(comm->memManager, fakeImport.ptr, fakeImport.size),
