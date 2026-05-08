@@ -7,8 +7,12 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import common
+import numpy as np
 import pandas as pd
 import pytest
+
+from utils.metrics.expression import build_eval_string
+from utils.metrics.metric_evaluator import MetricEvaluator
 
 config = {}
 config["cleanup"] = True
@@ -1362,6 +1366,110 @@ def test_pc_sampling_basic_coverage():
 
         result = search_pc_sampling_record([])
         assert result is None
+
+
+@pytest.mark.division_by_zero
+class TestMetricEvaluatorDivisionByZero:
+    """Test MetricEvaluator.eval_expression handles division-by-zero cases.
+
+    The evaluator must gracefully handle all denominator-zero and NaN scenarios
+    that can arise from real counter data. These tests exercise
+    utils.metrics.metric_evaluator.MetricEvaluator.eval_expression
+    (None, NaN, inf detection).
+    """
+
+    @staticmethod
+    def _make_evaluator(columns, sys_vars=None):
+        """Build a MetricEvaluator with the given pmc_perf columns."""
+        pmc_perf_df = pd.DataFrame(columns)
+        raw_pmc_df = {"pmc_perf": pmc_perf_df}
+        return MetricEvaluator(raw_pmc_df, sys_vars or {}, {})
+
+    @staticmethod
+    def _to_eval_str(equation):
+        """Transform a YAML-style equation through the full pipeline."""
+        return build_eval_string(equation, "pmc_perf", config={})
+
+    def test_all_zero_denominator_returns_na(self):
+        """Division by all-zero denominator produces inf, caught as N/A."""
+        evaluator = self._make_evaluator({
+            "NUMERATOR": [100.0, 200.0, 300.0],
+            "DENOMINATOR": [0.0, 0.0, 0.0],
+        })
+        eval_str = self._to_eval_str("MIN(NUMERATOR / DENOMINATOR)")
+        result = evaluator.eval_expression(eval_str)
+        assert result == "N/A", (
+            "Division by all-zero Series should produce inf, caught as N/A"
+        )
+
+    def test_zero_over_zero_returns_na(self):
+        """0/0 scalar division (SUM(0)/SUM(0)) produces NaN, caught as N/A."""
+        evaluator = self._make_evaluator({
+            "NUMERATOR": [0.0, 0.0, 0.0],
+            "DENOMINATOR": [0.0, 0.0, 0.0],
+        })
+        eval_str = self._to_eval_str("SUM(NUMERATOR) / SUM(DENOMINATOR)")
+        result = evaluator.eval_expression(eval_str)
+        assert result == "N/A", "SUM(0) / SUM(0) should produce NaN, caught as N/A"
+
+    def test_normal_nonzero_returns_valid_float(self):
+        """All non-zero values produce a valid numeric result."""
+        evaluator = self._make_evaluator({
+            "BUSY": [800.0, 600.0, 400.0],
+            "TOTAL": [1000.0, 1000.0, 1000.0],
+        })
+        eval_str = self._to_eval_str("SUM(100 * BUSY) / SUM(TOTAL)")
+        result = evaluator.eval_expression(eval_str)
+        assert isinstance(result, float), f"Expected float, got {type(result)}"
+        assert result == pytest.approx(60.0, abs=1e-9), (
+            "SUM(100*[800,600,400]) / SUM([1000,1000,1000]) should be 60.0, "
+            f"got {result}"
+        )
+
+    def test_nullified_incomplete_kernel_returns_na(self):
+        """Incomplete kernel nullified by imputation: both columns all-NaN → N/A.
+
+        Kernels with fewer dispatches than perfmon files have every counter
+        column set to NaN before metric evaluation.
+        SUM(all-NaN) / SUM(all-NaN) = NaN, which must be caught as N/A.
+        """
+        evaluator = self._make_evaluator({
+            "NUMERATOR": [np.nan, np.nan, np.nan],
+            "DENOMINATOR": [np.nan, np.nan, np.nan],
+        })
+        eval_str = self._to_eval_str("SUM(NUMERATOR) / SUM(DENOMINATOR)")
+        result = evaluator.eval_expression(eval_str)
+        assert result == "N/A", (
+            "Nullified incomplete kernel (both columns all-NaN) should produce "
+            "NaN, caught as N/A"
+        )
+
+    def test_system_variable_as_denominator(self):
+        """System variable used as denominator produces valid result."""
+        evaluator = self._make_evaluator(
+            {"COUNTER": [100.0, 200.0]},
+            sys_vars={"ammolite__var": 5},
+        )
+        eval_str = self._to_eval_str("SUM(COUNTER) / $var")
+        result = evaluator.eval_expression(eval_str)
+        assert isinstance(result, float), f"Expected float, got {type(result)}"
+        assert result == pytest.approx(60.0, abs=1e-9), (
+            f"SUM([100, 200]) / 5 should be 60.0, got {result}"
+        )
+
+    def test_partial_zeros_in_denominator_aggregates_correctly(self):
+        """Partial zeros in denominator are aggregated past by SUM."""
+        evaluator = self._make_evaluator({
+            "LEVEL": [100.0, 200.0, 300.0],
+            "REQ": [10.0, 0.0, 5.0],
+        })
+        eval_str = self._to_eval_str("SUM(LEVEL) / SUM(REQ)")
+        result = evaluator.eval_expression(eval_str)
+        # SUM([100,200,300]) / SUM([10,0,5]) = 600 / 15 = 40.0
+        assert isinstance(result, float)
+        assert result == pytest.approx(40.0, abs=1e-9), (
+            f"SUM(LEVEL) / SUM(REQ) should be 40.0, got {result}"
+        )
 
 
 @pytest.fixture

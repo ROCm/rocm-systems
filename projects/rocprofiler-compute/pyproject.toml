@@ -107,6 +107,7 @@ markers = [
     "noise_clamp",
     "torch_ops",
     "torch_trace",
+    "division_by_zero",
     "multi_rank",
     "experimental_feature",
     "skip",
