@@ -201,8 +201,8 @@ TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
   // Zero the output buffer via hsa_memory_copy (works for both coarse- and
   // fine-grained pools); a direct std::memset would segfault when the pool
   // isn't CPU-mapped.
-  std::vector<float> zero(N, 0.0f);
-  hsa_memory_copy(C_dev, zero.data(), buf_size);
+  const std::vector<std::uint8_t> c_zero_bytes(buf_size, 0);
+  ASSERT_EQ(hsa_memory_copy(C_dev, c_zero_bytes.data(), buf_size), HSA_STATUS_SUCCESS);
 
   auto kernarg_pool = find_pool(cpu, HSA_AMD_SEGMENT_GLOBAL, true);
   void *kernarg = nullptr;
@@ -440,8 +440,8 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
     hsa_memory_copy(B_dev, B_host.data(), ab_size);
     // Device allocations are not necessarily host-addressable on dGPUs, so
     // zero the output through HSA instead of calling std::memset on C_dev.
-    std::vector<float> zero(M * N, 0.0f);
-    hsa_memory_copy(C_dev, zero.data(), c_size);
+    const std::vector<std::uint8_t> c_zero_bytes(c_size, 0);
+    ASSERT_EQ(hsa_memory_copy(C_dev, c_zero_bytes.data(), c_size), HSA_STATUS_SUCCESS);
 
     std::vector<float> C_golden(M * N, 0.0f);
     for (uint32_t i = 0; i < M; ++i)

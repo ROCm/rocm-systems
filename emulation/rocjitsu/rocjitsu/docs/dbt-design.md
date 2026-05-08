@@ -4,7 +4,7 @@
 
 The Dynamic Binary Translation (DBT) system translates AMDGPU code objects compiled for one ISA to execute on a different ISA. The initial target pair is CDNA4 (GFX950) → RDNA4 (GFX1200/1201), but the architecture is designed to support any directional ISA pair.
 
-The translation pipeline is organized into three layers, each with a clear responsibility boundary. The binary translator orchestrates the process without containing ISA-specific logic. The encoding translator handles per-instruction binary format conversion. The semantic translator handles behavioral and ABI differences between ISA generations.
+The translation pipeline is organized into layers with clear responsibility boundaries. The binary translator orchestrates the process without owning ISA-specific policy. The encoding translator handles per-instruction binary format conversion. The semantic translator handles instruction-level behavioral differences. The kernel descriptor translator handles descriptor ABI and resource differences.
 
 ---
 
@@ -19,14 +19,18 @@ The translation pipeline is organized into three layers, each with a clear respo
 │  │  SemanticTranslator    │  │  EncodingTranslator         │ │
 │  │  Behavioral changes:   │  │  Binary format conversion:  │ │
 │  │  - waitcnt splitting   │  │  - opcode remapping         │ │
-│  │  - workgroup_id ABI    │  │  - field layout changes     │ │
-│  │  - instruction lowering│  │  - coherency bit remap      │ │
-│  │  - instruction expand  │  │  - null register sentinels  │ │
+│  │  - instruction lowering│  │  - field layout changes     │ │
+│  │  - instruction expand  │  │  - coherency bit remap      │ │
 │  └────────────────────────┘  └─────────────────────────────┘ │
 │                                                              │
 │  ┌──────────────────────────────────────────────────────────┐│
+│  │  KernelDescriptorTranslator                              ││
+│  │  Descriptor ABI/resource policy and entry prologue words  ││
+│  └──────────────────────────────────────────────────────────┘│
+│                                                              │
+│  ┌──────────────────────────────────────────────────────────┐│
 │  │  CodeObjectPatcher                                       ││
-│  │  ELF mutation: kernel descriptors, e_flags, .text        ││
+│  │  ELF mutation: descriptor bytes, entry redirects, .text  ││
 │  └──────────────────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -45,11 +49,12 @@ The binary translator is the top-level orchestrator. It operates on binary and s
 - Decode guest instructions into basic blocks via `Decoder::create(guest_arch)`
 - Traverse each basic block and apply semantic rules first, then per-instruction encoding translation
 - Manage code caves for expanded instructions (branch stubs in .text, bodies in NOP padding)
-- Delegate ELF and kernel descriptor patching to `CodeObjectPatcher`
+- Delegate descriptor ABI/resource policy to `KernelDescriptorTranslator`
+- Delegate byte-level ELF mutation and entry prologue redirects to `CodeObjectPatcher`
 
 ### Key design constraint
 
-The binary translator's main loop is ISA-agnostic. It contains no conditional branches on `guest_arch_` or `host_arch_`, no ISA-specific register constants, no encoding format knowledge, and no instruction mnemonics. All ISA-specific logic lives in the encoding and semantic translators.
+The binary translator's per-instruction loop is ISA-agnostic. It contains no conditional branches on `guest_arch_` or `host_arch_`, no ISA-specific register constants, no encoding format knowledge, and no instruction mnemonics. Instruction policy lives in the encoding and semantic translators; descriptor ABI/resource policy lives in the kernel descriptor translator.
 
 ### Code cave mechanism
 
@@ -104,7 +109,6 @@ The semantic translator handles instructions and ABI conventions whose behavior 
 ### What it handles
 
 - **Waitcnt splitting:** GFX9 monolithic `s_waitcnt` → GFX12 split `s_wait_loadcnt` / `s_wait_storecnt_dscnt` / `s_wait_kmcnt` / `s_wait_expcnt`. Decode and encode functions live in `semantic_translator.cpp`.
-- **Workgroup ID ABI:** CDNA4 delivers workgroup IDs via SGPRs; RDNA4 delivers them via TTMP registers (TTMP9 for X, TTMP7 for Y/Z). The semantic translator rewrites operand fields in affected instructions.
 - **Instruction lowering:** One-to-many expansion for instructions that don't exist on the target ISA. Example: `v_lshl_add_u64` → `v_add_co_u32` + `s_wait_alu` + `v_add_co_ci_u32` carry chain.
 - **MFMA → WMMA translation:** `v_mfma_f32_16x16x16_f16` → `v_wmma_f32_16x16x16_f16` with ds_bpermute lane remap (XOR-48 at lanes 16-47). Address VGPR selected via `LivenessAnalysis` to avoid clobbering live state.
 - **AccVGPR elimination:** `v_accvgpr_read/write` → `v_mov_b32` or NOP on the unified VGPR file.
@@ -127,7 +131,7 @@ struct TranslationRule {
 
 The `try_lower_expand()` method performs binary search over the sorted rule table. For matrix instructions, the `guest_layout` and `host_layout` pointers are passed to the expansion function, which uses `compute_lane_permutation()` to derive the cross-lane shuffle rather than hardcoding it.
 
-Context-dependent translations (workgroup ID rewrite) use a dedicated post-pass method that receives kernel-level context from `CodeObjectPatcher::WorkGroupIdInfo`.
+Context-dependent descriptor ABI translations are handled by `KernelDescriptorTranslator` and handed to `CodeObjectPatcher` as prebuilt kernel-entry prologue words. The original kernel entry stays untouched; when a prologue is actually required, the kernel descriptor is redirected to a prologue cave that branches into the original entry. For CDNA-to-RDNA4 translation today, CDNA workgroup-id SGPRs are materialized from RDNA4's `TTMP9` and packed `TTMP7` launch payload.
 
 ### Supporting infrastructure
 
@@ -151,7 +155,11 @@ Kernel-scoped backward liveness analysis over the CFG embedded in `BasicBlock`. 
 
 ### Code Object Patcher (`code/patch/code_object_patcher.h`)
 
-Handles ELF-level mutations: kernel descriptor translation (`compute_pgm_rsrc1/2/3`, `kernel_code_properties`), ELF flag updates, `.text` overwrite, code cave management, and workgroup ID SGPR layout extraction from kernel descriptors. Documented separately.
+Handles ELF-level mutations: descriptor byte overwrite, entry prologue cave placement, kernel-entry descriptor redirects, ELF flag updates, `.text` overwrite, and code cave storage. It does not decide descriptor translation policy.
+
+### Kernel Descriptor Translator (`code/dbt/kernel_descriptor_translator.h`)
+
+Handles descriptor-level ABI and resource policy: `compute_pgm_rsrc1/2/3`, `kernel_code_properties`, AccVGPR placement metadata, and kernel-entry prologue words for descriptor ABI shuffles when the target launch state cannot preserve the guest-visible register layout directly. It produces descriptor bytes and prologue words; `CodeObjectPatcher` places those words in the ELF and redirects the descriptor entry point when needed.
 
 ### Instruction Builder (`code/patch/instruction_builder.h`)
 
@@ -163,17 +171,18 @@ Provides ISA-parameterized helpers for encoding common instructions (`s_branch`,
 
 For each code object:
 
-1. **Decode:** Create a `Decoder` for the guest ISA and build basic blocks from the `.text` section.
-2. **Analyze:** Build per-kernel CFG scopes from kernel descriptor entry offsets and compute `LivenessAnalysis` for each scope.
-3. **Per-instruction pass:** For each instruction in each basic block:
+1. **Descriptor translate:** Parse kernel descriptors and compute descriptor byte patches plus any kernel-entry prologue words.
+2. **Decode:** Create a `Decoder` for the guest ISA and build basic blocks from the `.text` section.
+3. **Analyze:** Build per-kernel CFG scopes from kernel descriptor entry offsets and compute `LivenessAnalysis` for each scope.
+4. **Per-instruction pass:** For each instruction in each basic block:
    - Call `try_lower_expand(inst, offset, liveness)` — binary search the expand rules table by `(encoding_id, opcode)`. If a rule matches, the `ExpandFn` generates replacement instruction words using the `HazardTracker` for automatic `s_delay_alu` insertion and liveness-based register allocation for temp VGPRs/SGPRs.
    - If no expand rule matched, look up the legalization table. If Identity or Substitute, call the encoding translator. If Expand with no handler, NOP-fill and emit a warning.
    - If the replacement is larger than the source instruction, create a code cave (branch to NOP padding after `s_endpgm`, return branch at end of cave).
-4. **Workgroup ID rewrite:** Post-pass rewrites SGPR operands to TTMP registers for RDNA4 ABI.
-5. **Patch:** Update ELF flags, translate kernel descriptors (`compute_pgm_rsrc1/2/3`), write cave body.
-6. **Emit:** Return the modified ELF bytes.
+5. **Entry prologues:** `CodeObjectPatcher` places descriptor-provided prologue words in a cave and redirects the kernel descriptor entry point to that cave.
+6. **Patch:** Update ELF flags, write descriptor byte patches, write cave body.
+7. **Emit:** Return the modified ELF bytes.
 
-**Code cave sizing:** The cave body is placed in the NOP padding after `s_endpgm`. If the cave exceeds available padding, a warning is emitted. Future work will allocate a new `.text` section for large expansions.
+**Code cave sizing:** The cave body is placed in the NOP padding after `s_endpgm`. If the cave exceeds available padding, translation emits a warning and returns the original ELF unchanged so no descriptor or branch stub points at bytes that were not written. Future work will allocate a new `.text` section for large expansions.
 
 ---
 

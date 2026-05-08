@@ -10,8 +10,10 @@
 ///
 /// - **Waitcnt splitting**: GFX9 monolithic s_waitcnt → GFX12 split
 ///   s_wait_loadcnt / s_wait_storecnt_dscnt / s_wait_kmcnt / s_wait_expcnt
-/// - **Workgroup ID delivery**: GFX9 delivers workgroup IDs via SGPRs,
-///   RDNA4 delivers them via TTMP registers (TTMP9 for X, TTMP7 for Y/Z)
+/// - **Instruction lowering**: MFMA/AccVGPR and other one-to-many target
+///   sequences. Kernel-entry descriptor ABI prologues are built by
+///   KernelDescriptorTranslator and reached through a CodeObjectPatcher
+///   descriptor-entry redirect.
 ///
 /// The translator runs per-basic-block before the per-instruction encoding
 /// loop. It scans for anchor instructions (identified by InstFlags), applies
@@ -31,7 +33,6 @@
 
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
-#include "rocjitsu/code/patch/kernel_descriptor_info.h"
 #include "rocjitsu/code/rj_code.h"
 
 namespace rocjitsu {
@@ -71,11 +72,6 @@ struct SemanticReplacement {
 class SemanticTranslator {
 public:
   SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch);
-
-  /// @brief Rewrite workgroup_id SGPR references to TTMP registers.
-  [[nodiscard]] std::vector<SemanticReplacement>
-  rewrite_workgroup_ids(BasicBlock &block, const KernelWorkGroupIdInfo &wg_info,
-                        std::span<const uint8_t> translated_text) const;
 
   /// @brief Try to expand/lower an instruction via the expand rules table.
   /// @param inst      The decoded instruction.
