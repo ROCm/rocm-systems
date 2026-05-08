@@ -757,9 +757,18 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   memset(priv_data, 0, priv_size);
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
   uint32_t* doorbell_loc = nullptr;
-  auto queue_memory = static_cast<ComputeQueue*>(queue)->GetAmdQueueMemory();
-  auto resource = queue_memory->KmtHandle();
-  Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, IsAqlSupported(),
+  // amd_queue_memory_ / KmtHandle and AQL parameters only apply when the queue
+  // is an AQL ComputeQueue. SDMAQueue (and SwsCompute non-AQL queues) must not
+  // be down-cast to ComputeQueue here -- doing so reads garbage and crashes.
+  ComputeQueue* compute_queue = dynamic_cast<ComputeQueue*>(queue);
+  D3DKMT_HANDLE resource = 0;
+  bool is_aql = false;
+  if (compute_queue != nullptr && IsAqlSupported()) {
+    auto queue_memory = compute_queue->GetAmdQueueMemory();
+    resource = queue_memory->KmtHandle();
+    is_aql = true;
+  }
+  Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, is_aql,
       queue->cmdbuf_addr, queue->cmdbuf_size, reinterpret_cast<uintptr_t>(queue->ring_wptr),
       reinterpret_cast<uintptr_t>(queue->ring_rptr), resource, &doorbell_loc);
 

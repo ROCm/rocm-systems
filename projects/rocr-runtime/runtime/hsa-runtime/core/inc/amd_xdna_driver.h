@@ -224,10 +224,10 @@ public:
  private:
   /// @brief Destroys @p bo_handle.
   ///
-  /// This function will unmap the virtual address and close the BO, but will not return any status.
+  /// @note This function will unmap the virtual address and close the BO, even if the former fails.
   ///
   /// @param[in,out] bo_handle BO handle to destroy.
-  void DestroyBOHandle(BOHandle& bo_handle);
+  hsa_status_t DestroyBOHandle(BOHandle& bo_handle);
 
   /// @brief Returns the BO associated with the address.
   ///

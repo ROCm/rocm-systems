@@ -2770,8 +2770,11 @@ void GpuAgent::BindTrapHandler() {
   } else {
     if (isa_->GetMajorVersion() >= 11 ||
        (isa_->GetMajorVersion() == 9 &&
-        (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5))) {
+        (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5)) ||
+       (isa_->GetMajorVersion() == 10 && isa_->GetMinorVersion() == 3 &&
+        isa_->GetStepping() == 6)) {
       // No trap handler support without exception handling, soft error.
+      // gfx1036 (Granite Ridge iGPU): KMD does not support the trap handler escape.
       return;
     }
 
