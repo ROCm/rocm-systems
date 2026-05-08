@@ -16,7 +16,7 @@ API:
 
 Metric dict keys must match the Memory Chart panel YAML for RDNA3.5:
 
-    src/rocprof_compute_soc/analysis_configs/gfx1151/0300_Memory_Chart.yaml
+    src/rocprof_compute_soc/analysis_configs/gfx1151/0300_memory_chart.yaml
 
 Use ``MEM_CHART_PANEL_METRIC_KEYS`` for the authoritative ordered list.
 (If a future gfx target adds ``0300_memory_chart.yaml``, keep keys aligned there.)
@@ -24,9 +24,9 @@ Use ``MEM_CHART_PANEL_METRIC_KEYS`` for the authoritative ordered list.
 Bandwidth values are **Bytes/s**, matching the YAML ``unit: Bytes/s`` rows.
 
 RDNA3.5 MEMORY HIERARCHY (GCEA = Graphics Core Efficiency Arbiter):
-   Kernel -> TCP (L0 Vector Cache) -> GL1C (L1) -> GL2C (L2) -> GCEA -> System Memory
-         -> SQC (ICache/DCache)   -> GL1C (L1) -> GL2C (L2) -> GCEA -> System Memory
-         -> LDS (Local Data Share) [stays on CU, no GL1C connection]
+   Kernel -> GL0 (TCP Cache)      -> GL1 Cache -> GL2 Cache -> GCEA -> System Memory
+         -> SQC (ICache/DCache)   -> GL1 Cache -> GL2 Cache -> GCEA -> System Memory
+         -> LDS (Local Data Share) [stays on CU, no GL1 Cache connection]
 """
 
 import argparse
@@ -47,7 +47,7 @@ from utils.utils_analysis import format_bw_human_readable
 # ---------------------------------------------------------------------------
 
 # Keys = ``metric:`` names under each ``metric_table`` in
-# ``analysis_configs/gfx1151/0300_Memory_Chart.yaml`` (tables 301–309), in panel order.
+# ``analysis_configs/gfx1151/0300_memory_chart.yaml`` (tables 301–309), in panel order.
 # Commented-out YAML metrics (e.g. TCP Atomic, LDS direct read/write) are omitted.
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     # Table 301: Instruction Cache
@@ -63,13 +63,13 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("Dcache Hit Rate", 95.3),
     ("Dcache Request Stall Rate", 1.8),
     ("Dcache-GL1 Read Bandwidth", 28.8e9),
-    # Table 303: TCP Cache (Vector L0)
+    # Table 303: TCP Cache (GL0 Vector Cache)
     ("TCP Total Requests", 1_250_000),
     ("TCP Read Requests", 875_000),
     ("TCP Write Requests", 375_000),
     ("TCP Miss Requests", 150_000),
-    ("TCP Hit Rate", 88.0),
-    ("TCP Request Bandwidth", 80e9),
+    ("GL0 Cache Hit Rate (TCP Cache)", 88.0),
+    ("GL0 Cache BW (TCP Cache)", 80e9),
     # Table 304: LDS
     ("LDS Instructions", 125_000),
     ("LDS Atomic Instructions", 10_000),
@@ -82,31 +82,31 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("TCP-GL1 Write Requests", 50_000),
     ("TCP-GL1 Read Bandwidth", 96e9),
     ("TCP-GL1 Write Bandwidth", 32e9),
-    # Table 306: GL1C Cache (L1)
-    ("GL1C Utilization", 65.2),
-    ("GL1C Total Requests", 200_000),
-    ("GL1C Read Requests", 150_000),
-    ("GL1C Write Requests", 50_000),
-    ("GL1C Miss Requests", 30_000),
-    ("GL1C Hit Rate", 85.0),
-    ("GL1C Starve Rate", 5.2),
-    ("GL1C Stall GL2 Backpressure", 8.5),
-    # Table 307: GL1C-GL2 Interface
+    # Table 306: GL1 Cache (L1)
+    ("GL1 Cache Utilization", 65.2),
+    ("GL1 Cache Total Requests", 200_000),
+    ("GL1 Cache Read Requests", 150_000),
+    ("GL1 Cache Write Requests", 50_000),
+    ("GL1 Cache Miss Requests", 30_000),
+    ("GL1 Cache Hit Rate", 85.0),
+    ("GL1 Cache Starve Rate", 5.2),
+    ("GL1 Cache Stall GL2 Backpressure", 8.5),
+    # Table 307: GL1-GL2 Interface
     ("GL1-GL2 Read Requests", 30_000),
     ("GL1-GL2 Write Requests", 10_000),
     ("GL1-GL2 Read Bandwidth", 48e9),
     ("GL1-GL2 Write Bandwidth", 16e9),
     ("GL1-GL2 Read Latency", 85.2),
     ("GL1-GL2 Write Latency", 62.4),
-    # Table 308: GL2C Cache (L2)
-    ("GL2C Utilization", 74.2),
-    ("GL2C Total Requests", 40_000),
-    ("GL2C Read Requests", 30_000),
-    ("GL2C Write Requests", 10_000),
-    ("GL2C Atomic Requests", 1_000),
-    ("GL2C Hit Rate", 82.5),
-    ("GL2C Read Bandwidth", 64e9),
-    ("GL2C Write Bandwidth", 24e9),
+    # Table 308: GL2 Cache (L2)
+    ("GL2 Cache Utilization", 74.2),
+    ("GL2 Cache Total Requests", 40_000),
+    ("GL2 Cache Read Requests", 30_000),
+    ("GL2 Cache Write Requests", 10_000),
+    ("GL2 Cache Atomic Requests", 1_000),
+    ("GL2 Cache Hit Rate", 82.5),
+    ("GL2 Cache Read BW", 64e9),
+    ("GL2 Cache Write BW", 24e9),
     # Table 309: Graphics Core Efficiency Arbiter (GCEA) to System Memory
     ("SARB Utilization", 52.3),
     ("SARB Stall Rate", 12.4),
@@ -293,8 +293,8 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
 
     m["tcp_read_req"] = metric_dict.get("TCP Read Requests")
     m["tcp_write_req"] = metric_dict.get("TCP Write Requests")
-    m["tcp_hit"] = metric_dict.get("TCP Hit Rate")
-    m["tcp_bw"] = metric_dict.get("TCP Request Bandwidth")
+    m["tcp_hit"] = metric_dict.get("GL0 Cache Hit Rate (TCP Cache)")
+    m["tcp_bw"] = metric_dict.get("GL0 Cache BW (TCP Cache)")
 
     m["lds_insts"] = metric_dict.get("LDS Instructions")
     m["lds_inst_cycles"] = metric_dict.get("LDS Instruction Cycles")
@@ -307,17 +307,17 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
 
     m["sqc_gl1_read_bw"] = _safe_float_sum(m["icache_gl1_bw"], m["dcache_gl1_bw"])
 
-    m["gl1c_util"] = metric_dict.get("GL1C Utilization")
-    m["gl1c_hit"] = metric_dict.get("GL1C Hit Rate")
-    m["gl1c_stall_gl2"] = metric_dict.get("GL1C Stall GL2 Backpressure")
+    m["gl1c_util"] = metric_dict.get("GL1 Cache Utilization")
+    m["gl1c_hit"] = metric_dict.get("GL1 Cache Hit Rate")
+    m["gl1c_stall_gl2"] = metric_dict.get("GL1 Cache Stall GL2 Backpressure")
 
     m["gl1_gl2_read_bw"] = metric_dict.get("GL1-GL2 Read Bandwidth")
     m["gl1_gl2_write_bw"] = metric_dict.get("GL1-GL2 Write Bandwidth")
 
-    m["gl2c_util"] = metric_dict.get("GL2C Utilization")
-    m["gl2c_hit"] = metric_dict.get("GL2C Hit Rate")
-    m["gl2c_read_bw"] = metric_dict.get("GL2C Read Bandwidth")
-    m["gl2c_write_bw"] = metric_dict.get("GL2C Write Bandwidth")
+    m["gl2c_util"] = metric_dict.get("GL2 Cache Utilization")
+    m["gl2c_hit"] = metric_dict.get("GL2 Cache Hit Rate")
+    m["gl2c_read_bw"] = metric_dict.get("GL2 Cache Read BW")
+    m["gl2c_write_bw"] = metric_dict.get("GL2 Cache Write BW")
 
     m["sarb_util"] = metric_dict.get("SARB Utilization")
     m["sarb_stall"] = metric_dict.get("SARB Stall Rate")
@@ -407,13 +407,13 @@ def _build_kernel_and_l0(
         height=10,
     )
 
-    # TCP panel
+    # GL0 (TCP Cache) panel
     tcp_bw_line = (
         metric_line("BW", m["tcp_bw"], "Bytes/s", COLORS["bw"]) if m["tcp_bw"] else ""
     )
     tcp_panel = Panel(
         f"{metric_line('Hit Rate', m['tcp_hit'], '%', COLORS['hit'])}\n{tcp_bw_line}",
-        title=f"[bold {c_bl}]TCP (L0)[/bold {c_bl}]",
+        title=f"[bold {c_bl}]GL0 (TCP Cache)[/bold {c_bl}]",
         border_style=c_bl,
         width=20,
         height=10,
@@ -436,7 +436,7 @@ def _build_kernel_and_l0(
     l0_stack.add_row(tcp_panel)
     l0_stack.add_row(sqc_panel)
 
-    # Edges to GL1C (TCP and SQC connect, LDS does NOT)
+    # Edges to GL1 Cache (TCP and SQC connect, LDS does NOT)
     sa_l = std_arrows["left"]
     sa_r = std_arrows["right"]
     tcp_gl1_rd = fmt_bw(m["tcp_gl1_read_bw"], precision=1)
@@ -477,7 +477,7 @@ def _build_cache_columns(
     m: dict[str, Any],
     std_arrows: dict[str, str],
 ) -> tuple[Panel, Text, Panel]:
-    """Build GL1C panel, GL1-GL2 edges, GL2C panel.
+    """Build GL1 Cache panel, GL1-GL2 edges, GL2 Cache panel.
 
     Returns (gl1_panel, gl1_gl2_edges_text, gl2_panel).
     """
@@ -496,7 +496,7 @@ def _build_cache_columns(
         f"[dim]{bar(m['gl1c_hit'])}[/dim]\n"
         "\n"
         f"{metric_line('GL2 Stall', m['gl1c_stall_gl2'], '%', COLORS['stall'])}",
-        title=f"[bold {c_bl}]GL1C[/bold {c_bl}]",
+        title=f"[bold {c_bl}]GL1 Cache[/bold {c_bl}]",
         border_style=c_bl,
         width=16,
         height=30,
@@ -536,7 +536,7 @@ def _build_cache_columns(
         "\n"
         f"{metric_line('Hit Rate', m['gl2c_hit'], '%', COLORS['hit'])}\n"
         f"[dim]{bar(m['gl2c_hit'])}[/dim]",
-        title=f"[bold {c_bl}]GL2C[/bold {c_bl}]",
+        title=f"[bold {c_bl}]GL2 Cache[/bold {c_bl}]",
         border_style=c_bl,
         width=16,
         height=30,
@@ -724,7 +724,9 @@ def create_mem_chart_diagram(
     if show_debug:
         console.print("[dim]Architecture Notes:[/dim]")
         console.print("  TCP (Texture Cache Pipe): L0 vector cache for VMEM operations")
-        console.print("  LDS (Local Data Share): On-CU scratchpad, NO GL1C connection")
+        console.print(
+            "  LDS (Local Data Share): On-CU scratchpad, NO GL1 Cache connection"
+        )
         console.print("  SQC (Sequencer Cache): ICache + DCache for scalar operations")
         console.print()
 
@@ -742,7 +744,7 @@ def plot_mem_chart(
 ) -> str:
     """Plot the memory chart and return as string.
 
-    ``metric_dict`` keys should match ``0300_Memory_Chart.yaml`` (gfx1151), i.e.
+    ``metric_dict`` keys should match ``0300_memory_chart.yaml`` (gfx1151), i.e.
     ``MEM_CHART_PANEL_METRIC_KEYS``. Values for bandwidth metrics are in **Bytes/s**.
     Input is normalized to a flat ordered dict before rendering.
 
@@ -772,9 +774,7 @@ def plot_mem_chart(
 
 
 def main() -> None:
-    arg_parser = argparse.ArgumentParser(
-        description="RDNA3.5 Memory Chart - CLI Visualization"
-    )
+    arg_parser = argparse.ArgumentParser(description="Memory Chart - CLI Visualization")
     arg_parser.add_argument("--data", "-d", help="JSON file with metrics data")
     arg_parser.add_argument("--debug", action="store_true", help="Show debug info")
     arg_parser.add_argument("--arch", default="gfx1151", help="Architecture name")

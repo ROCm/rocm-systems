@@ -207,6 +207,12 @@ SBranchSopp::SBranchSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= BRANCH;
+}
+
+std::optional<int64_t> SBranchSopp::branch_offset_bytes() const {
+  // AMDGPU direct branch labels are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
 void SBranchSopp::execute_impl(amdgpu::Wavefront &wf) {
@@ -221,6 +227,12 @@ SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+}
+
+std::optional<int64_t> SCbranchScc0Sopp::branch_offset_bytes() const {
+  // AMDGPU direct branch labels are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
 void SCbranchScc0Sopp::execute_impl(amdgpu::Wavefront &wf) {
@@ -237,6 +249,12 @@ SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+}
+
+std::optional<int64_t> SCbranchScc1Sopp::branch_offset_bytes() const {
+  // AMDGPU direct branch labels are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
 void SCbranchScc1Sopp::execute_impl(amdgpu::Wavefront &wf) {
@@ -253,6 +271,12 @@ SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+}
+
+std::optional<int64_t> SCbranchVcczSopp::branch_offset_bytes() const {
+  // AMDGPU direct branch labels are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
 void SCbranchVcczSopp::execute_impl(amdgpu::Wavefront &wf) {
@@ -269,6 +293,12 @@ SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+}
+
+std::optional<int64_t> SCbranchVccnzSopp::branch_offset_bytes() const {
+  // AMDGPU direct branch labels are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
 void SCbranchVccnzSopp::execute_impl(amdgpu::Wavefront &wf) {
@@ -285,6 +315,12 @@ SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+}
+
+std::optional<int64_t> SCbranchExeczSopp::branch_offset_bytes() const {
+  // AMDGPU direct branch labels are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
 void SCbranchExeczSopp::execute_impl(amdgpu::Wavefront &wf) {
@@ -301,6 +337,12 @@ SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+}
+
+std::optional<int64_t> SCbranchExecnzSopp::branch_offset_bytes() const {
+  // AMDGPU direct branch labels are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
 }
 
 void SCbranchExecnzSopp::execute_impl(amdgpu::Wavefront &wf) {
@@ -366,6 +408,7 @@ SEndpgmSopp::SEndpgmSopp(const MachineInst *inst)
     : Sopp("s_endpgm", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SEndpgmSopp>()) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= PROGRAM_TERMINATOR;
 }
 
 void SEndpgmSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
@@ -375,6 +418,7 @@ SEndpgmSavedSopp::SEndpgmSavedSopp(const MachineInst *inst)
            make_exec_fn<SEndpgmSavedSopp>()) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= PROGRAM_TERMINATOR;
 }
 
 void SEndpgmSavedSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
@@ -384,6 +428,7 @@ SEndpgmOrderedPsDoneSopp::SEndpgmOrderedPsDoneSopp(const MachineInst *inst)
            make_exec_fn<SEndpgmOrderedPsDoneSopp>()) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= PROGRAM_TERMINATOR;
 }
 
 void SEndpgmOrderedPsDoneSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }

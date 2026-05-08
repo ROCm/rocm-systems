@@ -137,10 +137,10 @@ enum : int
 
 #else  // dummy MPI types
 
-using comm_t                           = int32_t;
-using info_t                           = int32_t;
-using data_type_t                      = int32_t;
-using status_t                         = int32_t;
+using comm_t                           = std::int32_t;
+using info_t                           = std::int32_t;
+using data_type_t                      = std::int32_t;
+using status_t                         = std::int32_t;
 static const comm_t comm_world_v       = 0;
 static const comm_t comm_self_v        = 0;
 static const info_t info_null_v        = 0;
@@ -182,10 +182,10 @@ get_id()
 template <typename Tp>
 using communicator_map_t = std::unordered_map<comm_t, Tp>;
 
-inline int32_t rank(comm_t = comm_world_v);
-inline int32_t size(comm_t = comm_world_v);
-inline void    set_rank(int32_t, comm_t = comm_world_v);
-inline void    set_size(int32_t, comm_t = comm_world_v);
+inline std::int32_t rank(comm_t = comm_world_v);
+inline std::int32_t size(comm_t = comm_world_v);
+inline void         set_rank(std::int32_t, comm_t = comm_world_v);
+inline void         set_size(std::int32_t, comm_t = comm_world_v);
 
 //--------------------------------------------------------------------------------------//
 // Currently ROCPROFSYS_MPI_THREAD is just a placeholder for future
@@ -285,7 +285,7 @@ inline bool&
 is_finalized()
 {
 #if defined(ROCPROFSYS_USE_MPI)
-    int32_t _fini = 0;
+    std::int32_t _fini = 0;
     PMPI_Finalized(&_fini);
     static bool _instance = static_cast<bool>(_fini);
     if(!_instance) _instance = static_cast<bool>(_fini);
@@ -302,7 +302,7 @@ inline std::function<bool()>&
 is_initialized_callback()
 {
     static std::function<bool()> _v = []() -> bool {
-        int32_t _init = 0;
+        std::int32_t _init = 0;
 #if defined(ROCPROFSYS_USE_MPI)
         if(!is_finalized()) PMPI_Initialized(&_init);
 #endif
@@ -403,15 +403,16 @@ finalize()
 
 #if defined(ROCPROFSYS_USE_MPI)
 
-int32_t
+std::int32_t
 rank(comm_t comm)
 {
-    int32_t _rank = 0;
+    std::int32_t _rank = 0;
     if(is_initialized())
     {
         // this is used to guard against the queries that might happen after an
         // application calls MPI_Finalize() directly
-        static communicator_map_t<int32_t>* _instance = new communicator_map_t<int32_t>();
+        static communicator_map_t<std::int32_t>* _instance =
+            new communicator_map_t<std::int32_t>();
         if(_instance->find(comm) == _instance->end())
         {
             PMPI_Comm_rank(comm, &_rank);
@@ -422,18 +423,19 @@ rank(comm_t comm)
             _rank = (*_instance)[comm];
         }
     }
-    return std::max(_rank, (int32_t) 0);
+    return std::max(_rank, (std::int32_t) 0);
 }
 
-int32_t
+std::int32_t
 size(comm_t comm)
 {
-    int32_t _size = 1;
+    std::int32_t _size = 1;
     if(is_initialized())
     {
         // this is used to guard against the queries that might happen after an
         // application calls MPI_Finalize() directly
-        static communicator_map_t<int32_t>* _instance = new communicator_map_t<int32_t>();
+        static communicator_map_t<std::int32_t>* _instance =
+            new communicator_map_t<std::int32_t>();
         if(_instance->find(comm) == _instance->end())
         {
             PMPI_Comm_size(comm, &_size);
@@ -444,27 +446,33 @@ size(comm_t comm)
             _size = (*_instance)[comm];
         }
     }
-    return std::max(_size, (int32_t) 1);
+    return std::max(_size, (std::int32_t) 1);
 }
 
 void
-set_rank(int32_t, comm_t)
+set_rank(std::int32_t, comm_t)
 {}
 void
-set_size(int32_t, comm_t)
+set_size(std::int32_t, comm_t)
 {}
 
 #else
 
 struct comm_data
 {
-    using entry_t = std::array<int32_t, 2>;
+    using entry_t = std::array<std::int32_t, 2>;
 
-    static int32_t rank(comm_t _comm) { return std::max<int32_t>(m_data()[_comm][0], 0); }
-    static int32_t size(comm_t _comm) { return std::max<int32_t>(m_data()[_comm][1], 1); }
+    static std::int32_t rank(comm_t _comm)
+    {
+        return std::max<std::int32_t>(m_data()[_comm][0], 0);
+    }
+    static std::int32_t size(comm_t _comm)
+    {
+        return std::max<std::int32_t>(m_data()[_comm][1], 1);
+    }
 
-    friend void set_rank(int32_t, comm_t);
-    friend void set_size(int32_t, comm_t);
+    friend void set_rank(std::int32_t, comm_t);
+    friend void set_size(std::int32_t, comm_t);
 
 private:
     static std::map<comm_t, entry_t>& m_data()
@@ -474,26 +482,26 @@ private:
     }
 };
 
-int32_t
+std::int32_t
 rank(comm_t comm)
 {
     return comm_data::rank(comm);
 }
 
-int32_t
+std::int32_t
 size(comm_t comm)
 {
     return comm_data::size(comm);
 }
 
 void
-set_rank(int32_t _rank, comm_t comm)
+set_rank(std::int32_t _rank, comm_t comm)
 {
     comm_data::m_data()[comm][0] = _rank;
 }
 
 void
-set_size(int32_t _size, comm_t comm)
+set_size(std::int32_t _size, comm_t comm)
 {
     comm_data::m_data()[comm][1] = _size;
 }
@@ -559,7 +567,7 @@ get_node_comm()
 
 //--------------------------------------------------------------------------------------//
 /// returns the number of ranks on a node
-inline int32_t
+inline std::int32_t
 get_num_ranks_per_node()
 {
     if(!is_initialized()) return 1;
@@ -568,7 +576,7 @@ get_num_ranks_per_node()
 
 //--------------------------------------------------------------------------------------//
 
-inline int32_t
+inline std::int32_t
 get_num_nodes()
 {
     if(!is_initialized()) return 1;
@@ -579,7 +587,7 @@ get_num_nodes()
 
 //--------------------------------------------------------------------------------------//
 
-inline int32_t
+inline std::int32_t
 get_node_index()
 {
     if(!is_initialized()) return 0;

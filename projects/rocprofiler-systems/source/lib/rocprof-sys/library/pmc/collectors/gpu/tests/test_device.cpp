@@ -3,6 +3,7 @@
 
 #include "library/pmc/collectors/gpu/device.hpp"
 #include "library/pmc/collectors/gpu/tests/mock_gpu_driver.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -151,11 +152,11 @@ protected:
         {
             for(size_t i = 0; i < MAX_NUM_VCN; ++i)
             {
-                met.xcp_stats[xcp].vcn_busy[i] = static_cast<uint16_t>(50 + i);
+                met.xcp_stats[xcp].vcn_busy[i] = static_cast<std::uint16_t>(50 + i);
             }
             for(size_t i = 0; i < MAX_NUM_JPEG_V1; ++i)
             {
-                met.xcp_stats[xcp].jpeg_busy[i] = static_cast<uint16_t>(30 + i);
+                met.xcp_stats[xcp].jpeg_busy[i] = static_cast<std::uint16_t>(30 + i);
             }
         }
 
@@ -692,7 +693,7 @@ TEST_F(DeviceTest, vcn_busy_collection_all_xcps)
     {
         for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
-            met.xcp_stats[xcp].vcn_busy[vcn] = static_cast<uint16_t>(50 + xcp + vcn);
+            met.xcp_stats[xcp].vcn_busy[vcn] = static_cast<std::uint16_t>(50 + xcp + vcn);
         }
     }
 
@@ -719,7 +720,7 @@ TEST_F(DeviceTest, vcn_busy_collection_all_xcps)
         for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
             EXPECT_EQ(collected.xcp_stats[xcp].vcn_busy[vcn],
-                      static_cast<uint16_t>(50 + xcp + vcn));
+                      static_cast<std::uint16_t>(50 + xcp + vcn));
         }
     }
 }
@@ -732,7 +733,8 @@ TEST_F(DeviceTest, jpeg_activity_collection_all_xcps)
     {
         for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG_V1; ++jpeg)
         {
-            met.xcp_stats[xcp].jpeg_busy[jpeg] = static_cast<uint16_t>(30 + xcp + jpeg);
+            met.xcp_stats[xcp].jpeg_busy[jpeg] =
+                static_cast<std::uint16_t>(30 + xcp + jpeg);
         }
     }
 
@@ -759,7 +761,7 @@ TEST_F(DeviceTest, jpeg_activity_collection_all_xcps)
         for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG_V1; ++jpeg)
         {
             EXPECT_EQ(collected.xcp_stats[xcp].jpeg_busy[jpeg],
-                      static_cast<uint16_t>(30 + xcp + jpeg));
+                      static_cast<std::uint16_t>(30 + xcp + jpeg));
         }
     }
 }
@@ -800,7 +802,7 @@ TEST_F(DeviceTest, mixed_vcn_jpeg_support)
     {
         for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
-            met.xcp_stats[xcp].vcn_busy[vcn] = static_cast<uint16_t>(50 + vcn);
+            met.xcp_stats[xcp].vcn_busy[vcn] = static_cast<std::uint16_t>(50 + vcn);
         }
     }
 
@@ -830,7 +832,7 @@ TEST_F(DeviceTest, mixed_vcn_jpeg_support)
         for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
             EXPECT_EQ(collected.xcp_stats[xcp].vcn_busy[vcn],
-                      static_cast<uint16_t>(50 + vcn));
+                      static_cast<std::uint16_t>(50 + vcn));
         }
     }
 
@@ -1541,7 +1543,7 @@ TEST_F(DeviceTest, large_array_indices_xcp)
     {
         for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
-            met.xcp_stats[xcp].vcn_busy[vcn] = static_cast<uint16_t>(xcp * 10 + vcn);
+            met.xcp_stats[xcp].vcn_busy[vcn] = static_cast<std::uint16_t>(xcp * 10 + vcn);
         }
     }
 
@@ -1565,7 +1567,7 @@ TEST_F(DeviceTest, large_array_indices_xcp)
         for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
             EXPECT_EQ(collected.xcp_stats[xcp].vcn_busy[vcn],
-                      static_cast<uint16_t>(xcp * 10 + vcn));
+                      static_cast<std::uint16_t>(xcp * 10 + vcn));
         }
     }
 }
@@ -1578,7 +1580,8 @@ TEST_F(DeviceTest, large_array_indices_jpeg)
     {
         for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG_V1; ++jpeg)
         {
-            met.xcp_stats[xcp].jpeg_busy[jpeg] = static_cast<uint16_t>(xcp * 100 + jpeg);
+            met.xcp_stats[xcp].jpeg_busy[jpeg] =
+                static_cast<std::uint16_t>(xcp * 100 + jpeg);
         }
     }
 
@@ -1602,7 +1605,7 @@ TEST_F(DeviceTest, large_array_indices_jpeg)
         for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG_V1; ++jpeg)
         {
             EXPECT_EQ(collected.xcp_stats[xcp].jpeg_busy[jpeg],
-                      static_cast<uint16_t>(xcp * 100 + jpeg));
+                      static_cast<std::uint16_t>(xcp * 100 + jpeg));
         }
     }
 }
@@ -1781,8 +1784,8 @@ TEST_F(DeviceTest, sdma_delta_computation)
 
 TEST_F(DeviceTest, vcn_busy_collection_preserves_sentinels)
 {
-    constexpr uint16_t SENTINEL_16 = 0xFFFF;
-    metrics            met         = CreateSentinelMetrics();
+    constexpr std::uint16_t SENTINEL_16 = 0xFFFF;
+    metrics                 met         = CreateSentinelMetrics();
 
     met.xcp_stats[0].vcn_busy[0] = 80;
 
@@ -1812,8 +1815,8 @@ TEST_F(DeviceTest, vcn_busy_collection_preserves_sentinels)
 
 TEST_F(DeviceTest, jpeg_busy_collection_preserves_sentinels)
 {
-    constexpr uint16_t SENTINEL_16 = 0xFFFF;
-    metrics            met         = CreateSentinelMetrics();
+    constexpr std::uint16_t SENTINEL_16 = 0xFFFF;
+    metrics                 met         = CreateSentinelMetrics();
 
     met.xcp_stats[0].jpeg_busy[0] = 60;
 
@@ -1843,8 +1846,8 @@ TEST_F(DeviceTest, jpeg_busy_collection_preserves_sentinels)
 
 TEST_F(DeviceTest, vcn_activity_device_level_preserves_sentinels)
 {
-    constexpr uint16_t SENTINEL_16 = 0xFFFF;
-    metrics            met         = CreateSentinelMetrics();
+    constexpr std::uint16_t SENTINEL_16 = 0xFFFF;
+    metrics                 met         = CreateSentinelMetrics();
 
     met.vcn_activity[0] = 42;
 
@@ -1881,7 +1884,7 @@ TEST_F(DeviceTest, memory_usage_unsupported_sentinel_value)
         .Times(AtLeast(1))
         .WillRepeatedly(Return(met));
 
-    constexpr uint64_t SENTINEL_MEM = 0xFFFFFFFFFFFFFFFFULL;
+    constexpr std::uint64_t SENTINEL_MEM = 0xFFFFFFFFFFFFFFFFULL;
     EXPECT_CALL(*mock_driver, get_memory_usage())
         .Times(AtLeast(1))
         .WillRepeatedly(Return(SENTINEL_MEM));
