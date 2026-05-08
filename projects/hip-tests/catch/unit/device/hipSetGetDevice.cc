@@ -141,7 +141,8 @@ HIP_TEST_CASE(Unit_hipSetGetDevice_Positive_Threaded_Basic) {
   };
 
   if (HipTest::getDeviceCount() < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   HipSetGetDeviceThreadedTest test;

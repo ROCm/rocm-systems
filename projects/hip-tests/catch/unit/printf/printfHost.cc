@@ -31,7 +31,8 @@ HIP_TEST_CASE(Unit_Host_Printf) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    return;
   }
   int *count{nullptr}, *count_d{nullptr};
   count = reinterpret_cast<int*>(malloc(sizeof(int)));

@@ -13,7 +13,8 @@
 
 HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Positive_Basic) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   SECTION("Cooperative kernel with no arguments") {
@@ -39,7 +40,8 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Positive_Basic) {
 
 HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Positive_Parameters) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   SECTION("blockDim.x == maxBlockDimX") {
@@ -63,7 +65,8 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Positive_Parameters) {
 
 HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Negative_Parameters) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   SECTION("f == nullptr") {
@@ -161,7 +164,8 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Negative_Parameters) {
 
 HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Verify_Capture) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   hipStream_t stream;

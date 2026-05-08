@@ -29,7 +29,8 @@ HIP_TEST_CASE(Unit_hipDeviceAPUCheck) {
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   if (!prop.integrated) {
-    HIP_SKIP_TEST("test requires integrated APU; discrete GPU detected.");
+    HipTest::HIP_SKIP_TEST("test requires integrated APU; discrete GPU detected.");
+    return;
   } else {
     std::cout << "This device is an APU" << std::endl;
   }

@@ -11,7 +11,8 @@
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttributes_Positive_Basic) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
 
   LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
@@ -48,7 +49,8 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttributes_Positive_Basic) {
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttributes_Negative_Parameters) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
 
   constexpr size_t num_attributes = 4;

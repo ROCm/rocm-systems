@@ -161,14 +161,15 @@ Please also note that you can not return values in functions calling ```HIP_CHEC
 ### Skipping Tests if certain criteria is not met
 If there arises a condition where certain flag is disabled and due to which a test can not run at that time, the following macro can be of use. It will highlight the test in ctest report as well.
 
-- ```HIP_SKIP_TEST``` : The API takes in an input of the reason as well and prints out the line HIP_SKIP_THIS_TEST. This causes ctest to mark the test as skipped and the test shows up in the report as skipped prompting proper response from the team. Internally uses the Catch2 SKIP macro to actually end the test execution and report the status as skipped. ctest also marks the test as skipped
+- ```HIP_SKIP_TEST``` : The API takes in an input of the reason as well and prints out the line HIP_SKIP_THIS_TEST. This causes ctest to mark the test as skipped and the test shows up in the report as skipped prompting proper response from the team.
 
   Usage:
 
   ```cpp
   TEST_CASE("TestOnlyOnXnack") {
     if(!XNACKEnabled) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+      return;
     }
     // Rest of test functionality
   }
