@@ -5,8 +5,8 @@ import argparse
 from pathlib import Path
 from unittest.mock import patch
 
+import common
 import pytest
-import test_utils
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_profile.profiler_rocprofiler_sdk import rocprofiler_sdk_profiler
@@ -237,7 +237,7 @@ def test_attach_library_resolution_with_fallback():
     """Unit test: attach branch picks new lib first, falls back to old, errors if
     neither exists. resolve_rocm_library_path is mocked so the actual library
     locations are controlled by the test, independent of the configured tool path."""
-    output_dir = Path(test_utils.get_output_dir())
+    output_dir = Path(common.get_output_dir())
     output_dir.mkdir(parents=True, exist_ok=True)
     args = argparse.Namespace(
         remaining="-- /bin/true",

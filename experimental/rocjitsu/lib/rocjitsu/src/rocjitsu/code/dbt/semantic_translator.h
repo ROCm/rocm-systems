@@ -29,9 +29,9 @@
 #include <span>
 #include <vector>
 
-#include "rocjitsu/analysis/register_liveness.h"
+#include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
-#include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/kernel_descriptor_info.h"
 #include "rocjitsu/code/rj_code.h"
 
 namespace rocjitsu {
@@ -74,17 +74,16 @@ public:
 
   /// @brief Rewrite workgroup_id SGPR references to TTMP registers.
   [[nodiscard]] std::vector<SemanticReplacement>
-  rewrite_workgroup_ids(BasicBlock &block,
-                        std::span<const CodeObjectPatcher::WorkGroupIdInfo> wg_info,
+  rewrite_workgroup_ids(BasicBlock &block, const KernelWorkGroupIdInfo &wg_info,
                         std::span<const uint8_t> translated_text) const;
 
   /// @brief Try to expand/lower an instruction via the expand rules table.
   /// @param inst      The decoded instruction.
   /// @param offset    Byte offset of the instruction in .text.
-  /// @param liveness  Per-instruction VGPR liveness data.
+  /// @param liveness  Kernel-scoped live-before data used for scratch register allocation.
   /// @returns Replacement instruction words on success, empty vector if no rule matches.
   [[nodiscard]] std::vector<uint32_t> try_lower_expand(const Instruction &inst, uint64_t offset,
-                                                       const RegisterLiveness &liveness) const;
+                                                       const LivenessAnalysis &liveness) const;
 
   [[nodiscard]] bool has_rules() const { return !expand_rules_.empty(); }
 

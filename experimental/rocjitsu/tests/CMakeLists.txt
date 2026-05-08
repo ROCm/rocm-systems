@@ -41,6 +41,7 @@ add_executable(rocjitsu_tests
     decode_smoke_test.cpp
     shared_infra_test.cpp
     transcendental_test.cpp
+    analysis/liveness_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
     kfd_ioctl_test.cpp

@@ -125,7 +125,9 @@ target_sources(amdhip64 PRIVATE
   hip_table_interface.cpp
   hip_table_interface_c.cpp
   hip_comgr_helper.cpp
-  hip_library.cpp)
+  hip_library.cpp
+  profiler/hip_clr_profiler.cpp
+  profiler/hip_clr_dispatch_wrappers.cpp)
 
 if(WIN32)
   target_sources(amdhip64 PRIVATE hip_runtime.cpp)

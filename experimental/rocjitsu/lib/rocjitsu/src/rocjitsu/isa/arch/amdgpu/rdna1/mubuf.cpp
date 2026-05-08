@@ -214,7 +214,7 @@ void BufferLoadUbyteMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->num_elems = 1;
     d->is_load = true;
     d->lds_dst = true;
-    d->lds_base = wf.m0();
+    d->lds_base = wf.m0() + wf.lds_base();
     d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
@@ -256,7 +256,7 @@ void BufferLoadSbyteMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->num_elems = 1;
     d->is_load = true;
     d->lds_dst = true;
-    d->lds_base = wf.m0();
+    d->lds_base = wf.m0() + wf.lds_base();
     d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
@@ -299,7 +299,7 @@ void BufferLoadUshortMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->num_elems = 1;
     d->is_load = true;
     d->lds_dst = true;
-    d->lds_base = wf.m0();
+    d->lds_base = wf.m0() + wf.lds_base();
     d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
@@ -341,7 +341,7 @@ void BufferLoadSshortMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->num_elems = 1;
     d->is_load = true;
     d->lds_dst = true;
-    d->lds_base = wf.m0();
+    d->lds_base = wf.m0() + wf.lds_base();
     d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
@@ -384,7 +384,7 @@ void BufferLoadDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->num_elems = 1;
     d->is_load = true;
     d->lds_dst = true;
-    d->lds_base = wf.m0();
+    d->lds_base = wf.m0() + wf.lds_base();
     d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
@@ -426,7 +426,7 @@ void BufferLoadDwordx2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->num_elems = 2;
     d->is_load = true;
     d->lds_dst = true;
-    d->lds_base = wf.m0();
+    d->lds_base = wf.m0() + wf.lds_base();
     d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
@@ -468,7 +468,7 @@ void BufferLoadDwordx4Mubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->num_elems = 4;
     d->is_load = true;
     d->lds_dst = true;
-    d->lds_base = wf.m0();
+    d->lds_base = wf.m0() + wf.lds_base();
     d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
@@ -510,7 +510,7 @@ void BufferLoadDwordx3Mubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->num_elems = 3;
     d->is_load = true;
     d->lds_dst = true;
-    d->lds_base = wf.m0();
+    d->lds_base = wf.m0() + wf.lds_base();
     d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
@@ -862,7 +862,7 @@ void BufferLoadUbyteD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->num_elems = 1;
     d->is_load = true;
     d->lds_dst = true;
-    d->lds_base = wf.m0();
+    d->lds_base = wf.m0() + wf.lds_base();
     d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
@@ -905,7 +905,7 @@ void BufferLoadUbyteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->num_elems = 1;
     d->is_load = true;
     d->lds_dst = true;
-    d->lds_base = wf.m0();
+    d->lds_base = wf.m0() + wf.lds_base();
     d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
@@ -948,7 +948,7 @@ void BufferLoadSbyteD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->num_elems = 1;
     d->is_load = true;
     d->lds_dst = true;
-    d->lds_base = wf.m0();
+    d->lds_base = wf.m0() + wf.lds_base();
     d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
@@ -992,7 +992,7 @@ void BufferLoadSbyteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->num_elems = 1;
     d->is_load = true;
     d->lds_dst = true;
-    d->lds_base = wf.m0();
+    d->lds_base = wf.m0() + wf.lds_base();
     d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
@@ -1036,7 +1036,7 @@ void BufferLoadShortD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->num_elems = 1;
     d->is_load = true;
     d->lds_dst = true;
-    d->lds_base = wf.m0();
+    d->lds_base = wf.m0() + wf.lds_base();
     d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
@@ -1079,7 +1079,7 @@ void BufferLoadShortD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->num_elems = 1;
     d->is_load = true;
     d->lds_dst = true;
-    d->lds_base = wf.m0();
+    d->lds_base = wf.m0() + wf.lds_base();
     d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);

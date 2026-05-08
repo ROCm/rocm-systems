@@ -14,6 +14,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -28,20 +29,24 @@ enum InstFlags : uint64_t {
   COND_BRANCH = (1ULL << 1),
   /// @brief Indirect branch (target from register).
   INDIRECT_BRANCH = (1ULL << 2),
+  /// @brief Indirect call (target from register, returns to fallthrough).
+  INDIRECT_CALL = (1ULL << 3),
   /// @brief Terminates the program.
-  PROGRAM_TERMINATOR = (1ULL << 3),
+  PROGRAM_TERMINATOR = (1ULL << 4),
   /// @brief Executes immediately without scheduling latency.
-  IMMEDIATELY_EXECUTED = (1ULL << 4),
+  IMMEDIATELY_EXECUTED = (1ULL << 5),
   /// @brief Memory operation (load or store).
-  MEMORY_OP = (1ULL << 5),
+  MEMORY_OP = (1ULL << 6),
   /// @brief Wait-counter instruction (s_waitcnt, s_wait_loadcnt, s_wait_storecnt, etc.).
-  WAITCNT = (1ULL << 6),
+  WAITCNT = (1ULL << 7),
   /// @brief Barrier instruction (s_barrier, s_barrier_signal, s_barrier_wait).
-  BARRIER = (1ULL << 7),
+  BARRIER = (1ULL << 8),
   /// @brief Matrix FMA instruction (v_mfma_*, v_smfmac_*).
-  MFMA = (1ULL << 8),
+  MFMA = (1ULL << 9),
   /// @brief AccVGPR move instruction (v_accvgpr_write, v_accvgpr_read, v_accvgpr_mov).
-  ACCVGPR = (1ULL << 9)
+  ACCVGPR = (1ULL << 10),
+  /// @brief Destination update is conditional and must not kill the old value.
+  PREDICATED_DEF = (1ULL << 11)
 };
 
 class BasicBlock;
@@ -170,10 +175,10 @@ public:
   /// @returns Encoding size in bytes.
   int size() const { return size_; }
 
-  /// @brief Whether this instruction is a branch.
-  /// @retval true The instruction has the BRANCH flag set.
-  /// @retval false The instruction is not a branch.
-  bool is_branch() const { return flags_ & BRANCH; }
+  /// @brief Whether this instruction is a direct branch.
+  /// @retval true The instruction has BRANCH or COND_BRANCH metadata.
+  /// @retval false The instruction is not a direct branch.
+  bool is_branch() const { return flags_ & (BRANCH | COND_BRANCH); }
 
   /// @brief Whether this instruction is a memory operation.
   /// @retval true The instruction has the MEMORY_OP flag set.
@@ -189,6 +194,22 @@ public:
   bool is_mfma() const { return flags_ & MFMA; }
 
   bool is_accvgpr() const { return flags_ & ACCVGPR; }
+
+  /// @brief Signed byte offset for a direct branch target.
+  ///
+  /// @details Generated ISA subclasses override this for direct branches whose
+  /// label operand is a signed instruction-count delta. Indirect branches and
+  /// non-branches return nullopt.
+  [[nodiscard]] virtual std::optional<int64_t> branch_offset_bytes() const { return std::nullopt; }
+
+  /// @brief Add registers implicitly read by this instruction.
+  ///
+  /// @details Used for encoded fields that affect execution but are not part of
+  /// the printed operand list, such as FLAT/GLOBAL `saddr` addressing fields.
+  virtual void implicit_uses(RegisterSet & /*uses*/) const {}
+
+  /// @brief Add registers implicitly written by this instruction.
+  virtual void implicit_defs(RegisterSet & /*defs*/) const {}
 
   /// @brief Raw encoding words of this instruction.
   /// @returns Pointer to the encoding words (size()/4 words), or nullptr if not set.
