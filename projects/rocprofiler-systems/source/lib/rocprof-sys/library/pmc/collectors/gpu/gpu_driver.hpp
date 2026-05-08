@@ -175,8 +175,12 @@ private:
 
     static void convert_clocks(const amdsmi_gpu_metrics_t& raw, metrics& out)
     {
-        out.gfx_clock_mhz = raw.current_gfxclk;
-        out.mem_clock_mhz = raw.current_uclk;
+        populate_if_supported(out.gfx_clock_mhz,
+                              static_cast<std::uint32_t>(raw.current_gfxclk),
+                              static_cast<std::uint32_t>(0xFFFFU));
+        populate_if_supported(out.mem_clock_mhz,
+                              static_cast<std::uint32_t>(raw.current_uclk),
+                              static_cast<std::uint32_t>(0xFFFFU));
     }
 
     amdsmi_processor_handle m_handle;
