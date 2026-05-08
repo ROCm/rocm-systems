@@ -87,8 +87,7 @@ Input parameters: `None`
 
 Output: `None`
 
-Exceptions that can be thrown by `amdsmi_shut_down`
-function:
+Exceptions that can be thrown by `amdsmi_shut_down` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiTimeoutException`
@@ -104,14 +103,16 @@ Example:
 import amdsmi
 try:
     amdsmi.amdsmi_init()
+    # continue with amdsmi
 except amdsmi.AmdSmiException as e:
-    print("Init failed")
+    print("AMD SMI operation failed")
     print(e)
-try:
-    amdsmi.amdsmi_shut_down()
-except amdsmi.AmdSmiException as e:
-    print("Shut down failed")
-    print(e)
+finally:
+    try:
+        amdsmi.amdsmi_shut_down()
+    except amdsmi.AmdSmiException as e:
+        print("Shut down failed")
+        print(e)
 ```
 
 ### amdsmi_get_processor_type
