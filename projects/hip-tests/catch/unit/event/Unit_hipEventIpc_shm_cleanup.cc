@@ -49,7 +49,13 @@ std::set<std::string> get_hip_ipc_shm_files() {
 }
 
 HIP_TEST_CASE(Unit_hipEventIpc_shm_cleanup) {
-  // This test validates /dev/shm cleanup for the emulated IPC event path.
+  hipDeviceProp_t props{};
+  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  if (!props.ipcEventSupported) {
+    HipTest::HIP_SKIP_TEST("IPC events are not supported on this device.");
+    return;
+  }
+
   // Skip when the device uses native IPC signals (no /dev/shm involved).
   {
     auto shm_before = get_hip_ipc_shm_files();
