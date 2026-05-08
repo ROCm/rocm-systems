@@ -243,11 +243,16 @@ void __hipRegisterManagedVar(
     void* init_value,  // Initial value to be copied into \p pointer
     const char* name,  // Name of the variable in code object
     size_t size, unsigned align) {
+
+#ifdef _WIN32 // Windows doesn't support managed variables
+  return;
+#endif
+
   static const bool enable_deferred_loading = []() {
-#ifdef _WIN32  // Don't defer loading for windows
+#ifdef _WIN32 // Don't defer loading for windows
     return false;
 #else
-    const char* var = getenv("HIP_ENABLE_DEFERRED_LOADING");
+    const char *var = getenv("HIP_ENABLE_DEFERRED_LOADING");
     return var ? atoi(var) != 0 : true;
 #endif
   }();

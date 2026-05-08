@@ -596,16 +596,27 @@ void StatCO::ResizeForDevices(size_t device_count) {
 hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
   std::scoped_lock lock(sclock_);
   hipError_t err = hipSuccess;
-  if (managedVarsDevicePtrInitalized_.find(deviceId) == managedVarsDevicePtrInitalized_.end() ||
+  if (managedVarsDevicePtrInitalized_.find(deviceId) ==
+          managedVarsDevicePtrInitalized_.end() ||
       !managedVarsDevicePtrInitalized_[deviceId]) {
-    for (auto& vecIter : managedVars_) {
-      for (auto& var : vecIter.second) {
+
+    // Managed variables require HMM support on the target device.
+    if (!managedVars_.empty() &&
+        !g_devices.at(deviceId)->devices()[0]->info().hmmSupported_) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_API,
+              "Managed memory not supported on device %d (HMM unavailable)",
+              deviceId);
+      return hipErrorNotSupported;
+    }
+    
+    for (auto &vecIter : managedVars_) {
+      for (auto &var : vecIter.second) {
         // Lazy load
-        FatBinaryInfo** module = var->ModuleInfo();
+        FatBinaryInfo **module = var->ModuleInfo();
         if (*(module) == nullptr) {
           std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
         }
-        hip::Stream* stream = g_devices.at(deviceId)->NullStream();
+        hip::Stream *stream = g_devices.at(deviceId)->NullStream();
         if (stream == nullptr) {
           ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
           return hipErrorInvalidResourceHandle;
@@ -613,10 +624,11 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
         // Allocate managed var for deferred loading
         IHIP_RETURN_ONFAIL(var->AllocateManagedVarPtr());
         // Copy from managed var host to device ptr
-        amd::Memory* mem = nullptr;
+        amd::Memory *mem = nullptr;
         IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
-        err = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(),
-                         mem->getSize(), hipMemcpyHostToDevice, *stream);
+        err = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)),
+                         var->GetManagedVarPtr(), mem->getSize(),
+                         hipMemcpyHostToDevice, *stream);
       }
     }
     managedVarsDevicePtrInitalized_[deviceId] = true;
