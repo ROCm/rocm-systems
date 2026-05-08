@@ -1318,7 +1318,8 @@ static ncclResult_t ncclP2pSchedule(struct ncclComm* comm) {
     int localRanks = nodeRanks[node].localRanks;
     if (localRanks % groupSize != 0 || localRanks < groupSize) groupSize = gcd(groupSize, nodeRanks[node].localRanks);
   }
-  comm->p2pChannelShiftSize = groupSize;
+  // p2pChannelShiftSize is set by rcclCommSetP2pShiftSize() before this function;
+  // do not overwrite the RCCL-specific channel mapping (defaults to bit-reversal = -1).
 
   int local = comm->localRank % groupSize;
   int group = comm->localRank / groupSize;
