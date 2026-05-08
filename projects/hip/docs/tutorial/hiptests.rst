@@ -12,13 +12,13 @@ can build ``rocm-systems/projects/hip-tests`` as described in :ref:`build-tests`
 
 The catch tests and samples provided in ``hip-tests`` are both a diagnostic tool and a learning toolkit.
 You can use the tools and tests to validate your own system environment and HIP installation. You can
-also review the code and see how specific aspecis of the HIP API are used under diferent conditions. 
+also review the code and see how specific aspects of the HIP API are used under different conditions. 
 
 Running HIP tests
 =================
 
 The HIP tests are catch tests provided alongside the HIP component, letting you test your
-system and the HIP runtime. In addition HIP tests provides some sample applications and
+system and the HIP runtime. In addition, HIP tests provide some sample applications and
 utilities that can be individually built and run as needed. 
 
 The top level of ``rocm-systems/projects/hip-tests`` is organized around one purpose: it is the official unit‑test
@@ -36,7 +36,7 @@ HIP installation, and executable examples of how to write catch tests for your o
 * How to isolate failures cleanly
 * How to write reproducible GPU tests that don’t depend on timing or scheduling quirks
 
-Follow the instructions in :ref:`build-tests`, and run the tests using the ``ctest`` command from the ``build`` folder. The command runs more than 4,000 tests and returns results in the ``build/Testing/Temporary/LastTest.log`` file. You can also build and run individual tests as explained in the build instructions. 
+Follow the instructions in :ref:`build-tests`, and run the tests using the ``ctest`` command from the ``build`` folder. The command runs more than 4,000 tests and writes results in the ``build/Testing/Temporary/LastTest.log`` file. You can also build and run individual tests as explained in the build instructions. 
 
 Building and running HIP samples
 ================================

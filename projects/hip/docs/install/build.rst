@@ -9,9 +9,9 @@ Build HIP from source
 Prerequisites
 =================================================
 
-HIP code can be developed on AMD ROCm platform using HIP-Clang compiler.
-Before building and running HIP, make sure drivers and prebuilt packages are
-installed properly on the platform.
+HIP code can be developed on AMD ROCm platform using `HIP-Clang compiler <https://rocm.docs.amd.com/projects/llvm-project/en/latest/index.html>`__.
+Before building and running HIP, ensure drivers and prebuilt packages are properly
+installed on the platform.
 
 You also need to install Python 3, which includes the ``CppHeaderParser`` package.
 Install Python 3 using the following command:
@@ -38,7 +38,7 @@ Install ``ROCm LLVM`` package using the command:
 Building the HIP runtime
 ==========================================================
 
-In the ROCM 7.1 release, HIP is integrated into the core ROCm projects resides in the ``rocm-systems`` monorepository.
+As of ROCM 7.1, HIP is integrated into the core ROCm projects resides in the ``rocm-systems`` monorepository.
 In addition, the following components are also part of the monorepository:
 
 * ``clr``, AMD's Compute Language Runtime, includes ROCclr, HIPAMD and OpenCl.
@@ -82,7 +82,7 @@ Set the repository branch using the variable: ``ROCM_BRANCH``. For example, for 
 
    Default paths and environment variables:
 
-   * HIP is installed into ``<ROCM_PATH>``. This can be overridden by setting the ``INSTALL_PREFIX`` as the command option.
+   * HIP is installed into ``<ROCM_PATH>``. This can be overridden by setting the ``INSTALL_PREFIX`` as a command option.
 
    * HSA is in ``<ROCM_PATH>``. This can be overridden by setting the ``HSA_PATH``
      environment variable.
@@ -136,7 +136,7 @@ Set the repository branch using the variable: ``ROCM_BRANCH``. For example, for 
 Build HIP tests
 =================================================
 
-To start you must setup the environment needed to build the HIP tests by setting the ``ROCM_PATH`` environent variable to point to the current installation of ROCm:
+To start, you must set up the environment needed to build the HIP tests by setting the ``ROCM_PATH`` environment variable to point to the current ROCm installation:
 
    .. code-block:: shell
 
@@ -196,7 +196,7 @@ HIP catch tests utilize the Catch2 testing framework.
 
 #. Build a standalone HIP Catch2 test.
 
-   HIP Catch2 supports compiling standalone tests using ``amdclang++`` for example:
+   HIP Catch2 supports compiling standalone tests using ``amdclang++``. For example:
 
    .. code-block:: shell
 
@@ -221,5 +221,5 @@ HIP catch tests utilize the Catch2 testing framework.
 Run HIP
 =================================================
 
-After installation and building HIP, you can compile your application and run.
+After installing and building HIP, you can compile and run your application.
 Simple examples can be found in the `ROCm-examples repository <https://github.com/ROCm/rocm-examples>`_.
