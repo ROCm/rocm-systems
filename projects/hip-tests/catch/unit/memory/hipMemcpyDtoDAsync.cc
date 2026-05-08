@@ -37,8 +37,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoDAsync_Basic, int, float,
 
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   int canAccessPeer = 0;
@@ -48,8 +47,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoDAsync_Basic, int, float,
     HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
   } else {
     INFO("Machine does not have P2P Capabilities");
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
   HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM, false);
   HIP_CHECK(hipSetDevice(1));
@@ -106,15 +104,13 @@ HIP_TEST_CASE(Unit_hipMemcpyDtoDAsync_Capture) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   if (device_count <= 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   int peer_access = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&peer_access, 0, 1));
   if (!peer_access) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
 
   constexpr size_t kNumElements = NUM_ELM;

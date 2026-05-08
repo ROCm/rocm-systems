@@ -137,8 +137,7 @@ HIP_TEST_CASE(Unit_hipModuleGetGlobal_DiffDevice) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   auto module = GetModule();
   HIP_CHECK(hipSetDevice(1));

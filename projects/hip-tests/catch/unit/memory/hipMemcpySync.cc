@@ -163,9 +163,8 @@ static void runMemcpyTests(hipStream_t stream, bool async, allocType type, memTy
 
 HIP_TEST_CASE(Unit_hipMemcpySync) {
 #if HT_AMD  // To be removed when EXSWCPHIPT-127 is fixed
-  HipTest::HIP_SKIP_TEST(
+  HIP_SKIP_TEST(
       "tracked issue EXSWCPHIPT-127 (sync behaviour differs on AMD and NVIDIA).");
-  return;
 #endif
   allocType type = GENERATE(allocType::deviceMalloc, allocType::hostMalloc, allocType::hostRegisted,
                             allocType::devRegistered);
@@ -178,9 +177,8 @@ HIP_TEST_CASE(Unit_hipMemcpySync) {
 
 HIP_TEST_CASE(Unit_hipMemcpy2DSync) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST(
+  HIP_SKIP_TEST(
       "tracked issue EXSWCPHIPT-127 (sync behaviour differs on AMD and NVIDIA).");
-  return;
 #endif
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
@@ -195,9 +193,8 @@ HIP_TEST_CASE(Unit_hipMemcpy2DSync) {
 
 HIP_TEST_CASE(Unit_hipMemcpy3DSync) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST(
+  HIP_SKIP_TEST(
       "tracked issue EXSWCPHIPT-127 (sync behaviour differs on AMD and NVIDIA).");
-  return;
 #endif
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);

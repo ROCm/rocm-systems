@@ -192,7 +192,7 @@ HIP_TEST_CASE(Unit_hipGraphUpload_Functional_multidevice_test) {
       }
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 }
 

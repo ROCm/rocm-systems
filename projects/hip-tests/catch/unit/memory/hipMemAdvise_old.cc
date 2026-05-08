@@ -118,8 +118,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
 
     HIP_CHECK(hipGetDeviceCount(&NumDevs));
     if (NumDevs < 2) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     }
     HIP_CHECK(hipMallocManaged(&Hmm, MEM_SIZE, hipMemAttachGlobal));
     for (int i = 0; i < NumDevs; ++i) {
@@ -154,7 +153,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
     HIP_CHECK(hipFree(Hmm));
     REQUIRE(IfTestPassed);
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 #endif
@@ -184,7 +183,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
       HIP_CHECK(hipFree(Hmm));
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -223,7 +222,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
       HIP_CHECK(hipFree(Hmm));
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -268,7 +267,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
     HIP_CHECK(hipFree(Hmm));
     HIP_CHECK(hipStreamDestroy(strm));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -318,14 +317,13 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
       HIP_CHECK(hipStreamDestroy(strm));
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }
 
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
   if (setenv("HSA_XNACK", "1", 1) != 0) {
-    HipTest::HIP_SKIP_TEST("cannot set XNACK via environment.");
-    return;
+    HIP_SKIP_TEST("cannot set XNACK via environment.");
   }
 
   hipDeviceProp_t prop;
@@ -338,7 +336,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
     hip::SpawnProc proc("hipMemAdviseTstAlignedAllocMem", true);
     REQUIRE(proc.run() == 0);
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }
 #endif
@@ -355,8 +353,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
     int Ngpus = 0;
     HIP_CHECK(hipGetDeviceCount(&Ngpus));
     if (Ngpus < 2) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     }
     int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123;
     int *Hmm1 = NULL, DataMismatch = 0;
@@ -418,6 +415,6 @@ HIP_TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
     HIP_CHECK(hipFree(Hmm));
 
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }

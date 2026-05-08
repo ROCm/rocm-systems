@@ -80,8 +80,7 @@ static std::tuple<int, int> GetDeviceIds(bool enable_peer_access) {
     int can_access_peer = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
     if (!can_access_peer) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
-      return {-1, -1};
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
     HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
   } else {

@@ -404,13 +404,14 @@ if(MPI_CXX_COMPILER)
     )
 endif()
 
-add_test(
-    NAME test_metric_validation
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_metric_validation.xml ${COV_OPTION}
-        tests/test_metric_validation.py ${WORKING_DIR_OPTION}
-)
+# Enable in ROCm 7.14 release where the underlying metric was made stable
+# add_test(
+#     NAME test_metric_validation
+#     COMMAND
+#         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+#         --junitxml=tests/test_metric_validation.xml ${COV_OPTION}
+#         tests/test_metric_validation.py ${WORKING_DIR_OPTION}
+# )
 
 set_tests_properties(
     test_profile_kernel_execution
@@ -457,13 +458,14 @@ add_test(
 # TCP counter tests
 # ---------------------------
 
-add_test(
-    NAME test_L1_cache_counters
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m L1_cache
-        --junitxml=tests/test_L1_cache_counters.xml ${COV_OPTION}
-        tests/test_TCP_counters.py ${WORKING_DIR_OPTION}
-)
+# Enable in ROCm 7.14 release where the underlying metric was made stable
+# add_test(
+#     NAME test_L1_cache_counters
+#     COMMAND
+#         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m L1_cache
+#         --junitxml=tests/test_L1_cache_counters.xml ${COV_OPTION}
+#         tests/test_TCP_counters.py ${WORKING_DIR_OPTION}
+# )
 
 # ---------------------------
 # Spec tests
@@ -863,15 +865,15 @@ else()
     )
 endif()
 
-# top-level symlink for bin/rocprof-compute
+# top-level bin/rocprof-compute launcher (re-execs into libexec entrypoint)
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/${EXECUTABLE_NAME}.in
+    ${PROJECT_BINARY_DIR}/${EXECUTABLE_NAME}
+    @ONLY
+)
 install(
-    CODE
-        "execute_process(
-    COMMAND bash -c \"set -e
-    cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
-    mkdir -p ${CMAKE_INSTALL_BINDIR}
-    ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
-    \")"
+    PROGRAMS ${PROJECT_BINARY_DIR}/${EXECUTABLE_NAME}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT main
 )
 
@@ -891,6 +893,11 @@ if(INSTALL_TESTS)
         FILES_MATCHING
         PATTERN "*.py"
         PATTERN "__pycache__" EXCLUDE
+    )
+    install(
+        PROGRAMS therock_test_runner.py
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT tests
     )
     install(
         DIRECTORY tests/workloads

@@ -13,14 +13,12 @@
 
 HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   std::vector<hipLaunchParams> params_list(device_count);
@@ -49,14 +47,12 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic) {
 
 HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   std::vector<hipLaunchParams> params_list(device_count);
@@ -130,14 +126,12 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters) {
 
 HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   HIP_CHECK(hipSetDevice(0));
