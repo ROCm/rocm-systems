@@ -16,17 +16,8 @@ find_file(
 get_filename_component(HSA_RUNTIME_INC_PATH ${HSA_H} DIRECTORY)
 include_directories(${HSA_RUNTIME_INC_PATH})
 
-# Set the HIP language runtime link flags as FindHIP does not set them.
-set(CMAKE_EXECUTABLE_RUNTIME_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RUNTIME_CXX_FLAG})
-set(CMAKE_EXECUTABLE_RUNTIME_HIP_FLAG_SEP ${CMAKE_SHARED_LIBRARY_RUNTIME_CXX_FLAG_SEP})
-set(CMAKE_EXECUTABLE_RPATH_LINK_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RPATH_LINK_CXX_FLAG})
-
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${ROCM_PATH}/lib/cmake/hip")
-set(CMAKE_HIP_ARCHITECTURES OFF)
-if(DEFINED ROCM_PATH)
-    set(HIP_ROOT_DIR "${ROCM_PATH}/bin")
-endif()
-find_package(HIP REQUIRED MODULE)
+find_package(hip CONFIG REQUIRED PATHS "${ROCM_PATH}")
+enable_language(HIP)
 
 find_package(
     Clang REQUIRED CONFIG
@@ -71,7 +62,8 @@ function(rocprofiler_sample_add_test _TARGET _ARGS)
 endfunction()
 
 function(rocprofiler_sample_add_executable _TARGET)
-    hip_add_executable(${_TARGET} ${ARGN})
+    add_executable(${_TARGET} ${ARGN})
+    target_link_libraries(${_TARGET} PRIVATE hip::device)
     rocprofiler_sample_add_test(${_TARGET} "")
 endfunction()
 
@@ -87,7 +79,7 @@ endfunction()
 
 # Build Kernel No Replay Sample
 set_source_files_properties(profiler/kernel_profiling_no_replay_sample.cpp
-                            PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+                            PROPERTIES LANGUAGE HIP)
 rocprofiler_sample_add_executable(
     profiler_kernel_no_replay profiler/kernel_profiling_no_replay_sample.cpp
     ${ROCPROFILER_UTIL_SRC_FILES})
@@ -103,7 +95,7 @@ install(TARGETS profiler_kernel_no_replay
 
 # Build Device Profiling Sample
 set_source_files_properties(profiler/device_profiling_sample.cpp
-                            PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+                            PROPERTIES LANGUAGE HIP)
 rocprofiler_sample_add_executable(
     profiler_device_profiling profiler/device_profiling_sample.cpp
     ${ROCPROFILER_UTIL_SRC_FILES})
@@ -120,7 +112,7 @@ set_tests_properties(profiler_device_profiling PROPERTIES DISABLED TRUE)
 
 # Build Counters Sampling example
 set_source_files_properties(counters_sampler/pcie_counters_example.cpp
-                            PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+                            PROPERTIES LANGUAGE HIP)
 rocprofiler_sample_add_executable(
     pcie_counters_sampler counters_sampler/pcie_counters_example.cpp
     ${ROCPROFILER_UTIL_SRC_FILES})
@@ -136,7 +128,7 @@ install(TARGETS pcie_counters_sampler
 
 # Build XGMI Counters Sampling example
 set_source_files_properties(counters_sampler/xgmi_counters_sampler_example.cpp
-                            PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+                            PROPERTIES LANGUAGE HIP)
 rocprofiler_sample_add_executable(
     xgmi_counters_sampler counters_sampler/xgmi_counters_sampler_example.cpp
     ${ROCPROFILER_UTIL_SRC_FILES})
@@ -158,7 +150,7 @@ set_tests_properties(xgmi_counters_sampler PROPERTIES DISABLED TRUE)
 # ########################################################################################
 
 # Build HIP/HSA Trace Sample
-set_source_files_properties(tracer/sample.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+set_source_files_properties(tracer/sample.cpp PROPERTIES LANGUAGE HIP)
 rocprofiler_sample_add_executable(tracer_hip_hsa tracer/sample.cpp
                                   ${ROCPROFILER_UTIL_SRC_FILES})
 target_include_directories(tracer_hip_hsa PRIVATE ${PROJECT_SOURCE_DIR}
