@@ -2,25 +2,36 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``cuda.core`` DLPack shim, ported from cuda-core 0.3.2 ``_dlpack.{pxd,pyx}``.
+"""``cuda.core`` DLPack shim, ported from cuda-core 0.7.0 ``_dlpack.{pxd,pyx}``.
 
 Pure-Python equivalent of the upstream Cython implementation: ctypes is
 used for the ``DLManagedTensor`` / ``DLManagedTensorVersioned`` struct
-layout and for the CPython ``PyCapsule_*`` C API. The producer side
-(:func:`make_py_capsule`) wires ``kROCM`` (=10) wherever upstream wired
-``kCUDA``; consumer-side parsing (used by :class:`StridedMemoryView`)
-accepts both ``kCUDA`` and ``kROCM`` so PyTorch-ROCm tensors and (in case
-of mixed setups) CUDA tensors both round-trip.
+layout and for the CPython ``PyCapsule_*`` / ``Py_IncRef`` /
+``Py_DecRef`` C API. The producer side (:func:`make_py_capsule`) wires
+``kROCM`` (=10) wherever upstream wired ``kCUDA``; consumer-side parsing
+(used by :class:`StridedMemoryView`) accepts both ``kCUDA`` and
+``kROCM`` so PyTorch-ROCm tensors and (in case of mixed setups) CUDA
+tensors both round-trip.
 
-Memory lifecycle:
+Memory lifecycle (mirrors upstream cuda-core 0.7.0):
 
-* Each ``DLManagedTensor[Versioned]`` is a Python ctypes ``Structure``
-  kept alive in ``_alive_capsules`` keyed by ``id(capsule)`` (i.e. the
-  ``PyObject`` address of the capsule that wraps the struct).
-* :func:`_pycapsule_destructor` drops the entry when the capsule is
-  destroyed; the per-tensor ``deleter`` callback is a no-op (consumers
-  that take ownership simply hold the capsule until done with it, and
-  the destructor cleans up regardless of consumed/unconsumed state).
+* Each ``DLManagedTensor[Versioned]`` is allocated on the C heap via
+  ``PyMem_RawMalloc``; the ``shape``/``strides`` array is a separate
+  ``PyMem_RawMalloc`` allocation. Both are owned by the DLM struct and
+  freed by the per-tensor ``deleter`` callback.
+* ``manager_ctx`` holds an ``Py_INCREF``-bumped raw ``PyObject*`` for
+  the originating Buffer (or any producer state object), pinning it
+  until cleanup. The matching ``Py_DECREF`` runs inside the per-tensor
+  ``deleter``.
+* The PyCapsule destructor (:func:`_pycapsule_deleter`, wired via
+  :func:`PyCapsule_New`) checks the capsule name: if it is still
+  ``dltensor`` / ``dltensor_versioned`` (consumer never claimed
+  ownership), it invokes ``dlm.deleter(dlm)`` to release the producer
+  state. If the consumer renamed to ``used_*`` (per DLPack spec,
+  claiming ownership), the destructor is a no-op — the consumer is
+  responsible for calling ``deleter`` from its own destructor (see
+  :class:`StridedMemoryView` and ``_release_dlpack`` in
+  ``_memoryview.py``).
 """
 
 from __future__ import annotations
@@ -123,7 +134,7 @@ class DLTensor(Structure):
     ]
 
 
-# Forward-declared for use in _DELETER_FUNCTYPE
+# Forward-declared for use in _DLM_DELETER
 class DLManagedTensor(Structure):
     pass
 
@@ -160,15 +171,15 @@ DLManagedTensorVersioned._fields_ = [
 
 
 # ---------------------------------------------------------------------------
-# CPython PyCapsule_* C API via ctypes.pythonapi
+# CPython PyCapsule_* / refcount C API via ctypes.pythonapi
 # ---------------------------------------------------------------------------
 
-# IMPORTANT: the capsule destructor MUST take ``c_void_p`` rather than
+# IMPORTANT: the PyCapsule destructor MUST take ``c_void_p`` rather than
 # ``py_object``. CPython invokes the destructor from ``capsule_dealloc``
 # at refcount=0; a ``py_object`` callback would INCREF the capsule on
 # entry (raising refcount to 1) and DECREF on return, which immediately
 # re-enters ``_Py_Dealloc`` -> ``capsule_dealloc`` -> our destructor and
-# blows the C stack.  ``c_void_p`` is a raw pointer; ctypes does not
+# blows the C stack. ``c_void_p`` is a raw pointer; ctypes does not
 # touch refcounts, matching CPython's expectations.
 _CAPSULE_DESTRUCTOR = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 
@@ -176,6 +187,7 @@ PyCapsule_New = ctypes.pythonapi.PyCapsule_New
 PyCapsule_New.restype = ctypes.py_object
 PyCapsule_New.argtypes = [c_void_p, ctypes.c_char_p, _CAPSULE_DESTRUCTOR]
 
+# Caller-side bindings: take a real Python capsule object.
 PyCapsule_GetPointer = ctypes.pythonapi.PyCapsule_GetPointer
 PyCapsule_GetPointer.restype = c_void_p
 PyCapsule_GetPointer.argtypes = [ctypes.py_object, ctypes.c_char_p]
@@ -188,49 +200,145 @@ PyCapsule_SetName = ctypes.pythonapi.PyCapsule_SetName
 PyCapsule_SetName.restype = c_int32
 PyCapsule_SetName.argtypes = [ctypes.py_object, ctypes.c_char_p]
 
+# Destructor-side bindings: same C functions, but receive the raw
+# PyObject* via ``c_void_p``. These avoid the ``py_object`` argtype
+# inside ``_pycapsule_deleter`` so ctypes does not synthesize a Python
+# reference on a half-deallocated capsule.
+_PyCapsule_IsValid_raw = ctypes.PYFUNCTYPE(c_int32, c_void_p, ctypes.c_char_p)(
+    ("PyCapsule_IsValid", ctypes.pythonapi)
+)
+_PyCapsule_GetPointer_raw = ctypes.PYFUNCTYPE(c_void_p, c_void_p, ctypes.c_char_p)(
+    ("PyCapsule_GetPointer", ctypes.pythonapi)
+)
+
+
+# Reference counting: raw-pointer signatures throughout. INCREF/DECREF
+# of an arbitrary Python object via ``c_void_p`` argtype keeps the
+# bookkeeping symmetric (``id(obj)`` going in, raw PyObject* coming
+# out of ``manager_ctx``) and bypasses any ctypes-side ``py_object``
+# conversion.
+_Py_IncRef_raw = ctypes.PYFUNCTYPE(None, c_void_p)(("Py_IncRef", ctypes.pythonapi))
+_Py_DecRef_raw = ctypes.PYFUNCTYPE(None, c_void_p)(("Py_DecRef", ctypes.pythonapi))
+
+
+# ---------------------------------------------------------------------------
+# C heap allocation (PyMem_RawMalloc / PyMem_RawFree)
+# ---------------------------------------------------------------------------
+
+# Mirrors upstream ``stdlib.malloc`` / ``stdlib.free`` for the DLM struct
+# and shape/strides array. ``PyMem_RawMalloc`` is the GIL-independent
+# allocator from the Python C API; on Linux it boils down to plain
+# ``malloc`` (matching ``stdlib.malloc``), and unlike ``ctypes.CDLL(None)``
+# it does not depend on the host symbol table.
+_PyMem_RawMalloc = ctypes.pythonapi.PyMem_RawMalloc
+_PyMem_RawMalloc.restype = c_void_p
+_PyMem_RawMalloc.argtypes = [ctypes.c_size_t]
+
+_PyMem_RawFree = ctypes.pythonapi.PyMem_RawFree
+_PyMem_RawFree.restype = None
+_PyMem_RawFree.argtypes = [c_void_p]
+
+
+# ---------------------------------------------------------------------------
+# Producer-side: per-tensor deleters
+# ---------------------------------------------------------------------------
+
+
+def _dlm_deleter_unversioned(tensor_ptr):
+    """C ABI: ``void deleter(DLManagedTensor* self)``.
+
+    Mirrors ``cdef void deleter(DLManagedTensor* tensor) noexcept with gil``
+    in upstream cuda-core 0.7.0. Frees the shape/strides array, DECREFs
+    the pinned ``manager_ctx``, and frees the struct itself. Tolerant
+    of a NULL pointer (matches upstream) and any partial-init state
+    coming from an aborted ``make_py_capsule``.
+    """
+    try:
+        if not tensor_ptr:
+            return
+        dlm = tensor_ptr.contents
+        if dlm.dl_tensor.shape:
+            _PyMem_RawFree(ctypes.cast(dlm.dl_tensor.shape, c_void_p))
+            dlm.dl_tensor.shape = ctypes.cast(0, POINTER(c_int64))
+        if dlm.manager_ctx:
+            _Py_DecRef_raw(dlm.manager_ctx)
+            dlm.manager_ctx = 0
+        _PyMem_RawFree(ctypes.cast(tensor_ptr, c_void_p))
+    except BaseException:
+        # Destructors must not propagate exceptions — would corrupt
+        # the CPython teardown path. Drop on the floor.
+        pass
+
+
+def _dlm_deleter_versioned(tensor_ptr):
+    """C ABI: ``void deleter(DLManagedTensorVersioned* self)``.
+
+    Versioned-DLPack twin of :func:`_dlm_deleter_unversioned`.
+    """
+    try:
+        if not tensor_ptr:
+            return
+        dlm = tensor_ptr.contents
+        if dlm.dl_tensor.shape:
+            _PyMem_RawFree(ctypes.cast(dlm.dl_tensor.shape, c_void_p))
+            dlm.dl_tensor.shape = ctypes.cast(0, POINTER(c_int64))
+        if dlm.manager_ctx:
+            _Py_DecRef_raw(dlm.manager_ctx)
+            dlm.manager_ctx = 0
+        _PyMem_RawFree(ctypes.cast(tensor_ptr, c_void_p))
+    except BaseException:
+        pass
+
+
+# Module-level CFUNCTYPE wrappers; their ctypes trampolines must outlive
+# every DLM struct that stores their address in the ``deleter`` field.
+_dlm_deleter_unversioned_cb = _DLM_DELETER(_dlm_deleter_unversioned)
+_dlm_deleter_versioned_cb = _DLMV_DELETER(_dlm_deleter_versioned)
+
+
+def _pycapsule_deleter(capsule_ptr):
+    """C ABI: ``void destructor(PyObject* capsule)``.
+
+    Wired as the PyCapsule destructor; CPython invokes it at
+    ``capsule_dealloc`` time with the raw PyObject* of the capsule.
+    Mirrors ``cdef void pycapsule_deleter(object capsule) noexcept`` in
+    upstream cuda-core 0.7.0: if the capsule still bears the unconsumed
+    name (``dltensor`` / ``dltensor_versioned``), invokes the in-struct
+    ``dlm.deleter(dlm)`` to release the producer-pinned state. If the
+    consumer has renamed to ``used_*`` (per DLPack spec, claiming
+    ownership), this is a no-op — the consumer is responsible for
+    calling ``deleter`` from its own destructor.
+
+    Uses the raw-pointer ``_PyCapsule_*_raw`` bindings so ctypes does
+    not synthesize Python references on the half-deallocated capsule.
+    """
+    try:
+        if not capsule_ptr:
+            return
+        if _PyCapsule_IsValid_raw(capsule_ptr, DLPACK_TENSOR_UNUSED_NAME):
+            addr = _PyCapsule_GetPointer_raw(capsule_ptr, DLPACK_TENSOR_UNUSED_NAME)
+            if addr:
+                dlm_p = ctypes.cast(addr, POINTER(DLManagedTensor))
+                if dlm_p.contents.deleter:
+                    dlm_p.contents.deleter(dlm_p)
+        elif _PyCapsule_IsValid_raw(capsule_ptr, DLPACK_VERSIONED_TENSOR_UNUSED_NAME):
+            addr = _PyCapsule_GetPointer_raw(
+                capsule_ptr, DLPACK_VERSIONED_TENSOR_UNUSED_NAME
+            )
+            if addr:
+                dlm_p = ctypes.cast(addr, POINTER(DLManagedTensorVersioned))
+                if dlm_p.contents.deleter:
+                    dlm_p.contents.deleter(dlm_p)
+    except BaseException:
+        pass
+
+
+_pycapsule_deleter_cb = _CAPSULE_DESTRUCTOR(_pycapsule_deleter)
+
 
 # ---------------------------------------------------------------------------
 # Producer-side: make_py_capsule(buf, versioned)
 # ---------------------------------------------------------------------------
-
-# Module-level registry pinning the ctypes struct, shape array, and the
-# originating Buffer for the lifetime of the capsule.  Indexed by the
-# capsule's PyObject address (== ``id(capsule)``) so the destructor,
-# which only receives the raw capsule pointer, can drop the entry
-# without calling any PyCapsule_* C function (those would re-enter the
-# refcount machinery on a half-deallocated capsule).
-_alive_capsules: "dict[int, tuple]" = {}
-
-
-def _pycapsule_destructor(capsule_ptr):
-    """CPython invokes this at capsule_dealloc time with the raw
-    PyObject* of the capsule. Drop the registry entry; that releases the
-    last Python reference to the managed-tensor struct, the shape array,
-    and the originating Buffer (which in turn frees the device memory
-    via its MemoryResource finalizer).
-    """
-    if capsule_ptr:
-        _alive_capsules.pop(int(capsule_ptr), None)
-
-
-_pycapsule_destructor_cb = _CAPSULE_DESTRUCTOR(_pycapsule_destructor)
-
-
-def _deleter_noop(tensor_ptr):
-    """DLPack-spec consumer-callable deleter.
-
-    Per the DLPack spec a consumer that takes ownership of the capsule
-    is required to call ``dl_tensor.deleter(dl_tensor_ptr)`` when it is
-    done with the tensor. In this shim the actual cleanup is keyed off
-    the capsule's lifetime via :func:`_pycapsule_destructor`, so this
-    callback intentionally does nothing — the registry entry survives
-    until the capsule is destroyed.
-    """
-    return None
-
-
-_deleter_unversioned_cb = _DLM_DELETER(_deleter_noop)
-_deleter_versioned_cb = _DLMV_DELETER(_deleter_noop)
 
 
 def _device_for_buffer(buf) -> Tuple[int, int]:
@@ -251,59 +359,93 @@ def make_py_capsule(buf, versioned: bool):
     """Build a DLPack capsule wrapping ``buf``'s 1-D contiguous bytes view.
 
     ``versioned=True`` produces a DLPack 1.0 ``DLManagedTensorVersioned``;
-    ``False`` produces the legacy ``DLManagedTensor``. The byte-level view
-    matches the upstream cuda-core 0.3.2 implementation: ndim=1, dtype=int8,
-    shape=[size]. Consumers that need a different dtype/shape are expected
-    to reinterpret the buffer themselves.
+    ``False`` produces the legacy ``DLManagedTensor``. The byte-level
+    view matches upstream cuda-core: ndim=1, dtype=int8, shape=[size],
+    strides=[1] (DLPack v1.2+ requires non-NULL strides for ndim != 0).
+
+    Memory lifecycle: the DLM struct and its shape/strides array are
+    raw-malloc'd; ``manager_ctx`` holds an ``Py_INCREF``-bumped reference
+    to ``buf`` for the lifetime of the capsule (or until the consumer
+    invokes ``deleter`` per the DLPack spec). Failure paths roll back
+    in the reverse order of acquisition.
     """
-    # Allocate the shape array (1-D view of byte-sized elements).
-    shape_arr = (c_int64 * 1)(int(buf.size))
+    dlm_ptr = 0
+    shape_ptr = 0
+    incref_done = False
 
-    if versioned:
-        dlm_ver = DLManagedTensorVersioned()
-        dlm_ver.version.major = DLPACK_MAJOR_VERSION
-        dlm_ver.version.minor = DLPACK_MINOR_VERSION
-        dlm_ver.flags = 0
-        dlm_ver.deleter = _deleter_versioned_cb
-        dlm_ver.manager_ctx = 0
-        dl_tensor = dlm_ver.dl_tensor
-        struct_ref = dlm_ver
-        capsule_name = DLPACK_VERSIONED_TENSOR_UNUSED_NAME
-    else:
-        dlm = DLManagedTensor()
-        dlm.deleter = _deleter_unversioned_cb
-        dlm.manager_ctx = 0
-        dl_tensor = dlm.dl_tensor
-        struct_ref = dlm
-        capsule_name = DLPACK_TENSOR_UNUSED_NAME
+    try:
+        if versioned:
+            dlm_ptr = _PyMem_RawMalloc(ctypes.sizeof(DLManagedTensorVersioned))
+            if not dlm_ptr:
+                raise MemoryError("DLManagedTensorVersioned allocation failed")
+            ctypes.memset(dlm_ptr, 0, ctypes.sizeof(DLManagedTensorVersioned))
+            dlm = ctypes.cast(dlm_ptr, POINTER(DLManagedTensorVersioned)).contents
+            dlm.version.major = DLPACK_MAJOR_VERSION
+            dlm.version.minor = DLPACK_MINOR_VERSION
+            dlm.flags = 0
+            dlm.deleter = _dlm_deleter_versioned_cb
+            capsule_name = DLPACK_VERSIONED_TENSOR_UNUSED_NAME
+        else:
+            dlm_ptr = _PyMem_RawMalloc(ctypes.sizeof(DLManagedTensor))
+            if not dlm_ptr:
+                raise MemoryError("DLManagedTensor allocation failed")
+            ctypes.memset(dlm_ptr, 0, ctypes.sizeof(DLManagedTensor))
+            dlm = ctypes.cast(dlm_ptr, POINTER(DLManagedTensor)).contents
+            dlm.deleter = _dlm_deleter_unversioned_cb
+            capsule_name = DLPACK_TENSOR_UNUSED_NAME
 
-    dl_tensor.data = c_void_p(int(buf.handle))
-    dl_tensor.ndim = 1
-    dl_tensor.dtype.code = int(DLDataTypeCode.kDLInt)
-    dl_tensor.dtype.bits = 8
-    dl_tensor.dtype.lanes = 1
-    dl_tensor.shape = ctypes.cast(shape_arr, POINTER(c_int64))
-    dl_tensor.strides = ctypes.cast(0, POINTER(c_int64))  # contiguous: NULL
-    dl_tensor.byte_offset = 0
+        # 1-D shape + contiguous strides, both stored in a single
+        # 2-element int64 array (matches upstream byte-layout exactly:
+        # ``shape = arr; strides = arr + ndim``).
+        shape_ptr = _PyMem_RawMalloc(ctypes.sizeof(c_int64) * 2)
+        if not shape_ptr:
+            raise MemoryError("DLPack shape array allocation failed")
+        shape_arr = ctypes.cast(shape_ptr, POINTER(c_int64))
+        shape_arr[0] = int(buf.size)
+        shape_arr[1] = 1  # contiguous stride
 
-    device_type, device_id = _device_for_buffer(buf)
-    dl_tensor.device.device_type = device_type
-    dl_tensor.device.device_id = device_id
+        dlm.dl_tensor.data = c_void_p(int(buf.handle))
+        dlm.dl_tensor.ndim = 1
+        dlm.dl_tensor.dtype.code = int(DLDataTypeCode.kDLInt)
+        dlm.dl_tensor.dtype.bits = 8
+        dlm.dl_tensor.dtype.lanes = 1
+        dlm.dl_tensor.shape = shape_arr
+        dlm.dl_tensor.strides = ctypes.cast(
+            shape_ptr + ctypes.sizeof(c_int64), POINTER(c_int64)
+        )
+        dlm.dl_tensor.byte_offset = 0
 
-    if versioned:
-        # Have to assign back: dl_tensor was a copy; rebind the struct field.
-        struct_ref.dl_tensor = dl_tensor
-    else:
-        struct_ref.dl_tensor = dl_tensor
+        device_type, device_id = _device_for_buffer(buf)
+        dlm.dl_tensor.device.device_type = device_type
+        dlm.dl_tensor.device.device_id = device_id
 
-    addr = ctypes.addressof(struct_ref)
-    capsule = PyCapsule_New(addr, capsule_name, _pycapsule_destructor_cb)
-    # Pin the ctypes struct, shape array, and originating Buffer for the
-    # lifetime of the capsule. Indexed by the capsule's PyObject address
-    # (== ``id(capsule)``) so the destructor can drop the entry using
-    # only the raw pointer it receives.
-    _alive_capsules[id(capsule)] = (struct_ref, shape_arr, buf)
-    return capsule
+        # Pin the originating Buffer (or producer state) by INCREF'ing
+        # it and stashing the raw PyObject* in manager_ctx. The matching
+        # DECREF runs inside _dlm_deleter_*.
+        _Py_IncRef_raw(id(buf))
+        incref_done = True
+        dlm.manager_ctx = id(buf)
+
+        return PyCapsule_New(dlm_ptr, capsule_name, _pycapsule_deleter_cb)
+    except BaseException:
+        # Roll back partial state on error before the capsule was created
+        # (no PyCapsule destructor will run, so we have to clean up here).
+        if incref_done:
+            try:
+                _Py_DecRef_raw(id(buf))
+            except BaseException:
+                pass
+        if shape_ptr:
+            try:
+                _PyMem_RawFree(c_void_p(shape_ptr))
+            except BaseException:
+                pass
+        if dlm_ptr:
+            try:
+                _PyMem_RawFree(c_void_p(dlm_ptr))
+            except BaseException:
+                pass
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +458,9 @@ def parse_capsule(capsule):
 
     Raises :class:`BufferError` on an unknown / already-consumed capsule.
     The caller is responsible for calling :func:`PyCapsule_SetName` with
-    ``used_name`` once the data has been copied into a StridedMemoryView.
+    ``used_name`` once the data has been copied into a StridedMemoryView,
+    and for invoking ``dl_tensor.deleter`` from the StridedMemoryView's
+    finalizer (see ``_release_dlpack`` in ``_memoryview.py``).
     """
     if PyCapsule_IsValid(capsule, DLPACK_VERSIONED_TENSOR_UNUSED_NAME):
         addr = PyCapsule_GetPointer(capsule, DLPACK_VERSIONED_TENSOR_UNUSED_NAME)
@@ -334,5 +478,6 @@ def parse_capsule(capsule):
         return dlm.dl_tensor, False, DLPACK_TENSOR_USED_NAME
 
     raise BufferError(
-        "DLPack capsule is invalid or already consumed (expected dltensor / " "dltensor_versioned)"
+        "DLPack capsule is invalid or already consumed (expected dltensor / "
+        "dltensor_versioned)"
     )

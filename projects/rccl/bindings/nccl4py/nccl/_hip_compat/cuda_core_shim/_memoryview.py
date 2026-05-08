@@ -15,6 +15,9 @@ exported from this shim report ``device_type == 10``.
 from __future__ import annotations
 
 import functools
+import weakref
+from ctypes import POINTER
+from ctypes import cast as _ctypes_cast
 from typing import Any, Optional
 
 import numpy as _np
@@ -98,6 +101,7 @@ class StridedMemoryView:
     """
 
     __slots__ = (
+        "__weakref__",
         "ptr",
         "shape",
         "strides",
@@ -173,6 +177,34 @@ _DEVICE_ACCESSIBLE_TYPES = (
 )
 
 
+def _release_dlpack(capsule, used_name):
+    """Per DLPack spec: a consumer that renamed the capsule to
+    ``used_dltensor[_versioned]`` must invoke ``dl_tensor.deleter`` to
+    signal the producer that its pinned state can be released.
+
+    Mirrors ``StridedMemoryView.__dealloc__`` in upstream cuda-core 0.7.0
+    ``_memoryview.pyx``: looks up the DLM struct via the renamed capsule
+    and calls its ``deleter`` field. Wrapped in ``try/except: pass`` —
+    finalizer callbacks are run by ``weakref`` machinery and
+    ``sys.unraisablehook``-noisy errors here would surface unrelated
+    teardown noise to users.
+    """
+    try:
+        if not _dl.PyCapsule_IsValid(capsule, used_name):
+            return
+        addr = _dl.PyCapsule_GetPointer(capsule, used_name)
+        if not addr:
+            return
+        if used_name == _dl.DLPACK_VERSIONED_TENSOR_USED_NAME:
+            dlm_p = _ctypes_cast(addr, POINTER(_dl.DLManagedTensorVersioned))
+        else:
+            dlm_p = _ctypes_cast(addr, POINTER(_dl.DLManagedTensor))
+        if dlm_p.contents.deleter:
+            dlm_p.contents.deleter(dlm_p)
+    except BaseException:
+        pass
+
+
 def view_as_dlpack(obj, stream_ptr, view: Optional[StridedMemoryView] = None) -> StridedMemoryView:
     dldevice, device_id = obj.__dlpack_device__()
     dldevice = int(dldevice)
@@ -227,6 +259,14 @@ def view_as_dlpack(obj, stream_ptr, view: Optional[StridedMemoryView] = None) ->
     out.exporting_obj = obj
 
     _dl.PyCapsule_SetName(capsule, used_name)
+
+    # Per DLPack spec, renaming to ``used_*`` claims ownership: the
+    # consumer must call ``dl_tensor.deleter`` itself when done with
+    # the data. Register a weakref.finalize that does so when ``out``
+    # is garbage-collected; the finalizer holds a strong reference to
+    # ``capsule`` (and ``used_name``) for the duration, pinning the
+    # producer-allocated DLM struct alongside the SMV.
+    weakref.finalize(out, _release_dlpack, capsule, used_name)
     return out
 
 
