@@ -4,7 +4,8 @@
 #include "rocjitsu/code/patch/code_object_patcher.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
-#include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
+#include "rocjitsu/code/patch/instruction_builder.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -12,35 +13,45 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 RJ_DIAGNOSTIC_POP
 
-#include <algorithm>
 #include <cassert>
+#include <climits>
+#include <cstddef>
 #include <cstring>
 #include <elf.h>
+#include <optional>
 
 namespace rocjitsu {
 namespace {
 
-struct Wave64DescriptorPatchInfo {
-  uint32_t vgpr_granularity;  // rsrc1 encodes (actual_vgprs / granularity) - 1.
-  bool clear_rsrc1_mode_bits; // GFX12 deprecates DX10_CLAMP and IEEE_MODE.
-};
+using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+namespace kd = rocr::llvm::amdhsa;
 
-Wave64DescriptorPatchInfo wave64_descriptor_patch_info(rj_code_arch_t target_arch) {
-  // Keep per-generation descriptor conventions in one place so adding a new
-  // RDNA target does not require scattering magic constants through the patcher.
-  switch (target_arch) {
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-    return {8u, false};
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    return {12u, true};
-  default:
-    // Unknown targets keep the older GFX10/GFX11-compatible behavior: 8-VGPR
-    // granularity and preserved floating-point mode bits.
-    return {8u, false};
-  }
+[[nodiscard]] bool target_supports_wave32(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
+[[nodiscard]] bool target_uses_gfx10_plus_mode_bits(rj_code_arch_t arch) {
+  return target_supports_wave32(arch);
+}
+
+[[nodiscard]] bool target_clears_rsrc1_mode_bits(rj_code_arch_t arch) {
+  // DX10_CLAMP and IEEE_MODE are deprecated on GFX12. Preserve them for GFX10
+  // and GFX11 targets where they still affect floating-point behavior.
+  return arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
+[[nodiscard]] uint32_t target_default_inst_pref_size(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                 arch == ROCJITSU_CODE_ARCH_RDNA4
+             ? 2
+             : 0;
+}
+
+[[nodiscard]] bool image_contains_range(size_t image_size, uint64_t file_offset, uint64_t size) {
+  const uint64_t limit = static_cast<uint64_t>(image_size);
+  return file_offset <= limit && size <= limit - file_offset;
 }
 
 } // namespace
@@ -74,108 +85,132 @@ void CodeObjectPatcher::update_elf_flags(uint32_t new_mach) {
   ehdr->e_flags = (ehdr->e_flags & ~0xFFu) | (new_mach & 0xFFu);
 }
 
-void CodeObjectPatcher::patch_kernel_descriptors_for_wave64(rj_code_arch_t target_arch) {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
-  namespace kd = rocr::llvm::amdhsa;
+bool CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset,
+                                                std::span<const uint8_t> descriptor) {
+  if (!image_contains_range(image_.size(), file_offset, descriptor.size()))
+    return false;
 
-  // Select target-specific descriptor policy once; the loop below only applies
-  // the policy while walking each kernel descriptor in the code object.
-  const Wave64DescriptorPatchInfo target_info = wave64_descriptor_patch_info(target_arch);
-
-  auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image_.data());
-  if (ehdr->e_shoff + static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr) > image_.size())
-    return;
-  auto *shdr = reinterpret_cast<Elf64_Shdr *>(image_.data() + ehdr->e_shoff);
-
-  for (int i = 0; i < ehdr->e_shnum; ++i) {
-    if (shdr[i].sh_type != SHT_SYMTAB)
-      continue;
-    if (shdr[i].sh_offset + shdr[i].sh_size > image_.size())
-      continue;
-    auto *symtab = reinterpret_cast<Elf64_Sym *>(image_.data() + shdr[i].sh_offset);
-    int nsyms = shdr[i].sh_size / sizeof(Elf64_Sym);
-    if (shdr[i].sh_link >= ehdr->e_shnum)
-      continue;
-    auto *strtab_shdr = &shdr[shdr[i].sh_link];
-    if (strtab_shdr->sh_offset + strtab_shdr->sh_size > image_.size())
-      continue;
-    auto *strtab = reinterpret_cast<const char *>(image_.data() + strtab_shdr->sh_offset);
-
-    for (int j = 0; j < nsyms; ++j) {
-      if (symtab[j].st_size != sizeof(KD))
-        continue;
-      if (strtab_shdr->sh_size > 0 && symtab[j].st_name > 0) {
-        if (symtab[j].st_name >= strtab_shdr->sh_size)
-          continue;
-        const char *name = strtab + symtab[j].st_name;
-        size_t len = strlen(name);
-        if (len >= 3 && strcmp(name + len - 3, ".kd") != 0)
-          continue;
-      }
-      uint16_t sec_idx = symtab[j].st_shndx;
-      if (sec_idx >= ehdr->e_shnum)
-        continue;
-      uint64_t file_off = shdr[sec_idx].sh_offset + (symtab[j].st_value - shdr[sec_idx].sh_addr);
-      if (file_off + sizeof(KD) > image_.size())
-        continue;
-
-      auto *kd = reinterpret_cast<KD *>(image_.data() + file_off);
-
-      // --- compute_pgm_rsrc1: translate GFX9 → GFX10+ ---
-
-      // VGPR granularity: GFX9/GFX11 wave64 use 8, RDNA4 wave64 uses 12.
-      // On CDNA3/4, AccVGPRs occupy the upper portion of the unified VGPR file.
-      // ACCUM_OFFSET in rsrc3 indicates where AccVGPRs start: (offset+1)*4.
-      // The translated code must allocate enough VGPRs for both ranges.
-      uint32_t gfx9_vgpr_gran = AMDHSA_BITS_GET(
-          kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
-      uint32_t actual_vgprs = (gfx9_vgpr_gran + 1) * 8;
-
-      uint32_t accum_offset =
-          AMDHSA_BITS_GET(kd->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
-      if (accum_offset > 0)
-        actual_vgprs = (accum_offset + 1) * 4 + actual_vgprs;
-
-      // Semantic lowering (e.g., MFMA→WMMA) injects instructions that need
-      // temp VGPRs found via liveness analysis. Ensure enough headroom.
-      actual_vgprs = std::max(actual_vgprs, 128u);
-      uint32_t target_vgpr_gran =
-          (actual_vgprs + target_info.vgpr_granularity - 1) / target_info.vgpr_granularity - 1;
-      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                      target_vgpr_gran);
-
-      // SGPR granularity: on GFX10+, the field is ignored by hardware but must
-      // be set for the runtime. Use 0 (8 SGPRs) which matches native compilers.
-      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                      0);
-
-      // DX10_CLAMP and IEEE_MODE are deprecated on GFX12. Preserve them for
-      // GFX11, where they still affect floating-point behavior.
-      if (target_info.clear_rsrc1_mode_bits) {
-        AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 0);
-        AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 0);
-      }
-
-      // Set GFX10+ required mode bits.
-      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_WGP_MODE, 1);
-      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_MEM_ORDERED, 1);
-      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_FWD_PROGRESS, 1);
-
-      // --- compute_pgm_rsrc3: translate GFX90A layout → GFX10+ layout ---
-      // GFX90A: [0:5]=ACCUM_OFFSET, [16]=TG_SPLIT
-      // GFX10+: [0:3]=SHARED_VGPR_COUNT, [4:9]=INST_PREF_SIZE
-      kd->compute_pgm_rsrc3 = 0;
-      AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE, 2);
-
-      // --- kernel_code_properties: ensure Wave64 ---
-      AMDHSA_BITS_SET(kd->kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
-                      0);
-    }
-  }
+  std::memcpy(image_.data() + file_offset, descriptor.data(), descriptor.size());
+  return true;
 }
 
-std::vector<KernelDescriptorInfo> CodeObjectPatcher::kernel_descriptor_info() const {
-  return collect_kernel_descriptor_info(image_, text_offset_, text_size_);
+bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation &translation,
+                                                            rj_code_arch_t target_arch) {
+  if (!image_contains_range(image_.size(), translation.descriptor_file_offset, sizeof(KD)))
+    return false;
+
+  std::optional<uint64_t> prologue_entry;
+  if (!translation.prologue_words.empty()) {
+    prologue_entry = append_kernel_entry_prologue(translation.entry_text_offset,
+                                                  translation.prologue_words, target_arch);
+    if (!prologue_entry)
+      return false;
+  }
+
+  auto *desc = reinterpret_cast<KD *>(image_.data() + translation.descriptor_file_offset);
+
+  AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  translation.target_vgpr_granulated);
+  AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  translation.target_sgpr_granulated);
+
+  if (target_uses_gfx10_plus_mode_bits(target_arch)) {
+    if (target_clears_rsrc1_mode_bits(target_arch)) {
+      AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 0);
+      AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 0);
+    }
+    AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_WGP_MODE, 1);
+    AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_MEM_ORDERED, 1);
+    AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_FWD_PROGRESS, 1);
+  }
+
+  if (target_supports_wave32(target_arch)) {
+    AMDHSA_BITS_SET(desc->kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                    translation.target_wave_size == 32 ? 1 : 0);
+  } else {
+    AMDHSA_BITS_SET(desc->kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                    0);
+  }
+
+  if (target_uses_gfx10_plus_mode_bits(target_arch)) {
+    desc->compute_pgm_rsrc3 = 0;
+    if (const uint32_t inst_pref = target_default_inst_pref_size(target_arch); inst_pref != 0) {
+      AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE,
+                      inst_pref);
+    }
+  }
+
+  desc->private_segment_fixed_size = translation.target_private_size;
+  desc->group_segment_fixed_size = translation.target_lds_size;
+  AMDHSA_BITS_SET(desc->compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
+                  translation.target_user_sgpr_count);
+  AMDHSA_BITS_SET(desc->compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
+                  translation.target_private_size != 0 ? 1 : 0);
+
+  if (prologue_entry) {
+    if (!redirect_kernel_entry(translation.descriptor_file_offset, translation.entry_text_offset,
+                               *prologue_entry))
+      return false;
+  }
+  return true;
+}
+
+std::optional<uint64_t> CodeObjectPatcher::append_kernel_entry_prologue(
+    uint64_t entry_text_offset, std::span<const uint32_t> prologue_words, rj_code_arch_t arch) {
+  assert(!prologue_words.empty() && "empty kernel entry prologue");
+
+  // A kernel descriptor entry point is a hardware launch address, not an
+  // ordinary branch target. CP expects that instruction address to be 256-byte
+  // aligned. The patcher works in .text-relative offsets, so preserve the
+  // original entry's 256-byte residue; if the original virtual address was
+  // aligned, the redirected virtual address stays aligned too.
+  const uint64_t current_offset = cave_start_ + cave_body_size();
+  const uint64_t required_residue = entry_text_offset % 256;
+  const uint64_t alignment_padding = (required_residue + 256 - (current_offset % 256)) % 256;
+  assert(alignment_padding % sizeof(uint32_t) == 0 && "unaligned cave padding");
+
+  std::vector<uint32_t> cave_words(prologue_words.begin(), prologue_words.end());
+  const uint64_t cave_byte_offset = current_offset + alignment_padding;
+  assert(cave_byte_offset % 256 == required_residue &&
+         "kernel descriptor entry lost its 256-byte alignment");
+
+  // The descriptor now enters the cave directly. The only control-flow fixup is
+  // a final branch from the prologue body to the original, untouched entry.
+  const int64_t branch_pc = static_cast<int64_t>(cave_byte_offset + cave_words.size() * 4);
+  const int64_t target = static_cast<int64_t>(entry_text_offset);
+  const int64_t target_delta_bytes = target - (branch_pc + 4);
+  if (target_delta_bytes % static_cast<int64_t>(sizeof(uint32_t)) != 0)
+    return std::nullopt;
+
+  const int64_t target_dwords = target_delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
+  if (target_dwords < INT16_MIN || target_dwords > INT16_MAX)
+    return std::nullopt;
+
+  if (alignment_padding != 0) {
+    std::vector<uint32_t> padding(alignment_padding / sizeof(uint32_t), build_s_nop(0, arch));
+    append_cave_body(padding);
+  }
+  cave_words.push_back(build_s_branch(static_cast<int16_t>(target_dwords), arch));
+
+  append_cave_body(cave_words);
+  return cave_byte_offset;
+}
+
+bool CodeObjectPatcher::redirect_kernel_entry(uint64_t descriptor_file_offset,
+                                              uint64_t old_entry_text_offset,
+                                              uint64_t new_entry_text_offset) {
+  if (!image_contains_range(image_.size(), descriptor_file_offset, sizeof(KD)))
+    return false;
+
+  auto *desc = reinterpret_cast<KD *>(image_.data() + descriptor_file_offset);
+  const int64_t delta =
+      static_cast<int64_t>(new_entry_text_offset) - static_cast<int64_t>(old_entry_text_offset);
+  const int64_t redirected = static_cast<int64_t>(desc->kernel_code_entry_byte_offset) + delta;
+  // The descriptor field is signed because the entry point may be before or
+  // after the descriptor in virtual address order. Preserve that signed value
+  // when applying the text-relative delta.
+  desc->kernel_code_entry_byte_offset = redirected;
+  return true;
 }
 
 void CodeObjectPatcher::append_cave_body(std::span<const uint32_t> words) {
