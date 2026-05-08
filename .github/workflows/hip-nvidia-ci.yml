@@ -88,8 +88,8 @@ jobs:
 
       - name: Fetch hipcc submodule
         run: |
-          pip install -r TheRock/requirements.txt
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
+          # pip install -r TheRock/requirements.txt
+          # ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
           git config --global --add safe.directory "*"
           git -C "${GITHUB_WORKSPACE}/TheRock" submodule update --init --depth 1 compiler/amd-llvm
 
