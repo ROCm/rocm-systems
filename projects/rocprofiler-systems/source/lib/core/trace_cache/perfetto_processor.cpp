@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/perfetto_processor.hpp"
 #include "core/agent_manager.hpp"
@@ -28,6 +9,7 @@
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
+#include "core/output_file_registry.hpp"
 #include "core/perfetto.hpp"
 #include "core/utility.hpp"
 #include "library/tracing.hpp"
@@ -45,16 +27,16 @@
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include <rocprofiler-sdk/context.h>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 namespace
 {
 struct annotation_entry
 {
-    const char*                                                             key;
-    std::variant<std::string, uint64_t, int64_t, double, int32_t, uint32_t> value;
+    std::string key;
+    std::variant<std::string, std::uint64_t, std::int64_t, double, std::int32_t,
+                 std::uint32_t>
+        value;
 };
 
 void
@@ -71,10 +53,12 @@ annotate_perfetto(::perfetto::EventContext&            ctx,
 
 template <typename CategoryT>
 ::perfetto::Track
-get_track(CategoryT, std::string name, uint64_t hash_arg)
+get_track(CategoryT, std::string name, std::uint64_t hash_arg)
 {
-    auto  _uuid        = tracing::get_perfetto_category_uuid<CategoryT>(hash_arg);
-    auto& _track_uuids = tracing::get_perfetto_track_uuids();
+    auto _uuid = tracing::get_perfetto_category_uuid<CategoryT>(hash_arg);
+
+    std::lock_guard<std::mutex> _lk{ tracing::get_perfetto_track_uuids_mutex() };
+    auto&                       _track_uuids = tracing::get_perfetto_track_uuids();
 
     if(_track_uuids.find(_uuid) == _track_uuids.end())
     {
@@ -128,7 +112,7 @@ using amd_smi_nic_tx_ucast_pkts_track =
 
 template <typename Track>
 bool
-ensure_gpu_track(uint32_t device_id, bool enabled, const char* track_suffix,
+ensure_gpu_track(std::uint32_t device_id, bool enabled, const char* track_suffix,
                  const char* units)
 {
     if(!enabled) return false;
@@ -140,8 +124,8 @@ ensure_gpu_track(uint32_t device_id, bool enabled, const char* track_suffix,
 
 template <typename Track, typename ValueT>
 void
-emit_gpu_scalar(uint32_t device_id, size_t ts, bool enabled, const char* track_suffix,
-                const char* units, ValueT value)
+emit_gpu_scalar(std::uint32_t device_id, size_t ts, bool enabled,
+                const char* track_suffix, const char* units, ValueT value)
 {
     if(ensure_gpu_track<Track>(device_id, enabled, track_suffix, units))
         TRACE_COUNTER(trait::name<typename Track::category_type>::value,
@@ -150,13 +134,13 @@ emit_gpu_scalar(uint32_t device_id, size_t ts, bool enabled, const char* track_s
 
 template <typename Track, typename Array, typename Fn>
 void
-emit_xcp_array_metrics(uint32_t device_id, size_t ts, const char* metric_name,
+emit_xcp_array_metrics(std::uint32_t device_id, size_t ts, const char* metric_name,
                        const Array& data, std::optional<size_t> xcp_idx, const Fn& emit)
 {
     for(size_t i = 0; i < data.size(); ++i)
     {
         const auto value = data[i];
-        if(value == std::numeric_limits<uint16_t>::max()) continue;
+        if(value == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16) continue;
 
         std::string track_name;
         if(xcp_idx.has_value())
@@ -170,9 +154,9 @@ emit_xcp_array_metrics(uint32_t device_id, size_t ts, const char* metric_name,
                 fmt::format("GPU [{}] {} [{:02}] (S)", device_id, metric_name, i);
         }
 
-        auto unique_key = (static_cast<uint64_t>(device_id) << 16) |
-                          (static_cast<uint64_t>(xcp_idx.value_or(0)) << 8) |
-                          static_cast<uint64_t>(i);
+        auto unique_key = (static_cast<std::uint64_t>(device_id) << 16) |
+                          (static_cast<std::uint64_t>(xcp_idx.value_or(0)) << 8) |
+                          static_cast<std::uint64_t>(i);
 
         if(!Track::exists(unique_key))
         {
@@ -183,7 +167,8 @@ emit_xcp_array_metrics(uint32_t device_id, size_t ts, const char* metric_name,
 }
 
 void
-emit_xgmi_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::metrics& m)
+emit_xgmi_metrics(std::uint32_t device_id, size_t ts,
+                  const pmc::collectors::gpu::metrics& m)
 {
     emit_gpu_scalar<amd_smi_xgmi_link_width_track>(device_id, ts, true, "XGMI Link Width",
                                                    "lanes", m.xgmi.link.width);
@@ -193,7 +178,7 @@ emit_xgmi_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::met
     for(size_t link = 0; link < m.xgmi.data_acc.read.size(); ++link)
     {
         const auto read_val = m.xgmi.data_acc.read[link];
-        if(read_val != std::numeric_limits<uint64_t>::max())
+        if(read_val != std::numeric_limits<std::uint64_t>::max())
         {
             auto unique_key = (device_id << 8) | link;
             if(!amd_smi_xgmi_read_track::exists(unique_key))
@@ -209,7 +194,7 @@ emit_xgmi_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::met
         }
 
         const auto write_val = m.xgmi.data_acc.write[link];
-        if(write_val != std::numeric_limits<uint64_t>::max())
+        if(write_val != std::numeric_limits<std::uint64_t>::max())
         {
             auto unique_key = (device_id << 8) | link;
             if(!amd_smi_xgmi_write_track::exists(unique_key))
@@ -227,7 +212,8 @@ emit_xgmi_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::met
 }
 
 void
-emit_pcie_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::metrics& m)
+emit_pcie_metrics(std::uint32_t device_id, size_t ts,
+                  const pmc::collectors::gpu::metrics& m)
 {
     emit_gpu_scalar<amd_smi_pcie_link_width_track>(device_id, ts, true, "PCIe Link Width",
                                                    "lanes", m.pcie.link.width);
@@ -337,7 +323,8 @@ dispatch_in_time_sample(size_t category_enum_id, const in_time_sample& _sample,
 
 perfetto_processor_t::perfetto_processor_t(
     const std::shared_ptr<metadata_registry>& metadata,
-    const std::shared_ptr<agent_manager>& agent_mngr, int pid, int ppid)
+    const std::shared_ptr<agent_manager>& agent_mngr, int pid, int ppid,
+    output_file_registry& output_registry)
 : processor_t<perfetto_processor_t>()
 , m_metadata(*metadata)
 , m_process_id(pid)
@@ -346,6 +333,7 @@ perfetto_processor_t::perfetto_processor_t(
 , m_tmp_file(nullptr)
 , m_tracing_session(nullptr)
 , m_use_annotations(config::get_perfetto_annotations())
+, m_output_registry(output_registry)
 {}
 
 void
@@ -526,6 +514,7 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
             // Write the trace into a file.
             ofs.write(trace_data.data(), trace_data.size());
             if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
+            m_output_registry.register_file(_filename, output_format::perfetto);
         }
         ofs.close();
     }
@@ -575,7 +564,7 @@ perfetto_processor_t::finalize_processing()
 void
 perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
 {
-    static auto _track_desc = [](uint64_t _device_id_v, uint64_t _queue_id_v) {
+    static auto _track_desc = [](std::uint64_t _device_id_v, std::uint64_t _queue_id_v) {
         return fmt::format("GPU Kernel Dispatch [{}] Queue {}", _device_id_v,
                            _queue_id_v);
     };
@@ -709,7 +698,7 @@ perfetto_processor_t::handle(const memory_copy_sample& _mcs)
         static_cast<rocprofiler_buffer_tracing_kind_t>(_mcs.kind),
         static_cast<rocprofiler_tracing_operation_t>(_mcs.operation)) };
 
-    auto _track_desc = [](int32_t _device_id_v, rocprofiler_thread_id_t _tid) {
+    auto _track_desc = [](std::int32_t _device_id_v, rocprofiler_thread_id_t _tid) {
         const auto& _tid_v = thread_info::get(_tid, SystemTID);
         return fmt::format("GPU Memory Copy to Agent [{}] Thread {}", _device_id_v,
                            _tid_v->index_data->sequent_value);
@@ -770,7 +759,7 @@ perfetto_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas
         const auto* operation = memop_to_string(
             static_cast<rocprofiler_memory_allocation_operation_t>(_mas.operation));
 
-        auto _track_desc = [](int32_t _device_id_v, rocprofiler_thread_id_t _tid) {
+        auto _track_desc = [](std::int32_t _device_id_v, rocprofiler_thread_id_t _tid) {
             const auto& _tid_v = thread_info::get(_tid, SystemTID);
             return fmt::format("GPU Memory Allocation to Agent [{}] Thread {}",
                                _device_id_v, _tid_v->index_data->sequent_value);
@@ -890,7 +879,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
 }
 
 void
-perfetto_processor_t::handle(const cpu_freq_sample& _cpu_sample)
+perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
 {
     using process_page_track = perfetto_counter_track<category::process_page>;
     using process_virt_track = perfetto_counter_track<category::process_virt>;
@@ -900,6 +889,7 @@ perfetto_processor_t::handle(const cpu_freq_sample& _cpu_sample)
     using process_user_track = perfetto_counter_track<category::process_user_mode_time>;
     using process_kern_track = perfetto_counter_track<category::process_kernel_mode_time>;
     using cpu_freq_track     = perfetto_counter_track<category::cpu_freq>;
+    using cpu_load_track     = perfetto_counter_track<category::cpu_load>;
 
     struct core_freq_sample
     {
@@ -907,7 +897,13 @@ perfetto_processor_t::handle(const cpu_freq_sample& _cpu_sample)
         float  value;
     };
 
-    auto deserialize_freqs = [](const std::vector<uint8_t>& buffer) {
+    struct core_load_sample
+    {
+        size_t id;
+        double value;
+    };
+
+    auto deserialize_freqs = [](const std::vector<std::uint8_t>& buffer) {
         std::vector<core_freq_sample> result;
         size_t                        offset = 0;
 
@@ -918,6 +914,22 @@ perfetto_processor_t::handle(const cpu_freq_sample& _cpu_sample)
             offset += sizeof(size_t);
             std::memcpy(&core_sample.value, buffer.data() + offset, sizeof(float));
             offset += sizeof(float);
+            result.push_back(core_sample);
+        }
+        return result;
+    };
+
+    auto deserialize_loads = [](const std::vector<std::uint8_t>& buffer) {
+        std::vector<core_load_sample> result;
+        size_t                        offset = 0;
+
+        while(offset + sizeof(double) + sizeof(size_t) <= buffer.size())
+        {
+            core_load_sample core_sample;
+            std::memcpy(&core_sample.id, buffer.data() + offset, sizeof(size_t));
+            offset += sizeof(size_t);
+            std::memcpy(&core_sample.value, buffer.data() + offset, sizeof(double));
+            offset += sizeof(double);
             result.push_back(core_sample);
         }
         return result;
@@ -934,49 +946,91 @@ perfetto_processor_t::handle(const cpu_freq_sample& _cpu_sample)
         process_kern_track::emplace(0, "CPU Kernel Time (S)", "sec");
     });
 
-    auto _ts = _cpu_sample.timestamp;
+    const auto  _ts        = _cpu_sample.timestamp;
+    const auto& _em        = _cpu_sample.enabled_metric;
+    const auto  _device_id = _cpu_sample.device_id;
 
-    TRACE_COUNTER(trait::name<category::process_page>::value,
-                  process_page_track::at(0, 0), _ts,
-                  static_cast<double>(_cpu_sample.page_rss) / units::megabyte);
+    // Process-level metrics are global — emit once from the lowest selected socket
+    static auto s_process_device_id = _device_id;
+    const bool  _is_process_owner   = (_device_id == s_process_device_id);
 
-    TRACE_COUNTER(trait::name<category::process_virt>::value,
-                  process_virt_track::at(0, 0), _ts,
-                  static_cast<double>(_cpu_sample.virt_mem_usage) / units::megabyte);
-
-    TRACE_COUNTER(trait::name<category::process_peak>::value,
-                  process_peak_track::at(0, 0), _ts,
-                  static_cast<double>(_cpu_sample.peak_rss) / units::megabyte);
-
-    TRACE_COUNTER(trait::name<category::process_context_switch>::value,
-                  process_cntx_track::at(0, 0), _ts,
-                  static_cast<double>(_cpu_sample.context_switch_count));
-
-    TRACE_COUNTER(trait::name<category::process_page_fault>::value,
-                  process_flts_track::at(0, 0), _ts,
-                  static_cast<double>(_cpu_sample.page_faults));
-
-    TRACE_COUNTER(trait::name<category::process_user_mode_time>::value,
-                  process_user_track::at(0, 0), _ts,
-                  static_cast<double>(_cpu_sample.user_mode_time) / units::sec);
-
-    TRACE_COUNTER(trait::name<category::process_kernel_mode_time>::value,
-                  process_kern_track::at(0, 0), _ts,
-                  static_cast<double>(_cpu_sample.kernel_mode_time) / units::sec);
-
-    auto cpu_freqs = deserialize_freqs(_cpu_sample.freqs);
-    for(const auto& cpu_data : cpu_freqs)
+    if(_is_process_owner)
     {
-        size_t cpu_id = cpu_data.id;
-        if(!cpu_freq_track::exists(cpu_id))
-        {
-            std::string track_name = "CPU Frequency [" + std::to_string(cpu_id) + "] (S)";
-            cpu_freq_track::emplace(cpu_id, track_name, "MHz");
-        }
+        if(_em.bits.page_rss)
+            TRACE_COUNTER(trait::name<category::process_page>::value,
+                          process_page_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.page_rss) /
+                              units::megabyte);
 
-        TRACE_COUNTER(trait::name<category::cpu_freq>::value,
-                      cpu_freq_track::at(cpu_id, 0), _ts,
-                      static_cast<double>(cpu_data.value));
+        if(_em.bits.virt_mem)
+            TRACE_COUNTER(trait::name<category::process_virt>::value,
+                          process_virt_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.virt_mem) /
+                              units::megabyte);
+        if(_em.bits.peak_rss)
+            TRACE_COUNTER(trait::name<category::process_peak>::value,
+                          process_peak_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.peak_rss) /
+                              units::megabyte);
+
+        if(_em.bits.ctx_switches)
+            TRACE_COUNTER(trait::name<category::process_context_switch>::value,
+                          process_cntx_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.context_switches));
+
+        if(_em.bits.page_faults)
+            TRACE_COUNTER(trait::name<category::process_page_fault>::value,
+                          process_flts_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.page_faults));
+
+        if(_em.bits.user_time)
+            TRACE_COUNTER(trait::name<category::process_user_mode_time>::value,
+                          process_user_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.user_mode_time) /
+                              units::sec);
+
+        if(_em.bits.kernel_time)
+            TRACE_COUNTER(trait::name<category::process_kernel_mode_time>::value,
+                          process_kern_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.kernel_mode_time) /
+                              units::sec);
+    }
+
+    if(_em.bits.frequency)
+    {
+        const auto cpu_freqs = deserialize_freqs(_cpu_sample.freqs);
+        for(const auto& cpu_data : cpu_freqs)
+        {
+            const size_t cpu_id = cpu_data.id;
+            if(!cpu_freq_track::exists(cpu_id))
+            {
+                const auto track_name = "CPU [" + std::to_string(_device_id) +
+                                        "] Core [" + std::to_string(cpu_id) +
+                                        "] Frequency (S)";
+                cpu_freq_track::emplace(cpu_id, track_name, "MHz");
+            }
+            TRACE_COUNTER(trait::name<category::cpu_freq>::value,
+                          cpu_freq_track::at(cpu_id, 0), _ts,
+                          static_cast<double>(cpu_data.value));
+        }
+    }
+
+    if(_em.bits.load)
+    {
+        const auto cpu_loads = deserialize_loads(_cpu_sample.loads);
+        for(const auto& cpu_data : cpu_loads)
+        {
+            const size_t cpu_id = cpu_data.id;
+            if(!cpu_load_track::exists(cpu_id))
+            {
+                const auto track_name = "CPU [" + std::to_string(_device_id) +
+                                        "] Core [" + std::to_string(cpu_id) +
+                                        "] Load (S)";
+                cpu_load_track::emplace(cpu_id, track_name, "%");
+            }
+            TRACE_COUNTER(trait::name<category::cpu_load>::value,
+                          cpu_load_track::at(cpu_id, 0), _ts, cpu_data.value);
+        }
     }
 }
 
@@ -1278,5 +1332,64 @@ perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
     }
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+void
+perfetto_processor_t::handle(const kfd_sample& _kfd)
+{
+    auto _beg_ts     = _kfd.start_timestamp;
+    auto _end_ts     = _kfd.end_timestamp;
+    auto _track_name = _kfd.track_name;
+    auto _name       = _kfd.name;
+    auto _category   = _kfd.category;
+    auto _track_hash = std::hash<std::string>{}(_track_name);
+
+    auto emit_kfd_event = [&](auto category_tag) {
+        using CategoryT = decltype(category_tag);
+        auto _track     = get_track(CategoryT{}, _track_name, _track_hash);
+
+        auto add_annotations = [&](::perfetto::EventContext ctx) {
+            if(!m_use_annotations) return;
+
+            std::vector<annotation_entry> annotations = {
+                { "begin_ns", _beg_ts },
+                { "end_ns", _end_ts },
+            };
+
+            auto args = process_arguments_string(_kfd.args_str);
+            for(const auto& arg : args)
+            {
+                annotations.push_back({ arg.arg_name.c_str(), arg.arg_value });
+            }
+
+            annotate_perfetto(ctx, annotations);
+        };
+
+        if(_beg_ts == _end_ts)
+        {
+            TRACE_EVENT_INSTANT(trait::name<CategoryT>::value,
+                                ::perfetto::DynamicString{ _name }, _track, _beg_ts,
+                                add_annotations);
+        }
+        else
+        {
+            tracing::push_perfetto_track(CategoryT{}, _name.c_str(), _track, _beg_ts,
+                                         add_annotations);
+            tracing::pop_perfetto_track(CategoryT{}, _name.c_str(), _track, _end_ts);
+        }
+    };
+
+    if(_category == trait::name<category::rocm_kfd_page_fault>::value)
+        emit_kfd_event(category::rocm_kfd_page_fault{});
+    else if(_category == trait::name<category::rocm_kfd_page_migrate>::value)
+        emit_kfd_event(category::rocm_kfd_page_migrate{});
+    else if(_category == trait::name<category::rocm_kfd_queue>::value)
+        emit_kfd_event(category::rocm_kfd_queue{});
+    else if(_category == trait::name<category::rocm_kfd_event_queue>::value)
+        emit_kfd_event(category::rocm_kfd_event_queue{});
+    else if(_category == trait::name<category::rocm_kfd_event_unmap_from_gpu>::value)
+        emit_kfd_event(category::rocm_kfd_event_unmap_from_gpu{});
+    else if(_category == trait::name<category::rocm_kfd_event_dropped_events>::value)
+        emit_kfd_event(category::rocm_kfd_event_dropped_events{});
+    else
+        LOG_WARNING("Unknown KFD category: {}", _category);
+}
+}  // namespace rocprofsys::trace_cache

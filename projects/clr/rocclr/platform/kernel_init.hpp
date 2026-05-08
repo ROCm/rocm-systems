@@ -101,7 +101,8 @@ const amd::Kernel::KernelFieldMapV3Type amd::Kernel::kKernelFieldMapV3[] = {
     {".vgpr_spill_count", KernelField::NumSpilledVGPRs},
     {".kind", KernelField::Kind},
     {".workgroup_processor_mode", KernelField::WgpMode},
-    {".uniform_work_group_size", KernelField::UniformWrokGroupSize}};
+    {".uniform_work_group_size", KernelField::UniformWrokGroupSize},
+    {".cluster_dims", KernelField::ClusterDims}};
 
 const amd::Kernel::ArgValueKindV3Type amd::Kernel::kArgValueKindV3[] = {
     {"by_value", amd::KernelParameterDescriptor::ValueObject},

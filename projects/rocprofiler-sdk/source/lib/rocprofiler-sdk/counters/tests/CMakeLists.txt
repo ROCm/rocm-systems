@@ -92,7 +92,7 @@ rocprofiler_add_unit_test(
     TIMEOUT 45
     ENVIRONMENT
         "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
-        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION
         "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*"
@@ -104,21 +104,3 @@ rocprofiler_add_unit_test(
         device_counting_service_test.sync_sq_waves_verify_non_intercept
         device_counting_service_test.raw_sq_waves_verify
         device_counting_service_test.sync_grbm_verify)
-
-set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
-
-add_executable(consumer-tests)
-target_sources(consumer-tests PRIVATE ${ROCPROFILER_LIB_CONSUMER_TEST_SOURCES})
-
-target_link_libraries(
-    consumer-tests rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
-    rocprofiler-sdk::rocprofiler-sdk-hip rocprofiler-sdk::rocprofiler-sdk-common-library
-    rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest GTest::gtest_main)
-
-rocprofiler_add_unit_test(
-    TARGET consumer-tests
-    SOURCES ${ROCPROFILER_LIB_CONSUMER_TEST_SOURCES}
-    TIMEOUT 45
-    ENVIRONMENT
-        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
-    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

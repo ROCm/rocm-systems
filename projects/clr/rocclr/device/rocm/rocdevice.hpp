@@ -114,6 +114,63 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   }
 };
 
+//! Graph-owned signal pool for per-launch signal allocation.
+//! Avoids runtime signal pool stalls (WaitCurrent/WaitNext) during graph execution.
+//! Two sub-pools: GPU-only signals (fast) and interrupt-capable signals (for host callbacks).
+struct GraphSignalPool {
+  ProfilingSignal* Acquire() {
+    size_t idx = next_idx_.fetch_add(1, std::memory_order_relaxed);
+    ProfilingSignal* ps;
+    if (idx < capacity_.load(std::memory_order_acquire)) {
+      ps = signals_[idx];
+    } else {
+      ps = GrowAndAcquire(idx);
+    }
+    if (ps) last_acquired_ = ps;
+    return ps;
+  }
+
+  ProfilingSignal* AcquireIrq(bool system_scope) {
+    size_t idx = irq_next_idx_.fetch_add(1, std::memory_order_relaxed);
+    ProfilingSignal* ps;
+    if (idx < irq_capacity_.load(std::memory_order_acquire)) {
+      ps = irq_signals_[idx];
+    } else {
+      ps = GrowAndAcquireIrq(idx, system_scope);
+    }
+    if (ps) last_acquired_ = ps;
+    return ps;
+  }
+
+  //! Returns the most recently acquired signal from a GPU dispatch (not pre-allocation)
+  ProfilingSignal* GetLastAcquired() const { return last_acquired_; }
+
+  //! Reset after pre-allocation so GetLastAcquired only reflects actual GPU dispatches
+  void ResetLastAcquired() { last_acquired_ = nullptr; }
+
+  bool Allocate(size_t count);
+  bool AllocateIrq(size_t count, bool system_scope);
+
+  size_t UsedCount() const { return next_idx_.load(std::memory_order_relaxed); }
+  size_t UsedIrqCount() const { return irq_next_idx_.load(std::memory_order_relaxed); }
+
+  ~GraphSignalPool();
+
+ private:
+  std::vector<ProfilingSignal*> signals_;       //!< GPU-only signals
+  std::atomic<size_t> capacity_{0};             //!< Current GPU-only signal count (atomic to avoid race with growth)
+  std::atomic<size_t> next_idx_{0};             //!< Next GPU-only signal index
+  std::vector<ProfilingSignal*> irq_signals_;   //!< Interrupt-capable signals
+  std::atomic<size_t> irq_capacity_{0};         //!< Current interrupt signal count
+  std::atomic<size_t> irq_next_idx_{0};         //!< Next interrupt signal index
+  ProfilingSignal* last_acquired_ = nullptr;    //!< Most recently acquired signal
+  amd::Monitor lock_;                           //!< Protects growth of both vectors
+
+  static ProfilingSignal* AllocateOneSignal(bool interrupt, bool system_scope);
+  ProfilingSignal* GrowAndAcquire(size_t idx);
+  ProfilingSignal* GrowAndAcquireIrq(size_t idx, bool system_scope);
+};
+
 class Sampler : public device::Sampler {
  public:
   //! Constructor
@@ -404,6 +461,7 @@ class Device : public NullDevice {
   }
 
   virtual device::Signal* createSignal() const override;
+  virtual device::Signal* createIpcSignal() const override;
 
   //! Acquire external graphics API object in the host thread
   //! Needed for OpenGL objects on CPU device
@@ -429,7 +487,7 @@ class Device : public NullDevice {
   virtual bool globalFreeMemory(size_t* freeMemory) const override;
   virtual void* hostAlloc(size_t size, size_t alignment,
                           MemorySegment mem_seg = MemorySegment::kNoAtomics,
-                          const void* agentInfo = nullptr) const override;  // nullptr uses default CPU agent
+                          const void* agentInfo = nullptr, bool allowAllAgentsAccess = true) const override;  // nullptr uses default CPU agent
   virtual void hostFree(void* ptr, size_t size = 0) const override;
 
   virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
@@ -444,7 +502,7 @@ class Device : public NullDevice {
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
 
   void* deviceLocalAlloc(size_t size,
-                        const AllocationFlags& flags = AllocationFlags{}) const override;
+                        const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const override;
   void* reserveMemory(size_t size, size_t alignment) const;
   void releaseMemory(void* ptr, size_t size) const;
   void memFree(void* ptr, size_t size) const;
@@ -482,6 +540,15 @@ class Device : public NullDevice {
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override;
   virtual void ReleaseGlobalSignal(void* signal) const override;
   virtual void RetainGlobalSignal(void* signal) const override;
+  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const override;
+  virtual void DestroyHwEvent(void* hw_event) const override;
+  virtual uint8_t* CreateBarrierPacket() const override;
+  virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
+                                   const std::vector<void*>& hw_events) const override;
+  virtual GraphSignalPool* CreateGraphSignalPool(
+      size_t gpu_count, size_t irq_count,
+      size_t segment_count, std::vector<void*>& hw_events) const override;
+  virtual size_t GetGraphSignalPoolUsedCount(GraphSignalPool* pool) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 
@@ -538,19 +605,18 @@ class Device : public NullDevice {
   hsa_queue_t* acquireQueue(
       uint32_t queue_size_hint, bool coop_queue = false, const std::vector<uint32_t>& cuMask = {},
       amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal,
-      bool managed = false, bool dedicated_queue = false);
+      bool managed = false, bool dedicated_queue = false,
+      hsa_queue_t* preferred = nullptr,
+      const std::unordered_set<uint64_t>* excluded_ids = nullptr);
 
   //! Release HSA queue
   void releaseQueue(hsa_queue_t*, const std::vector<uint32_t>& cuMask = {}, bool coop_queue = false,
                     bool managed = false);
 
-  hsa_queue_t* AcquireActiveQueue(amd::CommandQueue::Priority priority);
+  hsa_queue_t* AcquireActiveQueue(amd::CommandQueue::Priority priority,
+                                   hsa_queue_t* preferred = nullptr,
+                                   const std::unordered_set<uint64_t>* excluded_ids = nullptr);
   bool ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority priority);
-
-  //! For the given HSA queue, return an existing hostcall buffer or create a
-  //! new one. queuePool_ keeps a mapping from HSA queue to hostcall buffer.
-  void* getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue = false,
-                                  const std::vector<uint32_t>& cuMask = {});
 
   //! Return multi GPU grid launch sync buffer
   address MGSync() const { return mg_sync_; }
@@ -667,12 +733,11 @@ class Device : public NullDevice {
   static address mg_sync_;         //!< MGPU grid launch sync memory (SVM location)
 
   struct QueueInfo {
-    int refCount;           //! Reference counter. Shows how many time the queue was shared
-    void* hostcallBuffer_;  //! Host call buffer for the HSA queue
+    int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
 
     // Constructor
-    QueueInfo() : refCount(0), hostcallBuffer_(nullptr), hasDedicatedQueue_(false) {}
+    QueueInfo() : refCount(0), hasDedicatedQueue_(false) {}
 
     //! Get the current hardware queue depth (wptr - rptr)
     static uint64_t GetHwQueueDepth(hsa_queue_t* queue) {
@@ -715,15 +780,14 @@ class Device : public NullDevice {
   std::atomic<uint32_t> num_queues_[QueuePriority::Total] = {};  //!< Per-priority queue counters
 
   //! Use dynamic queues mode to get a queue from pool
-  hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false);
+  hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false,
+                                hsa_queue_t* preferred = nullptr,
+                                const std::unordered_set<uint64_t>* excluded_ids = nullptr);
 
-  void* coopHostcallBuffer_;
   //! returns value for corresponding LinkAttrbutes in a vector given Memory pool.
   virtual bool findLinkInfo(const hsa_amd_memory_pool_t& pool,
                             std::vector<LinkAttrType>* link_attr);
 
-  //! Pool of HSA queues with custom CU masks
-  std::vector<std::map<hsa_queue_t*, QueueInfo, QueueCompare>> queueWithCUMaskPool_;
   hsa_amd_memory_pool_t getHostMemoryPool(MemorySegment mem_seg,
                                           const AgentInfo* agentInfo = nullptr) const;
   //! Read and Write mask for device<->host

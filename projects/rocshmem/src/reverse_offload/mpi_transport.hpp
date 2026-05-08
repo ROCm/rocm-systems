@@ -44,13 +44,13 @@ public:
 
   virtual ~MPITransport();
 
-  void initTransport(int num_queues, BackendProxyT *proxy) override;
+  void initTransport(int num_queues, BackendProxy *proxy) override;
 
   void finalizeTransport() override;
 
   void createNewTeam(ROBackend *backend, Team *parent_team,
-                     TeamInfo *team_info_wrt_parent,
-                     TeamInfo *team_info_wrt_world, int num_pes,
+                     const TeamInfo& team_info_wrt_parent,
+                     const TeamInfo& team_info_wrt_world, int num_pes,
                      int my_pe_in_new_team, MPI_Comm team_comm,
                      rocshmem_team_t *new_team) override;
 
@@ -182,7 +182,7 @@ private:
 
   std::atomic<bool> transport_up{false};
 
-  BackendProxyT *backend_proxy{nullptr};
+  BackendProxy *backend_proxy{nullptr};
 
   std::thread progress_thread{};
 

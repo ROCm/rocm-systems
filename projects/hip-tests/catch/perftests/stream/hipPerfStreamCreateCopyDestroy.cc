@@ -44,8 +44,7 @@ bool hipPerfStreamCreateCopyDestroy::open(int deviceId) {
   int nGpu = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpu));
   if (nGpu < 1) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
-    return false;
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
   HIP_CHECK(hipSetDevice(deviceId));
   hipDeviceProp_t props;

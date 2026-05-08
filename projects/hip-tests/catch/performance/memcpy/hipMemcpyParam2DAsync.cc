@@ -53,9 +53,6 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
     // hipMemcpyDeviceToDevice
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-    if (src_device == -1 && dst_device == -1) {
-      return;
-    }
 
     LinearAllocGuard2D<int> src_allocation(width, height);
     HIP_CHECK(hipSetDevice(dst_device));
@@ -105,7 +102,6 @@ HIP_TEST_CASE(Performance_hipMemcpyParam2DAsync_DeviceToHost) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyParam2DAsync_HostToDevice) {
-  CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(width, 32, hipMemcpyHostToDevice);
 }
@@ -148,7 +144,6 @@ HIP_TEST_CASE(Performance_hipMemcpyParam2DAsync_HostToHost) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyParam2DAsync_DeviceToDevice_DisablePeerAccess) {
-  CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(width, 32, hipMemcpyDeviceToDevice);
 }
@@ -171,10 +166,8 @@ HIP_TEST_CASE(Performance_hipMemcpyParam2DAsync_DeviceToDevice_DisablePeerAccess
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyParam2DAsync_DeviceToDevice_EnablePeerAccess) {
-  CHECK_IMAGE_SUPPORT
   if (HipTest::getDeviceCount() < 2) {
-    HipTest::HIP_SKIP_TEST("This test requires 2 GPUs. Skipping.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(width, 32, hipMemcpyDeviceToDevice, true);

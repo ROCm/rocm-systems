@@ -30,11 +30,7 @@
 
 #define MAX_FAILED_STTICHES 1000
 
-inline bool skippable(InstCategory line)
-{
-    return line == InstCategory::VALU || line == InstCategory::VMEM || line == InstCategory::FLAT ||
-           line == InstCategory::IMMED || line == InstCategory::LDS;
-};
+inline bool skippable(InstCategory line) { return line != InstCategory::SALU && line <= InstCategory::IMMED; };
 
 inline bool is_trivial_match(int wave, InstCategory line)
 {
@@ -220,6 +216,10 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
         {
             if (inst.category != WaveInstCategory::JUMP) break;
             next = pctranslator->jump(*line);
+        }
+        else if (gfxip == 12 && line->cat == InstCategory::V_MOV_B64 && inst.category == WaveInstCategory::VALU)
+        {
+            inst.duration = std::max(inst.duration, inst.stall + 2);
         }
         else if (gfxip == 9 && line->cat == InstCategory::MFMA_SCALE && inst.category == WaveInstCategory::VALU)
         {

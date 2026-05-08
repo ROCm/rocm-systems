@@ -85,8 +85,11 @@
 #define vm_object_tree(app, is_userptr)				\
 		((is_userptr) ? &(app)->user_tree : &(app)->tree)
 
-#define START_NON_CANONICAL_ADDR (1ULL << 47)
-#define END_NON_CANONICAL_ADDR (~0UL - (1UL << 47))
+/*
+ * support up to 57bit VA and 48bit VA
+ */
+#define START_NON_CANONICAL_ADDR (1ULL << 56)
+#define END_NON_CANONICAL_ADDR (~0ULL - (1ULL << 56))
 
 struct vm_object {
 	void *start;
@@ -288,7 +291,7 @@ struct hsa_kfd_fmm_context
 
 	/* amdgpu device handle for each gpu that libdrm uses */
 	struct amdgpu_device *amdgpu_handle[DRM_LAST_RENDER_NODE + 1 - DRM_FIRST_RENDER_NODE];
-};
+} fmm_kfd_context_t;
 
 struct hsa_kfd_fmm_context *hsakmt_kfdcontext_get_fmm_context(HsaKFDContext *ctx)
 {
@@ -2355,16 +2358,10 @@ static HSAKMT_STATUS get_process_apertures(HsaKFDContext *ctx,
 
 int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor)
 {
-	char path[128];
 	int index, fd, dev_init_ret;
 	uint32_t major_drm, minor_drm;
 	struct amdgpu_device **device_handle;
 	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
-
-	/* Bypass amdgpu if we're running a model. Return ctx->fd, which is the
-	 * backing for all our "GPU" memory. */
-	if (hsakmt_use_model)
-		return ctx->fd;
 
 	if (minor < DRM_FIRST_RENDER_NODE || minor > DRM_LAST_RENDER_NODE) {
 		pr_err("DRM render minor %d out of range [%d, %d]\n", minor,
@@ -2377,11 +2374,10 @@ int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor)
 	if (fmm_ctx->drm_render_fds[index])
 		return fmm_ctx->drm_render_fds[index];
 
-	sprintf(path, "/dev/dri/renderD%d", minor);
-	fd = open(path, O_RDWR | O_CLOEXEC);
+	fd = hsakmt_drm_open_render(minor);
 	if (fd < 0) {
 		if (errno != ENOENT && errno != EPERM) {
-			pr_err("Failed to open %s: %s\n", path, strerror(errno));
+			pr_err("Failed to open render node %d: %s\n", minor, strerror(errno));
 			if (errno == EACCES)
 				pr_info("Check user is in \"video\" group\n");
 		}
@@ -2401,7 +2397,7 @@ int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor)
 	 *    its own VM space).
 	*/
 	if (ctx->hsakmt_is_primary_ctx)
-		dev_init_ret = amdgpu_device_initialize(fd, &major_drm, &minor_drm, device_handle);
+		dev_init_ret = hsakmt_amdgpu_device_initialize(fd, &major_drm, &minor_drm, device_handle);
 	else if (hsakmt_fn_amdgpu_device_initialize2)
 		dev_init_ret = hsakmt_fn_amdgpu_device_initialize2(fd, false, &major_drm, &minor_drm,
 						    (HsaAMDGPUDeviceHandle *)device_handle);
@@ -2415,16 +2411,15 @@ int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor)
 		/* if amdgpu_device_get_fd available query render fd that libdrm uses,
 		 * then close drm_render_fds above, replace it by fd libdrm uses.
 		 */
-		if (hsakmt_fn_amdgpu_device_get_fd) {
-			fd = hsakmt_fn_amdgpu_device_get_fd(*device_handle);
-			if (fd > 0) {
-				close(fmm_ctx->drm_render_fds[index]);
-				fmm_ctx->drm_render_fds[index] = fd;
-			} else {
-				pr_err("amdgpu_device_get_fd failed: %d\n", fd);
-				amdgpu_device_deinitialize(*device_handle);
-				*device_handle = 0;
-			}
+		int libdrm_fd = hsakmt_amdgpu_device_get_fd(*device_handle);
+		if (libdrm_fd > 0) {
+			close(fmm_ctx->drm_render_fds[index]);
+			fmm_ctx->drm_render_fds[index] = libdrm_fd;
+			fd = libdrm_fd;
+		} else {
+			pr_err("amdgpu_device_get_fd failed: %d\n", libdrm_fd);
+			hsakmt_amdgpu_device_deinitialize(*device_handle);
+			*device_handle = 0;
 		}
 	}
 
@@ -2513,7 +2508,12 @@ static void *reserve_address(void *addr, unsigned long long int len)
  */
 #define SVM_RESERVATION_LIMIT ((1ULL << 40) - 1)
 #define SVM_MIN_VM_SIZE (4ULL << 30)
-#define IS_CANONICAL_ADDR(a) ((a) < (1ULL << 47))
+
+/*
+ * Support up to 57bit VA, 56bit user space and 48bit VA, 47bit user space
+ */
+#define CANONICAL_ADDRESS_LIMIT	((1ULL << 56) - 1)
+#define IS_CANONICAL_ADDR(a)	((a) <= CANONICAL_ADDRESS_LIMIT)
 
 static HSAKMT_STATUS init_svm_apertures(struct hsa_kfd_fmm_context *fmm_ctx,
 					HSAuint64 base, HSAuint64 limit,
@@ -2710,7 +2710,7 @@ static void *map_mmio(HsaKFDContext *ctx,
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 
 	if (hsakmt_use_model) {
-		model_set_mmio_page(mem);
+		/* FFM handles MMIO internally */
 		return mem;
 	}
 
@@ -2819,9 +2819,9 @@ static bool init_mem_handle_aperture(struct hsa_kfd_fmm_context *fmm_ctx, HSAuin
 					mem_handle_aper->base, mem_handle_aper->limit);
 			return true;
 		} else {
-			/* increase base by 1UL<<47 to check next hole */
-			mem_handle_aper->base =  VOID_PTR_ADD(mem_handle_aper->base, (1UL << 47));
-			mem_handle_aper->limit = VOID_PTR_ADD(mem_handle_aper->base, (1ULL << 47));
+			/* increase base by 1UL<<56 to check next hole */
+			mem_handle_aper->base =  VOID_PTR_ADD(mem_handle_aper->base, (1ULL << 56));
+			mem_handle_aper->limit = VOID_PTR_ADD(mem_handle_aper->base, (1ULL << 56));
 		}
 	}
 
@@ -3147,7 +3147,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	}
 
 	fmm_ctx->cpuvm_aperture.align = PAGE_SIZE;
-	fmm_ctx->cpuvm_aperture.limit = (void *)0x7FFFFFFFFFFF; /* 2^47 - 1 */
+	fmm_ctx->cpuvm_aperture.limit = (void *)CANONICAL_ADDRESS_LIMIT;
 
 	fmm_init_rbtree(fmm_ctx);
 
@@ -4707,7 +4707,7 @@ void hsakmt_fmm_clear_all_mem(HsaKFDContext *ctx)
 	for (i = 0; i <= DRM_LAST_RENDER_NODE - DRM_FIRST_RENDER_NODE; i++) {
 
 		if (fmm_ctx->amdgpu_handle[i]) {
-			amdgpu_device_deinitialize(fmm_ctx->amdgpu_handle[i]);
+			hsakmt_amdgpu_device_deinitialize(fmm_ctx->amdgpu_handle[i]);
 			fmm_ctx->amdgpu_handle[i] = NULL;
 		} else if (fmm_ctx->drm_render_fds[i]) {
 			close(fmm_ctx->drm_render_fds[i]);

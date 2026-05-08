@@ -9,7 +9,7 @@ source/docs                                 @bgopesh
 source/include                              @jrmadsen      @bwelton     @ammarwa
 source/include/rocprofiler-sdk/rccl         @MythreyaK
 source/include/rocprofiler-sdk/kfd          @MythreyaK
-source/include/rocprofiler-sdk/cxx/codeobj  @ApoKalipse-V
+source/include/rocprofiler-sdk/cxx/codeobj  @ApoKalipse-V  @vlaindic
 source/bin                                  @SrirakshaNag  @bgopesh
 
 source/libexec                              @SrirakshaNag
@@ -22,4 +22,4 @@ source/lib/rocprofiler-sdk/kfd              @MythreyaK
 
 source/lib/rocprofiler-sdk-tool             @SrirakshaNag
 
-source/lib/rocprofiler-sdk-codeobj          @ApoKalipse-V
+source/lib/att-tool                         @ApoKalipse-V

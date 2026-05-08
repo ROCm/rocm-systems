@@ -34,7 +34,9 @@ extern int64_t ncclParamDmaBufEnable();
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 extern ncclNet_t rocmNetIb;
+extern ncclNet_t netIbCast;
 extern ncclResult_t rcclRocmNetP2pPolicy(void* handle, int isP2p);
+extern ncclResult_t rcclCastNetP2pPolicy(void* handle, int isP2p);
 
 enum rcclIBNicType {
     rcclIBNicTypeUnknown = -1,

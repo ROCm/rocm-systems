@@ -58,9 +58,7 @@ static std::vector<int> getSupportedDevices() {
 HIP_TEST_CASE(Unit_hipMemAdvise_v2_Device_Host) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test need at least one device with managed memory support");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
@@ -145,10 +143,11 @@ HIP_TEST_CASE(Unit_hipMemAdvise_v2_Device_Host) {
 #if __linux__
 HIP_TEST_CASE(Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent) {
   auto supportedDevices = getSupportedDevices();
-  if (supportedDevices.empty() || numa_available() < 0) {
-    HipTest::HIP_SKIP_TEST("Skipping as System does not have managed memory "
-                           "supported devices or No Numa nodes in system");
-    return;
+  if (supportedDevices.empty()) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
+  }
+  if (numa_available() < 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
@@ -223,9 +222,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent) {
 HIP_TEST_CASE(Unit_hipMemAdvise_v2_Negative) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test need at least one device with managed memory support");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));

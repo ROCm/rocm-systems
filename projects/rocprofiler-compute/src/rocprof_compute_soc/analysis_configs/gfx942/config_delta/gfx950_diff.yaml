@@ -563,7 +563,7 @@ Addition:
         max: MAX(((100 * (TCC_EA0_RDREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         unit: Percent
     - Read - Infinity Fabric Stall:
-        type: "Infinity Fabric™ Stall"
+        type: "Infinity Fabric Stall"
         transaction: Read
         avg: AVG(((100 * (TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         min: MIN(((100 * (TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
@@ -584,7 +584,7 @@ Addition:
         max: MAX(((100 * (TCC_EA0_WRREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         unit: Percent
     - Write - Infinity Fabric Stall:
-        type: "Infinity Fabric™ Stall"
+        type: "Infinity Fabric Stall"
         transaction: Write
         avg: AVG(((100 * (TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         min: MIN(((100 * (TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
@@ -607,7 +607,7 @@ Addition:
         min: MIN(TCC_EA0_RDREQ_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
         max: MAX(TCC_EA0_RDREQ_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
         unit: Gbps
-    - "Read Bandwidth - Infinity Fabric™":
+    - "Read Bandwidth - Infinity Fabric":
         avg: AVG(TCC_EA0_RDREQ_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
         min: MIN(TCC_EA0_RDREQ_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
         max: MAX(TCC_EA0_RDREQ_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
@@ -622,7 +622,7 @@ Addition:
         min: MIN(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
         max: MAX(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
         unit: Gbps
-    - "Write Bandwidth - Infinity Fabric™":
+    - "Write Bandwidth - Infinity Fabric":
         avg: AVG(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
         min: MIN(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
         max: MAX(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
@@ -642,7 +642,7 @@ Addition:
         min: MIN(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
         max: MAX(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
         unit: Gbps
-    - "Atomic Bandwidth - Infinity Fabric™":
+    - "Atomic Bandwidth - Infinity Fabric":
         avg: AVG(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
         min: MIN(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
         max: MAX(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
@@ -661,13 +661,13 @@ Addition:
     Bypass Req: Number of L2 cache bypass requests measured at the tag block. These requests skip normal cache lookup and go directly to memory, typically for uncacheable or write-combined memory accesses.
     Input Buffer Req: Number of raw memory requests received through the L2 cache Input Buffer (IB) from compute units and other hardware clients. This counts all incoming requests before cache lookup processing and represents the total incoming demand on the L2 cache.
     Read Bandwidth - PCIe: Total number of bytes due to L2 read requests due to PCIe traffic, divided by total duration.
-    "Read Bandwidth - Infinity Fabric™": Total number of bytes due to L2 read requests due to Infinity Fabric traffic, divided by total duration.
+    "Read Bandwidth - Infinity Fabric": Total number of bytes due to L2 read requests due to Infinity Fabric traffic, divided by total duration.
     Read Bandwidth - HBM: Total number of bytes due to L2 read requests due to HBM traffic, divided by total duration.
     Write Bandwidth - PCIe: Total number of bytes due to L2 write requests due to PCIe traffic, divided by total duration.
-    "Write Bandwidth - Infinity Fabric™": Total number of bytes due to L2 write requests due to Infinity Fabric traffic, divided by total duration.
+    "Write Bandwidth - Infinity Fabric": Total number of bytes due to L2 write requests due to Infinity Fabric traffic, divided by total duration.
     Write Bandwidth - HBM: Total number of bytes due to L2 write requests due to HBM traffic, divided by total duration.
     Atomic Bandwidth - PCIe: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided by total duration.
-    "Atomic Bandwidth - Infinity Fabric™": Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration.
+    "Atomic Bandwidth - Infinity Fabric": Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration.
     Atomic Bandwidth - HBM: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration.
     Atomic - HBM: The total number of L2 atomic requests (either 32-byte or 64-byte) destined for the accelerator's local high-bandwidth memory (HBM), per normalization unit. These are read-modify-write operations that update memory atomically.
     Read Stall: >-
@@ -690,9 +690,9 @@ Deletion:
 - Panel Config:
     id: 1500
   metric_descriptions:
-    "Sequencer → TA Address Stall":
-    "Sequencer → TA Command Stall":
-    "Sequencer → TA Data Stall":
+    "Sequencer -> TA Address Stall":
+    "Sequencer -> TA Command Stall":
+    "Sequencer -> TA Data Stall":
 Modification:
 - Panel Config:
     id: 200

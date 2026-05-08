@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 """
 rewrite caller tests
@@ -18,6 +18,7 @@ pytestmark = [pytest.mark.rewrite_caller]
 
 
 @pytest.mark.caller_include
+@pytest.mark.class_name("rewrite-caller")
 class TestRewriteCaller(RocprofsysTest):
     REWRITE_ARGS = [
         "-e",

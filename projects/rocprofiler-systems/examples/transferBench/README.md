@@ -11,7 +11,7 @@ TransferBench is a comprehensive all-to-all transfer benchmark that measures dat
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - HIP runtime and `hipcc` compiler
 - HSA runtime library (headers and library)
 - AMD Instinct GPU (APU-only targets are skipped)

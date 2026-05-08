@@ -357,3 +357,26 @@ mi_gpu_spec:
             chip_ids:
               physical: 30120
               virtual: 30136
+
+  #########################################################
+  #Note: in the future, we might set a seperate file for NAVI
+  - gpu_series: navi3
+    gpu_archs:
+      - gpu_arch: gfx1151
+        perfmon_config:
+            SQ: 8
+            TA: 2
+            GRBM: 2
+            CPC:  2
+            GCEA: 2
+            TCP:  4
+            SPI:  6
+            GL1A: 4
+            GL1C: 4
+            GL2A: 4
+            GL2C: 4
+        models:
+          - gpu_model: strix_halo
+            chip_ids:
+              physical: 5510
+  #########################################################

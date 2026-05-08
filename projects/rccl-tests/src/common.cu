@@ -1,7 +1,7 @@
 
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  * Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
  *
  * See LICENSE.txt for license information
@@ -1122,6 +1122,133 @@ static void getGPUMemoryInfo(int64_t* ptotalGpuMem, int64_t* pfreeGpuMem) {
   if (pfreeGpuMem != nullptr) *pfreeGpuMem = freeGpuMem;
 }
 
+// ============================================================
+// Network Counter Collection – thin wrappers around collector.h API.
+// The full implementation lives in collector.cu / collector.h
+// ============================================================
+
+static bool DiscoverRdmaNics(NetworkCounterContext& ctx) {
+  std::vector<std::string> ib_hca = NetCounterParseIbHcaList();
+  if (!ib_hca.empty()) {
+    for (const auto& ib : ib_hca) {
+      ctx.ib_names.push_back(ib);
+      ctx.nic_names.push_back(NetCounterFindNicForIbDevice(ib));
+    }
+    return true;
+  }
+  std::vector<std::string> all_nics;
+  NetCounterGetNetworkInterfaces(all_nics);
+  for (const auto& nic : all_nics) {
+    std::string ib = NetCounterFindIbDeviceForNic(nic);
+    if (ib.empty()) continue;
+    ctx.nic_names.push_back(nic);
+    ctx.ib_names.push_back(ib);
+  }
+  if (ctx.nic_names.empty()) {
+    fprintf(stderr,
+            "# Warning: no RDMA-capable NICs found, disabling net counter collection\n");
+    return false;
+  }
+  return true;
+}
+
+static NicType DetectNicTypeFromIbDevices(const std::vector<std::string>& ib_names,
+                                          bool& mixed) {
+  NicType nic_type = NIC_UNKNOWN;
+  mixed = false;
+  for (size_t i = 0; i < ib_names.size(); i++) {
+    NicType t = NetCounterDetectNicType(ib_names[i]);
+    if (t == NIC_UNKNOWN) continue;
+    if (nic_type == NIC_UNKNOWN) {
+      nic_type = t;
+    } else if (t != nic_type) {
+      mixed = true;
+      break;
+    }
+  }
+  if (mixed) {
+    fprintf(stderr,
+            "# Warning: mixed NIC types detected during counter table selection\n");
+  }
+  return nic_type;
+}
+
+NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
+  NetworkCounterContext ctx;
+  ctx.enabled = NetCounterIsEnabled();
+  if (!ctx.enabled) { return ctx; }
+
+  // Only localRank 0, thread 0 collects for the entire node.
+  bool is_node_lead = (args->localRank == 0 && args->thread == 0);
+  if (!is_node_lead) {
+    ctx.enabled = false;
+    return ctx;
+  }
+
+  ctx.nGpus = args->nGpus;
+  ctx.nranks = args->nProcs * args->nThreads * args->nGpus;
+  ctx.base_rank = args->proc * args->nThreads * args->nGpus;
+
+  if (!DiscoverRdmaNics(ctx)) {
+    ctx.enabled = false;
+    return ctx;
+  }
+
+  bool mixed_detect = false;
+  NicType nic_type = DetectNicTypeFromIbDevices(ctx.ib_names, mixed_detect);
+  ctx.selected_counters = NetCounterGetCounterList(nic_type);
+
+  size_t ndevs = ctx.nic_names.size();
+  ctx.snapshots_before.resize(ndevs);
+  for (size_t i = 0; i < ndevs; i++) {
+    ctx.snapshots_before[i] =
+        NetCounterCollectSnapshot(ctx.nic_names[i], ctx.ib_names[i],
+                                  ctx.selected_counters);
+  }
+
+  char hostname[256] = {0};
+  gethostname(hostname, sizeof(hostname));
+  printf("# Network counter collection enabled (RCCL_TESTS_NET_COUNTER_ENABLE=1)\n");
+  const char* ib_hca_env = getenv("NCCL_IB_HCA");
+  if (ib_hca_env && strlen(ib_hca_env) > 0) {
+    printf("# Device list from NCCL_IB_HCA\n");
+  }
+  printf("# Node %s: lead rank %d collecting %zu device(s):",
+         hostname, ctx.base_rank, ndevs);
+  for (size_t i = 0; i < ndevs; i++) {
+    if (!ctx.ib_names[i].empty()) {
+      printf(" %s(%s)", ctx.ib_names[i].c_str(), ctx.nic_names[i].c_str());
+    } else {
+      printf(" %s", ctx.nic_names[i].c_str());
+    }
+  }
+  printf("\n");
+  printf("# NIC type: %s\n", mixed_detect ? "MIXED" : NicTypeStr(nic_type));
+  printf("# Counters (%zu):", ctx.selected_counters.size());
+  for (const auto& d : ctx.selected_counters) { printf(" %s", d.name.c_str()); }
+  printf("\n");
+  fflush(stdout);
+
+  return ctx;
+}
+
+void NetCounterCollectAfterAndPrint(struct threadArgs* args,
+                                    const NetworkCounterContext& ctx) {
+  if (!ctx.enabled) { return; }
+
+  size_t ndevs = ctx.nic_names.size();
+  std::vector<NetworkCounterSnapshot> after(ndevs);
+  for (size_t i = 0; i < ndevs; i++) {
+    after[i] = NetCounterCollectSnapshot(ctx.nic_names[i], ctx.ib_names[i],
+                                         ctx.selected_counters);
+  }
+
+  NetCounterPrintTable(ctx.nic_names, ctx.snapshots_before, after,
+                       ctx.base_rank, ctx.selected_counters);
+}
+
+// ============================================================
+
 testResult_t threadRunTests(struct threadArgs* args) {
   //  capture the free memory before
   int64_t* totalGpuFreeMem = (int64_t*)calloc(args->nGpus*2, sizeof(int64_t));
@@ -1134,7 +1261,9 @@ testResult_t threadRunTests(struct threadArgs* args) {
   // will be done on the current GPU (by default : 0) and if the GPUs are in
   // exclusive mode those operations will fail.
   CUDACHECK(cudaSetDevice(args->gpus[0]));
+  NetworkCounterContext netCtx = NetCounterCollectBefore(args);
   TESTCHECK(ncclTestEngine.runTest(args, ncclroot, (ncclDataType_t)nccltype, test_typenames[nccltype], (ncclRedOp_t)ncclop, test_opnames[ncclop]));
+  NetCounterCollectAfterAndPrint(args, netCtx);
 
   // Capture the memory used by the GPUs
   for (int g = 0; g < args->nGpus; ++g) {
@@ -2127,6 +2256,7 @@ testResult_t run() {
   finalizeFooter();
 
 #ifdef MPI_SUPPORT
+  MPI_Barrier(mpi_comm);   // Synchronize all ranks
   MPI_Comm_free(&mpi_comm);
   MPI_Finalize();
 #endif

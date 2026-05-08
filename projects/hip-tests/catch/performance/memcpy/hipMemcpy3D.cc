@@ -60,9 +60,6 @@ static void RunBenchmark(const hipExtent extent, hipMemcpyKind kind,
     // hipMemcpyDeviceToDevice
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-    if (src_device == -1 && dst_device == -1) {
-      return;
-    }
 
     LinearAllocGuard3D<int> src_allocation(extent);
     HIP_CHECK(hipSetDevice(dst_device));
@@ -90,7 +87,6 @@ static void RunBenchmark(const hipExtent extent, hipMemcpyKind kind,
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy3D_DeviceToHost) {
-  CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyDeviceToHost);
 }
@@ -111,7 +107,6 @@ HIP_TEST_CASE(Performance_hipMemcpy3D_DeviceToHost) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy3D_HostToDevice) {
-  CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyHostToDevice);
 }
@@ -132,7 +127,6 @@ HIP_TEST_CASE(Performance_hipMemcpy3D_HostToDevice) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy3D_HostToHost) {
-  CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyHostToHost);
 }
@@ -153,7 +147,6 @@ HIP_TEST_CASE(Performance_hipMemcpy3D_HostToHost) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy3D_DeviceToDevice_DisablePeerAccess) {
-  CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyDeviceToDevice);
 }
@@ -176,10 +169,8 @@ HIP_TEST_CASE(Performance_hipMemcpy3D_DeviceToDevice_DisablePeerAccess) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpy3D_DeviceToDevice_EnablePeerAccess) {
-  CHECK_IMAGE_SUPPORT
   if (HipTest::getDeviceCount() < 2) {
-    HipTest::HIP_SKIP_TEST("This test requires 2 GPUs. Skipping.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyDeviceToDevice, true);

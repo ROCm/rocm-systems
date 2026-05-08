@@ -5,9 +5,7 @@
  */
 
 #include <hip/hip_runtime.h>
-#ifdef __linux__
 #include "printf_common.h"
-#endif
 #include <hip_test_common.hh>
 
 #define MAX_BLOCK_SIZE 523
@@ -382,6 +380,7 @@ bool testPrintfMultGPU(int numOfGPUs, uint32_t num_blocks, uint32_t threads_per_
 }  // namespace hipPrintfStressTest
 
 HIP_TEST_CASE(Stress_printf_ComplexKernelMultStream) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test - Stress_printf_ComplexKernelMultStream start\n");
   bool TestPassed = true;
@@ -399,11 +398,12 @@ HIP_TEST_CASE(Stress_printf_ComplexKernelMultStream) {
   REQUIRE(TestPassed);
   printf("Test - Stress_printf_ComplexKernelMultStream completed \n");
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
 HIP_TEST_CASE(Stress_printf_ComplexKernelMultStreamMultGpu) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test - Stress_printf_ComplexKernelMultStreamMultGpu start \n");
   bool TestPassed = true;
@@ -414,8 +414,7 @@ HIP_TEST_CASE(Stress_printf_ComplexKernelMultStreamMultGpu) {
   int numOfGPUs = 0;
   HIP_CHECK(hipGetDeviceCount(&numOfGPUs));
   if (numOfGPUs < 2) {
-    printf("Skipping test because numOfGPUs < 2\n");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   // num_blocks is calculated using an approximate formula to arrive at
   // the required print data quantity. CONST_WEIGHTING_FACT1 and
@@ -429,6 +428,6 @@ HIP_TEST_CASE(Stress_printf_ComplexKernelMultStreamMultGpu) {
   REQUIRE(TestPassed);
   printf("Test - Stress_printf_ComplexKernelMultStreamMultGpu end \n");
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }

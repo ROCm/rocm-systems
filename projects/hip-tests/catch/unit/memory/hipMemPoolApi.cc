@@ -34,8 +34,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Basic) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
 
   int numElements = 64 * 1024 * 1024;
@@ -91,8 +90,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicAlloc) {
 
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int* notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -180,8 +178,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicTrim) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int* notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -194,7 +191,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicTrim) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  size_t numElements = 8 * 1024 * 1024;
+  size_t numElements = 64 * 1024 * 1024;
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float),
                                    mem_pool, stream));
 
@@ -207,8 +204,8 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicTrim) {
 
   hipMemPoolAttr attr;
   attr = hipMemPoolAttrReleaseThreshold;
-  // The pool must hold 128MB
-  std::uint64_t threshold = 128 * 1024 * 1024;
+  // The pool must hold 512MB
+  std::uint64_t threshold = 512 * 1024 * 1024ULL;
   HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &threshold));
 
   // Not a real free, since kernel isn't done
@@ -256,7 +253,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicTrim) {
   attr = hipMemPoolAttrUsedMemHigh;
   HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
   // Make sure the high watermark usage works - the both buffers must be reported
-  REQUIRE(sizeof(float) * (8 * 1024 * 1024 + 1024) == value64);
+  REQUIRE(sizeof(float) * (64 * 1024 * 1024 + 1024) == value64);
 
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream));
@@ -268,8 +265,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicReuse) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int* notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -343,8 +339,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Opportunistic) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified1 = nullptr, *notified2 = nullptr;
   HIP_CHECK(hipHostMalloc(&notified1, sizeof(unsigned int)));
@@ -500,8 +495,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_Default) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int* notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));

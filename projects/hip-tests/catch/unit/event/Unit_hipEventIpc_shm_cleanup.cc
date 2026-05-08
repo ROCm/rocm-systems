@@ -49,6 +49,23 @@ std::set<std::string> get_hip_ipc_shm_files() {
 }
 
 HIP_TEST_CASE(Unit_hipEventIpc_shm_cleanup) {
+  // This test validates /dev/shm cleanup for the emulated IPC event path.
+  // Skip when the device uses native IPC signals (no /dev/shm involved).
+  {
+    auto shm_before = get_hip_ipc_shm_files();
+    hipEvent_t probe;
+    HIP_CHECK(hipEventCreateWithFlags(&probe,
+                                      hipEventInterprocess | hipEventDisableTiming));
+    hipIpcEventHandle_t h;
+    HIP_CHECK(hipIpcGetEventHandle(&h, probe));
+    auto shm_after = get_hip_ipc_shm_files();
+    HIP_CHECK(hipEventDestroy(probe));
+    if (shm_after.size() <= shm_before.size()) {
+      HipTest::HIP_SKIP_TEST("Device uses native IPC signals; /dev/shm cleanup not applicable");
+      return;
+    }
+  }
+
   auto before = get_hip_ipc_shm_files();
 
   int pipefd[2];

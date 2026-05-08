@@ -158,7 +158,7 @@ template <typename T> void Memcpy3D<T>::D2H_H2D_DeviceMem_OnDiffDevice() {
     free(hOutputData);
     DeAllocateMemory();
   } else {
-    SUCCEED("Skipped the test as there is no peer access\n");
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
 }
 /*
@@ -238,7 +238,7 @@ template <typename T> void Memcpy3D<T>::D2D_DeviceMem_OnDiffDevice() {
     free(hOutputData);
     DeAllocateMemory();
   } else {
-    SUCCEED("Skipped the test as there is no peer access\n");
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
 }
 /*
@@ -515,13 +515,14 @@ template <typename T> void Memcpy3D<T>::simple_Memcpy3D() {
  */
 
 HIP_TEST_CASE(Unit_hipMemcpy3D_multiDevice_Negative) {
+  CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
     Memcpy3D<int> memcpy3d(width, height, depth, hipChannelFormatKindSigned);
     memcpy3d.NegativeTests();
   } else {
-    SUCCEED("skipping the testcases as numDevices < 2");
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 

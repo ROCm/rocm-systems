@@ -1,27 +1,10 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "cache_manager.hpp"
+#include <cstdint>
 
+#include "core/output_file_registry.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
@@ -341,8 +324,8 @@ merge_perfetto_files()
     // settings::default_process_suffix() which was set to dmp::rank() during
     // initialization
 
-    auto    suffix_variant  = settings::default_process_suffix();
-    int32_t cached_mpi_rank = 0;
+    auto         suffix_variant  = settings::default_process_suffix();
+    std::int32_t cached_mpi_rank = 0;
 
     if(std::holds_alternative<int>(suffix_variant))
     {
@@ -403,21 +386,22 @@ namespace processing_utils
 [[nodiscard]] data::processor_storage_t
 configure_processors(const std::shared_ptr<sample_processor_t>&       _type_processing,
                      const std::shared_ptr<data::processor_config_t>& _processor_config,
-                     const data::enabled_formats_t&                   _enabled_formats)
+                     const data::enabled_formats_t&                   _enabled_formats,
+                     output_file_registry&                            _output_registry)
 {
     data::processor_storage_t processor_storage;
     if(_enabled_formats.is_rocpd_enabled())
     {
         processor_storage.rocpd_processor = std::make_shared<rocpd_processor_t>(
             _processor_config->_metadata_registry, _processor_config->_agent_manager,
-            _processor_config->_pid, _processor_config->_ppid);
+            _processor_config->_pid, _processor_config->_ppid, _output_registry);
         _type_processing->add_handler(*processor_storage.rocpd_processor);
     }
     if(_enabled_formats.is_perfetto_enabled())
     {
         processor_storage.perfetto_processor = std::make_shared<perfetto_processor_t>(
             _processor_config->_metadata_registry, _processor_config->_agent_manager,
-            _processor_config->_pid, _processor_config->_ppid);
+            _processor_config->_pid, _processor_config->_ppid, _output_registry);
         _type_processing->add_handler(*processor_storage.perfetto_processor);
     }
     return processor_storage;
@@ -426,14 +410,15 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _type_proc
 void
 process_buffered_storage(
     const std::shared_ptr<data::processor_config_t>& _processor_config,
-    const std::string& _storage_filename, const data::enabled_formats_t& _enabled_formats)
+    const std::string& _storage_filename, const data::enabled_formats_t& _enabled_formats,
+    output_file_registry& _output_registry)
 {
     LOG_DEBUG("Processing buffered storage: {} for pid={}", _storage_filename,
               _processor_config->_pid);
 
     auto _processor_coordinator = std::make_shared<sample_processor_t>();
-    auto processor_storage =
-        configure_processors(_processor_coordinator, _processor_config, _enabled_formats);
+    auto processor_storage      = configure_processors(
+        _processor_coordinator, _processor_config, _enabled_formats, _output_registry);
     storage_parser_t _parser(_storage_filename);
 
     _processor_coordinator->prepare_for_processing();
@@ -482,7 +467,8 @@ create_processor_configs(const data::mapped_cache_files_t& _cache_files,
 void
 multithreaded_processing(
     const std::vector<std::shared_ptr<data::processor_config_t>>& _processor_configs,
-    const data::enabled_formats_t&                                _enabled_formats)
+    const data::enabled_formats_t&                                _enabled_formats,
+    output_file_registry&                                         _output_registry)
 {
     LOG_DEBUG("Starting multithreaded processing with {} configs",
               _processor_configs.size());
@@ -497,7 +483,7 @@ multithreaded_processing(
             process_buffered_storage, processor_config,
             utility::get_buffered_storage_filename(processor_config->_ppid,
                                                    processor_config->_pid),
-            _enabled_formats);
+            _enabled_formats, std::ref(_output_registry));
     }
 
     LOG_TRACE("Waiting for {} processing threads to complete", processing_threads.size());
@@ -511,7 +497,8 @@ multithreaded_processing(
 void
 sequential_processing(
     const std::vector<std::shared_ptr<data::processor_config_t>>& _processor_configs,
-    const data::enabled_formats_t&                                _enabled_formats)
+    const data::enabled_formats_t&                                _enabled_formats,
+    output_file_registry&                                         _output_registry)
 {
     LOG_DEBUG("Starting sequential processing with {} configs",
               _processor_configs.size());
@@ -521,7 +508,7 @@ sequential_processing(
         process_buffered_storage(processor_config,
                                  utility::get_buffered_storage_filename(
                                      processor_config->_ppid, processor_config->_pid),
-                                 _enabled_formats);
+                                 _enabled_formats, _output_registry);
     }
     LOG_DEBUG("Sequential processing completed");
 }
@@ -529,17 +516,18 @@ sequential_processing(
 void
 dispatch_processing(
     const std::vector<std::shared_ptr<data::processor_config_t>>& _processor_configs,
-    const data::enabled_formats_t&                                _enabled_formats)
+    const data::enabled_formats_t&                                _enabled_formats,
+    output_file_registry&                                         _output_registry)
 {
     if(_enabled_formats.has_sequential_formats())
     {
         auto sequential_formats = _enabled_formats.get_sequential_formats();
-        sequential_processing(_processor_configs, sequential_formats);
+        sequential_processing(_processor_configs, sequential_formats, _output_registry);
     }
     if(_enabled_formats.has_parallel_formats())
     {
         auto parallel_formats = _enabled_formats.get_parallel_formats();
-        multithreaded_processing(_processor_configs, parallel_formats);
+        multithreaded_processing(_processor_configs, parallel_formats, _output_registry);
     }
 }
 
@@ -553,7 +541,7 @@ cache_manager::get_instance()
 }
 
 void
-cache_manager::post_process_bulk()
+cache_manager::post_process_bulk(output_file_registry& _output_registry)
 {
     LOG_TRACE("Starting trace cache bulk post-processing");
 
@@ -582,22 +570,26 @@ cache_manager::post_process_bulk()
         filesystem_utils::get_cache_files(root_pid, temp_directory_content);
     LOG_DEBUG("Found {} cache file pairs to process", cache_files.size());
 
-    const data::enabled_formats_t enabled_formats;
-    enabled_formats.print();
-
-    auto processor_configs =
-        processing_utils::create_processor_configs(cache_files, root_pid);
-
-    processor_configs.push_back(std::make_shared<data::processor_config_t>(
-        getpid(), root_pid, m_metadata,
-        std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
-
-    LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
-    processing_utils::dispatch_processing(processor_configs, enabled_formats);
-
-    if(enabled_formats.is_perfetto_enabled() && get_merge_perfetto_files())
+    if(config::output_filtering::is_output_enabled_for_current_mpi_rank())
     {
-        filesystem_utils::merge_perfetto_files();
+        const data::enabled_formats_t enabled_formats;
+        enabled_formats.print();
+
+        auto processor_configs =
+            processing_utils::create_processor_configs(cache_files, root_pid);
+
+        processor_configs.push_back(std::make_shared<data::processor_config_t>(
+            getpid(), root_pid, m_metadata,
+            std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
+
+        LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
+        processing_utils::dispatch_processing(processor_configs, enabled_formats,
+                                              _output_registry);
+
+        if(enabled_formats.is_perfetto_enabled() && get_merge_perfetto_files())
+        {
+            filesystem_utils::merge_perfetto_files();
+        }
     }
 
     filesystem_utils::clear_cache_files(cache_files);

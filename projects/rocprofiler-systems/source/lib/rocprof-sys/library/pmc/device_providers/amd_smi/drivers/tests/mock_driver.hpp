@@ -1,7 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
+
+#include "core/sdma_feature.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 
@@ -26,25 +29,26 @@ class mock_driver
 {
 public:
     MOCK_METHOD(amdsmi_status_t, init, ());
-    MOCK_METHOD(amdsmi_status_t, init, (uint64_t init_flags));
+    MOCK_METHOD(amdsmi_status_t, init, (std::uint64_t init_flags));
     MOCK_METHOD(amdsmi_status_t, shutdown, ());
     MOCK_METHOD(amdsmi_status_t, get_version, (amdsmi_version_t * version));
     MOCK_METHOD(amdsmi_status_t, get_socket_handles,
-                (uint32_t * socket_count, amdsmi_socket_handle* socket_handles));
+                (std::uint32_t * socket_count, amdsmi_socket_handle* socket_handles));
     MOCK_METHOD(amdsmi_status_t, get_processor_handles,
-                (amdsmi_socket_handle socket_handle, uint32_t* processor_count,
+                (amdsmi_socket_handle socket_handle, std::uint32_t* processor_count,
                  amdsmi_processor_handle* processor_handles));
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     MOCK_METHOD(amdsmi_status_t, get_processor_handles_by_type,
                 (amdsmi_socket_handle socket_handle, processor_type_t processor_type,
-                 amdsmi_processor_handle* processor_handles, uint32_t* processor_count));
+                 amdsmi_processor_handle* processor_handles,
+                 std::uint32_t*           processor_count));
 #endif
     MOCK_METHOD(amdsmi_status_t, get_processor_type,
                 (amdsmi_processor_handle processor_handle,
                  processor_type_t*       processor_type));
     MOCK_METHOD(amdsmi_status_t, get_memory_usage,
                 (amdsmi_processor_handle processor_handle, amdsmi_memory_type_t type,
-                 uint64_t* usage));
+                 std::uint64_t* usage));
     MOCK_METHOD(amdsmi_status_t, get_metrics_info,
                 (amdsmi_processor_handle processor_handle,
                  amdsmi_gpu_metrics_t*   metrics));
@@ -55,24 +59,8 @@ public:
     // SDMA-specific methods (requires AMD SMI >= 26.3)
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
     MOCK_METHOD(amdsmi_status_t, get_gpu_process_list,
-                (amdsmi_processor_handle processor_handle, uint32_t* max_processes,
+                (amdsmi_processor_handle processor_handle, std::uint32_t* max_processes,
                  amdsmi_proc_info_t* list));
-#endif
-
-    // NIC-specific methods (requires ROCPROFSYS_BUILD_AINIC)
-#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    MOCK_METHOD(amdsmi_status_t, get_nic_asic_info,
-                (amdsmi_processor_handle processor_handle,
-                 amdsmi_nic_asic_info_t* asic_info));
-    MOCK_METHOD(amdsmi_status_t, get_nic_port_info,
-                (amdsmi_processor_handle processor_handle,
-                 amdsmi_nic_port_info_t* port_info));
-    MOCK_METHOD(amdsmi_status_t, get_nic_rdma_dev_info,
-                (amdsmi_processor_handle         processor_handle,
-                 amdsmi_nic_rdma_devices_info_t* rdma_info));
-    MOCK_METHOD(amdsmi_status_t, get_nic_rdma_port_statistics,
-                (amdsmi_processor_handle processor_handle, uint8_t rdma_port_idx,
-                 uint32_t* num_stats, amdsmi_nic_stat_t* stats));
 #endif
 
     /**

@@ -86,10 +86,18 @@ fi
 # First attachment
 echo "First attachment: Attaching profiler to PID $APP_PID for 5 seconds (${OUTPUT_FORMAT} format)..."
 
+# Output the command and environment for debugging
+echo "===== COMMAND TO EXECUTE ====="
+echo "${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}"
+echo ""
+echo "===== ENVIRONMENT VARIABLES ====="
+env | grep "^ROCPROF" | sort
+echo "===== END ENVIRONMENT ====="
+echo ""
 
 # Run first rocprofv3 with --attach option
 echo "About to launch first rocprofv3 process..."
-LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out} &
+LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --sync-output -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out} &
 FIRST_ROCPROF_PID=$!
 ATTACH_PID=$FIRST_ROCPROF_PID
 echo "First rocprofv3 PID: $FIRST_ROCPROF_PID"
@@ -134,10 +142,14 @@ fi
 # Second attachment
 echo "Second attachment: Attaching profiler to PID $APP_PID for 5 seconds (${OUTPUT_FORMAT} format)..."
 
+# Output the command for debugging
+echo "===== COMMAND TO EXECUTE ====="
+echo "${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}"
+echo ""
 
 # Run second rocprofv3 with --attach option
 echo "About to launch second rocprofv3 process..."
-LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out} &
+LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --sync-output -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out} &
 SECOND_ROCPROF_PID=$!
 ATTACH_PID=$SECOND_ROCPROF_PID
 echo "Second rocprofv3 PID: $SECOND_ROCPROF_PID"

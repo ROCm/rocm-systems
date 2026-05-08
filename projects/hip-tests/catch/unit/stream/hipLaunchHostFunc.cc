@@ -304,8 +304,7 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_multidevice) {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   if (num_devices < 2) {
-    SUCCEED("Skipping the testcases as numDevices < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   usrDataS* usrDataptr = reinterpret_cast<usrDataS*>(malloc(sizeof(usrDataS)));
   REQUIRE(usrDataptr != nullptr);

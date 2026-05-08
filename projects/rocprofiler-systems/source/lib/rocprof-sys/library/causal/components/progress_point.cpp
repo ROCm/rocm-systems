@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/causal/components/progress_point.hpp"
 #include "core/common.hpp"
@@ -26,6 +7,7 @@
 #include "core/timemory.hpp"
 #include "library/causal/experiment.hpp"
 #include "library/thread_data.hpp"
+#include <cstdint>
 
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/type_traits.hpp>
@@ -51,13 +33,13 @@ get_progress_map()
 }
 
 progress_map_t&
-get_progress_map(int64_t _tid)
+get_progress_map(std::int64_t _tid)
 {
     return get_progress_map()->at(_tid);
 }
 
 auto&
-get_progress_allocator(int64_t _tid)
+get_progress_allocator(std::int64_t _tid)
 {
     return thread_data<progress_allocator_t>::instance(construct_on_thread{ _tid });
 }
@@ -115,7 +97,7 @@ progress_point::mark()
 }
 
 void
-progress_point::set_value(int64_t _v)
+progress_point::set_value(std::int64_t _v)
 {
     m_delta     = _v;
     m_arrival   = _v;
@@ -158,13 +140,13 @@ progress_point::is_latency_point() const
     return (m_arrival != 0 || m_departure != 0);
 }
 
-int64_t
+std::int64_t
 progress_point::get_delta() const
 {
     return m_delta;
 }
 
-int64_t
+std::int64_t
 progress_point::get_arrival() const
 {
     if(!is_latency_point()) return m_arrival;
@@ -172,7 +154,7 @@ progress_point::get_arrival() const
     return (m_arrival >= m_departure) ? (m_arrival + 1) : m_arrival;
 }
 
-int64_t
+std::int64_t
 progress_point::get_departure() const
 {
     // if(!is_latency_point()) return m_departure;
@@ -180,13 +162,13 @@ progress_point::get_departure() const
     return m_departure;
 }
 
-int64_t
+std::int64_t
 progress_point::get_latency_delta() const
 {
     return (get_arrival() - get_departure());
 }
 
-int64_t
+std::int64_t
 progress_point::get_laps() const
 {
     return std::max(get_delta(), get_latency_delta());
@@ -211,7 +193,7 @@ namespace causal = rocprofsys::causal;
 void
 push_node<causal::component::progress_point>::operator()(type&        _obj, scope::config,
                                                          hash_value_t _hash,
-                                                         int64_t      _tid) const
+                                                         std::int64_t _tid) const
 {
     auto itr = causal::component::get_progress_map(_tid).emplace(_hash, nullptr);
     if(itr.second && !itr.first->second)
@@ -227,7 +209,7 @@ push_node<causal::component::progress_point>::operator()(type&        _obj, scop
 }
 
 void
-pop_node<causal::component::progress_point>::operator()(type& _obj, int64_t) const
+pop_node<causal::component::progress_point>::operator()(type& _obj, std::int64_t) const
 {
     auto* itr = _obj.get_iterator();
     if(itr && !(_obj.get_is_invalid() || _obj.get_is_running()))

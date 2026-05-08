@@ -6,36 +6,19 @@
 rocDecode prerequisites
 ********************************************************************
 
-rocDecode requires ROCm running on `GPUs based on the CDNA architecture <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_.
+rocDecode requires a supported `AMD GPU <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_. See the ROCm system requirements for the current list of supported GPUs and gfx targets.
 
-ROCm must be installed using the AMDGPU installer with the ``rocm`` usecase:
+rocDecode is built and installed as part of `TheRock <https://github.com/ROCm/TheRock>`_. All core dependencies are provided by the TheRock build, including:
+
+* HIP runtime and development libraries
+* AMD Clang++ compiler (C++17 required)
+* Libva and VA-API drivers
+* Libdrm (amdgpu)
+* CMake and pkg-config
+
+To build and run samples and extended tests, FFmpeg development libraries must be installed separately:
 
 .. code:: shell
 
-  sudo amdgpu-install --usecase=rocm
-
-rocDecode has been tested on the following Linux environments:
-  
-* Ubuntu 22.04 and 24.04
-* RHEL 8 and 9
-* SLES 15 SP7
-
-See `Supported operating systems <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_ for the complete list of ROCm supported Linux environments.
-
-The following prerequisites are installed by the package installer. If you are building and installing using the source code, use the `rocDecode-setup.py <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/rocDecode-setup.py>`_ to install these prerequisites. 
-
-.. note:: 
-
-  To use the rocDecode samples, the ``rocdecode``, ``rocdecode-dev``, ``rocdecode-host``, and ``rocdecode-test`` packages need to be installed.
-  
-  If you're installing using the rocDecode source code, the ``rocDecode-setup.py`` script must be run with ``--developer`` set to ``ON``.
-
-* Libva-amdgpu-dev, an AMD implementation for Video Acceleration API (VA-API)
-* AMD VA Drivers
-* CMake version 3.10 or later
-* AMD Clang++ Version 18.0.0 or later
-* pkg-config
-* FFmpeg runtime and headers
-* libstdc++-12-dev for installations on Ubuntu 22.04 
-* HIP, specifically the ``hip-dev`` package
+  sudo apt install libavcodec-dev libavformat-dev libavutil-dev
 
