@@ -68,7 +68,7 @@ __attribute__((visibility("hidden"))) inline void report_error(
     std::exit(EXIT_FAILURE);
 }
 
-//hardcoding for this sample
+//hardcoding for this sample: Degault width will get adjusted after reconfigure
 #define DEFAULT_WIDTH 2912
 #define DEFAULT_HEIGHT 1888
 
