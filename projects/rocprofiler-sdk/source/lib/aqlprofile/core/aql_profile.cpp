@@ -824,7 +824,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                     }
                     else if(control_ptr[se_index].status & sqttbuilder->GetBufferFullMask())
                     {
-                        AQL_ERROR << "SQTT data buffer full, SE(" << se_index << ")";
+                        AQL_WARNING << "SQTT data buffer full, SE(" << se_index << ")";
                         if(status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
                     }
                 }
