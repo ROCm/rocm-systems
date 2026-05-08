@@ -765,13 +765,13 @@ void aggregateForTypeAndOp(AggregationType aggType)
           // for reduce, the result would be in the last lane whose first bit is on in the mask
           // for scans, the associated result is different in each lane
           if (result != expected[resultLane]) {
-            printMismatch(result, expected[resultLane], input, mask);
+            printMismatch(result, expected[resultLane], input, mask, laneId);
             INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
             REQUIRE(result == expected[resultLane]);
           }
         } else {
           INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
-          compareFloatingPoint(result, expected[resultLane], mask, h_input.host_ptr());
+          compareFloatingPoint(result, expected[resultLane], mask, h_input.host_ptr(), laneId);
         }
       }
     }
@@ -1164,11 +1164,26 @@ TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
 // for all the tile sizes and all input types, using random input values, calculates the scan
 // values. Additionally, randomly make some threads not participate for the coalesced_threads case
 // TODO g-h-c add more types
-TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic, int)
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic,  int, unsigned int, long long,
+                   unsigned long long, float, half, double)
 {
   std::tuple<cooperative_groups::plus<TestType>,
              cooperative_groups::less<TestType>,
              cooperative_groups::greater<TestType>> types;
+
+  if (getWarpSize() == 32) {
+    runAggregationRandomForOps<false, TestType, 32>(AggregationType::InclusiveScan, types);
+  } else {
+    runAggregationRandomForOps<false, TestType, 64>(AggregationType::InclusiveScan, types);
+  }
+}
+
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_boolean, int, unsigned int, long long,
+                   unsigned long long)
+{
+  std::tuple<cooperative_groups::bit_and<TestType>,
+             cooperative_groups::bit_or<TestType>,
+             cooperative_groups::bit_xor<TestType>> types;
 
   if (getWarpSize() == 32) {
     runAggregationRandomForOps<false, TestType, 32>(AggregationType::InclusiveScan, types);

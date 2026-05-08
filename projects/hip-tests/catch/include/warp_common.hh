@@ -488,13 +488,14 @@ T calculateExpected(T* output,
 }
 
 template <class T>
-void printMismatch(const T& result, const T& expected, const T* input, unsigned long long mask)
+void printMismatch(const T& result, const T& expected, const T* input, unsigned long long mask, int laneId)
 {
   std::ios init(NULL);
 
   init.copyfmt(std::cout);
-  std::cout << "\nMismatch\n";
+  std::cout << "\nMismatch at lane: " << laneId << "\n";
   std::cout << "Mask: 0x" << std::hex << std::setfill('0') << std::setw(16) << mask << "\n";
+  std::cout << "Input:\n";
   std::cout.copyfmt(init);
 
   for (int i = 0; i < getWarpSize(); i++) {
@@ -523,7 +524,7 @@ void printMismatch(const T& result, const T& expected, const T* input, unsigned 
 }
 
 template <class T>
-void compareFloatingPoint(const T& result, const T& expected, unsigned long long mask, const T* input)
+void compareFloatingPoint(const T& result, const T& expected, unsigned long long mask, const T* input, int laneId)
 {
   using namespace Catch::Matchers;
   if constexpr (std::is_same<T, __half>::value) {
@@ -539,7 +540,7 @@ void compareFloatingPoint(const T& result, const T& expected, unsigned long long
     if (relativeEpsilon > eps) {
       if (absDifference > 0.0001) {
         if (absDifference >= eps * fabs(fmax(resultFloat, expectedFloat))) {
-          printMismatch(result, expected, input, mask);
+          printMismatch(result, expected, input, mask, laneId);
           std::cout << "Relative epsilon: " << relativeEpsilon << "\n";
           std::cout << "Difference: " << absDifference << "\n";
         }
@@ -556,7 +557,7 @@ void compareFloatingPoint(const T& result, const T& expected, unsigned long long
     if (relativeEpsilon > eps) {
       if (absDifference > 0.0001) {
         if (absDifference >= eps * fabs(fmax(result, expected))) {
-          printMismatch(result, expected, input, mask);
+          printMismatch(result, expected, input, mask, laneId);
           std::cout << "Relative epsilon: " << relativeEpsilon << "\n";
           std::cout << "Difference: " << absDifference << "\n";
         }
@@ -614,12 +615,12 @@ void runTestReduce(int iteration, Reduce reduce)
             REQUIRE(__half2float(result) == __half2float(expected));
           else {
             if (result != expected) {
-              printMismatch(result, expected, waveInput, mask);
+              printMismatch(result, expected, waveInput, mask, lane);
               REQUIRE(result == expected);
             }
           }
         } else
-          compareFloatingPoint(result, expected, mask, waveInput);
+          compareFloatingPoint(result, expected, mask, waveInput, lane);
 
       }
       lane++;
