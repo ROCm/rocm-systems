@@ -352,4 +352,23 @@ else()
     endif()
 endif()
 
+#
+# rlog — use the system-installed Hub; only the submodule headers are needed for
+# the bridge implementation.  Never build or install librlog.so from here: the Hub
+# must be a single system-wide singleton shared with every other tool (e.g. rpd_tracer).
+#
+rocprofiler_checkout_git_submodule(
+    RELATIVE_PATH external/rlog
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    REPO_URL https://github.com/ROCm/rlog.git
+    REPO_BRANCH "main")
+
+find_library(RLOG_HUB_LIBRARY NAMES rlog REQUIRED)
+message(STATUS "rlog Hub library: ${RLOG_HUB_LIBRARY}")
+
+target_link_libraries(rocprofiler-sdk-rlog INTERFACE ${RLOG_HUB_LIBRARY})
+target_include_directories(
+    rocprofiler-sdk-rlog SYSTEM
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/rlog/include>)
+
 cmake_policy(POP)

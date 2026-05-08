@@ -26,6 +26,7 @@
 #include "config.hpp"
 #include "execution_profile.hpp"
 #include "helper.hpp"
+#include "rlog_tool.hpp"
 #include "stream_stack.hpp"
 
 #include "lib/att-tool/att_lib_wrapper.hpp"
@@ -638,7 +639,10 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
             // only pause if there are active contexts and the ref count is zero
             if(_active_contexts != 0 && _ref_count == 0)
+            {
+                rocprofiler::tool::rlog::disable();
                 set_contexts_active(*ctxs, false);
+            }
             else if(_ref_count < 0)
             {
                 ROCP_WARNING << fmt::format(
@@ -663,6 +667,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 if(tool::get_config().selected_regions) att_device_trace_id++;
                 set_contexts_active(*ctxs, true);
+                rocprofiler::tool::rlog::enable();
             }
             else if(_ref_count < 0)
             {
@@ -2234,6 +2239,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                              callbacks.callback_tracing,
                              nullptr),
                          "callback tracing service failed to configure");
+
+        rocprofiler::tool::rlog::enable();
     }
 
     // Register pause/resume control callbacks when using selected_regions or marker tracing
@@ -3212,11 +3219,19 @@ tool_detach(void* /*tool_data*/)
 }
 
 void
+add_rlog_marker_message(uint64_t corr_id, std::string msg)
+{
+    if(tool_metadata) tool_metadata->add_marker_message(corr_id, std::move(msg));
+}
+
+void
 tool_fini(void* /*tool_data*/)
 {
     static bool _first = true;
     if(!_first) return;
     _first = false;
+
+    rocprofiler::tool::rlog::disable();
 
     client_identifier = nullptr;
     client_finalizer  = nullptr;

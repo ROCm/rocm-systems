@@ -4,9 +4,9 @@
 
 rocprofiler_activate_clang_tidy()
 
-set(TOOL_HEADERS config.hpp execution_profile.hpp helper.hpp stream_stack.hpp)
+set(TOOL_HEADERS config.hpp execution_profile.hpp helper.hpp rlog_tool.hpp stream_stack.hpp)
 
-set(TOOL_SOURCES config.cpp main.c tool.cpp stream_stack.cpp)
+set(TOOL_SOURCES config.cpp main.c rlog_tool.cpp tool.cpp stream_stack.cpp)
 
 add_library(rocprofiler-sdk-tool SHARED)
 target_sources(rocprofiler-sdk-tool PRIVATE ${TOOL_SOURCES} ${TOOL_HEADERS})
@@ -24,7 +24,11 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-otf2
             rocprofiler-sdk::rocprofiler-sdk-dw
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
-            rocprofiler-sdk::rocprofiler-sdk-att-parser)
+            rocprofiler-sdk::rocprofiler-sdk-att-parser
+            rocprofiler-sdk::rocprofiler-sdk-rlog)
+
+target_include_directories(rocprofiler-sdk-tool
+                           PRIVATE ${PROJECT_SOURCE_DIR}/external/rlog/src)
 
 set_target_properties(
     rocprofiler-sdk-tool
