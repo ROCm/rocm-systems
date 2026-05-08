@@ -612,7 +612,13 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.guest_sgpr_count = granulated_count_to_registers(guest_sgpr_granulated, 8);
   result.host_sgpr_count = std::max(result.guest_sgpr_count, options.minimum_sgprs);
   result.target_sgpr_count = result.host_sgpr_count;
-  if (arch_max_sgprs(host_arch) != 0 && result.host_sgpr_count > arch_max_sgprs(host_arch)) {
+  const uint32_t max_logical_sgprs = arch_max_sgprs(host_arch);
+  const uint32_t max_descriptor_sgprs = align_up(max_logical_sgprs, 8);
+  if (max_logical_sgprs != 0 && result.host_sgpr_count > max_descriptor_sgprs) {
+    // The ISA's logical SGPR limit is the highest ordinary scalar register
+    // code may address. The kernel descriptor stores a rounded allocation
+    // size, so a CDNA wave with 102 logical SGPRs can legitimately encode a
+    // 104-SGPR allocation granule without making s102/s103 usable.
     result.warnings.push_back("required SGPR count exceeds target limit; spill tiers are not "
                               "implemented for this descriptor");
     result.supported = false;
