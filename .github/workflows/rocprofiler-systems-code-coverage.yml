@@ -95,10 +95,8 @@ jobs:
         max_attempts: 5
         command: |
           apt-get update &&
-          apt-get remove -y --purge 'libopenmpi-dev' 'libopenmpi3' 'openmpi-bin' 'openmpi-common' &&
-          apt-get autoremove -y --purge &&
           apt-get upgrade -y &&
-          apt-get install -y libomp-dev libmpich-dev mpich gcovr &&
+          apt-get install -y libomp-dev gcovr &&
           apt-get autoclean
 
     - name: Install Python Test Dependencies
