@@ -1,15 +1,6 @@
-# Set the HIP language runtime link flags as FindHIP does not set them.
 set(CMAKE_INSTALL_TESTDIR test/${PROJECT_NAME})
-set(CMAKE_EXECUTABLE_RUNTIME_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RUNTIME_CXX_FLAG})
-set(CMAKE_EXECUTABLE_RUNTIME_HIP_FLAG_SEP ${CMAKE_SHARED_LIBRARY_RUNTIME_CXX_FLAG_SEP})
-set(CMAKE_EXECUTABLE_RPATH_LINK_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RPATH_LINK_CXX_FLAG})
-
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${ROCM_PATH}/lib/cmake/hip")
-set(CMAKE_HIP_ARCHITECTURES OFF)
-if(DEFINED ROCM_PATH)
-    set(HIP_ROOT_DIR "${ROCM_PATH}/bin")
-endif()
-find_package(HIP REQUIRED MODULE)
+find_package(hip CONFIG REQUIRED PATHS "${ROCM_PATH}")
+enable_language(HIP)
 
 # ########################################################################################
 function(rocprofiler_featuretests_tracer_add_test _TARGET)
@@ -28,7 +19,8 @@ function(rocprofiler_featuretests_tracer_add_test _TARGET)
 endfunction()
 
 function(rocprofiler_featuretests_tracer_add_executable _TARGET)
-    hip_add_executable(${_TARGET} ${ARGN})
+    add_executable(${_TARGET} ${ARGN})
+    target_link_libraries(${_TARGET} PRIVATE hip::device)
     rocprofiler_featuretests_tracer_add_test(${_TARGET})
 endfunction()
 
@@ -52,7 +44,7 @@ set(GTEST_MAIN_DIR ${PROJECT_SOURCE_DIR}/tests-v2/featuretests)
 file(GLOB GTEST_MAIN_SRC_FILE ${GTEST_MAIN_DIR}/*.cpp)
 
 # Compile Applications hip_helloworld
-set_source_files_properties(apps/hello_world.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+set_source_files_properties(apps/hello_world.cpp PROPERTIES LANGUAGE HIP)
 rocprofiler_featuretests_tracer_add_executable(tracer_hip_helloworld apps/hello_world.cpp)
 set_target_properties(
     tracer_hip_helloworld
@@ -67,8 +59,7 @@ install(
         COMPONENT tests)
 
 # hsa-mem_async_copy and async_copy_on_engine
-set_source_files_properties(apps/copy_on_engine.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT
-                                                               1)
+set_source_files_properties(apps/copy_on_engine.cpp PROPERTIES LANGUAGE HIP)
 rocprofiler_featuretests_tracer_add_executable(copy_on_engine apps/copy_on_engine.cpp)
 set_target_properties(
     copy_on_engine PROPERTIES RUNTIME_OUTPUT_DIRECTORY
@@ -90,8 +81,9 @@ find_library(
     HINTS ${ROCM_PATH}/lib)
 if(ROCTX_LIBRARY)
     set_source_files_properties(apps/MatrixTranspose.cpp
-                                PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-    hip_add_executable(tracer_matrix_transpose apps/MatrixTranspose.cpp)
+                                PROPERTIES LANGUAGE HIP)
+    add_executable(tracer_matrix_transpose apps/MatrixTranspose.cpp)
+    target_link_libraries(tracer_matrix_transpose PRIVATE hip::device)
     set_target_properties(
         tracer_matrix_transpose
         PROPERTIES RUNTIME_OUTPUT_DIRECTORY
