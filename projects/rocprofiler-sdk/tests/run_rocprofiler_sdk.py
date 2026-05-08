@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 PROJECT_NAME = "rocprofiler-sdk"
+DEFAULT_BUILD_DIR_NAME = f"{PROJECT_NAME}-test"
 
 logging.basicConfig(level=logging.INFO)
 
@@ -29,6 +30,10 @@ payload. When run from an installed location, it discovers:
 
 The installed tests are CMake source files, so the runner configures and builds
 them before invoking CTest.
+
+Environment variables:
+  ROCM_PATH          ROCm install prefix override.
+  TEST_BUILD_DIR     Build directory for the installed test source.
 """
 
 
@@ -75,8 +80,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--build-dir",
-        default="build",
-        help="Relative or absolute CMake build directory for the SDK tests.",
+        type=Path,
+        default=path_from_env("TEST_BUILD_DIR"),
+        help=(
+            "Relative or absolute CMake build directory for the SDK tests. "
+            f"Defaults to TEST_BUILD_DIR or ./{DEFAULT_BUILD_DIR_NAME}."
+        ),
     )
     parser.add_argument(
         "--parallel",
@@ -150,11 +159,11 @@ def setup_env(rocm_path: Path) -> Dict[str, str]:
     return env
 
 
-def get_build_dir(tests_path: Path, build_dir: str) -> Path:
-    path = Path(build_dir)
+def get_build_dir(build_dir: Optional[Path]) -> Path:
+    path = build_dir if build_dir is not None else Path(DEFAULT_BUILD_DIR_NAME)
     if path.is_absolute():
-        return path
-    return tests_path / path
+        return path.resolve()
+    return (Path.cwd() / path).resolve()
 
 
 def cmake_config(
@@ -167,6 +176,8 @@ def cmake_config(
 
     cmd = [
         "cmake",
+        "-S",
+        str(tests_path),
         "-B",
         str(build_dir),
         "-G",
@@ -178,13 +189,11 @@ def cmake_config(
         f"-DPython3_EXECUTABLE={sys.executable}",
     ]
 
-    logging.info("++ Exec [%s]$ %s", tests_path, format_command(cmd))
-    subprocess.run(cmd, cwd=tests_path, check=True, env=env)
+    logging.info("++ Exec [%s]$ %s", Path.cwd(), format_command(cmd))
+    subprocess.run(cmd, check=True, env=env)
 
 
-def cmake_build(
-    tests_path: Path, build_dir: Path, parallel: int, env: Dict[str, str]
-) -> None:
+def cmake_build(build_dir: Path, parallel: int, env: Dict[str, str]) -> None:
     cmd = [
         "cmake",
         "--build",
@@ -193,13 +202,11 @@ def cmake_build(
         str(parallel),
     ]
 
-    logging.info("++ Exec [%s]$ %s", tests_path, format_command(cmd))
-    subprocess.run(cmd, cwd=tests_path, check=True, env=env)
+    logging.info("++ Exec [%s]$ %s", Path.cwd(), format_command(cmd))
+    subprocess.run(cmd, check=True, env=env)
 
 
-def execute_tests(
-    tests_path: Path, build_dir: Path, parallel: int, env: Dict[str, str]
-) -> None:
+def execute_tests(build_dir: Path, parallel: int, env: Dict[str, str]) -> None:
     cmd = [
         "ctest",
         "--test-dir",
@@ -209,8 +216,8 @@ def execute_tests(
         "--output-on-failure",
     ]
 
-    logging.info("++ Exec [%s]$ %s", tests_path, format_command(cmd))
-    subprocess.run(cmd, cwd=tests_path, check=True, env=env)
+    logging.info("++ Exec [%s]$ %s", Path.cwd(), format_command(cmd))
+    subprocess.run(cmd, check=True, env=env)
 
 
 def main() -> None:
@@ -224,12 +231,12 @@ def main() -> None:
     )
     if not tests_path.is_dir():
         raise FileNotFoundError(f"Could not find rocprofiler-sdk tests: {tests_path}")
-    build_dir = get_build_dir(tests_path, args.build_dir)
+    build_dir = get_build_dir(args.build_dir)
     env = setup_env(rocm_path)
 
     cmake_config(rocm_path, tests_path, build_dir, env)
-    cmake_build(tests_path, build_dir, args.parallel, env)
-    execute_tests(tests_path, build_dir, args.parallel, env)
+    cmake_build(build_dir, args.parallel, env)
+    execute_tests(build_dir, args.parallel, env)
 
 
 if __name__ == "__main__":
