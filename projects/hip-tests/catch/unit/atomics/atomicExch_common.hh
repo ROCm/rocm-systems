@@ -342,7 +342,8 @@ void AtomicExchSingleDeviceMultipleKernelTest(const unsigned int kernel_count,
   int concurrent_kernels = 0;
   HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, 0));
   if (!concurrent_kernels) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentKernelExecutionUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentKernelExecutionUnsupported);
+    return;
   }
 
   AtomicExchParams params;
@@ -371,12 +372,14 @@ void AtomicExchMultipleDeviceMultipleKernelAndHostTest(const unsigned int num_de
                                                        const unsigned int host_thread_count = 0u) {
   if (num_devices > 1) {
     if (HipTest::getDeviceCount() < num_devices) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kRequiredDeviceCountNotMet);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiredDeviceCountNotMet);
+      return;
     }
   }
 
   if (!HipTest::checkConcurrentKernels(num_devices)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentKernelExecutionUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentKernelExecutionUnsupported);
+    return;
   }
 
   AtomicExchParams params;

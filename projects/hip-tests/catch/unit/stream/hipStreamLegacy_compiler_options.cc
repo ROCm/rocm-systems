@@ -99,7 +99,10 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsDiffOperationWithSptCompOption) {
   const unsigned int threadsSupported = std::thread::hardware_concurrency();
 
   if (threadsSupported < 2) {
-    HIP_SKIP_TEST("Skipping due to machine doesn't support two concurrent threads");
+    HipTest::HIP_SKIP_TEST(
+        "Skipping due to machine does't "
+        "support two concurrent threads");
+    return;
   }
 
   int* hostArrSrc = new int[N];

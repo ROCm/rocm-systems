@@ -40,7 +40,8 @@ HIP_TEST_CASE(Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic) {
   int can_access_peer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, device1, device2));
   if (!can_access_peer) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    return;
   }
 
   uint32_t link_type1 = -1, hop_count1 = -1;

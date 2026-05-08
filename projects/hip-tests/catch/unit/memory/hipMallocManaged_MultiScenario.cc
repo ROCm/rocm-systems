@@ -63,7 +63,8 @@ void HostKernelDouble(float* Hmm, float* hPtr, size_t n) {
 HIP_TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
 
   float *Hmm = nullptr, *hPtr = nullptr, *dPtr = nullptr, *resPtr = nullptr;
@@ -99,7 +100,8 @@ HIP_TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
 
   std::atomic<int> DataMismatch{0};
@@ -150,7 +152,8 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
 
   std::atomic<int> DataMismatch{0};
@@ -158,7 +161,8 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
   int NumDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&NumDevices));
   if (NumDevices < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
   unsigned int NUM_ELMS = (1024 * 1024);
   float *Ad[MAX_GPU], *Hmm = NULL, *Ah = new float[NUM_ELMS];
@@ -204,14 +208,16 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
 HIP_TEST_CASE(Unit_hipMallocManaged_OverSubscription) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
 
 #if HT_AMD
   int isPageableHMM = 0;
   HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0));
   if (!isPageableHMM) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
+    return;
   }
 #endif
 
@@ -287,7 +293,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_TwoPointers, int,
                    float, double) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
 
   int NumDevices = 0;
@@ -327,13 +334,15 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_DeviceContextChange,
                    unsigned char, int, float, double) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
 
   int NumDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&NumDevices));
   if (NumDevices < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   std::atomic<unsigned int> DataMismatch;

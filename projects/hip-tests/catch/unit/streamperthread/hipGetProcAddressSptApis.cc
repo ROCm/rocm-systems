@@ -2505,7 +2505,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_LaunchCooperativeKernel) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, 0));
 
   if (!device_properties.cooperativeLaunch) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   void* hipLaunchCooperativeKernel_spt_ptr = nullptr;

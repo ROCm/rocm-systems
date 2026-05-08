@@ -29,7 +29,8 @@ HIP_TEST_CASE(Unit_hipMemVmm_Basic) {
   INFO("hipDeviceAttributeVirtualMemoryManagementSupported: " << vmm);
 
   if (vmm == 0) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
+    return;
   }
 
   size_t granularity = 0;
@@ -86,7 +87,8 @@ HIP_TEST_CASE(Unit_hipMemVmm_Uncached) {
   INFO("hipDeviceAttributeVirtualMemoryManagementSupported: " << vmm);
 
   if (vmm == 0) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
+    return;
   }
 
   size_t granularity = 0;

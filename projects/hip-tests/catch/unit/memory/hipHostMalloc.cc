@@ -95,7 +95,7 @@ HIP_TEST_CASE(Unit_hipHostMalloc_Basic) {
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipGetDeviceProperties(&prop, device));
   if (prop.canMapHostMemory != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
   } else {
     float *A_h, *B_h, *C_h;
     float *A_d, *B_d, *C_d;
@@ -191,7 +191,7 @@ HIP_TEST_CASE(Unit_hipHostMalloc_Coherent) {
 
     HIP_CHECK(hipFreeHost(A));
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
   }
 }
 
@@ -221,7 +221,8 @@ HIP_TEST_CASE(Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory) {
   char* host_ptr = nullptr;
   const size_t total_ram_mb = HipTest::getTotalSystemMemoryInMB();
   if (total_ram_mb == 0) {
-    HIP_SKIP_TEST("total system memory could not be queried.");
+    HipTest::HIP_SKIP_TEST("total system memory could not be queried.");
+    return;
   }
 
   const size_t total_ram_bytes = total_ram_mb * 1024 * 1024;

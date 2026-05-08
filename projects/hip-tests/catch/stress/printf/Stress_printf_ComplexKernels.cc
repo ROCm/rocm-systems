@@ -398,7 +398,7 @@ HIP_TEST_CASE(Stress_printf_ComplexKernelMultStream) {
   REQUIRE(TestPassed);
   printf("Test - Stress_printf_ComplexKernelMultStream completed \n");
 #else
-  HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
@@ -414,7 +414,8 @@ HIP_TEST_CASE(Stress_printf_ComplexKernelMultStreamMultGpu) {
   int numOfGPUs = 0;
   HIP_CHECK(hipGetDeviceCount(&numOfGPUs));
   if (numOfGPUs < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
   // num_blocks is calculated using an approximate formula to arrive at
   // the required print data quantity. CONST_WEIGHTING_FACT1 and
@@ -428,6 +429,6 @@ HIP_TEST_CASE(Stress_printf_ComplexKernelMultStreamMultGpu) {
   REQUIRE(TestPassed);
   printf("Test - Stress_printf_ComplexKernelMultStreamMultGpu end \n");
 #else
-  HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }

@@ -34,14 +34,16 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoD_Basic, int, float,
 
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   int canAccessPeer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
   HIP_CHECK(hipSetDevice(0));
   if (!canAccessPeer) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    return;
   }
   HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
   HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM, false);

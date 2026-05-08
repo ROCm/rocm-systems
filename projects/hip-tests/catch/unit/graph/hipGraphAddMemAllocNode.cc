@@ -454,7 +454,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_1) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
+    HipTest::HIP_SKIP_TEST(
+        "Runtime doesn't support Memory Pool."
+        " Skip the test case.");
+    return;
   }
 
   constexpr size_t N = 1024 * 1024;
@@ -561,7 +564,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_2) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
+    HipTest::HIP_SKIP_TEST(
+        "Runtime doesn't support Memory Pool."
+        " Skip the test case.");
+    return;
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;
@@ -627,7 +633,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_3) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
+    HipTest::HIP_SKIP_TEST(
+        "Runtime doesn't support Memory Pool."
+        " Skip the test case.");
+    return;
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;
@@ -698,7 +707,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_4) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
+    HipTest::HIP_SKIP_TEST(
+        "Runtime doesn't support Memory Pool."
+        " Skip the test case.");
+    return;
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;
@@ -784,7 +796,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Argument_Check) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
+    HipTest::HIP_SKIP_TEST(
+        "Runtime doesn't support Memory Pool."
+        " Skip the test case.");
+    return;
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;
@@ -1001,7 +1016,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Instanciate_Graph_Again) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
+    HipTest::HIP_SKIP_TEST(
+        "Runtime doesn't support Memory Pool."
+        " Skip the test case.");
+    return;
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;
@@ -1060,7 +1078,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
+    HipTest::HIP_SKIP_TEST(
+        "Runtime doesn't support Memory Pool."
+        " Skip the test case.");
+    return;
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;
@@ -1122,7 +1143,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
+    HipTest::HIP_SKIP_TEST(
+        "Runtime doesn't support Memory Pool."
+        " Skip the test case.");
+    return;
   }
 
   constexpr size_t N = 512 * 1024 * 1024;

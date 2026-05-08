@@ -356,7 +356,8 @@ HIP_TEST_CASE(Unit_hipMallocMipmappedArray_Negative_NumericLimit) {
 HIP_TEMPLATE_TEST_CASE(Unit_hipMallocMipmappedArray_Negative_Non2DTextureGather, char, uchar2,
                    float2) {
 #if HT_AMD
-  HIP_SKIP_TEST(HipTest::SkipReason::kTextureGatherUnsupportedAmd);
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureGatherUnsupportedAmd);
+  return;
 #endif
   hipMipmappedArray_t array;
   unsigned int numLevels = 1;

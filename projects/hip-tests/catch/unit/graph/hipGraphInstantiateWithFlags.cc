@@ -264,10 +264,11 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg) {
     if (canAccessPeer) {
       GraphInstantiateWithFlags_DependencyGraph(true);
     } else {
-      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 }
 
@@ -285,10 +286,11 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_StreamCapture) {
     if (canAccessPeer) {
       GraphInstantiateWithFlags_StreamCapture();
     } else {
-      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 }
 
@@ -306,10 +308,11 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg) {
     if (canAccessPeer) {
       GraphInstantiateWithFlags_StreamCapture(true);
     } else {
-      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 }
 

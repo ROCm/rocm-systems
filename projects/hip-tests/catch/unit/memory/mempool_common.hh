@@ -19,19 +19,21 @@ namespace {
 constexpr auto wait_ms = 500;
 }  // anonymous namespace
 
-#define checkMempoolSupported(device) {                                                            \
-  int deviceSupportsMemoryPools = 0;                                                               \
-  HIP_CHECK(hipDeviceGetAttribute(&deviceSupportsMemoryPools,                                      \
-        hipDeviceAttributeMemoryPoolsSupported, device));                                          \
-  if (0 == deviceSupportsMemoryPools) {                                                            \
-    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);                                    \
-  }                                                                                                \
+#define checkMempoolSupported(device) {\
+  int deviceSupportsMemoryPools = 0;\
+  HIP_CHECK(hipDeviceGetAttribute(&deviceSupportsMemoryPools,\
+        hipDeviceAttributeMemoryPoolsSupported, device));\
+  if (0 == deviceSupportsMemoryPools) {\
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);\
+    return;\
+  }\
 }
 
-#define checkIfMultiDev(numOfDev) {                                                                \
-  if (numOfDev < 2) {                                                                              \
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);                                         \
-  }                                                                                                \
+#define checkIfMultiDev(numOfDev) {\
+  if (numOfDev < 2) {\
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);\
+    return;\
+  }\
 }
 
 template <typename T> __global__ void kernel_500ms(T* host_res, int clk_rate) {
@@ -84,7 +86,8 @@ template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemP
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    return;
   }
   unsigned int *notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -143,7 +146,8 @@ void MallocMemPoolAsync_TwoAllocs(F malloc_func, const MemPools mempool_type) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    return;
   }
   unsigned int *notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -222,7 +226,8 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    return;
   }
   unsigned int *notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));

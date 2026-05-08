@@ -150,7 +150,7 @@ HIP_TEST_CASE(Unit_hipDeviceTotalMem_MaskedDevices) {
     ret = getTotalMemoryOfMaskedDevices(count);
     REQUIRE(ret == true);
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 

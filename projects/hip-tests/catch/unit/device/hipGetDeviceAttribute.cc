@@ -260,9 +260,10 @@ HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported) {
     HIP_CHECK(hipHostUnregister(x.get()));
     HIP_CHECK_ERROR(hipHostGetDevicePointer(&device_memory, x.get(), 0), hipErrorInvalidValue);
   } else {
-    HIP_SKIP_TEST(
+    HipTest::HIP_SKIP_TEST(
         "Skipping the test as GPU 0 doesn't support "
         "hipDeviceAttributeHostRegisterSupported attribute.\n");
+    return;
   }
 }
 

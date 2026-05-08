@@ -47,7 +47,8 @@ template <typename T> __global__ void set(T* ptr, T val) { *ptr = val; }
 
 HIP_TEST_CASE(Unit_hipHostGetDevicePointer_UseCase) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCanMapHostMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+    return;
   }
 
   int* hPtr{nullptr};
@@ -86,7 +87,8 @@ HIP_TEST_CASE(Unit_hipHostGetDevicePointer_UseCase) {
 
 HIP_TEST_CASE(Unit_hipHostGetDevicePointer_Capture) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCanMapHostMemory)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+    return;
   }
 
   int* host_ptr = nullptr;

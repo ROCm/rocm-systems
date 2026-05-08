@@ -35,7 +35,8 @@
 HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Default) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   const auto allocation_size = GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
@@ -101,7 +102,8 @@ HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Synchronization_Behavior) {
 
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   int can_access_peer = 0;
@@ -146,7 +148,8 @@ HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Synchronization_Behavior) {
 HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_ZeroSize) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   const auto allocation_size = kPageSize;
@@ -228,7 +231,8 @@ HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_ZeroSize) {
 HIP_TEST_CASE(Unit_hipMemcpyPeer_Negative_Parameters) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   int can_access_peer = 0;

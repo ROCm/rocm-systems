@@ -70,7 +70,8 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Basic) {
 HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
   }
 
   float *A, *B, *C;

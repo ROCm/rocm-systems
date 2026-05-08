@@ -50,7 +50,8 @@ static void RunBenchmark() {
  */
 HIP_TEST_CASE(Performance_hipMemPoolGetAccess) {
   if (!AreMemPoolsSupported(0)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    return;
   }
   RunBenchmark();
 }

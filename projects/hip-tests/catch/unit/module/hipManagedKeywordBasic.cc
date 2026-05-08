@@ -42,7 +42,8 @@ HIP_TEST_CASE(Unit_hipModuleGetGlobal_Functional) {
     int managed_memory = 0;
     HIPCHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
     if (!managed_memory) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+      return;
     }
   }
   for (int i = 0; i < numDevices; i++) {

@@ -138,7 +138,8 @@ HIP_TEST_CASE(Perf_hipPerfHostNumaAlloc_test) {
   CONSOLE_PRINT("Cpu count %d, Gpu count %d, page_size %d\n", cpuCount, gpuCount, page_size);
 
   if (cpuCount < 0 || gpuCount < 0) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    return;
   }
 
   REQUIRE(true == runTest(cpuCount, gpuCount, hipHostMallocDefault | hipHostMallocNumaUser,

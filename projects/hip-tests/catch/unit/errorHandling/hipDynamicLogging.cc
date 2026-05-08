@@ -83,7 +83,8 @@ HIP_TEST_CASE(Unit_hipDynamicLogging_Positive_Basic) {
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    return;
   }
 
   REQUIRE(hipDynamicLoggingTest() == true);
@@ -106,7 +107,8 @@ HIP_TEST_CASE(Unit_hipDynamicLogging_Positive_MultipleEnableDisable) {
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    return;
   }
 
   // Test multiple enable/disable cycles

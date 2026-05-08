@@ -55,7 +55,8 @@ HIP_TEST_CASE(Perf_MempoolManager_hipMallocAsync_hipFreeAsync) {
   size_t free = 0, total = 0;
   HIP_CHECK(hipMemGetInfo(&free, &total));
   if (free < 30_GB) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kNotEnoughFreeGpuMemory);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNotEnoughFreeGpuMemory);
+    return;
   }
 
   hipMemPool_t pool;

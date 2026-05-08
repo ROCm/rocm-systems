@@ -33,7 +33,8 @@
 
 HIP_TEST_CASE(Unit_hipMemcpyAtoA_Basic) {
 #if HT_NVIDIA
-  HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
+  return;
 #else
   HIP_CHECK(hipSetDevice(0));
   CHECK_IMAGE_SUPPORT

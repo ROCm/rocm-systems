@@ -102,7 +102,7 @@ HIP_TEST_CASE(Unit_hipGraphLaunch_Functional_multidevice_test) {
       hipGraphLaunch_test();
     }
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 }
 

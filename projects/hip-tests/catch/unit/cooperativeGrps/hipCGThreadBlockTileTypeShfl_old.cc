@@ -169,7 +169,8 @@ HIP_TEST_CASE(Unit_hipCGThreadBlockTileType_Shfl) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   TiledGroupShflTests shfl_test = GENERATE(

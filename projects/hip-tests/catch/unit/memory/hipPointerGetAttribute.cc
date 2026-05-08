@@ -37,7 +37,8 @@ behaviour
   hipDeviceAttribute_t attr = hipDeviceAttributeVirtualMemoryManagementSupported;                \
   HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
   if (value == 0) {                                                                              \
-    HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);                                         \
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);                                  \
+    return;                                                                                      \
   }                                                                                              \
 }
 
@@ -160,11 +161,12 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_PeerGPU) {
                                        reinterpret_cast<hipDeviceptr_t>(A_d)));
       REQUIRE(data == 0);
     } else {
-      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     HIP_CHECK(hipFree(A_d));
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
   HIP_CHECK(hipFree(A_d));
 }

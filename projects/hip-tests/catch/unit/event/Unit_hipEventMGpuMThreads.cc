@@ -210,7 +210,7 @@ HIP_TEST_CASE(Unit_hipEventMGpuMThreads_2) {
   if (numDevices > 1) {
     testEventMGpuMThreads(numDevices);
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 
@@ -234,7 +234,7 @@ HIP_TEST_CASE(Unit_hipEventMGpuMThreads_3) {
     fprintf(stderr, "Second round\n");
     testEventMGpuMThreads(numDevices);
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 

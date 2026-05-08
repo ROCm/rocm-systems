@@ -647,7 +647,8 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_Negative_MultiDevice_Context_Changed) {
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 1, 0));
   }
   if (!peerAccess) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    return;
   }
   HIP_CHECK(hipSetDevice(0));
   int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
