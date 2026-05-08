@@ -283,11 +283,11 @@ class TestSplitCopyComputeHWQueues(RocprofsysTest):
         )
         self.assert_regex(result)
 
-        # We expect to see "nstreams" amount of GPU Kernel Dispatch tracks, each with a cube kernel
+        # We expect to see "nstreams" HIP Stream tracks, each with a cube kernel
         self.assert_perfetto(
             result,
             subtest_name="Stream Count Validation",
-            categories=["rocm_kernel_dispatch"],
+            categories=["rocm_hip_stream"],
             label_substrings=["cube"],
             counts=[self.nstreams],
             depths=[0],
