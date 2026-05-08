@@ -80,6 +80,9 @@ jobs:
           path: "TheRock"
           ref: 903ee444eb935adf456bf5df724e1b6f5c2ce962 # 2026-05-03 commit
 
+      - name: Fetch hipcc submodule
+        run: git -C TheRock submodule update --init --depth 1 compiler/amd-llvm
+
       - name: Install system dependencies
         run: |
           apt-get update -q
@@ -88,7 +91,7 @@ jobs:
       - name: Build hipconfig
         run: |
           cmake -S TheRock/compiler/amd-llvm/amd/hipcc -B "${BUILD_DIR}/hipcc" -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build "${BUILD_DIR}/hipcc" --parallel
+          cmake --build "${BUILD_DIR}/hipcc" --target hipconfig --parallel
           mkdir -p "${BUILD_DIR}/hipcc-install/bin"
           cp "${BUILD_DIR}/hipcc/hipconfig" "${BUILD_DIR}/hipcc-install/bin/"
           ln -s "$(which nvcc)" "${BUILD_DIR}/hipcc-install/bin/hipcc"
