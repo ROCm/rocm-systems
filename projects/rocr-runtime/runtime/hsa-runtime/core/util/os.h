@@ -366,6 +366,9 @@ int Ffs(int i);
 /// Find the count of leading zeros
 int Ctz(uint64_t i);
 
+/// Population count (number of set bits)
+int Popcount(uint32_t i);
+
 /// Shared library or DLL load error
 char* DlError();
 
