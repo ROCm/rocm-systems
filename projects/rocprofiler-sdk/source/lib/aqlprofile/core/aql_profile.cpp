@@ -377,7 +377,8 @@ hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_profile_t* profile,
                                 trace_config.perfcounters.push_back({p->value, 0xF});
                             break;
                         default:
-                            ERR_LOGGING("Bad trace parameter name ({})", static_cast<int>(p->parameter_name));
+                            ERR_LOGGING("Bad trace parameter name ({})",
+                                        static_cast<int>(p->parameter_name));
                             return HSA_STATUS_ERROR_INVALID_ARGUMENT;
                     }
                 }
@@ -850,7 +851,10 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
 
                     if(sample_size >= sample_capacity)
                     {
-                        ERR_LOGGING("SQTT data out of bounds, sample_id({}) size({}/{})", se_index, sample_size, sample_capacity);
+                        ERR_LOGGING("SQTT data out of bounds, sample_id({}) size({}/{})",
+                                    se_index,
+                                    sample_size,
+                                    sample_capacity);
                         sample_size = sample_capacity;
                         if(status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
                     }
@@ -903,7 +907,9 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                         }
                         if(status != HSA_STATUS_SUCCESS)
                         {
-                            ERR_LOGGING("SQTT data callback error, sample_id({}) status({})", i, static_cast<int>(status));
+                            ERR_LOGGING("SQTT data callback error, sample_id({}) status({})",
+                                        i,
+                                        static_cast<int>(status));
                             break;
                         }
                         sample_ptr = reinterpret_cast<char*>(sample_ptr) + sample_capacity;

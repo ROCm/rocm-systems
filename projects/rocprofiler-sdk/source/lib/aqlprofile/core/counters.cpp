@@ -44,7 +44,8 @@
 #include <vector>
 
 #define ERR_CHECK(cond, err, msg)                                                                  \
-    do {                                                                                           \
+    do                                                                                             \
+    {                                                                                              \
         if(cond)                                                                                   \
         {                                                                                          \
             ERR_LOGGING("{}", msg);                                                                \

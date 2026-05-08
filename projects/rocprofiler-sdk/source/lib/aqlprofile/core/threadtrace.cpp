@@ -120,7 +120,10 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
 
         if(sample_size >= sample_capacity)
         {
-            ERR_LOGGING("SQTT data out of bounds, sample_id({}) size({}/{})", se_index, sample_size, sample_capacity);
+            ERR_LOGGING("SQTT data out of bounds, sample_id({}) size({}/{})",
+                        se_index,
+                        sample_size,
+                        sample_capacity);
             sample_size = sample_capacity;
             if(status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         }
@@ -252,7 +255,8 @@ _internal_aqlprofile_att_create_packets(aqlprofile_handle_t*                  ha
                     trace_config.perfcounters.push_back({p->counter_id, p->simd_mask});
                     break;
                 default:
-                    ERR_LOGGING("Bad trace parameter name ({})", static_cast<int>(p->parameter_name));
+                    ERR_LOGGING("Bad trace parameter name ({})",
+                                static_cast<int>(p->parameter_name));
                     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
             }
 
