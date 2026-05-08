@@ -77,26 +77,20 @@ jobs:
       - name: Checkout TheRock repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          repository: "ROCm/TheRock"
-          path: "TheRock"
-          ref: 903ee444eb935adf456bf5df724e1b6f5c2ce962 # 2026-05-03 commit
+          repository: "ROCm/llvm-project"
+          path: "llvm-project"
+          ref: 43215c73116c407735c85a180d174f718798c328 # 2026-04-14 bump in TheRock
+          sparse-checkout:
+            amd/hipcc
 
       - name: Install system dependencies
         run: |
           apt-get update -q
           apt-get install -y --no-install-recommends git cmake ninja-build llvm-dev libnuma-dev libelf-dev libdrm-dev python3-dev python3-pip pkg-config
 
-      - name: Fetch hipcc submodule
-        run: |
-
-          pip install --break-system-packages -r TheRock/requirements.txt
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
-          git config --global --add safe.directory "*"
-          git -C "${GITHUB_WORKSPACE}/TheRock" submodule update --init --depth 1 compiler/amd-llvm
-
       - name: Build hipconfig
         run: |
-          cmake -S TheRock/compiler/amd-llvm/amd/hipcc -B "${BUILD_DIR}/hipcc" -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S llvm-project/amd/hipcc -B "${BUILD_DIR}/hipcc" -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build "${BUILD_DIR}/hipcc" --target hipconfig --parallel
           mkdir -p "${BUILD_DIR}/hipcc-install/bin"
           cp "${BUILD_DIR}/hipcc/hipconfig" "${BUILD_DIR}/hipcc-install/bin/"
