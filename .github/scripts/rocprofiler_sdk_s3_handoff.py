@@ -52,6 +52,8 @@ def content_type(path):
     guessed, _ = mimetypes.guess_type(str(path))
     if path.name.endswith(".tar.gz"):
         return "application/gzip"
+    if path.name.endswith(".tar.zst") or path.suffix == ".zst":
+        return "application/zstd"
     return guessed or DEFAULT_CONTENT_TYPE
 
 

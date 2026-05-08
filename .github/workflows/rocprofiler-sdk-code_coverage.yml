@@ -179,7 +179,7 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         apt-get update
-        apt-get install -y build-essential ccache python3-pip gcovr libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm
+        apt-get install -y build-essential ccache python3-pip gcovr libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm zstd
         python3 -m pip install -U --user cmake==3.24.0
         python3 -m pip install -U --user -r requirements.txt
 
@@ -235,13 +235,13 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-        tar -czf rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
+        tar --use-compress-program='zstd -T0 -3' -cf rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
           build/
 
     - name: Create ROCM dependencies tarball
       shell: bash
       run: |
-        tar -czf rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
+        tar --use-compress-program='zstd -T0 -3' -cf rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
           -C /opt rocm
 
     - name: Install S3 handoff dependencies
@@ -264,8 +264,8 @@ jobs:
         python3 .github/scripts/rocprofiler_sdk_s3_handoff.py upload \
           --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
           --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/code-coverage/build-code-coverage/${{ matrix.system.os }}/${{ matrix.system.gpu }}" \
-          --file "projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz" \
-          --file "rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz"
+          --file "projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst" \
+          --file "rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst"
 
   code-coverage:
     name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
@@ -311,21 +311,32 @@ jobs:
         python3 .github/scripts/rocprofiler_sdk_s3_handoff.py download \
           --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
           --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/code-coverage/build-code-coverage/${{ matrix.system.os }}/${{ matrix.system.gpu }}" \
-          --file "projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz" \
-          --file "rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz"
+          --file "projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst" \
+          --file "rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst"
+
+    - name: Install requirements
+      timeout-minutes: 10
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        git config --global --add safe.directory '*'
+        apt-get update
+        apt-get install -y python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig zstd
+        python3 -m pip install -U --user cmake==3.24.0
+        python3 -m pip install -U --user -r requirements.txt
 
     - name: Extract build artifacts
       shell: bash
       run: |
         cd projects/rocprofiler-sdk
-        tar -xzf rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+        tar --use-compress-program='zstd -d -T0' -xf rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
     - name: Extract ROCM dependencies
       shell: bash
       run: |
         rm -rf /opt/rocm /opt/rocm-* /opt/rocprofiler-sdk
         cd /opt
-        tar -xzf $GITHUB_WORKSPACE/rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+        tar --use-compress-program='zstd -d -T0' -xf $GITHUB_WORKSPACE/rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
     - name: Load Existing XML Code Coverage
       if: github.event_name == 'pull_request'
@@ -340,17 +351,6 @@ jobs:
       run: |
         echo "${PATH}:/usr/local/bin:${HOME}/.local/bin" >> $GITHUB_PATH
         echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/lib:${HOME}/.local/lib" >> $GITHUB_ENV
-
-    - name: Install requirements
-      timeout-minutes: 10
-      shell: bash
-      working-directory: projects/rocprofiler-sdk
-      run: |
-        git config --global --add safe.directory '*'
-        apt-get update
-        apt-get install -y python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig
-        python3 -m pip install -U --user cmake==3.24.0
-        python3 -m pip install -U --user -r requirements.txt
 
     - name: Sync gcov with compilers
       timeout-minutes: 10
