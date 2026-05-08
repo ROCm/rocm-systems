@@ -42,6 +42,7 @@
 
 #include "core/inc/amd_xdna_driver.h"
 
+#include <cerrno>
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -210,6 +211,35 @@ constexpr uint32_t CMD_COUNT_SIZE_INCREASE = 3;
 /// @brief Default amdxdna_cu_config::cu_func when configuring a CU.
 constexpr uint32_t default_cu_func = 0;
 
+/// @brief Calls ioctl with the given request and argument, and retries if the call is interrupted
+/// by a signal or if it returns EAGAIN.
+///
+/// @param[in] fd file descriptor
+/// @param[in] request ioctl request code
+/// @param[in] arg pointer to the argument for the ioctl call
+static hsa_status_t xdna_ioctl(int fd, unsigned long request, void* arg) {
+  int ret;
+  do {
+    ret = ioctl(fd, request, arg);
+    if (ret >= 0) {
+      return HSA_STATUS_SUCCESS;
+    }
+  } while (errno == EINTR || errno == EAGAIN);
+
+  // Map errno to appropriate HSA status code.
+  switch (errno) {
+    case EINVAL:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case ENOENT:
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    case ENOMEM:
+    case ENOSPC:
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    default:
+      return HSA_STATUS_ERROR;
+  }
+}
+
 /**
  * @brief Flushes the CPU cache for the packet's arguments.
  *
@@ -237,10 +267,7 @@ static hsa_status_t DestroyHwCtx(int fd, uint32_t hw_ctx_handle) {
 
   amdxdna_drm_destroy_hwctx args = {};
   args.handle = hw_ctx_handle;
-  if (ioctl(fd, DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &args) < 0) {
-    return HSA_STATUS_ERROR;
-  }
-  return HSA_STATUS_SUCCESS;
+  return xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &args);
 }
 
 /**
@@ -264,8 +291,9 @@ static hsa_status_t SubmitCommand(int fd, uint32_t cmd_bo_handle,
   exec_cmd.args = reinterpret_cast<uint64_t>(bo_handles.data());
   exec_cmd.cmd_count = 1;
   exec_cmd.arg_count = static_cast<uint32_t>(bo_handles.size());
-  if (ioctl(fd, DRM_IOCTL_AMDXDNA_EXEC_CMD, &exec_cmd) < 0) {
-    return HSA_STATUS_ERROR;
+  hsa_status_t err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_EXEC_CMD, &exec_cmd);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   seq_out = exec_cmd.seq;
@@ -306,12 +334,13 @@ static hsa_status_t WaitCommand(int fd, ert_start_kernel_cmd* cmd, uint32_t hw_c
   wait_cmd.hwctx = hw_ctx_handle;
   wait_cmd.timeout = 0;  // no timeout, wait until the command finishes
   wait_cmd.seq = seq;
-  if (ioctl(fd, DRM_IOCTL_AMDXDNA_WAIT_CMD, &wait_cmd) < 0) {
-    return HSA_STATUS_ERROR;
+  hsa_status_t err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_WAIT_CMD, &wait_cmd);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
+  // Check if command failed.
   if (cmd_ref.state != ERT_CMD_STATE_COMPLETED) {
-    // Command is in an error state.
     return HSA_STATUS_ERROR;
   }
   return HSA_STATUS_SUCCESS;
@@ -390,8 +419,9 @@ hsa_status_t XdnaDriver::GetNodeProperties(HsaNodeProperties& node_props, uint32
   get_info_args.buffer_size = sizeof(aie_metadata);
   get_info_args.buffer = reinterpret_cast<uintptr_t>(&aie_metadata);
 
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_INFO, &get_info_args) < 0) {
-    return HSA_STATUS_ERROR;
+  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_INFO, &get_info_args);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   const std::string sysfs_device_path = std::string(sysfs_path) + "/" + devnode_name_ + "/device";
@@ -511,8 +541,9 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     create_bo_args.type = AMDXDNA_BO_DEV;
   }
 
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_BO, &create_bo_args) < 0) {
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_BO, &create_bo_args);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   BOHandle bo_handle;
@@ -524,8 +555,9 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
 
   amdxdna_drm_get_bo_info get_bo_info_args = {};
   get_bo_info_args.handle = create_bo_args.handle;
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &get_bo_info_args) < 0) {
-    return HSA_STATUS_ERROR;
+  err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &get_bo_info_args);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   if (use_bo_share) {
@@ -564,31 +596,16 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::FreeMemory(void *mem, size_t size) {
+hsa_status_t XdnaDriver::FreeMemory(void* mem, size_t size) {
   auto it = vmem_addr_mappings.find(mem);
-  if (it == vmem_addr_mappings.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  if (it == vmem_addr_mappings.end()) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
 
   auto& bo_handle = it->second;
-  if (bo_handle.unmap_vaddr) {
-    if (munmap(bo_handle.vaddr, bo_handle.size) != 0) {
-      return HSA_STATUS_ERROR;
-    }
-    bo_handle.unmap_vaddr = false;
-  }
-  bo_handle.vaddr = nullptr;
-  bo_handle.size = 0;
-
-  // Close the BO.
-  drm_gem_close close_args = {};
-  close_args.handle = bo_handle.handle;
-  if (ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_args) < 0) {
-    return HSA_STATUS_ERROR;
-  }
-  bo_handle.handle = AMDXDNA_INVALID_BO_HANDLE;
-
+  hsa_status_t err = DestroyBOHandle(bo_handle);
   vmem_addr_mappings.erase(it);
-
-  return HSA_STATUS_SUCCESS;
+  return err;
 }
 
 hsa_status_t XdnaDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
@@ -605,8 +622,9 @@ hsa_status_t XdnaDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint
   create_hwctx_args.qos_p = reinterpret_cast<uintptr_t>(&qos_info);
   create_hwctx_args.max_opc = 0x800;
   create_hwctx_args.num_tiles = 1;  // dummy context; use 1 core
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &create_hwctx_args) < 0) {
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &create_hwctx_args);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   // Create hardware context for the queue.
@@ -624,12 +642,13 @@ hsa_status_t XdnaDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint
   config_ctx.param_type = DRM_AMDXDNA_HWCTX_CONFIG_CU;
   config_ctx.param_val = reinterpret_cast<uint64_t>(cu_config);
   config_ctx.param_val_size = static_cast<uint32_t>(cu_config_size);
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &config_ctx) < 0) {
+  err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &config_ctx);
+  if (err != HSA_STATUS_SUCCESS) {
     DestroyHwCtx(fd_, create_hwctx_args.handle);
-    return HSA_STATUS_ERROR;
+    return err;
   }
 
-  queue_resource.QueueId = create_hwctx_args.handle;
+  queue_resource.QueueId = static_cast<HSA_QUEUEID>(create_hwctx_args.handle);
 
   return HSA_STATUS_SUCCESS;
 }
@@ -676,8 +695,9 @@ hsa_status_t XdnaDriver::ExportDMABuf(void* mem, size_t size, int* dmabuf_fd, si
   export_params.handle = bo_handle.handle;
   export_params.flags = DRM_RDWR;
   export_params.fd = -1;
-  if (ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &export_params) < 0) {
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &export_params);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   *dmabuf_fd = export_params.fd;
@@ -691,8 +711,10 @@ hsa_status_t XdnaDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
   drm_prime_handle import_params = {};
   import_params.handle = AMDXDNA_INVALID_BO_HANDLE;
   import_params.fd = dmabuf_fd;
-  if (ioctl(fd_, DRM_IOCTL_PRIME_FD_TO_HANDLE, &import_params) < 0)
-    return HSA_STATUS_ERROR;
+  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_PRIME_FD_TO_HANDLE, &import_params);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
 
   *handle = core::ShareableHandle{import_params.handle};
   return HSA_STATUS_SUCCESS;
@@ -710,13 +732,15 @@ hsa_status_t XdnaDriver::Map(core::ShareableHandle handle, void *mem,
   drm_prime_handle params = {};
   params.handle = handle.handle;
   params.fd = -1;
-  if (ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &params) < 0) {
-    return HSA_STATUS_ERROR;
+  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &params);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   // Change permissions.
   void *mapped_ptr = mmap(mem, size, PermissionsToMmapFlags(perms),
                           MAP_FIXED | MAP_SHARED, params.fd, offset);
+  close(params.fd);
   if (mapped_ptr == MAP_FAILED) {
     return HSA_STATUS_ERROR;
   }
@@ -726,8 +750,9 @@ hsa_status_t XdnaDriver::Map(core::ShareableHandle handle, void *mem,
 
 hsa_status_t XdnaDriver::Unmap(core::ShareableHandle handle, void *mem,
                                size_t offset, size_t size) {
-  if (munmap(mem, size) != 0)
+  if (munmap(mem, size) != 0) {
     return HSA_STATUS_ERROR;
+  }
 
   return HSA_STATUS_SUCCESS;
 }
@@ -745,8 +770,9 @@ hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   // Get offset.
   amdxdna_drm_get_bo_info get_bo_info_args = {};
   get_bo_info_args.handle = bo_handle.handle;
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &get_bo_info_args) < 0) {
-    return HSA_STATUS_ERROR;
+  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &get_bo_info_args);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   // Get fd associated with the handle.
@@ -754,14 +780,16 @@ hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   params.handle = bo_handle.handle;
   params.flags = DRM_RDWR;
   params.fd = -1;
-  if (ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &params) < 0) {
-    return HSA_STATUS_ERROR;
+  err = xdna_ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &params);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   // Map memory to the virtual address.
   void* mapped_ptr = mmap(va, size, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_SHARED, fd_,
                           get_bo_info_args.map_offset);
   if (mapped_ptr == MAP_FAILED) {
+    close(params.fd);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -776,8 +804,10 @@ hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 hsa_status_t XdnaDriver::DestroyShareableHandle(core::ShareableHandle* handle) {
   drm_gem_close close_params = {};
   close_params.handle = handle->handle;
-  if (ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_params) < 0)
-    return HSA_STATUS_ERROR;
+  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_params);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
 
   *handle = {};
 
@@ -789,8 +819,9 @@ hsa_status_t XdnaDriver::QueryDriverVersion() {
   amdxdna_drm_get_info args{DRM_AMDXDNA_QUERY_AIE_VERSION, sizeof(aie_version),
                             reinterpret_cast<uintptr_t>(&aie_version)};
 
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_INFO, &args) < 0) {
-    return HSA_STATUS_ERROR;
+  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_INFO, &args);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   version_.KernelInterfaceMajorVersion = aie_version.major;
@@ -803,8 +834,9 @@ hsa_status_t XdnaDriver::InitDeviceHeap() {
   amdxdna_drm_create_bo create_bo_args = {};
   create_bo_args.size = dev_heap_size;
   create_bo_args.type = AMDXDNA_BO_DEV_HEAP;
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_BO, &create_bo_args) < 0) {
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_BO, &create_bo_args);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   dev_heap_handle.handle = create_bo_args.handle;
@@ -814,8 +846,9 @@ hsa_status_t XdnaDriver::InitDeviceHeap() {
 
   amdxdna_drm_get_bo_info get_bo_info_args = {};
   get_bo_info_args.handle = dev_heap_handle.handle;
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &get_bo_info_args) < 0) {
-    return HSA_STATUS_ERROR;
+  err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &get_bo_info_args);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   const size_t size = dev_heap_align * 2 - 1;
@@ -824,6 +857,7 @@ hsa_status_t XdnaDriver::InitDeviceHeap() {
   if (dev_heap_handle.vaddr == MAP_FAILED) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
+  dev_heap_handle.unmap_vaddr = true;
   dev_heap_handle.size = size;
 
   void* addr_aligned = reinterpret_cast<void*>(
@@ -843,24 +877,19 @@ hsa_status_t XdnaDriver::InitDeviceHeap() {
 }
 
 hsa_status_t XdnaDriver::FreeDeviceHeap() {
-  if (dev_heap_aligned) {
-    if (munmap(dev_heap_aligned, dev_heap_size) != 0) {
-      return HSA_STATUS_ERROR;
-    }
-    dev_heap_aligned = nullptr;
-  }
-
-  DestroyBOHandle(dev_heap_handle);
-
-  return HSA_STATUS_SUCCESS;
+  hsa_status_t err = DestroyBOHandle(dev_heap_handle);
+  assert(err == HSA_STATUS_SUCCESS && "Failed to destroy device heap BO handle.");
+  dev_heap_aligned = nullptr;
+  return err;
 }
 
 hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) {
   amdxdna_drm_create_bo create_cmd_bo = {};
   create_cmd_bo.type = AMDXDNA_BO_CMD;
   create_cmd_bo.size = size;
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_BO, &create_cmd_bo) < 0) {
-    return HSA_STATUS_ERROR;
+  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_BO, &create_cmd_bo);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   BOHandle tmp_cmd_bo_handle;
@@ -872,8 +901,9 @@ hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) {
 
   amdxdna_drm_get_bo_info cmd_bo_get_bo_info = {};
   cmd_bo_get_bo_info.handle = tmp_cmd_bo_handle.handle;
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &cmd_bo_get_bo_info) < 0) {
-    return HSA_STATUS_ERROR;
+  err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &cmd_bo_get_bo_info);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   void* mem = mmap(nullptr, tmp_cmd_bo_handle.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_,
@@ -1127,25 +1157,35 @@ hsa_status_t XdnaDriver::IsModelEnabled(bool* enable) const {
   return HSA_STATUS_SUCCESS;
 }
 
-void XdnaDriver::DestroyBOHandle(BOHandle& handle) {
-  if (handle.unmap_vaddr) {
-    // Unmap the memory.
-    if (munmap(handle.vaddr, handle.size) != 0) {
-      assert(false && "Failed to unmap BO memory.");
-    }
-    handle.unmap_vaddr = false;
+hsa_status_t XdnaDriver::DestroyBOHandle(BOHandle& bo_handle) {
+  if (!bo_handle.IsValid()) {
+    return HSA_STATUS_SUCCESS;
   }
-  handle.vaddr = nullptr;
-  handle.size = 0;
 
-  if (handle.IsValid()) {
-    drm_gem_close close_bo_args = {};
-    close_bo_args.handle = handle.handle;
-    if (ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_bo_args) < 0) {
-      assert(false && "Failed to close BO handle.");
+  hsa_status_t unmap_err = HSA_STATUS_SUCCESS;
+
+  // Unmap the memory.
+  if (bo_handle.unmap_vaddr) {
+    if (munmap(bo_handle.vaddr, bo_handle.size) != 0) {
+      unmap_err = HSA_STATUS_ERROR;
+      assert(false && "Failed to unmap BO memory.");
+    } else {
+      bo_handle.unmap_vaddr = false;
+      bo_handle.vaddr = nullptr;
+      bo_handle.size = 0;
     }
-    handle.handle = AMDXDNA_INVALID_BO_HANDLE;
   }
+
+  // Close the BO handle.
+  drm_gem_close close_bo_args = {};
+  close_bo_args.handle = bo_handle.handle;
+  hsa_status_t ioctl_err = xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_bo_args);
+  bo_handle.handle = AMDXDNA_INVALID_BO_HANDLE;
+
+  if (ioctl_err != HSA_STATUS_SUCCESS) {
+    return ioctl_err;
+  }
+  return unmap_err;
 }
 
 XdnaDriver::BOHandle XdnaDriver::FindBOHandle(void* mem) const {
@@ -1204,9 +1244,9 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID
   // Note: we can do this because we have forced synchronization between command chains. If we move
   // to a more asynchronous model, we will need to figure out how hardware context destruction works
   // while applications are running.
-  hsa_status_t status = DestroyHwCtx(fd_, hw_ctx_handle);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
+  hsa_status_t err = DestroyHwCtx(fd_, hw_ctx_handle);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
   queue_id = AMDXDNA_INVALID_CTX_HANDLE;
 
@@ -1217,8 +1257,9 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID
   create_hwctx_args.qos_p = reinterpret_cast<uintptr_t>(&qos_info);
   create_hwctx_args.max_opc = 0x800;
   create_hwctx_args.num_tiles = num_core_tiles;
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &create_hwctx_args) < 0) {
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &create_hwctx_args);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   // Configure the new hardware context
@@ -1227,9 +1268,10 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID
   config_hw_ctx_args.param_type = DRM_AMDXDNA_HWCTX_CONFIG_CU;
   config_hw_ctx_args.param_val = reinterpret_cast<uint64_t>(xdna_config_cu_param);
   config_hw_ctx_args.param_val_size = static_cast<uint32_t>(config_cu_param_size);
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &config_hw_ctx_args) < 0) {
+  err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &config_hw_ctx_args);
+  if (err != HSA_STATUS_SUCCESS) {
     DestroyHwCtx(fd_, create_hwctx_args.handle);
-    return HSA_STATUS_ERROR;
+    return err;
   }
 
   queue_id = create_hwctx_args.handle;
