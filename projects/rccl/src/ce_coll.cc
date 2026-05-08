@@ -120,7 +120,7 @@ bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_
 
   // CE is supported in ROCm 7.0.2.2 and later
   // hipDriverGetVersion() returns 70051831 for ROCm 7.0.2.2
-  if (driverVersion >= 70051831) {
+  if (driverVersion == 70051831) {
     switch (coll) {
     case ncclFuncAllGather:
     case ncclFuncAlltoAll:
@@ -284,7 +284,7 @@ ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int n
   params->sizes = nullptr;
   params->numOps = 0;
   params->intraBatchSync = false;
-#if ROCM_VERSION >= 70002
+#if ROCM_VERSION == 70002
   params->attrs = nullptr;
   params->attrIdxs = nullptr;
   params->numAttrs = 0;
@@ -293,7 +293,7 @@ ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int n
   NCCLCHECKGOTO(ncclCalloc(&params->srcs, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->dsts, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->sizes, nRanks), ret, fail);
-#if ROCM_VERSION >= 70002
+#if ROCM_VERSION == 70002
   NCCLCHECKGOTO(ncclCalloc(&params->attrs, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->attrIdxs, nRanks), ret, fail);
 #endif
@@ -307,7 +307,7 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
   if (params->srcs) free(params->srcs);
   if (params->dsts) free(params->dsts);
   if (params->sizes) free(params->sizes);
-#if ROCM_VERSION >= 70002
+#if ROCM_VERSION == 70002
   if (params->attrs) free(params->attrs);
   if (params->attrIdxs) free(params->attrIdxs);
 #endif
@@ -345,8 +345,8 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   //--------------No graph capture--------------
   else {
     // driverVersion is reported as 70051831 for ROCm 7.0.2.2 when using hipDriverGetVersion().
-    if (ROCM_VERSION >= 70002 && driverVersion >= 70051831) {
-#if ROCM_VERSION >= 70002
+    if (ROCM_VERSION == 70002 && driverVersion == 70051831) {
+#if ROCM_VERSION == 70002
     // For ROCm 7.0.2.2+, use batch memory copy for better performance
     params->attrs[0] = {};
     params->attrs[0].srcAccessOrder = cudaMemcpySrcAccessOrderStream;
