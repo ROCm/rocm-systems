@@ -18,6 +18,31 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  # CMake formatting (mirrors rocprofiler-compute-formatting.yml `cmake` job)
+  - repo: https://github.com/BlankSpruce/gersemi
+    rev: 0.22.1
+    hooks:
+      - id: gersemi
+        files: ^projects/rocprofiler-compute/.*(CMakeLists\.txt|\.cmake)$
+
+  # C/C++ formatting (mirrors rocprofiler-compute-formatting.yml `cxx` job)
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v22.1.0
+    hooks:
+      - id: clang-format
+        files: ^projects/rocprofiler-compute/src/.*\.(h|hpp|hh|c|cc|cpp)(\.in)?$
+
+  # Reject committed Python bytecode (mirrors `python-bytecode` job)
+  - repo: local
+    hooks:
+      - id: no-python-bytecode
+        name: Reject staged Python bytecode
+        entry: >-
+          bash -c 'printf "Error - Python bytecode staged for commit:\n";
+          printf "  %s\n" "$@"; exit 1' --
+        language: system
+        files: (^|/)(__pycache__/.*|.*\.pyc)$
+
   # Local hook: copyright header check
   - repo: local
     hooks:
