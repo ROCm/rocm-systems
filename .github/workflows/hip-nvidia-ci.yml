@@ -80,13 +80,13 @@ jobs:
           path: "TheRock"
           ref: 903ee444eb935adf456bf5df724e1b6f5c2ce962 # 2026-05-03 commit
 
-      - name: Fetch hipcc submodule
-        run: git -C TheRock submodule update --init --depth 1 compiler/amd-llvm
-
       - name: Install system dependencies
         run: |
           apt-get update -q
           apt-get install -y --no-install-recommends git cmake ninja-build llvm-dev libnuma-dev libelf-dev libdrm-dev pkg-config
+
+      - name: Fetch hipcc submodule
+        run: git -C TheRock submodule update --init --depth 1 compiler/amd-llvm
 
       - name: Build hipconfig
         run: |
