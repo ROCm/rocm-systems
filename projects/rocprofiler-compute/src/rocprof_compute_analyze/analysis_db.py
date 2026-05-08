@@ -313,6 +313,7 @@ class db_analysis(OmniAnalyze_Base):
                 raw_pmc = self.iteration_multiplex_impute_counters(
                     raw_pmc,
                     policy=self._profiling_config["iteration_multiplexing"],
+                    workload_dir=Path(workload_path),
                 )
 
             pmc_df_per_workload[workload_path] = raw_pmc["pmc_perf"]

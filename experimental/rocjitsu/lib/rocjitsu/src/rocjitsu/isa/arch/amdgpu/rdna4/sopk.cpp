@@ -54,6 +54,7 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= PREDICATED_DEF;
 }
 
 void SCmovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -146,6 +147,7 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= INDIRECT_CALL;
 }
 
 void SCallB64Sopk::execute_impl(amdgpu::Wavefront &wf) {

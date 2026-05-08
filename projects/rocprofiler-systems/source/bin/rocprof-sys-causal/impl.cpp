@@ -489,21 +489,21 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
             update_env(_env, "ROCPROFSYS_CAUSAL_DURATION", p.get<double>("duration"));
         });
 
-    int64_t _niterations       = 1;
-    auto    _virtual_speedups  = std::vector<std::string>{};
-    auto    _function_scopes   = std::vector<std::string>{};
-    auto    _binary_scopes     = std::vector<std::string>{};
-    auto    _source_scopes     = std::vector<std::string>{};
-    auto    _function_excludes = std::vector<std::string>{};
-    auto    _binary_excludes   = std::vector<std::string>{};
-    auto    _source_excludes   = std::vector<std::string>{};
+    std::int64_t _niterations       = 1;
+    auto         _virtual_speedups  = std::vector<std::string>{};
+    auto         _function_scopes   = std::vector<std::string>{};
+    auto         _binary_scopes     = std::vector<std::string>{};
+    auto         _source_scopes     = std::vector<std::string>{};
+    auto         _function_excludes = std::vector<std::string>{};
+    auto         _binary_excludes   = std::vector<std::string>{};
+    auto         _source_excludes   = std::vector<std::string>{};
 
     parser
         .add_argument({ "-n", "--iterations" },
                       "Number of times to repeat the combination of run configurations")
         .count(1)
         .dtype("int")
-        .action([&](parser_t& p) { _niterations = p.get<int64_t>("iterations"); });
+        .action([&](parser_t& p) { _niterations = p.get<std::int64_t>("iterations"); });
 
     parser.start_group(
         "CAUSAL PROFILING OPTIONS (Combinatorial)",
@@ -537,7 +537,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
                     for(const auto& ditr : tim::delimit(itr, ",; \t\n\r"))
                     {
                         for(auto nitr :
-                            parse_numeric_range<int64_t, std::vector<int64_t>>(
+                            parse_numeric_range<std::int64_t, std::vector<std::int64_t>>(
                                 ditr, "virtual speedup", 5L))
                         {
                             _virtual_speedups.emplace_back(std::to_string(nitr));
@@ -716,7 +716,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
     // duplicate for the number of iterations
     _causal_envs.clear();
     _causal_envs.reserve(_niterations * _causal_envs_tmp.size());
-    for(int64_t i = 0; i < _niterations; ++i)
+    for(std::int64_t i = 0; i < _niterations; ++i)
     {
         for(const auto& itr : _causal_envs_tmp)
             _causal_envs.emplace_back(itr);

@@ -106,7 +106,7 @@ The semantic translator handles instructions and ABI conventions whose behavior 
 - **Waitcnt splitting:** GFX9 monolithic `s_waitcnt` → GFX12 split `s_wait_loadcnt` / `s_wait_storecnt_dscnt` / `s_wait_kmcnt` / `s_wait_expcnt`. Decode and encode functions live in `semantic_translator.cpp`.
 - **Workgroup ID ABI:** CDNA4 delivers workgroup IDs via SGPRs; RDNA4 delivers them via TTMP registers (TTMP9 for X, TTMP7 for Y/Z). The semantic translator rewrites operand fields in affected instructions.
 - **Instruction lowering:** One-to-many expansion for instructions that don't exist on the target ISA. Example: `v_lshl_add_u64` → `v_add_co_u32` + `s_wait_alu` + `v_add_co_ci_u32` carry chain.
-- **MFMA → WMMA translation:** `v_mfma_f32_16x16x16_f16` → `v_wmma_f32_16x16x16_f16` with ds_bpermute lane remap (XOR-48 at lanes 16-47). Address VGPR selected via RegisterLiveness to avoid clobbering live state.
+- **MFMA → WMMA translation:** `v_mfma_f32_16x16x16_f16` → `v_wmma_f32_16x16x16_f16` with ds_bpermute lane remap (XOR-48 at lanes 16-47). Address VGPR selected via `LivenessAnalysis` to avoid clobbering live state.
 - **AccVGPR elimination:** `v_accvgpr_read/write` → `v_mov_b32` or NOP on the unified VGPR file.
 - **Future:** Additional MFMA shapes, transpose load replacement.
 
@@ -133,21 +133,21 @@ Context-dependent translations (workgroup ID rewrite) use a dedicated post-pass 
 
 - **HazardTracker** (`code/dbt/hazard_tracker.h`): Auto-inserts GFX12 `s_delay_alu` instructions based on pipeline class annotations (VALU, SALU, TRANS). Each expansion function emits instructions through the tracker, which manages a 2-deep producer history and computes dependency fields.
 - **Lane permutation** (`code/dbt/lane_permutation.cpp`): Derives the XOR mask and lane range for MFMA→WMMA output remapping from `LaneLayout` descriptors. Adding new MFMA shapes requires only adding layout constants.
-- **SGPR allocation**: `RegisterLiveness` tracks the maximum SGPR index referenced in each block and provides `find_free_sgpr_pair()` / `find_free_sgpr()` for safe temp SGPR allocation in injected code.
+- **Temp register allocation**: `LivenessAnalysis` materializes live-before sets for each instruction and provides `find_free_run()` / `find_free_sgpr_pair()` / `find_free_sgpr()` for safe temporary register allocation in injected code.
 
 ---
 
 ## Supporting Modules
 
-### Register Liveness Analysis (`analysis/register_liveness.h`)
+### Register Liveness Analysis (`analysis/liveness.h`)
 
-Per-basic-block backward liveness analysis over VGPR indices (0-511, covering both VGPR and AccVGPR ranges in the unified file) plus conservative SGPR max-tracking. Computed per-block before the per-instruction pass. Provides:
+Kernel-scoped backward liveness analysis over the CFG embedded in `BasicBlock`. DBT builds a `KernelBlockScope` from one kernel descriptor entry and ignores CFG edges that leave that scope. The analysis tracks ordinary SGPRs, VGPRs, and AccVGPRs through `RegisterSet`, then materializes live-before sets for instruction-level queries. Provides:
 
-- `is_live(offset, vgpr_index)` — query whether a VGPR is live at an instruction
-- `find_free_run(offset, count)` — find consecutive free VGPRs for operand expansion
-- `find_free_sgpr_pair()` / `find_free_sgpr()` — allocate temp SGPRs above the highest referenced SGPR
+- `live_before(inst)` / `is_live_before(inst, ref)` — query the register set live before an instruction
+- `find_free_run(inst, count)` — find consecutive dead VGPRs for operand expansion
+- `find_free_sgpr_pair()` / `find_free_sgpr()` — find dead SGPR temporaries for injected code
 
-Used by the semantic translator for safe register allocation in injected code (MFMA→WMMA expansion needs temp VGPRs and SGPRs). Lives at the top level of rocjitsu (not in `code/`) because it's general analysis infrastructure shared by DBT, DBI, and the simulator.
+`InstDefUse` includes explicit operands plus instruction-level implicit hooks. This currently models hidden FLAT `saddr` address dependencies when they map to ordinary SGPR uses. Special architectural state such as EXEC, VCC, SCC, M0, TTMP, and FLAT_SCRATCH is not tracked by liveness yet.
 
 ### Code Object Patcher (`code/patch/code_object_patcher.h`)
 
@@ -164,7 +164,7 @@ Provides ISA-parameterized helpers for encoding common instructions (`s_branch`,
 For each code object:
 
 1. **Decode:** Create a `Decoder` for the guest ISA and build basic blocks from the `.text` section.
-2. **Analyze:** Compute `RegisterLiveness` per basic block (backward scan for VGPR gen/kill sets, max SGPR tracking).
+2. **Analyze:** Build per-kernel CFG scopes from kernel descriptor entry offsets and compute `LivenessAnalysis` for each scope.
 3. **Per-instruction pass:** For each instruction in each basic block:
    - Call `try_lower_expand(inst, offset, liveness)` — binary search the expand rules table by `(encoding_id, opcode)`. If a rule matches, the `ExpandFn` generates replacement instruction words using the `HazardTracker` for automatic `s_delay_alu` insertion and liveness-based register allocation for temp VGPRs/SGPRs.
    - If no expand rule matched, look up the legalization table. If Identity or Substitute, call the encoding translator. If Expand with no handler, NOP-fill and emit a warning.

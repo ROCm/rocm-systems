@@ -212,6 +212,7 @@ class Flat : public IsaInstruction<Isa> {
 public:
   Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
   void build_modifiers(std::string &out) const override;
+  void implicit_uses(RegisterSet &uses) const override;
   using OpEncoding = FlatMachineInst;
   const OpEncoding inst_;
   std::string owned_mnemonic_;

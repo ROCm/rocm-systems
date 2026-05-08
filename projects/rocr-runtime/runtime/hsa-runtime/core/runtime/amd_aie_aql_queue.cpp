@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -41,7 +41,6 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "core/inc/amd_aie_aql_queue.h"
-#include "core/inc/amd_xdna_driver.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -57,6 +56,7 @@
 #include <cassert>
 #include <cstring>
 
+#include "inc/hsa_ext_amd_aie.h"
 #include "core/inc/amd_xdna_driver.h"
 #include "core/inc/queue.h"
 #include "core/inc/runtime.h"
@@ -65,6 +65,9 @@
 
 namespace rocr {
 namespace AMD {
+
+static_assert(sizeof(hsa_amd_aie_kernel_dispatch_packet_t) == sizeof(core::AqlPacket),
+              "hsa_amd_aie_kernel_dispatch_packet_t must be the same size as core::AqlPacket");
 
 AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
                          uint32_t node_id, uint64_t flags)
@@ -77,7 +80,7 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
     throw hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
                         "Attempting to create an AIE queue on a non-AIE agent.");
   }
-  queue_size_bytes_ = req_size_pkts * sizeof(core::AqlPacket);
+  queue_size_bytes_ = req_size_pkts * sizeof(hsa_amd_aie_kernel_dispatch_packet_t);
   ring_buf_ = agent_.system_allocator()(queue_size_bytes_, 4096,
                                         core::MemoryRegion::AllocateNoFlags);
 
@@ -88,10 +91,12 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
 
   // Populate hsa_queue_t fields.
   amd_queue_.hsa_queue.type = HSA_QUEUE_TYPE_SINGLE;
-  amd_queue_.hsa_queue.id = INVALID_QUEUEID;
-  amd_queue_.hsa_queue.doorbell_signal = Signal::Convert(this);
+  amd_queue_.hsa_queue.features = 0;  // KMQ queues do not support any features.
   amd_queue_.hsa_queue.size = req_size_pkts;
   amd_queue_.hsa_queue.base_address = ring_buf_;
+  amd_queue_.hsa_queue.doorbell_signal = Signal::Convert(this);
+  amd_queue_.hsa_queue.id = GetQueueId();
+
   // Populate AMD queue fields.
   amd_queue_.write_dispatch_id = 0;
   amd_queue_.read_dispatch_id = 0;
@@ -108,9 +113,7 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
   if (status != HSA_STATUS_SUCCESS) {
     throw hsa_exception(status, "Failed to create a hardware context for an AIE queue.");
   }
-
   queue_id_ = queue_resource.QueueId;
-  amd_queue_.hsa_queue.id = GetQueueId();
 }
 
 AieAqlQueue::~AieAqlQueue() {
@@ -214,54 +217,23 @@ void AieAqlQueue::SubmitPackets() {
   }
 
   auto& driver = static_cast<XdnaDriver&>(agent_.driver());
-  void* queue_base = amd_queue_.hsa_queue.base_address;
-  const uint32_t queue_size = amd_queue_.hsa_queue.size;
 
-  uint64_t cur_id = LoadReadIndexRelaxed();
-  const uint64_t end = LoadWriteIndexAcquire();
-  while (cur_id < end) {
-    // Use modulo to properly index into the ring buffer
-    const uint64_t pkt_idx = cur_id % queue_size;
-    auto* pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + pkt_idx;
+  const uint64_t first_pkt_idx = LoadReadIndexRelaxed();
+  const uint64_t last_pkt_idx = LoadWriteIndexAcquire();
 
-    // Get the packet header information
-    if (pkt->header.header != HSA_PACKET_TYPE_VENDOR_SPECIFIC ||
-        pkt->header.AmdFormat != HSA_AMD_PACKET_TYPE_AIE_ERT ) {
-      throw hsa_exception(HSA_STATUS_ERROR_INVALID_PACKET_FORMAT, "Invalid packet header");
-    }
-
-    // Get the payload information
-    switch (pkt->opcode) {
-      case HSA_AMD_AIE_ERT_START_CU: {
-        // Iterating over future packets and seeing how many contiguous HSA_AMD_AIE_ERT_START_CU
-        // packets there are. All can be combined into a single chain.
-        uint64_t num_cont_start_cu_pkts = 1;
-        for (uint64_t peak_pkt_id = cur_id + 1; peak_pkt_id < end; peak_pkt_id++) {
-          const uint64_t peak_pkt_idx = peak_pkt_id % queue_size;
-          auto* peak_pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + peak_pkt_idx;
-          if (peak_pkt->opcode != HSA_AMD_AIE_ERT_START_CU) {
-            break;
-          }
-          num_cont_start_cu_pkts++;
-        }
-
-        // Call into the driver to submit from cur_id to write_dispatch_id.
-        // Submitting the command chain might create a new hardware context.
-        hsa_status_t status = driver.SubmitCmdChain(pkt, num_cont_start_cu_pkts, queue_id_,
-                                                    agent_.properties().NumNeuralCores);
-        if (status != HSA_STATUS_SUCCESS) {
-          throw hsa_exception(status, "Could not submit packets");
-        }
-
-        cur_id += num_cont_start_cu_pkts;
-        break;
-      }
-      default:
-        break;
-    }
+  if (first_pkt_idx >= last_pkt_idx) {
+    // No packets to submit.
+    return;
   }
 
-  atomic::Store(&amd_queue_.read_dispatch_id, cur_id, std::memory_order_release);
+  const auto num_pkts = last_pkt_idx - first_pkt_idx;
+  hsa_status_t status = driver.SubmitCmdChain(amd_queue_.hsa_queue, queue_id_, first_pkt_idx,
+                                              num_pkts, agent_.properties().NumNeuralCores);
+  if (status != HSA_STATUS_SUCCESS) {
+    throw hsa_exception(status, "Could not submit packets");
+  }
+
+  atomic::Store(&amd_queue_.read_dispatch_id, last_pkt_idx, std::memory_order_release);
 }
 
 void AieAqlQueue::StoreRelease(hsa_signal_value_t value) {

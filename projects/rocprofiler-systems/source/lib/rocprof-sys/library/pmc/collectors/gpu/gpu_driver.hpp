@@ -46,18 +46,18 @@ public:
         return out;
     }
 
-    [[nodiscard]] uint64_t get_memory_usage() const
+    [[nodiscard]] std::uint64_t get_memory_usage() const
     {
-        uint64_t usage = 0;
+        std::uint64_t usage = 0;
         check(amdsmi_get_gpu_memory_usage(m_handle, AMDSMI_MEM_TYPE_VRAM, &usage),
               "get_memory_usage");
         return usage;
     }
 
-    [[nodiscard]] uint64_t get_raw_sdma_usage() const
+    [[nodiscard]] std::uint64_t get_raw_sdma_usage() const
     {
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-        uint32_t num_processes = 0;
+        std::uint32_t num_processes = 0;
         check(amdsmi_get_gpu_process_list(m_handle, &num_processes, nullptr),
               "get_gpu_process_list (count)");
 
@@ -70,7 +70,7 @@ public:
         check(amdsmi_get_gpu_process_list(m_handle, &num_processes, proc_list.data()),
               "get_gpu_process_list (data)");
 
-        uint64_t cumulative = 0;
+        std::uint64_t cumulative = 0;
         for(const auto& proc : proc_list)
         {
             cumulative += proc.sdma_usage;
@@ -84,7 +84,7 @@ public:
     [[nodiscard]] bool is_sdma_supported() const noexcept
     {
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-        uint32_t num_processes = 0;
+        std::uint32_t num_processes = 0;
         return amdsmi_get_gpu_process_list(m_handle, &num_processes, nullptr) ==
                AMDSMI_STATUS_SUCCESS;
 #else
@@ -138,7 +138,7 @@ private:
 
             constexpr size_t copy_count =
                 std::min(static_cast<size_t>(sizeof(raw.xcp_stats[0].jpeg_busy) /
-                                             sizeof(uint16_t)),
+                                             sizeof(std::uint16_t)),
                          MAX_NUM_JPEG_V1);
             std::copy_n(std::begin(raw.xcp_stats[xcp].jpeg_busy), copy_count,
                         out.xcp_stats[xcp].jpeg_busy.begin());
