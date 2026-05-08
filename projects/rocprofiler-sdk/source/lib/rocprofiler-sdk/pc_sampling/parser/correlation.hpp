@@ -263,6 +263,24 @@ is_invalid_sample<rocprofiler_pc_sampling_record_v2_t>(
     return sample.timestamp == 0 && sample.exec_mask == 0;
 }
 
+template <>
+inline bool
+is_invalid_sample<rocprofiler_pc_sampling_record_v3_t>(
+    const rocprofiler_pc_sampling_record_v3_t& /*sample*/)
+{
+    // V3 is for host-trap: copySample never produces invalid V3 records
+    return false;
+}
+
+template <>
+inline bool
+is_invalid_sample<rocprofiler_pc_sampling_record_v4_t>(
+    const rocprofiler_pc_sampling_record_v4_t& sample)
+{
+    // V4 invalid samples are zero-init'd by copySample (same pattern as V2)
+    return sample.timestamp == 0 && sample.exec_mask == 0;
+}
+
 /**
  * @brief Mark a sample as invalid. For old records with `size`, sets size to 0.
  * For new records, zero-inits the entire struct.
@@ -294,6 +312,22 @@ template <>
 inline void
 mark_sample_invalid<rocprofiler_pc_sampling_record_v2_t>(
     rocprofiler_pc_sampling_record_v2_t& sample)
+{
+    std::memset(&sample, 0, sizeof(sample));
+}
+
+template <>
+inline void
+mark_sample_invalid<rocprofiler_pc_sampling_record_v3_t>(
+    rocprofiler_pc_sampling_record_v3_t& sample)
+{
+    std::memset(&sample, 0, sizeof(sample));
+}
+
+template <>
+inline void
+mark_sample_invalid<rocprofiler_pc_sampling_record_v4_t>(
+    rocprofiler_pc_sampling_record_v4_t& sample)
 {
     std::memset(&sample, 0, sizeof(sample));
 }

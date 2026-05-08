@@ -176,15 +176,16 @@ get_snapshot_ext_field_name(rocprofiler_pc_sampling_snapshot_ext_field_id_t fiel
 }
 
 /**
- * @brief Helper to check if a record kind is one of the currently supported
- * version kinds (V0, V1, V2).  V3-V5 are reserved for future use.
+ * @brief Helper to check if a record kind is one of the supported version kinds (V0-V4).
  */
 bool
 is_valid_version_record_kind(rocprofiler_pc_sampling_record_kind_t kind)
 {
     return kind == ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE ||
            kind == ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE ||
-           kind == ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE;
+           kind == ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE ||
+           kind == ROCPROFILER_PC_SAMPLING_RECORD_V3_SAMPLE ||
+           kind == ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE;
 }
 
 /**
@@ -194,7 +195,7 @@ is_valid_version_record_kind(rocprofiler_pc_sampling_record_kind_t kind)
  * - record_kinds must not be null
  * - num_record_kinds must be > 0
  * - No duplicates
- * - At most one valid version kind (V0-V2; V3-V5 are reserved)
+ * - At most one valid version kind (V0-V4)
  * - INVALID_SAMPLE can appear independently alongside one valid version
  * - NONE, LAST, and old kinds (HOST_TRAP_V0, STOCHASTIC_V0) are not allowed
  */
@@ -363,9 +364,6 @@ validate_api_flags(rocprofiler_pc_sampling_api_flags_t flags)
  * - REQUIRE flags override the record-kind heuristic
  * - PREFER flags act as soft hints
  *
- * Note: V3-V5 record kinds are reserved for future use and are not yet
- * supported.  They are accepted by the enum but not handled here.
- *
  * @param[in] record_kinds  - array of record kinds
  * @param[in] num_record_kinds - size of array
  * @param[in] flags - API flags
@@ -384,18 +382,21 @@ infer_method_from_record_kinds_and_flags(
     auto f = static_cast<uint32_t>(flags);
 
     // Determine method from record kinds (find the valid version, if any).
-    // Currently only V0, V1, and V2 are supported.
     auto method_from_records = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     for(size_t i = 0; i < num_record_kinds; i++)
     {
         auto kind = record_kinds[i];
-        if(kind == ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE)
+        if(kind == ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE ||
+           kind == ROCPROFILER_PC_SAMPLING_RECORD_V3_SAMPLE)
         {
+            // V1 and V3 are host-trap record kinds
             method_from_records = ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP;
             break;
         }
-        else if(kind == ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE)
+        else if(kind == ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE ||
+                kind == ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE)
         {
+            // V2 and V4 are stochastic record kinds
             method_from_records = ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
             break;
         }
@@ -436,6 +437,25 @@ infer_method_from_record_kinds_and_flags(
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
+/**
+ * @brief Check whether a record kind is supported on the given agent's architecture.
+ *
+ * V3 and V4 record kinds require GFX12+ (gfxip_major == 12).
+ * All other record kinds (V0, V1, V2, INVALID_SAMPLE) are universally supported.
+ */
+bool
+is_record_kind_supported_on_agent(rocprofiler_pc_sampling_record_kind_t kind,
+                                  const rocprofiler_agent_t*            agent)
+{
+    if(kind == ROCPROFILER_PC_SAMPLING_RECORD_V3_SAMPLE ||
+       kind == ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE)
+    {
+        auto gfxip_major = (agent->gfx_target_version / 10000) % 100;
+        return gfxip_major == 12;
+    }
+    return true;
+}
+
 }  // namespace
 
 extern "C" {
@@ -564,6 +584,13 @@ rocprofiler_pc_sampling_configure_service_v2(
     const auto* agent = rocprofiler::agent::get_agent(agent_id);
     if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
+    // Reject V3/V4 record kinds on non-GFX12 agents
+    for(size_t i = 0; i < num_record_kinds; i++)
+    {
+        if(!is_record_kind_supported_on_agent(record_kinds[i], agent))
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
     // checking if the registered context exists
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
@@ -667,6 +694,14 @@ rocprofiler_pc_sampling_query_agent_configurations_v2(
     const auto* agent = rocprofiler::agent::get_agent(agent_id);
     if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
+    // V3/V4 record kinds are not supported on non-GFX12 agents: return empty configs
+    // so the caller can fall through to a lower record kind (e.g. V2).
+    for(size_t i = 0; i < num_record_kinds; i++)
+    {
+        if(!is_record_kind_supported_on_agent(record_kinds[i], agent))
+            return cb(nullptr, 0, user_data);
+    }
+
     // Query all v1 configs from the ioctl layer
     std::vector<rocprofiler_pc_sampling_configuration_t> v1_configs;
     auto status = rocprofiler::pc_sampling::ioctl::ioctl_query_pcs_configs(agent, v1_configs);
@@ -769,7 +804,6 @@ record_kind_has_snapshot_information(rocprofiler_pc_sampling_record_kind_t recor
     {
         case ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE:
         case ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE:
-        case ROCPROFILER_PC_SAMPLING_RECORD_V5_SAMPLE:
             return true;
         default:
             return false;
@@ -840,12 +874,6 @@ get_ext_data_from_record(rocprofiler_pc_sampling_record_kind_t record_kind, cons
         {
             const auto* rec =
                 static_cast<const rocprofiler_pc_sampling_record_v4_t*>(record);
-            return rec->snapshot_information.ext_data;
-        }
-        case ROCPROFILER_PC_SAMPLING_RECORD_V5_SAMPLE:
-        {
-            const auto* rec =
-                static_cast<const rocprofiler_pc_sampling_record_v5_t*>(record);
             return rec->snapshot_information.ext_data;
         }
         default:

@@ -451,6 +451,151 @@ print_sample_v2(std::ostream&                              os,
     os << "\n";
 }
 
+/**
+ * @brief Print a V3 host-trap PC sampling record with cluster information.
+ * V3 records are only available on gfx1250.
+ */
+void
+print_sample_v3(std::ostream& os, const rocprofiler_pc_sampling_record_v3_t* sample)
+{
+    print_sample_common_fields(os, sample);
+    os << ", cluster_id: " << static_cast<unsigned int>(sample->cluster_id);
+    if(sample->cluster_id != 0)
+    {
+        os << ", cluster_flat_nwg: " << static_cast<unsigned int>(sample->cluster_flat_nwg)
+           << ", cluster_nwg_(x=" << static_cast<unsigned int>(sample->cluster_nwg_x)
+           << ", y=" << static_cast<unsigned int>(sample->cluster_nwg_y)
+           << ", z=" << static_cast<unsigned int>(sample->cluster_nwg_z) << ")"
+           << ", cluster_pos_(x=" << sample->cluster_position.x
+           << ", y=" << sample->cluster_position.y
+           << ", z=" << sample->cluster_position.z << ")";
+    }
+    os << "\n";
+}
+
+/**
+ * @brief Print a V4 stochastic PC sampling record with cluster info, snapshot_information,
+ * memory counters and ext_data decoded via the per-agent snapshot ext fields.
+ * V4 records are only available on gfx1250.
+ */
+void
+print_sample_v4(std::ostream&                              os,
+                const rocprofiler_pc_sampling_record_v4_t* sample,
+                const tool_agent_info*                     agent_info)
+{
+    print_sample_common_fields(os, sample);
+    os << ", ";
+
+    // Print cluster information
+    os << "cluster_id: " << static_cast<unsigned int>(sample->cluster_id);
+    if(sample->cluster_id != 0)
+    {
+        os << ", cluster_flat_nwg: " << static_cast<unsigned int>(sample->cluster_flat_nwg)
+           << ", cluster_nwg_(x=" << static_cast<unsigned int>(sample->cluster_nwg_x)
+           << ", y=" << static_cast<unsigned int>(sample->cluster_nwg_y)
+           << ", z=" << static_cast<unsigned int>(sample->cluster_nwg_z) << ")"
+           << ", cluster_pos_(x=" << sample->cluster_position.x
+           << ", y=" << sample->cluster_position.y
+           << ", z=" << sample->cluster_position.z << ")";
+    }
+    os << ", ";
+
+    // Print snapshot_information fields (same as V2)
+    auto& snap = sample->snapshot_information;
+    if(snap.wave_issued)
+    {
+        const char* inst_name     = nullptr;
+        uint64_t    inst_name_len = 0;
+        auto        inst_status   = rocprofiler_pc_sampling_get_instruction_type_name_v2(
+            static_cast<rocprofiler_pc_sampling_instruction_type_t>(snap.instruction_type),
+            &inst_name,
+            &inst_name_len);
+        if(inst_status == ROCPROFILER_STATUS_SUCCESS && inst_name != nullptr)
+            os << "wave issued " << std::string(inst_name, inst_name_len) << " instruction, ";
+        else
+            os << "wave issued instruction (type=" << static_cast<unsigned int>(snap.instruction_type)
+               << "), ";
+    }
+    else
+    {
+        const char* reason_name     = nullptr;
+        uint64_t    reason_name_len = 0;
+        auto        reason_status   = rocprofiler_pc_sampling_get_instruction_not_issued_reason_name_v2(
+            static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
+                snap.no_issue_reason),
+            &reason_name,
+            &reason_name_len);
+        if(reason_status == ROCPROFILER_STATUS_SUCCESS && reason_name != nullptr)
+            os << "wave stalled: " << std::string(reason_name, reason_name_len) << ", ";
+        else
+            os << "wave stalled (reason=" << static_cast<unsigned int>(snap.no_issue_reason)
+               << "), ";
+    }
+
+    os << "wave_count: " << static_cast<unsigned int>(snap.wave_count) << ", ";
+
+    // Print memory counters
+    auto& mc = sample->memory_counters;
+    os << "mem_counters: {"
+       << "load=" << static_cast<unsigned int>(mc.load_count)
+       << ", store=" << static_cast<unsigned int>(mc.store_count)
+       << ", ds=" << static_cast<unsigned int>(mc.ds_count)
+       << ", km=" << static_cast<unsigned int>(mc.km_count)
+       << ", bvh=" << static_cast<unsigned int>(mc.bvh_count)
+       << ", sample=" << static_cast<unsigned int>(mc.sample_count)
+       << ", async=" << static_cast<unsigned int>(mc.async_count)
+       << ", tensor=" << static_cast<unsigned int>(mc.tensor_count)
+       << ", xnack=" << static_cast<unsigned int>(mc.xnack_count)
+       << "}, ";
+
+    // Decode ext_data using the pre-queried per-agent snapshot ext fields
+    if(agent_info != nullptr && agent_info->ext_fields != nullptr &&
+       !agent_info->ext_fields->empty())
+    {
+        os << "ext_data: {";
+
+        struct ext_cb_data
+        {
+            std::ostream*                    os;
+            const ext_field_name_map_t*   name_map;
+        };
+        auto cb_data = ext_cb_data{&os, &agent_info->ext_field_names};
+
+        auto ext_cb = [](const rocprofiler_pc_sampling_snapshot_ext_field_id_t* field_ids,
+                            const uint32_t*                                           values,
+                            size_t                                                    num_fields,
+                            void* user_data) -> rocprofiler_status_t {
+            auto&  data  = *static_cast<ext_cb_data*>(user_data);
+            bool   first = true;
+            for(size_t i = 0; i < num_fields; i++)
+            {
+                auto it = data.name_map->find(field_ids[i]);
+                if(it == data.name_map->end()) continue;
+                if(!first) *data.os << ", ";
+                *data.os << it->second << "=" << values[i];
+                first = false;
+            }
+            return ROCPROFILER_STATUS_SUCCESS;
+        };
+
+        auto extract_status = rocprofiler_pc_sampling_extract_snapshot_ext_field_values(
+            ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE,
+            static_cast<const void*>(sample),
+            agent_info->ext_fields->data(),
+            agent_info->ext_fields->size(),
+            ext_cb,
+            static_cast<void*>(&cb_data));
+
+        if(extract_status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            os << "ERROR extracting ext_data fields";
+        }
+        os << "}";
+    }
+
+    os << "\n";
+}
+
 void
 print_sample_invalid(std::ostream& os, const rocprofiler_pc_sampling_record_invalid_t* /*sample*/)
 {
@@ -517,6 +662,18 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
                 auto* pc_sample =
                     static_cast<rocprofiler_pc_sampling_record_v2_t*>(cur_header->payload);
                 print_sample_v2(ss, pc_sample, agent_info);
+            }
+            else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_V3_SAMPLE)
+            {
+                auto* pc_sample =
+                    static_cast<rocprofiler_pc_sampling_record_v3_t*>(cur_header->payload);
+                print_sample_v3(ss, pc_sample);
+            }
+            else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE)
+            {
+                auto* pc_sample =
+                    static_cast<rocprofiler_pc_sampling_record_v4_t*>(cur_header->payload);
+                print_sample_v4(ss, pc_sample, agent_info);
             }
             else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE)
             {

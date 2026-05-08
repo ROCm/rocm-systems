@@ -193,6 +193,8 @@ protected:
     std::vector<std::unique_ptr<PCSamplingData<rocprofiler_pc_sampling_record_v0_t>>> v0_data;
     std::vector<std::unique_ptr<PCSamplingData<rocprofiler_pc_sampling_record_v1_t>>> v1_data;
     std::vector<std::unique_ptr<PCSamplingData<rocprofiler_pc_sampling_record_v2_t>>> v2_data;
+    std::vector<std::unique_ptr<PCSamplingData<rocprofiler_pc_sampling_record_v3_t>>> v3_data;
+    std::vector<std::unique_ptr<PCSamplingData<rocprofiler_pc_sampling_record_v4_t>>> v4_data;
     //! Dispatches not yet completed.
     // Uses only the internal correlation_id.
     std::unordered_map<uint64_t, dispatch_pkt_id_t> active_dispatches;

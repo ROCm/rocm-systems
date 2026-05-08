@@ -819,6 +819,98 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
     return ret;
 }
 
+// --- copySample specializations for GFX1250 V3 (host-trap with cluster info) ---
+
+template <>
+inline rocprofiler_pc_sampling_record_v3_t
+copySample<GFX1250, rocprofiler_pc_sampling_record_v3_t>(const void* sample)
+{
+    const auto& s     = *static_cast<const perf_sample_host_trap_v1*>(sample);
+    auto        ret   = copySampleCommon<rocprofiler_pc_sampling_record_v3_t>(s);
+    ret.wave_in_group = s.chiplet_and_wave_id & 0x3F;
+    // GFX1250 has chiplets
+    ret.hw_id.chiplet = s.chiplet_and_wave_id >> 8;
+    // ROCr uses same hw_id struct for both GFX12 and GFX1250
+    copyHwId<GFX12>(ret.hw_id, s.hw_id);
+    ret.workgroup_position.x = s.workgroup_id_x;
+    ret.workgroup_position.y = s.workgroup_id_y;
+    ret.workgroup_position.z = s.workgroup_id_z;
+    // Cluster fields are zero-initialized by copySampleCommon (memset 0)
+    // and will be populated when cluster support is available in the hardware.
+    return ret;
+}
+
+// --- copySample specialization for GFX1250 V4 (stochastic with cluster + memory counters) ---
+
+template <>
+inline rocprofiler_pc_sampling_record_v4_t
+copySample<GFX1250, rocprofiler_pc_sampling_record_v4_t>(const void* sample)
+{
+    const auto& s = *static_cast<const perf_sample_snapshot_v1*>(sample);
+
+    auto perf_snapshot_data = s.perf_snapshot_data;
+    // The sample is valid if perf_snapshot_data.valid == 1
+    auto valid = static_cast<bool>(EXTRACT_BITS(perf_snapshot_data, 0, 0));
+    if(!valid)
+    {
+        rocprofiler_pc_sampling_record_v4_t invalid{};
+        std::memset(&invalid, 0, sizeof(invalid));
+        return invalid;
+    }
+
+    auto ret          = copySampleCommon<rocprofiler_pc_sampling_record_v4_t>(s);
+    // GFX1250 has chiplets
+    ret.hw_id.chiplet = s.chiplet_and_wave_id >> 8;
+    ret.wave_in_group = s.chiplet_and_wave_id & 0x3F;
+    // ROCr uses same hw_id struct for both GFX12 and GFX1250
+    copyHwId<GFX12>(ret.hw_id, s.hw_id);
+    ret.workgroup_position.x = s.workgroup_id_x;
+    ret.workgroup_position.y = s.workgroup_id_y;
+    ret.workgroup_position.z = s.workgroup_id_z;
+
+    // Cluster fields are zero-initialized by copySampleCommon (memset 0)
+    // and will be populated when cluster support is available in the hardware.
+
+    // Populate snapshot_information
+    ret.snapshot_information.wave_issued = EXTRACT_BITS(perf_snapshot_data, 1, 1);
+    ret.snapshot_information.instruction_type =
+        translate_inst<GFX12>(EXTRACT_BITS(perf_snapshot_data, 5, 2));
+    ret.snapshot_information.no_issue_reason =
+        translate_reason<GFX12>(EXTRACT_BITS(perf_snapshot_data, 8, 6));
+
+    auto perf_snapshot_data1            = s.perf_snapshot_data1;
+    ret.snapshot_information.wave_count = EXTRACT_BITS(perf_snapshot_data1, 5, 0);
+
+    // Pack arbiter state + lock contention into canonical layout
+    // GFX1250 arb_state is at bits [24:9] of perf_snapshot_data1 (GFX12 uses [21:6])
+    uint16_t arb_state      = EXTRACT_BITS(perf_snapshot_data1, 24, 9);
+    bool lock_contention    = EXTRACT_BITS(perf_snapshot_data, 14, 14);
+    ret.snapshot_information.ext_data = pack_snapshot_ext_data_gfx1250(arb_state, lock_contention);
+
+    // Populate memory counters from perf_snapshot_data2 register
+    auto perf_snapshot_data2         = s.perf_snapshot_data2;
+    ret.memory_counters.load_count   = EXTRACT_BITS(perf_snapshot_data2, 5, 0);
+    ret.memory_counters.store_count  = EXTRACT_BITS(perf_snapshot_data2, 11, 6);
+    ret.memory_counters.bvh_count    = EXTRACT_BITS(perf_snapshot_data2, 14, 12);
+    ret.memory_counters.sample_count = EXTRACT_BITS(perf_snapshot_data2, 20, 15);
+    ret.memory_counters.ds_count     = EXTRACT_BITS(perf_snapshot_data2, 26, 21);
+    ret.memory_counters.km_count     = EXTRACT_BITS(perf_snapshot_data2, 31, 27);
+    // GFX1250-specific counters from perf_snapshot_data and perf_snapshot_data1
+    ret.memory_counters.async_count  = EXTRACT_BITS(perf_snapshot_data, 25, 20);
+    ret.memory_counters.tensor_count = EXTRACT_BITS(perf_snapshot_data, 31, 26);
+    ret.memory_counters.xnack_count  = EXTRACT_BITS(perf_snapshot_data1, 31, 26);
+
+    // Verify that the wave_id of snapshot_data matches the hw_id.wave_id
+    auto sampled_wave_id = EXTRACT_BITS(perf_snapshot_data, 13, 9);
+    if(sampled_wave_id != ret.hw_id.wave_id)
+    {
+        ROCP_FATAL << "sampled_wave_id: " << sampled_wave_id
+                   << " mismatches the hw_id.wave_id: " << ret.hw_id.wave_id;
+    }
+
+    return ret;
+}
+
 // =====================================================================================
 // correct_pc_address
 // =====================================================================================

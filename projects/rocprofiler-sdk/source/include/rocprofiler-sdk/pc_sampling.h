@@ -201,7 +201,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
  * This function configures PC sampling in a single call. The @p record_kinds array specifies
  * which record types should be enabled, with the following validation rules:
  * - The array must contain at least one element (num_record_kinds > 0)
- * - At most ONE valid version (V0_SAMPLE through V5_SAMPLE) can be included in the array
+ * - At most ONE valid version (V0_SAMPLE through V4_SAMPLE) can be included in the array
  * - INVALID_SAMPLE can be included independently, either alone or alongside one valid version
  * - Each record kind can appear at most once in the array (no duplicates)
  * - Violating any of these rules returns ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT
@@ -305,7 +305,7 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT function invoked with invalid arguments:
  * - num_record_kinds is 0 (empty array)
  * - record_kinds is NULL
- * - multiple valid versions (V0_SAMPLE-V5_SAMPLE) in the array
+ * - multiple valid versions (V0_SAMPLE-V4_SAMPLE) in the array
  * - duplicate record kinds in the array
  * - invalid record_kind value
  * - conflicting flags (e.g. REQUIRE_HOST_TRAP | REQUIRE_STOCHASTIC)
@@ -882,22 +882,24 @@ ROCPROFILER_CXX_CODE(
                   "permitted");)
 
 /**
- * @brief (experimental) Reserved for the future architectures.
+ * @brief (experimental) Memory counters for gfx1250 compatible architectures.
  *
  * Total size must not exceed 16 bytes.
+ *
+ * Used on gfx1250.
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_counters_v1_t
 {
-    uint8_t load_count;   ///< Number of VMEM load instructions issued but not yet completed
-    uint8_t store_count;  ///< Number of VMEM store instructions issued but not yet completed
-    uint8_t ds_count;     ///< Number of LDS instructions issued but not yet completed
-    uint8_t km_count;   ///< Number of scalar memory reads/instructions issued but not yet completed
-    uint8_t bvh_count;  ///< Number of VMEM BVH instructions issued but not yet completed
+    uint8_t load_count;    ///< Number of VMEM load instructions issued but not yet completed
+    uint8_t store_count;   ///< Number of VMEM store instructions issued but not yet completed
+    uint8_t ds_count;      ///< Number of LDS instructions issued but not yet completed
+    uint8_t km_count;      ///< Number of scalar memory reads/instructions issued but not yet completed
+    uint8_t bvh_count;     ///< Number of VMEM BVH instructions issued but not yet completed
     uint8_t sample_count;  ///< Number of VMEM sample instructions issued but not yet completed
-    // For descriptive purpose only. Mimics counters that will be introduced in the future.
-    uint8_t reserved0;  ///< Reserved for future use
-    uint8_t reserved1;  ///< Reserved for future use
-    uint8_t reserved2;  ///< Reserved for future use
+    uint8_t async_count;   ///< Number of async instructions issued but not yet completed (gfx1250)
+    uint8_t tensor_count;  ///< Number of tensor instructions issued but not yet completed (gfx1250)
+    uint8_t xnack_count;   ///< Number of outstanding memory instructions not yet reported
+                           ///< XNACK acknowledgement (gfx1250)
 } rocprofiler_pc_sampling_memory_counters_v1_t;
 
 ROCPROFILER_CXX_CODE(
@@ -905,30 +907,6 @@ ROCPROFILER_CXX_CODE(
                   "Increasing the size of the rocprofiler_pc_sampling_memory_counters_v1_t is not "
                   "permitted");)
 
-/**
- * @brief (experimental) Reserved for the future architectures
- *
- * Total size must not exceed 16 bytes.
- */
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_counters_v2_t
-{
-    uint8_t load_count;   ///< Number of VMEM load instructions issued but not yet completed
-    uint8_t store_count;  ///< Number of VMEM store instructions issued but not yet completed
-    uint8_t ds_count;     ///< Number of LDS instructions issued but not yet completed
-    uint8_t km_count;  ///< Number of scalar memory reads/instructions issued but not yet completed
-    uint8_t sample_count;  ///< Number of VMEM sample instructions issued but not yet completed
-    // For descriptive purpose only. Mimics counters that will be introduced in the future.
-    uint8_t reserved0;  ///< Reserved for future use
-    uint8_t reserved1;  ///< Reserved for future use
-    uint8_t reserved2;  ///< Reserved for future use
-    uint8_t reserved3;  ///< Reserved for future use
-    uint8_t reserved4;  ///< Reserved for future use
-} rocprofiler_pc_sampling_memory_counters_v2_t;
-
-ROCPROFILER_CXX_CODE(
-    static_assert(sizeof(rocprofiler_pc_sampling_memory_counters_v2_t) == 10,
-                  "Increasing the size of the rocprofiler_pc_sampling_memory_counters_v2_t is not "
-                  "permitted");)
 
 /**
  * @brief Information about where was running when sampled.
@@ -1044,7 +1022,8 @@ ROCPROFILER_CXX_CODE(
 
 /**
  * @brief 104B in total (experimental) PC sampling record tailored for host-trap sampling
- * on future gen architectures.
+ * on gfx1250 compatible architectures.
+ * Please note that `simd_in_group` is always zero on gfx1250.
  *
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v3_t
@@ -1055,21 +1034,27 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v3_t
     uint64_t                           dispatch_id;  ///< originating kernel dispatch ID
     rocprofiler_async_correlation_id_t correlation_id;
 
-    // 11B (padded to 12B)
-    rocprofiler_pc_sampling_hw_id_v1_t
-        hw_id;  ///< 8B if we use ::rocprofiler_pc_sampling_hw_id_record_packed_t
+    // 16B
+    rocprofiler_pc_sampling_hw_id_v1_t hw_id;
     // 12B
     rocprofiler_dim3_t workgroup_position;  ///< work group position in 3D grid
+                                            ///< (or cluster if cluster_id != 0)
     // 7B (will probably be padded to 8B)
-    uint8_t wave_in_group;  ///< wave position in the workgroup
-    uint8_t reserved0;      ///< must be zero
-    uint8_t reserved1;      ///< must be zero
-    uint8_t reserved2;      ///< must be zero
-    uint8_t reserved3;      ///< must be zero
-    uint8_t reserved4;      ///< must be zero
-    uint8_t reserved5;      ///< must be zero
+    uint8_t wave_in_group;     ///< wave position in the workgroup
+    uint8_t simd_in_group;     ///< Reserved for future use, must be zero
+    uint8_t cluster_id;        ///< non-zero value means wave is in cluster
+                               ///< (reserved for future use, must be zero for now)
+    uint8_t cluster_flat_nwg;  ///< flat number of work groups in cluster
+                               ///< (meaningful if cluster_id != 0)
+    uint8_t cluster_nwg_x;    ///< number of work groups in cluster in X axis
+                               ///< (meaningful if cluster_id != 0)
+    uint8_t cluster_nwg_y;    ///< number of work groups in cluster in Y axis
+                               ///< (meaningful if cluster_id != 0)
+    uint8_t cluster_nwg_z;    ///< number of work groups in cluster in Z axis
+                               ///< (meaningful if cluster_id != 0)
     // 12B
-    rocprofiler_dim3_t reserved6;  ///< reserved for the future use (must be zero)
+    rocprofiler_dim3_t cluster_position;  ///< cluster position in 3D grid
+                                          ///< (relevant only if cluster_id != 0)
 
     /// @var correlation_id
     /// @brief API launch call id that matches dispatch ID
@@ -1081,8 +1066,9 @@ ROCPROFILER_CXX_CODE(
         "Increasing the size of the rocprofiler_pc_sampling_record_v3_t is not permitted");)
 
 /**
- * @brief 128B in total (experimental) PC sampling record tailored for stochastic on future gen
- * architectures.
+ * @brief 120B in total (experimental) PC sampling record tailored for stochastic sampling
+ * on gfx1250 compatible architectures.
+ * Please note that `simd_in_group` is always zero on gfx1250.
  *
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v4_t
@@ -1093,21 +1079,27 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v4_t
     uint64_t                           dispatch_id;  ///< originating kernel dispatch ID
     rocprofiler_async_correlation_id_t correlation_id;
 
-    // 11B (padded to 12B)
-    rocprofiler_pc_sampling_hw_id_v1_t
-        hw_id;  ///< 8B if we use ::rocprofiler_pc_sampling_hw_id_record_packed_t
+    // 16B
+    rocprofiler_pc_sampling_hw_id_v1_t hw_id;
     // 12B
     rocprofiler_dim3_t workgroup_position;  ///< work group position in 3D grid
+                                            ///< (or cluster if cluster_id != 0)
     // 7B (will probably be padded to 8B)
-    uint8_t wave_in_group;  ///< wave position in the workgroup
-    uint8_t reserved0;      ///< must be zero
-    uint8_t reserved1;      ///< must be zero
-    uint8_t reserved2;      ///< must be zero
-    uint8_t reserved3;      ///< must be zero
-    uint8_t reserved4;      ///< must be zero
-    uint8_t reserved5;      ///< must be zero
+    uint8_t wave_in_group;     ///< wave position in the workgroup
+    uint8_t simd_in_group;     ///< Reserved for future use, must be zero
+    uint8_t cluster_id;        ///< non-zero value means wave is in cluster
+                               ///< (reserved for future use, must be zero for now)
+    uint8_t cluster_flat_nwg;  ///< flat number of work groups in cluster
+                               ///< (meaningful if cluster_id != 0)
+    uint8_t cluster_nwg_x;    ///< number of work groups in cluster in X axis
+                               ///< (meaningful if cluster_id != 0)
+    uint8_t cluster_nwg_y;    ///< number of work groups in cluster in Y axis
+                               ///< (meaningful if cluster_id != 0)
+    uint8_t cluster_nwg_z;    ///< number of work groups in cluster in Z axis
+                               ///< (meaningful if cluster_id != 0)
     // 12B
-    rocprofiler_dim3_t reserved6;  ///< reserved for the future use (must be zero)
+    rocprofiler_dim3_t cluster_position;  ///< cluster position in 3D grid
+                                          ///< (relevant only if cluster_id != 0)
     // 8B
     rocprofiler_pc_sampling_snapshot_information_v0_t snapshot_information;
     // 9B (probably padded to 12B)
@@ -1115,7 +1107,6 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v4_t
 
     /// @var correlation_id
     /// @brief API launch call id that matches dispatch ID
-    /// @var flags
     /// @var memory_counters
     /// @brief Memory counters (@see ::rocprofiler_pc_sampling_memory_counters_v1_t).
 } rocprofiler_pc_sampling_record_v4_t;
@@ -1124,48 +1115,6 @@ ROCPROFILER_CXX_CODE(
     static_assert(
         sizeof(rocprofiler_pc_sampling_record_v4_t) == 120,
         "Increasing the size of the rocprofiler_pc_sampling_record_v4_t is not permitted");)
-
-/**
- * @brief 128B in total (experimental) PC sampling record tailored for stochastic future gen arch
- */
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v5_t
-{
-    rocprofiler_pc_t                   pc;           ///< information about sampled program counter
-    uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
-    uint64_t                           timestamp;    ///< timestamp when sample is generated
-    uint64_t                           dispatch_id;  ///< originating kernel dispatch ID
-    rocprofiler_async_correlation_id_t correlation_id;
-
-    // 11B (padded to 12B)
-    rocprofiler_pc_sampling_hw_id_v1_t
-        hw_id;  ///< 8B if we use ::rocprofiler_pc_sampling_hw_id_record_packed_t
-    // 12B
-    rocprofiler_dim3_t workgroup_position;  ///< work group position in 3D grid
-    // 7B (will probably be padded to 8B)
-    uint8_t wave_in_group;  ///< wave position in the workgroup
-    uint8_t reserved0;      ///< reserved for the future use (must be zero)
-    uint8_t reserved1;      ///< reserved for the future use (must be zero)
-    uint8_t reserved2;      ///< reserved for the future use (must be zero)
-    uint8_t reserved3;      ///< reserved for the future use (must be zero)
-    uint8_t reserved4;      ///< reserved for the future use (must be zero)
-    uint8_t reserved5;      ///< reserved for the future use (must be zero)
-    // 12B
-    rocprofiler_dim3_t reserved6;  ///< reserved for the future use (must be zero)
-    // 8B
-    rocprofiler_pc_sampling_snapshot_information_v0_t snapshot_information;
-    // 10B (padded to 12B)
-    rocprofiler_pc_sampling_memory_counters_v2_t memory_counters;
-
-    /// @var correlation_id
-    /// @brief API launch call id that matches dispatch ID
-    /// @var memory_counters
-    /// @brief Memory counters (@see ::rocprofiler_pc_sampling_memory_counters_v2_t).
-} rocprofiler_pc_sampling_record_v5_t;
-
-ROCPROFILER_CXX_CODE(
-    static_assert(
-        sizeof(rocprofiler_pc_sampling_record_v5_t) == 120,
-        "Increasing the size of the rocprofiler_pc_sampling_record_v5_t is not permitted");)
 
 /**
  * @brief (experimental) IDs of snapshot ext_data fields.

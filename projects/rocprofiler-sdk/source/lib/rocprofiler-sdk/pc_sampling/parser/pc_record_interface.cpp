@@ -24,6 +24,8 @@
 
 #include "lib/common/utility.hpp"
 
+#include <type_traits>
+
 template <>
 uint64_t
 PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_host_trap_v0_t>(
@@ -96,6 +98,34 @@ PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_v2_t>(
     return size;
 }
 
+template <>
+uint64_t
+PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_v3_t>(
+    rocprofiler_pc_sampling_record_v3_t** buffer,
+    uint64_t                              size)
+{
+    std::unique_lock<std::shared_mutex> lock(mut);
+    assert(buffer != nullptr);
+    v3_data.emplace_back(
+        std::make_unique<PCSamplingData<rocprofiler_pc_sampling_record_v3_t>>(size));
+    *buffer = v3_data.back()->samples.data();
+    return size;
+}
+
+template <>
+uint64_t
+PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_v4_t>(
+    rocprofiler_pc_sampling_record_v4_t** buffer,
+    uint64_t                              size)
+{
+    std::unique_lock<std::shared_mutex> lock(mut);
+    assert(buffer != nullptr);
+    v4_data.emplace_back(
+        std::make_unique<PCSamplingData<rocprofiler_pc_sampling_record_v4_t>>(size));
+    *buffer = v4_data.back()->samples.data();
+    return size;
+}
+
 /**
  * @brief Get the appropriate parse function based on the GFXIP and sampling method.
  *
@@ -123,6 +153,7 @@ PCSamplingParserContext::_get_parse_func_for_method(rocprofiler_pc_sampling_meth
 
 /**
  * @brief Get the appropriate parse function based on the GFXIP and requested v2 record kind.
+ * V3/V4 record kinds are only available on GFX1250.
  */
 template <typename GFXIP>
 PCSamplingParserContext::parse_funct_ptr_t
@@ -137,6 +168,18 @@ PCSamplingParserContext::_get_parse_func_for_record_kind(
             return &PCSamplingParserContext::_parse<GFXIP, rocprofiler_pc_sampling_record_v1_t>;
         case ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE:
             return &PCSamplingParserContext::_parse<GFXIP, rocprofiler_pc_sampling_record_v2_t>;
+        case ROCPROFILER_PC_SAMPLING_RECORD_V3_SAMPLE:
+            if constexpr(std::is_same_v<GFXIP, GFX1250>)
+                return &PCSamplingParserContext::_parse<GFXIP,
+                                                       rocprofiler_pc_sampling_record_v3_t>;
+            else
+                return nullptr;
+        case ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE:
+            if constexpr(std::is_same_v<GFXIP, GFX1250>)
+                return &PCSamplingParserContext::_parse<GFXIP,
+                                                       rocprofiler_pc_sampling_record_v4_t>;
+            else
+                return nullptr;
         default: return nullptr;
     }
 }
@@ -357,6 +400,33 @@ emplace_records_in_buffer<rocprofiler_pc_sampling_record_v2_t>(
     }
 }
 
+// --- emplace_records_in_buffer specialization for V4 (handles invalid samples) ---
+
+template <>
+inline void
+emplace_records_in_buffer<rocprofiler_pc_sampling_record_v4_t>(
+    rocprofiler::buffer::instance*             buff,
+    const rocprofiler_pc_sampling_record_v4_t* samples,
+    size_t                                     num_samples,
+    rocprofiler_pc_sampling_record_kind_t      record_kind)
+{
+    for(size_t i = 0; i < num_samples; i++)
+    {
+        if(is_invalid_sample(samples[i]))
+        {
+            auto invalid_sample = rocprofiler::common::init_public_api_struct(
+                rocprofiler_pc_sampling_record_invalid_t{});
+            buff->emplace(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING,
+                          ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE,
+                          invalid_sample);
+        }
+        else
+        {
+            buff->emplace(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING, record_kind, samples[i]);
+        }
+    }
+}
+
 // --- generate_upcoming_pc_record specializations for v2 record types ---
 
 template <>
@@ -390,4 +460,26 @@ PCSamplingParserContext::generate_upcoming_pc_record<rocprofiler_pc_sampling_rec
 {
     this->generate_upcoming_pc_record(
         agent_id_handle, samples, num_samples, ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE);
+}
+
+template <>
+void
+PCSamplingParserContext::generate_upcoming_pc_record<rocprofiler_pc_sampling_record_v3_t>(
+    uint64_t                                   agent_id_handle,
+    const rocprofiler_pc_sampling_record_v3_t* samples,
+    size_t                                     num_samples)
+{
+    this->generate_upcoming_pc_record(
+        agent_id_handle, samples, num_samples, ROCPROFILER_PC_SAMPLING_RECORD_V3_SAMPLE);
+}
+
+template <>
+void
+PCSamplingParserContext::generate_upcoming_pc_record<rocprofiler_pc_sampling_record_v4_t>(
+    uint64_t                                   agent_id_handle,
+    const rocprofiler_pc_sampling_record_v4_t* samples,
+    size_t                                     num_samples)
+{
+    this->generate_upcoming_pc_record(
+        agent_id_handle, samples, num_samples, ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE);
 }
