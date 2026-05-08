@@ -180,17 +180,16 @@ void GpuDiscoveryDeprecatedTest::Run() {
             << supported_gpu_nodes << " supported, "
             << deprecated_gpu_nodes << " deprecated" << std::endl;
 
-  // Phase 2: Verify hsa_init() succeeds regardless of deprecated GPUs.
-  // This is the core regression test — before the fix, hsa_init() would fail
-  // with HSA_STATUS_ERROR if ANY GPU had DoorbellType != 2.
-  hsa_status_t err = hsa_init();
-  ASSERT_EQ(err, HSA_STATUS_SUCCESS)
-      << "hsa_init() failed. If deprecated GPUs are present, they should be "
-         "skipped gracefully without aborting initialization.";
+  // Phase 2: HSA was initialized in TestBase::SetUp() via InitAndSetupHSA().
+  // The core regression check is implicit: if SetUp() returned successfully
+  // with deprecated GPUs present, hsa_init() did not abort the way it used to
+  // before this fix. We do not call hsa_init() / hsa_shut_down() here — the
+  // rocrtst harness (main.cc:RunCustomTestProlog/Epilog) handles that lifecycle
+  // and TestBase::Close() will call hsa_shut_down() via CommonCleanUp().
 
   // Phase 3: Count GPU agents exposed by HSA.
   uint32_t hsa_gpu_count = 0;
-  err = hsa_iterate_agents(CountGpuAgentsCallback, &hsa_gpu_count);
+  hsa_status_t err = hsa_iterate_agents(CountGpuAgentsCallback, &hsa_gpu_count);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS) << "hsa_iterate_agents failed";
 
   std::cout << "  HSA reports " << hsa_gpu_count << " GPU agent(s)" << std::endl;
@@ -231,8 +230,8 @@ void GpuDiscoveryDeprecatedTest::Run() {
               << hsa_gpu_count << " supported GPU(s) exposed."
               << std::endl;
   }
-
-  hsa_shut_down();
+  // hsa_shut_down() intentionally not called here — TestBase::Close() handles
+  // it via CommonCleanUp().
 }
 
 void GpuDiscoveryDeprecatedTest::Close() {

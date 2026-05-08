@@ -2,8 +2,18 @@
  * Standalone unit tests for doorbell type validation logic.
  * Can be compiled and run without ROCm/HSA runtime installed.
  *
- * Build:  g++ -std=c++17 -I../rocrtst/gtest/include -o doorbell_type_test \
- *           doorbell_type_test.cc ../rocrtst/gtest/src/gtest-all.cc -lpthread
+ * From projects/rocr-runtime/rocrtst/suites/functional/:
+ *
+ * Build:  g++ -std=c++17 -I../../gtest/include -I../../gtest \
+ *           -o doorbell_type_test doorbell_type_test.cc \
+ *           ../../gtest/src/gtest.cpp \
+ *           ../../gtest/src/gtest-port.cpp \
+ *           ../../gtest/src/gtest-printers.cpp \
+ *           ../../gtest/src/gtest-filepath.cpp \
+ *           ../../gtest/src/gtest-test-part.cpp \
+ *           ../../gtest/src/gtest-typed-test.cpp \
+ *           ../../gtest/src/gtest-death-test.cpp \
+ *           -lpthread
  *
  * Run:    ./doorbell_type_test
  */
