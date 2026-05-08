@@ -20,6 +20,10 @@
 #               | -- memory partition mode:
 #                   | -- npsX: # NUMA partition per socket
 #                       | -- Xpx # Number of HBM stack partitions
+#           |-- design:
+#               | -- physical_aid # Number of physical AIDs (CDNA)
+#               | -- logical_partitions_per_die # Logical AID partitions per physical AID (CDNA)
+#               | -- memory_die # Number of memory dies / MCDs (RDNA/navi3)
 #
 # --------------------------------------------------------------------------------
 

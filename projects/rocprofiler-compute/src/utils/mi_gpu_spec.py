@@ -80,8 +80,9 @@ class MIGPUSpecs:
                         | -- compute partition mode
                         | -- memory partition mode
                     |-- design
-                        | -- physical_aid
-                        | -- logical_partitions_per_die
+                        | -- physical_aid (CDNA)
+                        | -- logical_partitions_per_die (CDNA)
+                        | -- memory_die (RDNA/navi3)
         """
 
         current_dir = Path(__file__).parent

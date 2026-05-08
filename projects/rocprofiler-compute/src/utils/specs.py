@@ -775,7 +775,7 @@ class MachineSpecs:
             "show_in_table": True,
         },
     )
-    num_dies: Optional[str] = field(
+    num_dies: Optional[int] = field(
         default=None,
         metadata={
             "doc": "Number of logical dies present on the model. For Instinct products "
@@ -785,7 +785,7 @@ class MachineSpecs:
             "show_in_table": False,
         },
     )
-    cache_sizes: Optional[str] = field(
+    cache_sizes: Optional[dict[str, int]] = field(
         default=None,
         metadata={
             "doc": "Size of cache at each level present on the GPU",
@@ -954,14 +954,14 @@ def totall2_banks(
     return None
 
 
-def set_cache_sizes(num_cu: int, cache_info: dict, num_dies: int) -> None:
+def set_cache_sizes(num_cu: int, cache_info: dict, num_dies: int) -> dict[str, int]:
     """
     Extrapolate the cache sizes for AMD-SMI cache info output
     """
     if num_cu == 0:
-        raise RuntimeError("Failed to determine GPU compute unit count from AMD-SMI.")
+        console_error("Failed to determine GPU compute unit count from AMD-SMI.")
     if not cache_info:
-        raise RuntimeError("Failed to retrieve GPU cache information from AMD-SMI.")
+        console_error("Failed to retrieve GPU cache information from AMD-SMI.")
 
     cache_sizes = {}
     for cache_values in cache_info["cache"]:
