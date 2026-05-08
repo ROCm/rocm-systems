@@ -57,7 +57,7 @@ VALU_NFMA = 1024
 # Bench_base Class (ABSTRACT)
 # =============================================================================
 class Bench_base(ABC):
-    def __init__(self, device_id: int) -> None:
+    def __init__(self, device_id: int, cache_sizes: dict) -> None:
         self.device_id = device_id
 
         # Arch or hardware-specific variables must be set in child classes
@@ -71,6 +71,8 @@ class Bench_base(ABC):
         self.csv_cols_map: dict[str, str]
         self.WAVEFRONT_SIZE: int
         self.MATRIX_OPS_TYPE: str
+
+        self.cache_sizes = cache_sizes
 
         # Some data types have different rates. Set the number of iterations
         # to keep running time under control.
@@ -124,16 +126,11 @@ class Bench_base(ABC):
         self.matrix_f64_src: str
         self.matrix_i8_src: str
         self.set_kernel_source()
-        self.set_cache_sizes()
         self.set_cache_kernel_selector()
 
     # -----------------------------------------------------------------------------
     # Helper Methods and Classes
     # -----------------------------------------------------------------------------
-
-    # Method must be set in child classes
-    def set_cache_sizes(self) -> None:
-        self.cache_sizes = {}
 
     @contextmanager
     def gpu_benchmark_lock(self, device: int) -> Generator[None, None, None]:
@@ -256,14 +253,6 @@ class Bench_base(ABC):
 
         # Parse out only gfx
         return arch_str.split(":", 1)[0]
-
-    def get_gpu_model(self) -> str:
-        """Retrieve GPU model name."""
-        from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model
-
-        with amdsmi_ctx():
-            full_name = get_gpu_model()[1]
-        return full_name.split()[-1]
 
     def set_cache_kernel_selector(self) -> None:
         self.cache_kernel_selector = {}

@@ -15,11 +15,8 @@ from .. import benchmark_base
 # Bench_gfx9 Class (ABSTRACT)
 # =============================================================================
 class Bench_gfx9(benchmark_base.Bench_base):
-    def __init__(self, device_id: int) -> None:
-        # Must define number of AID per arch
-        self.aid_count: int
-
-        super().__init__(device_id)
+    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+        super().__init__(device_id, cache_sizes)
 
         self.WAVEFRONT_SIZE = 64
         self.MATRIX_OPS_TYPE = "MFMA"
@@ -85,49 +82,6 @@ class Bench_gfx9(benchmark_base.Bench_base):
     # -----------------------------------------------------------------------------
     # Helper Methods and Classes
     # -----------------------------------------------------------------------------
-
-    def set_cache_sizes(self) -> None:
-        from utils.amdsmi_interface import (
-            amdsmi_ctx,
-            get_gpu_cache_info,
-            get_gpu_num_compute_units,
-        )
-
-        with amdsmi_ctx():
-            cu_count = get_gpu_num_compute_units()
-            if cu_count == -1:
-                raise RuntimeError(
-                    "Failed to determine GPU compute unit count from AMD-SMI."
-                )
-            cache_info = get_gpu_cache_info()
-            if (
-                not cache_info
-                or not isinstance(cache_info, dict)
-                or "cache" not in cache_info
-                or not cache_info["cache"]
-            ):
-                raise RuntimeError(
-                    "Failed to retrieve GPU cache information from AMD-SMI."
-                )
-
-        self.cache_sizes = {}
-
-        for cache_values in cache_info["cache"]:
-            # Cache level is L1 and we are looking for vL1d which means
-            # there should be a cache instance per CU available on the GPU
-            if (
-                cache_values["cache_level"] == 1
-                and cache_values["num_cache_instance"] == cu_count
-            ):
-                self.cache_sizes["L1"] = cache_values["cache_size"] * 1024
-            # Cache levels L2 and L3/MALL are shared across all CUs
-            # therefore only have one cache instance
-            elif cache_values["cache_level"] == 2:
-                self.cache_sizes["L2"] = cache_values["cache_size"] * 1024
-            elif cache_values["cache_level"] == 3 and self.aid_count > 0:
-                self.cache_sizes["MALL"] = int(
-                    cache_values["cache_size"] * 1024 / self.aid_count
-                )
 
     # -----------------------------------------------------------------------------
     # Benchmarking kernel source

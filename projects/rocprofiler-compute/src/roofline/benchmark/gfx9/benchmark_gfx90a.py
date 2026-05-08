@@ -16,14 +16,8 @@ from . import benchmark_gfx9_base
 # Bench_gfx90a Class
 # =============================================================================
 class Bench_gfx90a(benchmark_gfx9_base.Bench_gfx9):
-    def __init__(self, device_id: int) -> None:
-        # GPU model name not currently needed for MI300 series products
-        # self.gpu_model = self.get_gpu_model()
-
-        # MI200 products do not have AID
-        self.aid_count = -1
-
-        super().__init__(device_id)
+    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+        super().__init__(device_id, cache_sizes)
 
         self.unsupported_data_types = [
             "MALL",

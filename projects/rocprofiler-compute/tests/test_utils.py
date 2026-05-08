@@ -5994,7 +5994,7 @@ def test_amdsmi_get_gpu_num_compute_units():
             side_effect=Exception("Mock exception"),
         ):
             cu_count = get_gpu_num_compute_units()
-            assert cu_count == -1
+            assert cu_count == 0
 
 
 # =============================================================================

@@ -186,7 +186,7 @@ def get_gpu_vram_size() -> str:
 
 
 def get_gpu_cache_info() -> dict[str, Any]:
-    """Get the GPU cache sizes."""
+    """Get the GPU cache level information."""
     amdsmi = import_amdsmi_module()
     error = None
     for device in get_device_handles():
@@ -212,4 +212,4 @@ def get_gpu_num_compute_units() -> int:
         except Exception as e:
             error = e
     console_warning(f"Error getting GPU compute unit count: {error}")
-    return -1
+    return 0
