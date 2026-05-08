@@ -7003,8 +7003,8 @@ amdsmi_status_t amdsmi_set_cpu_xgmi_width(amdsmi_processor_handle processor_hand
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t amdsmi_get_cpu_xgmi_width(amdsmi_processor_handle processor_handle,
-                                          uint8_t* min, uint8_t* max) {
+amdsmi_status_t amdsmi_get_cpu_xgmi_width(amdsmi_processor_handle processor_handle, uint8_t* min,
+                                          uint8_t* max) {
   amdsmi_status_t status;
   uint8_t sock_ind;
 

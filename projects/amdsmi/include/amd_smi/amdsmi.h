@@ -8289,8 +8289,8 @@ amdsmi_status_t amdsmi_set_cpu_xgmi_width(amdsmi_processor_handle processor_hand
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_cpu_xgmi_width(amdsmi_processor_handle processor_handle,
-                                          uint8_t* min, uint8_t* max);
+amdsmi_status_t amdsmi_get_cpu_xgmi_width(amdsmi_processor_handle processor_handle, uint8_t* min,
+                                          uint8_t* max);
 
 /** @} End tagEsmiXGMIBandwidthCont */
 
@@ -8448,8 +8448,9 @@ amdsmi_status_t amdsmi_set_cpu_df_pstate_range(amdsmi_processor_handle processor
 /**
  *  @brief Get the DF PState range
  *
- *  This API retrieves the current Data Fabric (DF) P-State range for the specified processor socket.
- *  The DF P-State range defines the minimum and maximum frequency states for the data fabric.
+ *  This API retrieves the current Data Fabric (DF) P-State range for the specified processor
+ * socket. The DF P-State range defines the minimum and maximum frequency states for the data
+ * fabric.
  *
  *  @ingroup tagPstateSelect
  *

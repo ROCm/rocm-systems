@@ -4830,9 +4830,7 @@ class AMDSMICommands:
                 static_dict["df_pstate_range"]["min_pstate"] = "N/A"
                 static_dict["df_pstate_range"]["max_pstate"] = "N/A"
                 logging.debug(
-                    "Failed to get df pstate range for cpu %s | %s",
-                    cpu_id,
-                    e.get_error_info()
+                    "Failed to get df pstate range for cpu %s | %s", cpu_id, e.get_error_info()
                 )
         if args.cpu_metrics_ver:
             static_dict["metric_version"] = {}

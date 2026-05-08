@@ -1448,10 +1448,7 @@ def amdsmi_get_cpu_apb_status(processor_handle: processor_handle_t) -> dict:
     else:  # APB is disabled
         pstate_val = pstate.value
 
-    return {
-        "status": status,
-        "pstate": pstate_val
-    }
+    return {"status": status, "pstate": pstate_val}
 
 
 def amdsmi_get_cpu_fclk_mclk(processor_handle: processor_handle_t):
@@ -1801,10 +1798,7 @@ def amdsmi_get_cpu_xgmi_width(processor_handle: processor_handle_t) -> dict:
         )
     )
 
-    return {
-        "min_width": min_width.value,
-        "max_width": max_width.value
-    }
+    return {"min_width": min_width.value, "max_width": max_width.value}
 
 
 def amdsmi_set_cpu_gmi3_link_width_range(
@@ -1936,10 +1930,7 @@ def amdsmi_get_cpu_df_pstate_range(processor_handle: processor_handle_t):
         )
     )
 
-    return {
-        "min_pstate": min_pstate.value,
-        "max_pstate": max_pstate.value
-    }
+    return {"min_pstate": min_pstate.value, "max_pstate": max_pstate.value}
 
 
 def amdsmi_get_cpu_current_io_bandwidth(
