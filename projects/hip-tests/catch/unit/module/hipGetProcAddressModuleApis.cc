@@ -317,7 +317,8 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisLoadData) {
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_ModuleApisCooperativeKernels) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    return;
   }
 
   HIP_CHECK(hipSetDevice(0));

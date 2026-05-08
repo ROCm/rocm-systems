@@ -292,7 +292,8 @@ HIP_TEST_CASE(Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GP
   int numaNode = -1;
   HIP_CHECK(hipDeviceGetAttribute(&numaNode, hipDeviceAttributeHostNumaId, 0));
   if (numaNode == -1) {
-    HIP_SKIP_TEST("host NUMA is not supported.");
+    HipTest::HIP_SKIP_TEST("host NUMA is not supported.");
+    return;
   }
   HIP_CHECK(hipSetDevice(0));
   // In windows, it is the same with / without hipHostMallocNumaUser

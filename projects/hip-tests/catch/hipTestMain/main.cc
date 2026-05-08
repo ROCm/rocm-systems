@@ -7,6 +7,7 @@
 #define CATCH_CONFIG_RUNNER
 #include <cmd_options.hh>
 #include <hip_test_common.hh>
+#include <iostream>
 
 CmdOptions cmd_options;
 

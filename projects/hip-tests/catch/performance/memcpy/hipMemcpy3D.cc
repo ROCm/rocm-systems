@@ -60,6 +60,9 @@ static void RunBenchmark(const hipExtent extent, hipMemcpyKind kind,
     // hipMemcpyDeviceToDevice
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
+    if (src_device == -1 && dst_device == -1) {
+      return;
+    }
 
     LinearAllocGuard3D<int> src_allocation(extent);
     HIP_CHECK(hipSetDevice(dst_device));
@@ -170,7 +173,8 @@ HIP_TEST_CASE(Performance_hipMemcpy3D_DeviceToDevice_DisablePeerAccess) {
  */
 HIP_TEST_CASE(Performance_hipMemcpy3D_DeviceToDevice_EnablePeerAccess) {
   if (HipTest::getDeviceCount() < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyDeviceToDevice, true);

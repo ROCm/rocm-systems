@@ -74,24 +74,25 @@ public:
 };
 
 static std::once_flag glut_init_flag;
-static bool glut_init_failed = false;
 static void GlutError(const char *fmt, va_list ap)
 {
     // Print what error occurred
     fprintf(stderr, "GlutError:");
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, "\n");
-    
-    glut_init_failed = true;
+
+    // Mark this test as skipped because this error could be
+    // due to system doesn't have display connected, e.g: Jenkins CI machine
+    HipTest::HIP_SKIP_TEST("GLUT initialization failed.");
+
+    glutExit();
+    exit(1);
 }
 
 class GLUTContextScopeGuard : public IContextScopeGuard {
  public:
   GLUTContextScopeGuard() {
     std::call_once(glut_init_flag, &GLUTContextScopeGuard::init);
-    if (glut_init_failed) {
-      HIP_SKIP_TEST("GLUT Init Failed");
-    }
     glut_window_ = glutCreateWindow("");
   }
 
@@ -114,7 +115,6 @@ class GLUTContextScopeGuard : public IContextScopeGuard {
     static int glut_argc = 1;
     glutInitErrorFunc(&GlutError);
     glutInit(&glut_argc, glut_argv.data());
-    if (glut_init_failed) return;
     glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
     glutInitWindowSize(512, 512);
   }
@@ -207,6 +207,11 @@ class GLContextScopeGuard {
 
   GLContextScopeGuard() {
 
+    if(!HipTest::isImageSupported()) {
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
+      exit(0);
+    }
+
     char* val = std::getenv(kEnvarName);
     std::string val_str = val == NULL ? "" : val;
 
@@ -229,8 +234,10 @@ class GLContextScopeGuard {
 #ifdef USE_GLEW
     GLenum err = glewInit();
     if (err != GLEW_OK) {
-      fprintf(stderr, "GLEW initialization failed: %s\n", glewGetErrorString(err));
-      HIP_SKIP_TEST(HipTest::SkipReason::kGlewInitFailed);
+      fprintf(stderr, "GLEW initialization failed: %s\n",
+              glewGetErrorString(err));
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGlewInitFailed);
+      exit(1);
     }
 #endif
   }

@@ -35,7 +35,8 @@
 HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Positive_Default) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   const auto allocation_size = GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
@@ -105,7 +106,8 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Positive_Synchronization_Behavior) {
 
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   const StreamGuard stream_guard(Streams::created);
@@ -153,7 +155,8 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Positive_Synchronization_Behavior) {
 HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Positive_ZeroSize) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   const StreamGuard stream_guard(Streams::created);
@@ -237,7 +240,8 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Positive_ZeroSize) {
 HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Negative_Parameters) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   const StreamGuard stream_guard(Streams::created);
@@ -296,7 +300,8 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Negative_Parameters) {
 HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Capture) {
   const int device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   hipStream_t stream = nullptr;

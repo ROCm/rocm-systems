@@ -77,9 +77,10 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_StreamOnDiffDevice) {
       HipTest::freeArrays<int>(X_d, Y_d, Z_d, nullptr, nullptr, nullptr, false);
       HIP_CHECK(hipStreamDestroy(stream));
     } else {
-      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 }
