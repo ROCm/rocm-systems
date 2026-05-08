@@ -299,13 +299,23 @@ endif()
 # compress selected columns of the output database.
 #
 if(ROCPROFILER_BUILD_SQLITE_ZSTD)
+    # Pinned to v0.3.2 because tags v0.3.3+ bumped the rusqlite dependency to
+    # 0.35.x, whose `Connection::extension_init2` performs a runtime SQLite
+    # version check that requires the host process's libsqlite3 to be at least
+    # the version rusqlite was compiled against (3.49.1+ for 0.35.0). Linux
+    # distros that ship SQLite 3.45.x (e.g. Ubuntu 24.04) trigger a "SQLite
+    # version mismatch" abort during sqlite3_load_extension and rocpd silently
+    # falls back to writing an uncompressed database. v0.3.2 uses
+    # `rusqlite-le 0.24.2` and assigns sqlite3_api_routines manually with no
+    # version check, which works against any SQLite that supports the
+    # extension API.
     rocprofiler_checkout_git_submodule(
         RECURSIVE
         RELATIVE_PATH external/sqlite-zstd
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         TEST_FILE Cargo.toml
         REPO_URL https://github.com/phiresky/sqlite-zstd
-        REPO_BRANCH "master")
+        REPO_BRANCH "v0.3.2")
 
     find_program(
         CARGO_EXECUTABLE

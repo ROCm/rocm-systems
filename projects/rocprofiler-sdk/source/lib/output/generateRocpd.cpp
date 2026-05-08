@@ -408,6 +408,15 @@ apply_zstd_compression(rocpd_db& db)
         return true;
     };
 
+    // Per-target failures are demoted to warnings (see run_sql above) and we
+    // continue with the remaining targets rather than aborting the whole pass.
+    // sqlite-zstd refuses to compress columns that participate in any index
+    // (including auto-indexes from UNIQUE / PRIMARY KEY constraints), and
+    // schema evolution can introduce such constraints on individual columns
+    // without intending to disable compression of the rest. Aborting the
+    // first time any single target fails throws away the (often substantial)
+    // compression savings on the unaffected targets.
+    size_t success_count = 0;
     for(const auto& [table_tmpl, column] : sqlite_zstd_compression_targets)
     {
         auto table = replace_uuid(db, table_tmpl);
@@ -422,8 +431,16 @@ apply_zstd_compression(rocpd_db& db)
             table,
             column);
         auto stmt = fmt::format("SELECT zstd_enable_transparent('{}');", config);
-        if(!run_sql(fmt::format("zstd_enable_transparent({}.{})", table, column), stmt))
-            return;
+        if(run_sql(fmt::format("zstd_enable_transparent({}.{})", table, column), stmt))
+            ++success_count;
+    }
+
+    if(success_count == 0)
+    {
+        ROCP_CI_LOG(WARNING)
+            << "[rocpd] sqlite-zstd: no compression targets succeeded; skipping "
+               "zstd_incremental_maintenance and VACUUM";
+        return;
     }
 
     if(!run_sql("zstd_incremental_maintenance",
@@ -432,8 +449,10 @@ apply_zstd_compression(rocpd_db& db)
 
     if(!run_sql("VACUUM", std::string{"VACUUM;"})) return;
 
-    ROCP_INFO << fmt::format("[rocpd] sqlite-zstd compression applied to {} (table, column) pairs",
-                             sqlite_zstd_compression_targets.size());
+    ROCP_INFO << fmt::format(
+        "[rocpd] sqlite-zstd compression applied to {} of {} (table, column) pairs",
+        success_count,
+        sqlite_zstd_compression_targets.size());
 }
 
 // Insert a row into rocpd_metadata recording whether the file was written with
