@@ -17,9 +17,11 @@
 namespace hip {
 
 hipError_t ihipEventCreateWithFlags(hipEvent_t* event, unsigned flags);
+hipError_t ihipCreateIpcEventByType(hipEvent_t* event, ihipIpcEventHandleType type);
+void ihipDestroyIpcEvent(hipEvent_t event);
 
 // ================================================================================================
-bool IPCEvent::createIpcEventShmemIfNeeded() {
+bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
   // Early return if shared memory already exists
   if (ipc_evt_.ipc_shmem_) {
     return true;
@@ -58,7 +60,7 @@ bool IPCEvent::createIpcEventShmemIfNeeded() {
 }
 
 // ================================================================================================
-hipError_t IPCEvent::query() {
+hipError_t IPCEventEmulated::query() {
   if (ipc_evt_.ipc_shmem_) {
     const int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
     const int offset = prev_read_idx % IPC_SIGNALS_PER_EVENT;
@@ -72,7 +74,7 @@ hipError_t IPCEvent::query() {
 }
 
 // ================================================================================================
-hipError_t IPCEvent::synchronize() {
+hipError_t IPCEventEmulated::synchronize() {
   if (ipc_evt_.ipc_shmem_) {
     int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
     if (prev_read_idx >= 0) {
@@ -87,7 +89,7 @@ hipError_t IPCEvent::synchronize() {
 }
 
 // ================================================================================================
-hipError_t IPCEvent::streamWait(hip::Stream* stream, uint flags) {
+hipError_t IPCEventEmulated::streamWait(hip::Stream* stream, uint flags) {
   const int offset = ipc_evt_.ipc_shmem_->read_index;
   return ihipStreamOperation(
       reinterpret_cast<hipStream_t>(stream),
@@ -97,14 +99,14 @@ hipError_t IPCEvent::streamWait(hip::Stream* stream, uint flags) {
 }
 
 // ================================================================================================
-hipError_t IPCEvent::recordCommand(amd::Command*& command, amd::HostQueue* stream, uint32_t flags,
-                                   bool batch_flush) {
+hipError_t IPCEventEmulated::recordCommand(amd::Command*& command, amd::HostQueue* stream,
+                                           uint32_t flags, bool batch_flush) {
   command = new amd::Marker(*stream, kMarkerDisableFlush);
   return hipSuccess;
 }
 
 // ================================================================================================
-hipError_t IPCEvent::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
+hipError_t IPCEventEmulated::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
   createIpcEventShmemIfNeeded();
 
   // Allocate signal slot for this event
@@ -147,19 +149,21 @@ hipError_t IPCEvent::enqueueRecordCommand(hip::Stream* stream, amd::Command* com
 }
 
 // ================================================================================================
-hipError_t IPCEvent::GetHandle(ihipIpcEventHandle_t* handle) {
+hipError_t IPCEventEmulated::GetHandle(ihipIpcEventHandle_t* handle) {
   if (!createIpcEventShmemIfNeeded()) {
     return hipErrorInvalidValue;
   }
   ipc_evt_.ipc_shmem_->owners_device_id = deviceId();
   ipc_evt_.ipc_shmem_->owners_process_id = amd::Os::getProcessId();
-  memset(handle->shmem_name, 0, HIP_IPC_HANDLE_SIZE);
+  handle->type = kIpcEventHandleEmulated;
+  handle->creator_pid = static_cast<int32_t>(amd::Os::getProcessId());
+  memset(handle->shmem_name, 0, IHIP_IPC_EVENT_HANDLE_SIZE);
   ipc_evt_.ipc_name_.copy(handle->shmem_name, std::string::npos);
   return hipSuccess;
 }
 
 // ================================================================================================
-hipError_t IPCEvent::OpenHandle(ihipIpcEventHandle_t* handle) {
+hipError_t IPCEventEmulated::OpenHandle(ihipIpcEventHandle_t* handle) {
   ipc_evt_.ipc_name_ = handle->shmem_name;
 
   // Map shared memory from IPC handle
@@ -186,6 +190,167 @@ hipError_t IPCEvent::OpenHandle(ihipIpcEventHandle_t* handle) {
 }
 
 // ================================================================================================
+// IPCEvent implementation (true IPC signals for supported backends)
+// Record: standard barrier + async handler sets IPC signal to 0 when GPU work completes
+// StreamWait: barrier packet with IPC signal as dep_signal (GPU waits until signal reaches 0)
+// ================================================================================================
+
+hipError_t IPCEvent::createIpcSignalIfNeeded() {
+  if (ipc_signal_ != nullptr) {
+    return hipSuccess;
+  }
+
+  auto* dev = g_devices[deviceId()]->devices()[0];
+  ipc_signal_ = dev->createIpcSignal();
+  if (ipc_signal_ == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  const auto ws = (flags_ & hipEventBlockingSync)
+      ? amd::device::Signal::WaitState::Blocked
+      : amd::device::Signal::WaitState::Active;
+  if (!ipc_signal_->Init(*dev, 1, ws)) {
+    delete ipc_signal_;
+    ipc_signal_ = nullptr;
+    return hipErrorInvalidValue;
+  }
+
+  return hipSuccess;
+}
+
+IPCEvent::~IPCEvent() {
+  if (ipc_signal_ != nullptr) {
+    // If the event was recorded (signal armed), wait for any in-flight barrier
+    // to finish before destroying the signal; otherwise the GPU could write to
+    // freed memory.  Skip the wait when the signal was never recorded (still at
+    // its initial value) — waiting would hang forever.
+    if (event_ != nullptr) {
+      ipc_signal_->Wait(1, amd::device::Signal::Condition::Lt, UINT64_MAX);
+    }
+    delete ipc_signal_;
+    ipc_signal_ = nullptr;
+  }
+}
+
+// ================================================================================================
+hipError_t IPCEvent::GetHandle(ihipIpcEventHandle_t* handle) {
+  auto status = createIpcSignalIfNeeded();
+  if (status != hipSuccess) {
+    return status;
+  }
+
+  handle->type = kIpcEventHandleROCr;
+  handle->creator_pid = static_cast<int32_t>(amd::Os::getProcessId());
+  if (!ipc_signal_->IpcExport(handle->ipc_signal_handle, IHIP_IPC_EVENT_HANDLE_SIZE)) {
+    return hipErrorInvalidValue;
+  }
+
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t IPCEvent::OpenHandle(ihipIpcEventHandle_t* handle) {
+  if (handle->type != kIpcEventHandleROCr) {
+    return hipErrorInvalidValue;
+  }
+
+  if (static_cast<int32_t>(amd::Os::getProcessId()) == handle->creator_pid) {
+    return hipErrorInvalidContext;
+  }
+
+  auto* dev = g_devices[deviceId()]->devices()[0];
+  ipc_signal_ = dev->createIpcSignal();
+  if (ipc_signal_ == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  if (!ipc_signal_->IpcImport(handle->ipc_signal_handle, IHIP_IPC_EVENT_HANDLE_SIZE, dev)) {
+    delete ipc_signal_;
+    ipc_signal_ = nullptr;
+    return hipErrorInvalidValue;
+  }
+
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t IPCEvent::recordCommand(amd::Command*& command, amd::HostQueue* stream,
+                                   uint32_t flags, bool batch_flush) {
+  auto status = createIpcSignalIfNeeded();
+  if (status != hipSuccess) {
+    return status;
+  }
+
+  auto* marker = new amd::Marker(*stream, kMarkerDisableFlush);
+  marker->setIpcCompletionSignal(ipc_signal_);
+  command = marker;
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t IPCEvent::enqueueRecordCommand(hip::Stream* stream, amd::Command* command) {
+  // Re-arm the signal; GPU barrier will decrement to 0 when work completes
+  ipc_signal_->Reset(1);
+
+  command->enqueue();
+
+  if (event_ != nullptr) {
+    event_->release();
+  }
+  event_ = &command->event();
+
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t IPCEvent::synchronize() {
+  std::scoped_lock lock(lock_);
+
+  if (ipc_signal_ == nullptr) {
+    return hipSuccess;
+  }
+
+  ipc_signal_->Wait(1, amd::device::Signal::Condition::Lt, UINT64_MAX);
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t IPCEvent::query() {
+  std::scoped_lock lock(lock_);
+
+  if (ipc_signal_ == nullptr) {
+    return hipSuccess;
+  }
+
+  if (ipc_signal_->Load() >= 1) {
+    return hipErrorNotReady;
+  }
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t IPCEvent::streamWait(hip::Stream* stream, uint flags) {
+  std::scoped_lock lock(lock_);
+
+  if (ipc_signal_ == nullptr) {
+    return hipSuccess;
+  }
+
+  if (ipc_signal_->Load() < 1) {
+    return hipSuccess;
+  }
+
+  // Dispatch a barrier that waits on the IPC signal as dep_signal
+  auto* marker = new amd::Marker(*stream, kMarkerDisableFlush);
+  marker->setIpcDepSignal(ipc_signal_);
+  marker->enqueue();
+  return hipSuccess;
+}
+
+// ================================================================================================
+// HIP API functions for IPC events
+// ================================================================================================
+
 hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle, hipEvent_t event) {
   HIP_INIT_API(hipIpcGetEventHandle, handle, event);
 
@@ -205,19 +370,20 @@ hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle) 
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // Create IPC event with timing disabled
-  constexpr uint32_t kIpcEventFlags = hipEventDisableTiming | hipEventInterprocess;
-  auto status = ihipEventCreateWithFlags(event, kIpcEventFlags);
+  auto* const iHandle = reinterpret_cast<ihipIpcEventHandle_t*>(&handle);
+
+  // Select event implementation based on the handle's type field rather than
+  // a runtime probe — the opener must match the exporter's implementation.
+  auto status = ihipCreateIpcEventByType(event, iHandle->type);
   if (status != hipSuccess) {
     HIP_RETURN(status);
   }
 
   auto* const e = reinterpret_cast<hip::Event*>(*event);
-  auto* const iHandle = reinterpret_cast<ihipIpcEventHandle_t*>(&handle);
-
   const auto open_status = e->OpenHandle(iHandle);
   if (open_status != hipSuccess) {
-    delete e;
+    ihipDestroyIpcEvent(*event);
+    *event = nullptr;
   }
   HIP_RETURN(open_status);
 }

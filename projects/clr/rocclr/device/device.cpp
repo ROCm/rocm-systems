@@ -1207,6 +1207,23 @@ bool Device::IpcAttach(const char* handle, size_t mem_size, size_t mem_offset, u
   if (mem_obj_exist == nullptr) {
     // Add the original mem_ptr to the MemObjMap with newly created amd_mem_obj
     amd::MemObjMap::AddMemObj(amd_mem_obj->getSvmPtr(), amd_mem_obj);
+  } else if (mem_obj_exist->ipcShared()) {
+    // Stale IPC import at the same VA. The app freed memory on the
+    // exporter side and reallocated at the same VA without the importer calling
+    // hipIpcCloseMemHandle. Replace the stale object with the new mapping.
+    void* old_ptr = mem_obj_exist->getSvmPtr();
+    void* new_ptr = amd_mem_obj->getSvmPtr();
+    amd::MemObjMap::RemoveIpcHandleMemObj(mem_obj_exist);
+    amd::MemObjMap::RemoveMemObj(old_ptr);
+
+    if (old_ptr == new_ptr) {
+      // Clear ipcShared to prevent the destructor from calling ipc_memory_detach,
+      // which would unmap the new (valid) mapping at this VA.
+      mem_obj_exist->setIpcShared(false);
+    }
+    // Different VA: destructor will call ipc_memory_detach to unmap the old VA.
+    mem_obj_exist->release();
+    amd::MemObjMap::AddMemObj(new_ptr, amd_mem_obj);
   } else {
     amd_mem_obj->release();
     amd_mem_obj = mem_obj_exist;
