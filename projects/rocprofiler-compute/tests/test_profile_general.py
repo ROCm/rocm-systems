@@ -57,6 +57,8 @@ DEFAULT_ABS_DIFF = 15
 DEFAULT_REL_DIFF = 50
 MAX_REOCCURING_COUNT = 28
 
+LIVE_ATTACH_OUTPUT_OPTIONS = ["--format-rocprof-output", "csv"]
+
 CSVS = sorted([
     "sysinfo.csv",
 ])
@@ -586,6 +588,15 @@ def skip_unsupported_roofline_soc():
 
 def is_rdna35_halo_soc():
     return soc == "RDNA35_HALO"
+
+
+def skip_unsupported_pc_sampling_soc(is_stochastic=False):
+    unsupported_socs = {"MI100", "RDNA35_HALO"}
+    if is_stochastic:
+        unsupported_socs.add("MI200")
+
+    if soc in unsupported_socs:
+        pytest.skip(f"PC sampling is not supported on {soc}")
 
 
 # --
@@ -2031,7 +2042,13 @@ def test_comprehensive_error_paths():
 
 @pytest.mark.live_attach_detach
 def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
-    options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
+    options = [
+        "--block",
+        "3.1.1",
+        "4.1.1",
+        "5.1.1",
+        *LIVE_ATTACH_OUTPUT_OPTIONS,
+    ]
     workload_dir = common.get_output_dir()
 
     # TODO: temp fix for sdk defautly disable attach/detach,
@@ -2086,7 +2103,7 @@ def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
 )
 @pytest.mark.live_attach_detach
 def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_compute):
-    options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
+    options = ["--block", "3.1.1", "4.1.1", "5.1.1", *LIVE_ATTACH_OUTPUT_OPTIONS]
     workload_dir = common.get_output_dir()
 
     # TODO: temp fix for sdk defautly disable attach/detach,
@@ -2151,7 +2168,7 @@ def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_co
 def test_live_attach_detach_singlepass_launch_stats(
     binary_handler_profile_rocprof_compute,
 ):
-    options = ["--set", "launch_stats"]
+    options = ["--set", "launch_stats", *LIVE_ATTACH_OUTPUT_OPTIONS]
     workload_dir = common.get_output_dir()
 
     # TODO: temp fix for sdk defautly disable attach/detach,
@@ -2205,14 +2222,13 @@ def test_live_attach_detach_singlepass_launch_stats(
     # Check that launch-stat sets were applied
     config_file = f"{workload_dir}/profiling_config.yaml"
     for tag in [
-        "7.1.0",
-        "7.1.1",
-        "7.1.2",
-        "7.1.5",
-        "7.1.6",
-        "7.1.7",
-        "7.1.8",
-        "7.1.9",
+        "7.2.0",
+        "7.2.1",
+        "7.3.0",
+        "7.2.2",
+        "7.2.3",
+        "7.2.4",
+        "7.2.5",
     ]:
         assert common.check_file_pattern(f"- {tag}", config_file)
 
@@ -2223,7 +2239,9 @@ def test_live_attach_detach_singlepass_launch_stats(
 def test_live_attach_detach_pc_sampling(
     binary_handler_profile_rocprof_compute,
 ):
-    options = ["-b", "21"]
+    skip_unsupported_pc_sampling_soc(is_stochastic=True)
+
+    options = ["-b", "21", *LIVE_ATTACH_OUTPUT_OPTIONS]
     workload_dir = common.get_output_dir()
 
     # TODO: temp fix for sdk defautly disable attach/detach,
