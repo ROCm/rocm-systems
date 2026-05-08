@@ -32,6 +32,8 @@ namespace rocjitsu {
 
 namespace {
 
+constexpr uint32_t kConservativeLoweringMinimumVgprs = 128;
+
 EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arch_t host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
     return cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4;
@@ -181,9 +183,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return result;
   }
   KernelDescriptorTranslator descriptor_translator(guest_arch_, host_arch_);
+  KernelDescriptorTranslationOptions descriptor_options;
+  // Semantic lowerings allocate temporary VGPRs from liveness. Descriptor
+  // translation runs before those choices are known, so keep the historical
+  // 128-VGPR headroom for now.
+  // TODO: Have lowerings report their actual highest temporary VGPR demand and
+  // use that instead of this conservative floor.
+  descriptor_options.minimum_vgprs = kConservativeLoweringMinimumVgprs;
   const auto descriptor_translations = descriptor_translator.translate_image(
-      patcher.image_bytes(), patcher.text_offset(), patcher.text_size(),
-      KernelDescriptorTranslationOptions{});
+      patcher.image_bytes(), patcher.text_offset(), patcher.text_size(), descriptor_options);
   bool descriptors_supported = true;
   for (const auto &translation : descriptor_translations) {
     result.warnings.insert(result.warnings.end(), translation.warnings.begin(),
