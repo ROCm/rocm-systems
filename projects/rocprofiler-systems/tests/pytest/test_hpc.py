@@ -273,6 +273,7 @@ class TestSplitCopyComputeHWQueues(RocprofsysTest):
         env = hpc_hip_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,hsa_api,kernel_dispatch,memory_copy"
         env["ROCPROFSYS_COUT_OUTPUT"] = "OFF"
+        env["ROCPROFSYS_ROCM_GROUP_BY_QUEUE"] = "ON"
 
         result = self.run_test(
             mode,
@@ -283,11 +284,11 @@ class TestSplitCopyComputeHWQueues(RocprofsysTest):
         )
         self.assert_regex(result)
 
-        # We expect to see "nstreams" HIP Stream tracks, each with a cube kernel
+        # We expect to see "nstreams" amount of GPU Kernel Dispatch tracks, each with a cube kernel
         self.assert_perfetto(
             result,
             subtest_name="Stream Count Validation",
-            categories=["rocm_hip_stream"],
+            categories=["rocm_kernel_dispatch"],
             label_substrings=["cube"],
             counts=[self.nstreams],
             depths=[0],
