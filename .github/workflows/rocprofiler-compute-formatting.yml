@@ -34,7 +34,7 @@ jobs:
       with:
         sparse-checkout: projects/rocprofiler-compute
     - name: Set up Python '3.x'
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.x'
     - name: Install dependencies
