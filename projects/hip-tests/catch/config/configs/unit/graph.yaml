@@ -1691,3 +1691,12 @@ graph:
     <<: *level_2
     disabled: [amd_windows]
     tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch:
+    <<: *level_2
+    tags: [node]

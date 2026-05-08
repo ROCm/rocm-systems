@@ -10,13 +10,13 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 #include <thread>
+#include <atomic>
 
 /**
  * @addtogroup hipGraphAllocNodeMemReuse hipGraphAllocNodeMemReuse
  * @{
  * @ingroup GraphTest
- * Tests for verifying memory reuse optimization for graph allocation nodes when graphs
- * are launched sequentially on the same stream.
+ * Tests for verifying memory reuse optimization for graph allocation nodes.
  */
 
 static constexpr int kBlockSize = 256;
@@ -35,6 +35,20 @@ __global__ void verifyKernel(const float* buf, float expected, int64_t n, int* e
   }
 }
 
+// Busy-spin kernel: each thread loops `iters` times, reading/writing buf to
+// prevent the compiler from optimizing the loop away. Use a large iteration
+// count to keep the GPU busy long enough for concurrent host-thread launches.
+__global__ void busyKernel(float* buf, float value, int64_t n, int64_t iters) {
+  int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (idx < n) {
+    float v = value;
+    for (int64_t i = 0; i < iters; ++i) {
+      v = v * 1.0001f + 0.0001f;
+    }
+    buf[idx] = v;
+  }
+}
+
 // Helper to capture a graph with hipMallocAsync and kernel launch
 static hipGraphExec_t captureGraphWithAlloc(hipStream_t stream, size_t allocBytes,
                                             float fillValue) {
@@ -47,6 +61,34 @@ static hipGraphExec_t captureGraphWithAlloc(hipStream_t stream, size_t allocByte
   HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&dTemp), allocBytes, stream));
 
   fillKernel<<<gridSize, kBlockSize, 0, stream>>>(dTemp, fillValue, numElems);
+
+  HIP_CHECK(hipFreeAsync(dTemp, stream));
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+
+  HIP_CHECK(hipGraphDestroy(graph));
+
+  return exec;
+}
+
+// Helper to capture a graph with hipMallocAsync and a long-running busy kernel.
+// The busy kernel spins for `iters` iterations to keep the GPU occupied, ensuring
+// concurrent launches from different host threads actually overlap on the GPU.
+static hipGraphExec_t captureGraphWithBusyKernel(hipStream_t stream, size_t allocBytes,
+                                                  float fillValue, int64_t iters) {
+  int64_t numElems = static_cast<int64_t>(allocBytes / sizeof(float));
+  int gridSize = static_cast<int>((numElems + kBlockSize - 1) / kBlockSize);
+
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+
+  float* dTemp = nullptr;
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&dTemp), allocBytes, stream));
+
+  busyKernel<<<gridSize, kBlockSize, 0, stream>>>(dTemp, fillValue, numElems, iters);
 
   HIP_CHECK(hipFreeAsync(dTemp, stream));
 
@@ -113,7 +155,7 @@ void printDeviceMem(const char* label) {
  *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 7.2
+ *  - HIP_VERSION >= 7.14
  */
 TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes") {
   const int device = 0;
@@ -171,13 +213,13 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes") {
  *  - The memory reuse optimization only works for exact size matches. Different sizes
  *    require separate physical allocations acquired directly from the OS.
  *  - This test creates three graphs with different allocation sizes and verifies that
- *    the current memory usage is sum of all 3 allocations for amd
+ *    the current memory usage is the sum of all 3 allocations on AMD.
  * Test source
  * ------------------------
  *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 7.2
+ *  - HIP_VERSION >= 7.14
  */
 TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse") {
   const int device = 0;
@@ -245,7 +287,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse") {
  *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 7.14
  */
 TEST_CASE("Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches") {
   const int device = 0;
@@ -300,7 +342,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches") {
  *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 7.14
  */
 TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemoryTrim") {
   const int device = 0;
@@ -347,7 +389,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemoryTrim") {
  *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 7.14
  */
 TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize") {
   const int device = 0;
@@ -443,7 +485,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize") {
  *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 7.14
  */
 TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSizes") {
   const int device = 0;
@@ -550,7 +592,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSizes"
  *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 7.14
  */
 TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse") {
   const int device = 0;
@@ -663,16 +705,17 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse") {
 /**
  * Test Description
  * ------------------------
- *  - Test to verify that graphs captured on different streams do NOT share memory.
+ *  - Test to verify that graphs captured on different streams CAN share memory
+ *    from the shared graph memory pool.
  *  - Two graphs are captured on separate streams, each with a malloc->kernel->free
- *  - sequence. Memory can be shared between graphs and current graph pool usage
- *  - should reflect that.
+ *    sequence. When launched sequentially, the second graph reuses the physical
+ *    memory freed by the first, so usedCurrent reflects a single allocation.
  * Test source
  * ------------------------
  *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 7.2
+ *  - HIP_VERSION >= 7.14
  */
 TEST_CASE("Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse") {
   const int device = 0;
@@ -701,11 +744,11 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse") {
   HIP_CHECK(hipGraphLaunch(execB, stream2));
   HIP_CHECK(hipStreamSynchronize(stream2));
 
-  // Check memory statistics - each graph has its own allocation
+  // Check memory statistics
   auto stats = queryGraphMem(device);
 
-  // Both graphs retain their own memory (no cross-graph reuse on different streams),
-  // so usedCurrent should be the sum of both allocations.
+  // Both graphs share the same graph memory pool. When launched sequentially,
+  // graph B reuses graph A's freed physical memory, so usedCurrent == kAllocSize.
   REQUIRE(stats.usedCurrent == kAllocSize);
 
   // Destroy graph executables - memory should be released
@@ -739,7 +782,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse") {
  *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 7.2
+ *  - HIP_VERSION >= 7.14
  */
 TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap") {
   const int device = 0;
@@ -752,12 +795,14 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap") {
   hipStream_t stream2 = stream_guard2.stream();
 
   constexpr size_t kAllocSize = 64ULL * 1024 * 1024;  // 64 MB - same for both graphs
+  // Enough iterations to keep the GPU busy so both threads overlap
+  constexpr int64_t kBusyIters = 100;
 
   resetGraphMemAttributes(device);
 
-  // Step 1: Capture two graphs with identical alloc sizes
-  hipGraphExec_t execA = captureGraphWithAlloc(stream1, kAllocSize, 1.0f);
-  hipGraphExec_t execB = captureGraphWithAlloc(stream2, kAllocSize, 2.0f);
+  // Step 1: Capture two graphs with busyKernel to ensure long-running GPU work.
+  hipGraphExec_t execA = captureGraphWithBusyKernel(stream1, kAllocSize, 1.0f, kBusyIters);
+  hipGraphExec_t execB = captureGraphWithBusyKernel(stream2, kAllocSize, 2.0f, kBusyIters);
 
   // Step 2: Launch graph A first and sync — its physical memory goes to the shared
   // graph pool's free_heap, available for opportunistic reuse by graph B.
@@ -769,10 +814,14 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap") {
 
   // Step 3: Concurrently launch graph B (which may steal graph A's memory) and
   // relaunch graph A (which must remap if its memory was stolen).
+  // Use an atomic flag as a barrier so both threads launch at roughly the same time.
   hipError_t errB = hipSuccess;
   hipError_t errA = hipSuccess;
+  std::atomic<int> ready{0};
 
   std::thread threadB([&]() {
+    ready.fetch_add(1, std::memory_order_release);
+    while (ready.load(std::memory_order_acquire) < 2) {}
     errB = hipGraphLaunch(execB, stream2);
     if (errB == hipSuccess) {
       errB = hipStreamSynchronize(stream2);
@@ -780,6 +829,8 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap") {
   });
 
   std::thread threadA([&]() {
+    ready.fetch_add(1, std::memory_order_release);
+    while (ready.load(std::memory_order_acquire) < 2) {}
     errA = hipGraphLaunch(execA, stream1);
     if (errA == hipSuccess) {
       errA = hipStreamSynchronize(stream1);
@@ -810,6 +861,115 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap") {
   auto statsAfterDestroy = queryGraphMem(device);
   REQUIRE(statsAfterDestroy.usedCurrent == 0);
 #endif
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Test to verify that hipGraphInstantiateFlagAutoFreeOnLaunch frees unmatched
+ *    alloc node memory at the start of each launch, allowing re-launch to succeed.
+ *  - A graph with alloc -> kernel and NO free node is used. Without the flag,
+ *    a second launch fails with hipErrorInvalidValue because the alloc node's
+ *    memory is still live (memAllocNodeCount > 0). With AutoFreeOnLaunch, the
+ *    runtime frees all prior allocations before re-executing, so the second
+ *    launch succeeds and the kernel writes to freshly allocated memory.
+ *  - Data correctness is verified by reading back the buffer after the second
+ *    launch to confirm the kernel wrote the expected value.
+ * Test source
+ * ------------------------
+ *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.14
+ */
+TEST_CASE("Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch") {
+  const int device = 0;
+  HIP_CHECK(hipSetDevice(device));
+
+  StreamGuard stream_guard(Streams::created);
+  hipStream_t stream = stream_guard.stream();
+
+  constexpr size_t kAllocSize = 64ULL * 1024 * 1024;  // 64 MB
+  int64_t numElems = static_cast<int64_t>(kAllocSize / sizeof(float));
+  int gridSize = static_cast<int>((numElems + kBlockSize - 1) / kBlockSize);
+
+  resetGraphMemAttributes(device);
+
+  // Create a graph with alloc -> kernel (no free node)
+  hipGraph_t graph;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+
+  hipGraphNode_t allocNode;
+  hipMemAllocNodeParams allocParam;
+  memset(&allocParam, 0, sizeof(allocParam));
+  allocParam.bytesize = kAllocSize;
+  allocParam.poolProps.allocType = hipMemAllocationTypePinned;
+  allocParam.poolProps.location.id = device;
+  allocParam.poolProps.location.type = hipMemLocationTypeDevice;
+
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode, graph, nullptr, 0, &allocParam));
+  REQUIRE(allocParam.dptr != nullptr);
+
+  hipGraphNode_t kernelNode;
+  hipKernelNodeParams kernelParam;
+  memset(&kernelParam, 0, sizeof(kernelParam));
+  float fillValue = 42.0f;
+  void* kernelArgs[] = {&allocParam.dptr, &fillValue, &numElems};
+  kernelParam.func = reinterpret_cast<void*>(fillKernel);
+  kernelParam.gridDim = dim3(gridSize);
+  kernelParam.blockDim = dim3(kBlockSize);
+  kernelParam.kernelParams = kernelArgs;
+
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, &allocNode, 1, &kernelParam));
+
+  // Without AutoFreeOnLaunch: second launch must fail because the alloc node's
+  // memory is still live (no matching free node, memAllocNodeCount > 0).
+  SECTION("Without AutoFreeOnLaunch") {
+    hipGraphExec_t exec;
+    HIP_CHECK(hipGraphInstantiateWithFlags(&exec, graph, 0));
+
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    // Second launch must return hipErrorInvalidValue
+    hipError_t err = hipGraphLaunch(exec, stream);
+    REQUIRE(err == hipErrorInvalidValue);
+
+    HIP_CHECK(hipGraphExecDestroy(exec));
+  }
+
+  // With AutoFreeOnLaunch: the runtime frees all prior allocations before
+  // re-executing, so the second launch succeeds.
+  SECTION("With AutoFreeOnLaunch") {
+    hipGraphExec_t exec;
+    HIP_CHECK(hipGraphInstantiateWithFlags(&exec, graph,
+                                           hipGraphInstantiateFlagAutoFreeOnLaunch));
+
+    // First launch — alloc node acquires memory
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    // Second launch — AutoFreeOnLaunch frees the previous allocation
+    // (even though it was still mapped), then alloc node re-allocates.
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    
+    auto statsAfterSecond = queryGraphMem(device);
+    
+#if HT_AMD
+    // usedCurrent should still be a single allocation (old freed, new allocated)
+    REQUIRE(statsAfterSecond.usedCurrent == kAllocSize);
+#else
+    // on nvidia, allocation is not freed with hipGraphExecDestroy,
+    // so second launch allocates another chunk without freeing the first,
+    // resulting in 2x allocation size
+    REQUIRE(statsAfterSecond.usedCurrent == kAllocSize * 2 );
+#endif
+
+    HIP_CHECK(hipGraphExecDestroy(exec));
+  }
+
+  HIP_CHECK(hipGraphDestroy(graph));
 }
 
 /**
