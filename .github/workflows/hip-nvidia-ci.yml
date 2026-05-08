@@ -87,9 +87,8 @@ jobs:
 
       - name: Fetch hipcc submodule
         run: |
-          ls -la
-          cd TheRock
-          git submodule update --init --depth 1 compiler/amd-llvm
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}/TheRock"
+          git -C "${GITHUB_WORKSPACE}/TheRock" submodule update --init --depth 1 compiler/amd-llvm
 
       - name: Build hipconfig
         run: |
