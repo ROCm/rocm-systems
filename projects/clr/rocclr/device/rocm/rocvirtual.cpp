@@ -567,6 +567,89 @@ bool VirtualGPU::HwQueueTracker::Create() {
 hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_val, Timestamp* ts,
                                                       bool attach_signal) {
   amd::Command* cmd = gpu_.command();
+
+  // Graph signal pool fast path: skip WaitCurrent/WaitNext, use graph-owned signals.
+  // No fallback to runtime pool — graph pool grows on demand.
+  if (cmd != nullptr && cmd->graphSignalPool() != nullptr) {
+    if (!attach_signal) {
+      if (cmd->HwEvent() != nullptr) {
+        reinterpret_cast<ProfilingSignal*>(cmd->HwEvent())->release();
+      }
+      cmd->SetHwEvent(nullptr);
+      return hsa_signal_t{0};
+    }
+
+    auto* pool = cmd->graphSignalPool();
+
+    bool enqueHandler = false;
+    if (ts != nullptr) {
+      enqueHandler =
+          (ts->command().Callback() != nullptr || ts->command().GetBatchHead() != nullptr) &&
+          !ts->command().CpuWaitRequested();
+    }
+    bool use_irq = enqueHandler || (IS_WINDOWS && gpu_.ForceIrq());
+    use_irq |= !gpu_.dev().ActiveWait();
+
+    ProfilingSignal* ps;
+    if (use_irq) {
+      const Settings& settings = gpu_.dev().settings();
+      ps = pool->AcquireIrq(settings.system_scope_signal_);
+    } else {
+      ps = pool->Acquire();
+    }
+
+    if (ps == nullptr) {
+      LogError("GraphSignalPool: failed to allocate signal");
+      if (cmd->HwEvent() != nullptr) {
+        reinterpret_cast<ProfilingSignal*>(cmd->HwEvent())->release();
+      }
+      cmd->SetHwEvent(nullptr);
+      return hsa_signal_t{0};
+    }
+
+    Hsa::signal_silent_store_relaxed(ps->signal_, init_val);
+    ps->flags_.done_ = false;
+    ps->engine_ = engine_;
+    ps->flags_.isPacketDispatch_ = false;
+    ps->ResetCachedTiming();
+
+    if (cmd->HwEvent() != nullptr) {
+      reinterpret_cast<ProfilingSignal*>(cmd->HwEvent())->release();
+    }
+    cmd->SetHwEvent(ps);
+    ps->retain();
+
+    if (ts != nullptr) {
+      ts->retain();
+      ps->ts_ = ts;
+      ts->AddProfilingSignal(ps);
+
+      if (enqueHandler) {
+        uint32_t handler_init = kInitSignalValueOne;
+        if (ts->command().Callback() != nullptr) {
+          bool blocking = ts->command().Callback()->blocking_;
+          ts->SetCallbackSignal(ps->signal_, blocking);
+          if (blocking) {
+            Hsa::signal_add_relaxed(ps->signal_, 1);
+            handler_init += 1;
+          }
+        }
+        gpu_.QueuedAsyncHandlers()++;
+        ts->gpu()->retain();
+        hsa_status_t result = Hsa::signal_async_handler(
+            ps->signal_, HSA_SIGNAL_CONDITION_LT, handler_init, &HsaAmdSignalHandler, ts);
+        if (HSA_STATUS_SUCCESS != result) {
+          gpu_.QueuedAsyncHandlers()--;
+          ts->gpu()->release();
+          LogError("hsa_amd_signal_async_handler() failed in graph pool path");
+        }
+      }
+    }
+    return ps->signal_;
+  }
+
+  // --- Normal runtime pool path ---
+
   // If no signal is needed, decrement the refcount and clear the hw_event of current command
   if (!attach_signal) {
     if (nullptr != cmd) {
@@ -740,15 +823,16 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
   if (explicit_wait) {
     bool skip_internal_signal = false;
 
+    ProfilingSignal* last_signal = GetLastSignal();
     for (uint32_t i = 0; i < external_signals_.size(); ++i) {
       // If external signal matches internal one, then skip it
-      if (external_signals_[i]->signal_.handle == signal_list_[current_id_]->signal_.handle) {
+      if (external_signals_[i]->signal_.handle == last_signal->signal_.handle) {
         skip_internal_signal = true;
       }
     }
     // Add the oldest signal into the tracking for a wait
     if (!skip_internal_signal) {
-      external_signals_.push_back(signal_list_[current_id_]);
+      external_signals_.push_back(last_signal);
     }
   }
 
@@ -806,13 +890,25 @@ bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
 }
 
 // ================================================================================================
+ProfilingSignal* VirtualGPU::HwQueueTracker::GetLastSignal() const {
+  auto* cmd = gpu_.command();
+  if (cmd != nullptr && cmd->graphSignalPool() != nullptr) {
+    auto* last = cmd->graphSignalPool()->GetLastAcquired();
+    if (last != nullptr) return last;
+  }
+  return signal_list_[current_id_];
+}
+
+// ================================================================================================
 bool VirtualGPU::HwQueueTracker::WaitCurrent() {
-  ProfilingSignal* signal = signal_list_[current_id_];
+  ProfilingSignal* signal = GetLastSignal();
   return CpuWaitForSignal(signal);
 }
 
 // ================================================================================================
 void VirtualGPU::HwQueueTracker::WaitNext() {
+  auto* cmd = gpu_.command();
+  if (cmd != nullptr && cmd->graphSignalPool() != nullptr) return;
   size_t next = (current_id_ + 1) % signal_list_.size();
   ProfilingSignal* signal = signal_list_[next];
   // Only wait, there is no need to save timestamp for the next signal
@@ -822,6 +918,14 @@ void VirtualGPU::HwQueueTracker::WaitNext() {
 
 // ================================================================================================
 void VirtualGPU::HwQueueTracker::ResetCurrentSignal() {
+  auto* cmd = gpu_.command();
+  if (cmd != nullptr && cmd->graphSignalPool() != nullptr) {
+    auto* last = cmd->graphSignalPool()->GetLastAcquired();
+    if (last != nullptr) {
+      Hsa::signal_silent_store_relaxed(last->signal_, 0);
+    }
+    return;
+  }
   // Reset the signal and return
   Hsa::signal_silent_store_relaxed(signal_list_[current_id_]->signal_, 0);
   // Fallback to the previous signal
@@ -1464,8 +1568,16 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
              (thisChunk - firstCount) * kPacketSize);
     }
 
-    // Per-packet fixups: profiling signals and kernel-name printing.
-    if (timestamp_ != nullptr || IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2)) {
+    // Attach signal to the last packet when requested (before per-packet logging).
+    auto* lastSlotPtr = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
+        queueBase + ((startIndex + chunkEnd - 1) & queueMask) * kPacketSize);
+    if (isLastChunk && (attach_signal || blocking) && timestamp_ == nullptr) {
+      lastSlotPtr->completion_signal = Barriers().ActiveSignal();
+    }
+
+    // Per-packet fixups: profiling signals, kernel-name printing, and barrier logging.
+    if (timestamp_ != nullptr || IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
+        IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
       for (size_t i = chunkStart; i < chunkEnd; ++i) {
         const uint64_t slotIdx = (startIndex + i) & queueMask;
         auto* slot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
@@ -1474,8 +1586,6 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
         const uint8_t pktType =
             extractAqlBits(hdr, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
         if (timestamp_ != nullptr) {
-          // When pre_patched, skip any slot whose completion_signal was already
-          // written by ApplyHwEventPatches (non-zero means pre-patched).
           bool has_prepatched_signal = pre_patched && (slot->completion_signal.handle != 0);
           if (!has_prepatched_signal) {
             slot->completion_signal =
@@ -1513,14 +1623,27 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
                   slot->kernel_object, slot->kernarg_address,
                   slot->completion_signal, slot->reserved2,
                   Hsa::queue_load_read_index_scacquire(gpu_queue_), slotIdx);
+        } else if (pktType == HSA_PACKET_TYPE_BARRIER_AND) {
+          auto* bpkt = reinterpret_cast<hsa_barrier_and_packet_t*>(slot);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
+                  "SWq=0x%zx, HWq=0x%zx, id=%d, Graph Barrier-AND Header = "
+                  "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
+                  "dep_signal=[0x%zx, 0x%zx, 0x%zx, 0x%zx, 0x%zx], "
+                  "completion_signal=0x%zx, rptr=%u, wptr=%u",
+                  gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, hdr, pktType,
+                  extractAqlBits(hdr, HSA_PACKET_HEADER_BARRIER,
+                                 HSA_PACKET_HEADER_WIDTH_BARRIER),
+                  extractAqlBits(hdr, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
+                                 HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
+                  extractAqlBits(hdr, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                                 HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
+                  bpkt->dep_signal[0].handle, bpkt->dep_signal[1].handle,
+                  bpkt->dep_signal[2].handle, bpkt->dep_signal[3].handle,
+                  bpkt->dep_signal[4].handle,
+                  bpkt->completion_signal.handle,
+                  Hsa::queue_load_read_index_scacquire(gpu_queue_), slotIdx);
         }
       }
-    }
-
-    auto* lastSlotPtr = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
-        queueBase + ((startIndex + chunkEnd - 1) & queueMask) * kPacketSize);
-    if (isLastChunk && (attach_signal || blocking) && timestamp_ == nullptr) {
-      lastSlotPtr->completion_signal = Barriers().ActiveSignal();
     }
 
     // Write valid headers and ring the doorbell for this chunk.
