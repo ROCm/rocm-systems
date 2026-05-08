@@ -1739,7 +1739,7 @@ void* ncclProxyService(void* _args) {
         WARN("[Service thread] Initialize peers[%d].sock fails", s);
         return NULL;
       }
-      if (ncclSocketAccept(&peers[s].sock, proxyState->listenSock) != ncclSuccess) {
+      if (ncclSocketAccept(&peers[s].sock, proxyState->listenSock, /*retryOnBadMagic*/false) != ncclSuccess) {
         WARN("[Service thread] Accept failed %s", strerror(errno));
       } else {
         if (ncclSocketGetFd(&peers[s].sock, &pollfds[s].fd) != ncclSuccess) {
