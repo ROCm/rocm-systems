@@ -42,7 +42,7 @@ auto root_process_id =
     get_env<pid_t>("ROCPROFSYS_ROOT_PROCESS", process::get_id(), false);
 
 auto&
-get_sampling_on_child_threads_history(int64_t _idx = utility::get_thread_index())
+get_sampling_on_child_threads_history(std::int64_t _idx = utility::get_thread_index())
 {
     static auto _v = utility::get_filled_array<ROCPROFSYS_MAX_THREADS>(
         []() { return utility::get_reserved_vector<bool>(64); });
@@ -75,20 +75,21 @@ sampling_on_child_threads()
 }
 }  // namespace
 
-std::atomic<uint64_t>&
+std::atomic<std::uint64_t>&
 get_cpu_cid()
 {
-    static std::atomic<uint64_t> _v{ 0 };
+    static std::atomic<std::uint64_t> _v{ 0 };
     return _v;
 }
 
-unique_ptr_t<std::vector<uint64_t>>&
-get_cpu_cid_stack(int64_t _tid, int64_t _parent)
+unique_ptr_t<std::vector<std::uint64_t>>&
+get_cpu_cid_stack(std::int64_t _tid, std::int64_t _parent)
 {
     struct rocprofsys_cpu_cid_stack
     {};
-    using init_data_t   = thread_data<bool, rocprofsys_cpu_cid_stack>;
-    using thread_data_t = thread_data<std::vector<uint64_t>, rocprofsys_cpu_cid_stack>;
+    using init_data_t = thread_data<bool, rocprofsys_cpu_cid_stack>;
+    using thread_data_t =
+        thread_data<std::vector<std::uint64_t>, rocprofsys_cpu_cid_stack>;
 
     auto& _v_tid = thread_data_t::instance(construct_on_thread{ _tid });
     auto& _b_tid = init_data_t::instance(construct_on_thread{ _tid }, false);
@@ -108,7 +109,7 @@ get_cpu_cid_stack(int64_t _tid, int64_t _parent)
 }
 
 unique_ptr_t<cpu_cid_parent_map_t>&
-get_cpu_cid_parents(int64_t _tid)
+get_cpu_cid_parents(std::int64_t _tid)
 {
     struct rocprofsys_cpu_cid_stack
     {};
@@ -116,8 +117,8 @@ get_cpu_cid_parents(int64_t _tid)
     return thread_data_t::instance(construct_on_thread{ _tid }, cpu_cid_parent_map_t{});
 }
 
-std::tuple<uint64_t, uint64_t, uint32_t>
-create_cpu_cid_entry(int64_t _tid)
+std::tuple<std::uint64_t, std::uint64_t, std::uint32_t>
+create_cpu_cid_entry(std::int64_t _tid)
 {
     using tim::auto_lock_t;
 
@@ -128,7 +129,7 @@ create_cpu_cid_entry(int64_t _tid)
     auto_lock_t _lk{ _mtx, std::defer_lock };
     if(!_lk.owns_lock()) _lk.lock();
 
-    int64_t _p_idx = (get_cpu_cid_stack(_tid)->empty()) ? 0 : _tid;
+    std::int64_t _p_idx = (get_cpu_cid_stack(_tid)->empty()) ? 0 : _tid;
 
     auto&       _p_mtx = get_cpu_cid_stack_lock(_p_idx);
     auto_lock_t _p_lk{ _p_mtx, std::defer_lock };
@@ -136,28 +137,29 @@ create_cpu_cid_entry(int64_t _tid)
 
     auto&& _cid = get_cpu_cid()++;
     // auto&&     _parent_cid = get_cpu_cid_stack(_p_idx)->back();
-    uint64_t _parent_cid = 0;
-    auto&    cid_stack   = get_cpu_cid_stack(_p_idx);
+    std::uint64_t _parent_cid = 0;
+    auto&         cid_stack   = get_cpu_cid_stack(_p_idx);
 
     if(!cid_stack->empty())
     {
         _parent_cid = cid_stack->back();
     }
 
-    uint32_t&& _depth = get_cpu_cid_stack(_p_idx)->size() - ((_p_idx == _tid) ? 1 : 0);
+    std::uint32_t&& _depth =
+        get_cpu_cid_stack(_p_idx)->size() - ((_p_idx == _tid) ? 1 : 0);
 
     get_cpu_cid_parents(_tid)->emplace(_cid, std::make_tuple(_parent_cid, _depth));
     return std::make_tuple(_cid, _parent_cid, _depth);
 }
 
 cpu_cid_pair_t
-get_cpu_cid_entry(uint64_t _cid, int64_t _tid)
+get_cpu_cid_entry(std::uint64_t _cid, std::int64_t _tid)
 {
     return get_cpu_cid_parents(_tid)->at(_cid);
 }
 
 tim::mutex_t&
-get_cpu_cid_stack_lock(int64_t _tid)
+get_cpu_cid_stack_lock(std::int64_t _tid)
 {
     struct cpu_cid_stack_s
     {};

@@ -706,6 +706,10 @@ struct ncclComm {
 
   hipEvent_t doneEvent;
   hipStream_t lastStream;
+  // False until the first kernel launch on this comm. Distinguishes "no prior launch"
+  // from "prior launch on the default stream (lastStream==nullptr)" so ncclLaunchPrepare
+  // can correctly detect a stream change in either case.
+  bool lastStreamValid;
   latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_COLLTRACE

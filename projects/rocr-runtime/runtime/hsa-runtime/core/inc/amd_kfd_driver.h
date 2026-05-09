@@ -71,7 +71,7 @@ class KfdDriver final : public core::Driver {
 public:
   KfdDriver(std::string devnode_name);
 
-  /// @brief Determine of the KFD is present on the system and attemp to open it if found.
+  /// @brief Determine if the KFD is present on the system and attempt to open it if found.
   ///
   /// @param[out] Driver object for the KFD.
   /// @return HSA_STATUS_SUCCESS if driver found and opened.
