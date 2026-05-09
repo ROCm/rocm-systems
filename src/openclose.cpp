@@ -34,10 +34,6 @@
 #include <cstdio>
 #include <strings.h>
 #include <cassert>
-
-
-hsakmtRuntime *dxg_runtime = new hsakmtRuntime();
-
 void hsakmtRuntime::HeapInit() {
     ReserveLocalHeapSpace();
     ReserveSystemHeapSpace();
@@ -476,13 +472,7 @@ static void clear_after_fork(void) {
   reset_suballocator();
   clear_allocation_map();
 
-  if (dxg_runtime->dxg_fd >= 0) {
-    close(dxg_runtime->dxg_fd);
-    dxg_runtime->dxg_fd = -1;
-  }
-  delete dxg_runtime;
-  dxg_runtime = new hsakmtRuntime();
-
+  dxg_runtime->ResetAfterFork();
 }
 
 static inline void init_page_size(void) {
@@ -611,9 +601,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) {
 
   if (dxg_runtime->dxg_open_count > 0) {
     if (--dxg_runtime->dxg_open_count == 0) {
-      close(dxg_runtime->dxg_fd);
-      dxg_runtime->dxg_fd = -1;
       wsl::thunk::dxcore::DxcoreLoader::Instance().Shutdown();
+      dxg_runtime->Reset();
     }
 
     result = HSAKMT_STATUS_SUCCESS;

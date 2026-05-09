@@ -47,96 +47,9 @@ wsl::thunk::GpuMemory *get_gpu_mem(void *MemoryAddress);
 #define HSAKMT_DEBUG_LEVEL_INFO     6
 #define HSAKMT_DEBUG_LEVEL_DEBUG    7
 
-struct hsakmtRuntime {
-  hsakmtRuntime()
-    : dxg_fd(-1),
-    parent_pid(getpid()),
-    is_forked(false),
-    hsakmt_debug_level(HSAKMT_DEBUG_LEVEL_DEFAULT),
-    dxg_open_count(0),
-    hsakmt_mutex(PTHREAD_MUTEX_INITIALIZER),
-    hsakmt_is_dgpu(false),
-    is_svm_api_supported(false),
-    zfb_support(0),
-    vendor_packet_process(0),
-    check_avail_sysram(false),
-    max_single_alloc_size(0),
-    enable_thunk_sub_allocator(0),
-    local_heap_space_start_(0),
-    local_heap_space_size_(0),
-    system_heap_space_start_(0),
-    system_heap_space_size_(0),
-    handle_aperture_start_(0),
-    handle_aperture_size_(0),
-    default_node(1) {}
+#include "runtime.h"
 
-  void HeapInit();
-  void HeapFini();
-  bool ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t align);
-  bool FreeSvmSpace(uint64_t &base, uint64_t &size);
-  bool ReserveLocalHeapSpace();
-  bool FreeLocalHeapSpace();
-  void InitLocalHeapMgr();
-  bool ReserveSystemHeapSpace();
-  uint64_t SystemHeapSize() { return system_heap_space_size_; }
-  bool FreeSystemHeapSpace();
-  bool CommitSystemHeapSpace(void* addr, int64_t size, bool lock);
-  bool DecommitSystemHeapSpace(void* addr, int64_t size);
-  void InitSystemHeapMgr();
-  ErrorCode ReserveGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
-          gpusize hit_base_addr, gpusize size,
-          gpusize *out_gpu_virt_addr, gpusize alignment, bool lock);
-  ErrorCode FreeGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
-          gpusize gpu_addr, gpusize size);
-  bool CommitSystemHeapSpaceIPC(void* addr, int64_t size, int &fd, bool lock=false);
-  bool DecommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd);
-  ErrorCode ReserveIPCSysMem(gpusize size,
-          gpusize *out_gpu_virt_addr, gpusize alignment,
-          int &memfd, bool lock);
-  ErrorCode FreeIPCSysMem(gpusize gpu_addr, gpusize size, int &memfd);
-  bool InitHandleApertureSpace();
-  void InitHandleApertureMgr();
-  ErrorCode HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt_addr);
-  void HandleApertureFree(gpusize gpu_addr);
-
-  pthread_mutex_t hsakmt_mutex;
-  const char *dxg_device_name = "/dev/dxg";
-  long page_size;
-  int page_shift;
-  int dxg_fd = -1;
-  pid_t parent_pid = -1;
-  bool is_forked = false;
-  int hsakmt_debug_level = HSAKMT_DEBUG_LEVEL_DEFAULT;
-  unsigned long dxg_open_count;
-  bool hsakmt_is_dgpu;
-  bool is_svm_api_supported;
-  int zfb_support;
-  int vendor_packet_process;
-  bool check_avail_sysram;
-  size_t max_single_alloc_size;
-  int enable_thunk_sub_allocator;
-  uint32_t default_node;
-
-  /* local heap means bo's backend is vram of all GPUs */
-  uint64_t local_heap_space_start_;
-  uint64_t local_heap_space_size_;
-
-  /* manage the reserved local heap space which shared by CPU and GPUs */
-  std::unique_ptr<wsl::thunk::VaMgr> local_heap_mgr_;
-
-  /* system heap means bo's backend is system ram */
-  uint64_t system_heap_space_start_;
-  uint64_t system_heap_space_size_;
-
-  /* manage the reserved system heap space which shared by CPU and GPUs */
-  std::unique_ptr<wsl::thunk::VaMgr> system_heap_mgr_;
-
-  uint64_t handle_aperture_start_;
-  uint64_t handle_aperture_size_;
-  std::unique_ptr<wsl::thunk::VaMgr> handle_aperture_mgr_;
-};
-
-extern hsakmtRuntime *dxg_runtime;
+#define dxg_runtime (&rocdxg::Runtime::Instance())
 extern HsaStructureSizes detected_abi_;
 
 #undef HSAKMTAPI
