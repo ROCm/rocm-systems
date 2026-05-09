@@ -142,7 +142,7 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
         bdf_(bdf),
         drm_(drm) {
     populate_ifoe_fabric_bdf_list();
-    if (has_ifoe_related_bdf()) {
+    if (has_ifoe_related_bdf() && device_has_ualink()) {
       auto ifoe_bdf_str = get_ifoe_bdf_string();
       if (auto ualoe_status = ualoe_open(ifoe_bdf_str.c_str(), &ualoe_handle_); ualoe_status != 0) {
         ualoe_handle_ = (-1);
@@ -155,7 +155,7 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
     if (check_if_drm_is_supported()) this->get_drm_data();
 
     populate_ifoe_fabric_bdf_list();
-    if (has_ifoe_related_bdf()) {
+    if (has_ifoe_related_bdf() && device_has_ualink()) {
       auto ifoe_bdf_str = get_ifoe_bdf_string();
       if (auto ualoe_status = ualoe_open(ifoe_bdf_str.c_str(), &ualoe_handle_); ualoe_status != 0) {
         ualoe_handle_ = (-1);
@@ -202,6 +202,7 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
 
   auto has_ifoe_related_bdf() const -> bool;
   auto get_ifoe_bdf_string() const -> std::string;
+  bool device_has_ualink() const;
 
  private:
   uint32_t gpu_id_;

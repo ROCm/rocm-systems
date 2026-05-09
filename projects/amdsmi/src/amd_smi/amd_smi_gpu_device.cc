@@ -983,6 +983,21 @@ auto AMDSmiGPUDevice::get_ifoe_bdf_string() const -> std::string {
   return {};
 }
 
+// Check if this GPU device has ualink sysfs directory (required for UALOE)
+// Uses the same path construction as get_fabric_info_from_ualoe()
+bool AMDSmiGPUDevice::device_has_ualink() const {
+  if (!has_ifoe_related_bdf()) {
+    return false;
+  }
+
+  // Use the same ualink path logic as get_fabric_info_from_ualoe()
+  const auto ualink_directory =
+      (std::string(kUALOE_BASE_PATH) + get_gpu_path() + std::string(kUALOE_UALINK_DIRECTORY));
+  const auto ualink_directory_path = std::filesystem::path(ualink_directory);
+
+  return std::filesystem::is_directory(ualink_directory_path);
+}
+
 auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_info,
                                                  UALoeLinkInfo_t link_info_type) const
     -> amdsmi_status_t {
