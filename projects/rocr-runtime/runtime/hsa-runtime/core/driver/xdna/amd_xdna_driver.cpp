@@ -240,9 +240,60 @@ static hsa_status_t xdna_ioctl(int fd, unsigned long request, void* arg) {
   }
 }
 
+/// @brief Per hardware context PDI cache.
+class PDICache {
+ private:
+  /// @brief CU mask size.
+  constexpr static size_t cu_mask_size = sizeof(uint32_t) * CHAR_BIT;
+
+ public:
+  using size_type = uint32_t;
+
+ private:
+  std::array<uint32_t, cu_mask_size> entries = {};
+  size_type entry_count = 0;
+
+ public:
+  /// @brief Sentinel value for entries not found.
+  constexpr static size_type NotFound = cu_mask_size;
+
+  /// @brief Returns if the cache is empty.
+  constexpr bool empty() const { return entry_count == 0; }
+
+  /// @brief Returns the size of the cache.
+  constexpr size_type size() const { return entry_count; }
+
+  /// @brief Returns the index of the BO handle if it is the cache, otherwise @ref NotFound.
+  ///
+  /// This function does a linear search because the mask is small (32 elements).
+  size_type GetIndex(uint32_t pdi_handle) const {
+    for (size_type i = 0; i < entry_count; ++i) {
+      if (entries[i] == pdi_handle) {
+        return i;
+      }
+    }
+    return NotFound;
+  }
+
+  /// @brief Sets the next cache entry.
+  hsa_status_t SetNext(uint32_t pdi_bo_handle, size_type& index) {
+    if (entry_count == entries.size()) {
+      // cache is full
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+
+    index = entry_count++;
+    entries[index] = pdi_bo_handle;
+    return HSA_STATUS_SUCCESS;
+  }
+
+  constexpr uint32_t operator[](size_type index) const { return entries[index]; }
+};
+
 /// @brief Metadata for a Kernel Mode Queue (KMQ).
 struct KmqQueueMetadata {
   uint32_t hw_ctx_handle;
+  PDICache pdi_cache;
 };
 
 /**
@@ -952,14 +1003,8 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* kmq_metadata, uint
     }
   });
 
-  // PDI cache to avoid reconfiguration. If the cache is empty or updated, a new hardware context
-  // will be created for the queue.
-  PDICache pdi_cache;
-  auto pdi_cache_it = queue_pdi_map_.find(queue_metadata->hw_ctx_handle);
-  if (pdi_cache_it != queue_pdi_map_.end()) {
-    pdi_cache = pdi_cache_it->second;
-  }
-  bool reconfigure_queue = pdi_cache.empty();
+  // Flag to reconfigure the hardware context because of a new PDI.
+  bool reconfigure_queue = false;
 
   // Process all packets in a single command chain.
   auto* queue = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(q.base_address);
@@ -974,13 +1019,13 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* kmq_metadata, uint
     if (!pdi_bo_handle.IsValid()) {
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
-    auto cached_pdi_index = pdi_cache.GetIndex(pdi_bo_handle.handle);
+    auto cached_pdi_index = queue_metadata->pdi_cache.GetIndex(pdi_bo_handle.handle);
     if (cached_pdi_index == PDICache::NotFound) {
       FlushCpuCache(pdi_bo_handle.vaddr, 0, pdi_bo_handle.size);
-      hsa_status_t status = pdi_cache.SetNext(pdi_bo_handle, cached_pdi_index);
-      if (status != HSA_STATUS_SUCCESS) {
+      hsa_status_t err = queue_metadata->pdi_cache.SetNext(pdi_bo_handle.handle, cached_pdi_index);
+      if (err != HSA_STATUS_SUCCESS) {
         assert(false && "Failed to set PDI in cache.");
-        return status;
+        return err;
       }
       reconfigure_queue = true;
     }
@@ -1016,10 +1061,10 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* kmq_metadata, uint
     const uint32_t cmd_data_bytesize = cmd_dwords * sizeof(uint32_t);
     const uint32_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + cmd_data_bytesize;
     BOHandle cmd_bo_handle;
-    hsa_status_t status = CreateCmdBO(cmd_bytesize, cmd_bo_handle);
-    if (status != HSA_STATUS_SUCCESS) {
+    hsa_status_t err = CreateCmdBO(cmd_bytesize, cmd_bo_handle);
+    if (err != HSA_STATUS_SUCCESS) {
       assert(false && "Failed to create command BO.");
-      return status;
+      return err;
     }
     cmd_bo_handles.push_back(cmd_bo_handle);
 
@@ -1048,15 +1093,11 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* kmq_metadata, uint
 
   // Reconfigure hardware context and update cache entry if a PDI was added to the cache.
   if (reconfigure_queue) {
-    if (pdi_cache_it != queue_pdi_map_.end()) {
-      queue_pdi_map_.erase(pdi_cache_it);
-    }
-    hsa_status_t status = ConfigHwCtx(pdi_cache, queue_metadata, num_core_tiles);
-    if (status != HSA_STATUS_SUCCESS) {
+    hsa_status_t err = ConfigHwCtx(queue_metadata, num_core_tiles);
+    if (err != HSA_STATUS_SUCCESS) {
       assert(false && "Failed to configure hardware context for queue.");
-      return status;
+      return err;
     }
-    queue_pdi_map_.emplace(queue_metadata->hw_ctx_handle, pdi_cache);
   }
 
   // Remove duplicate BOs, since the driver reports an error if the same BO is provided multiple
@@ -1231,12 +1272,11 @@ XdnaDriver::BOHandle XdnaDriver::FindBOHandle(void* mem) const {
   return it->second;
 }
 
-hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, void* kmq_metadata,
-                                     uint32_t num_core_tiles) const {
+hsa_status_t XdnaDriver::ConfigHwCtx(void* kmq_metadata, uint32_t num_core_tiles) const {
   auto queue_metadata = static_cast<KmqQueueMetadata*>(kmq_metadata);
 
-  const size_t config_cu_param_size =
-      sizeof(amdxdna_hwctx_param_config_cu) + pdi_bo_handles.size() * sizeof(amdxdna_cu_config);
+  const size_t config_cu_param_size = sizeof(amdxdna_hwctx_param_config_cu) +
+      queue_metadata->pdi_cache.size() * sizeof(amdxdna_cu_config);
 
   auto* xdna_config_cu_param =
       static_cast<amdxdna_hwctx_param_config_cu*>(malloc(config_cu_param_size));
@@ -1246,10 +1286,10 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, void* kmq_m
   MAKE_SCOPE_GUARD([xdna_config_cu_param] { free(xdna_config_cu_param); });
   memset(xdna_config_cu_param, 0, config_cu_param_size);
 
-  xdna_config_cu_param->num_cus = pdi_bo_handles.size();
+  xdna_config_cu_param->num_cus = queue_metadata->pdi_cache.size();
 
-  for (size_t i = 0; i < pdi_bo_handles.size(); i++) {
-    xdna_config_cu_param->cu_configs[i].cu_bo = pdi_bo_handles[i].handle;
+  for (size_t i = 0; i < queue_metadata->pdi_cache.size(); i++) {
+    xdna_config_cu_param->cu_configs[i].cu_bo = queue_metadata->pdi_cache[i];
     xdna_config_cu_param->cu_configs[i].cu_func = default_cu_func;
   }
 

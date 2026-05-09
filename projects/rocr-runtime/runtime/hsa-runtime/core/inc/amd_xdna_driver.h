@@ -47,7 +47,6 @@
 #include <climits>
 #include <map>
 #include <memory>
-#include <unordered_map>
 
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/driver.h"
@@ -77,57 +76,6 @@ class XdnaDriver final : public core::Driver {
     constexpr BOHandle(void* vaddr, uint32_t handle, size_t size)
         : vaddr{vaddr}, handle{handle}, size{size} {}
     constexpr bool IsValid() const { return handle != 0; }
-  };
-
-
-  /// @brief Per hardware context PDI cache.
-  class PDICache {
-   private:
-    /// @brief CU mask size.
-    constexpr static size_t cu_mask_size = sizeof(uint32_t) * CHAR_BIT;
-
-   public:
-    using size_type = uint32_t;
-
-   private:
-    std::array<BOHandle, cu_mask_size> entries = {};
-    size_type entry_count = 0;
-
-   public:
-    /// @brief Sentinel value for entries not found.
-    constexpr static size_type NotFound = cu_mask_size;
-
-    /// @brief Returns if the cache is empty.
-    constexpr bool empty() const { return entry_count == 0; }
-
-    /// @brief Returns the size of the cache.
-    constexpr size_type size() const { return entry_count; }
-
-    /// @brief Returns the index of the BO handle if it is the cache, otherwise @ref NotFound.
-    ///
-    /// This function does a linear search because the mask is small (32 elements).
-    size_type GetIndex(uint32_t pdi_handle) const {
-      for (size_type i = 0; i < entry_count; ++i) {
-        if (entries[i].handle == pdi_handle) {
-          return i;
-        }
-      }
-      return NotFound;
-    }
-
-    /// @brief Sets the next cache entry.
-    hsa_status_t SetNext(const BOHandle& pdi_bo_handle, size_type& index) {
-      if (entry_count == entries.size()) {
-        // cache is full
-        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-      }
-
-      index = entry_count++;
-      entries[index] = pdi_bo_handle;
-      return HSA_STATUS_SUCCESS;
-    }
-
-    constexpr const BOHandle& operator[](size_type index) const { return entries[index]; }
   };
 
 public:
@@ -167,7 +115,8 @@ public:
                            void* queue_addr, uint64_t queue_size, HsaEvent* event) const override;
   hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
 
-  /// @brief Create Kernel Mode Queue (KMQ) metadata to dispatch packets in a user-mode access agent dispatch queue.
+  /// @brief Create Kernel Mode Queue (KMQ) metadata to dispatch packets in a user-mode access agent
+  /// dispatch queue.
   ///
   /// @param[in] queue_size size of the dispatch queue in number of packets
   /// @param[out] metadata KMQ metadata created for the dispatch queue
@@ -248,11 +197,9 @@ public:
 
   /// @brief Creates a new hardware context.
   ///
-  /// @param[in] pdi_bo_handles PDI BO handles to use for the new hardware context.
   /// @param[in,out] kmq_metadata Kernel Mode Queue (KMQ) metadata
   /// @param[in] num_core_tiles number of core tiles in the AIE device
-  hsa_status_t ConfigHwCtx(const PDICache& pdi_bo_handles, void* kmq_metadata,
-                           uint32_t num_core_tiles) const;
+  hsa_status_t ConfigHwCtx(void* kmq_metadata, uint32_t num_core_tiles) const;
 
   /// @brief Queries the driver version and updates internal state.
   hsa_status_t QueryDriverVersion();
@@ -270,9 +217,6 @@ public:
   hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info);
 
   std::map<void*, BOHandle> vmem_addr_mappings;
-
-  /// @brief Queue to PDI cache map.
-  std::unordered_map<HSA_QUEUEID, PDICache> queue_pdi_map_;
 
   /// @brief Virtual address range allocated for the device heap.
   ///
