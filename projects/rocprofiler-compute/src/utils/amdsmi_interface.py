@@ -5,6 +5,7 @@ import os
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 from utils.logger import (
     console_debug,
@@ -182,3 +183,33 @@ def get_gpu_vram_size() -> str:
             error = e
     console_warning(f"Error getting GPU VRAM size: {error}")
     return "0"
+
+
+def get_gpu_cache_info() -> dict[str, Any]:
+    """Get the GPU cache level information."""
+    amdsmi = import_amdsmi_module()
+    error = None
+    for device in get_device_handles():
+        try:
+            cache_info = amdsmi.amdsmi_get_gpu_cache_info(device)
+            console_debug(f"GPU Cache Info: {cache_info}")
+            return cache_info
+        except Exception as e:
+            error = e
+    console_warning(f"Error getting GPU cache info: {error}")
+    return {}
+
+
+def get_gpu_num_compute_units() -> int:
+    """Get the GPU's number of compute units."""
+    amdsmi = import_amdsmi_module()
+    error = None
+    for device in get_device_handles():
+        try:
+            cu_count = amdsmi.amdsmi_get_gpu_asic_info(device)["num_compute_units"]
+            console_debug(f"GPU compute units count: {cu_count}")
+            return int(cu_count)
+        except Exception as e:
+            error = e
+    console_warning(f"Error getting GPU compute unit count: {error}")
+    return 0

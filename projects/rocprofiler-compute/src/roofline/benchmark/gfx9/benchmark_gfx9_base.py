@@ -15,21 +15,11 @@ from .. import benchmark_base
 # Bench_gfx9 Class (ABSTRACT)
 # =============================================================================
 class Bench_gfx9(benchmark_base.Bench_base):
-    def __init__(self, device_ids: list) -> None:
-        super().__init__(device_ids)
+    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+        super().__init__(device_id, cache_sizes)
 
         self.WAVEFRONT_SIZE = 64
         self.MATRIX_OPS_TYPE = "MFMA"
-
-        # Unused, keeping for reference
-        # self.lds_sizes = {
-        #     "gfx908": 64 * 1024,
-        #     "gfx90a": 64 * 1024,
-        #     "gfx940": 64 * 1024,
-        #     "gfx941": 64 * 1024,
-        #     "gfx942": 64 * 1024,
-        #     "gfx950": 64 * 1024,
-        # }
 
         self.matrix_kernel_selector = {
             "F4": "mfma_f8f6f4<FP4_E2M1>",
@@ -88,6 +78,10 @@ class Bench_gfx9(benchmark_base.Bench_base):
             "MFMA-F64": "MFMAF64Flops",
             "MFMA-I8": "MFMAI8Ops",
         }
+
+    # -----------------------------------------------------------------------------
+    # Helper Methods and Classes
+    # -----------------------------------------------------------------------------
 
     # -----------------------------------------------------------------------------
     # Benchmarking kernel source
