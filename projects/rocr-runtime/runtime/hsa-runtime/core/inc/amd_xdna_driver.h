@@ -188,7 +188,7 @@ public:
   /// @note This function will unmap the virtual address and close the BO, even if the former fails.
   ///
   /// @param[in,out] bo_handle BO handle to destroy.
-  hsa_status_t DestroyBOHandle(BOHandle& bo_handle);
+  hsa_status_t DestroyBOHandle(BOHandle& bo_handle) const;
 
   /// @brief Returns the BO associated with the address.
   ///
@@ -214,7 +214,7 @@ public:
   ///
   /// @param[in] size size of memory to allocate
   /// @param[out] bo_info allocated BO
-  hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info);
+  hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info) const;
 
   std::map<void*, BOHandle> vmem_addr_mappings;
 

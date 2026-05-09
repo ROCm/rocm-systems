@@ -42,20 +42,21 @@
 
 #include "core/inc/amd_xdna_driver.h"
 
-#include <cerrno>
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <unistd.h>
-
 #include <array>
 #include <cassert>
+#include <cerrno>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
+
+#include <drm/drm.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 #include "inc/hsa_ext_amd_aie.h"
 #include "core/inc/amd_memory_region.h"
@@ -293,6 +294,7 @@ class PDICache {
 /// @brief Metadata for a Kernel Mode Queue (KMQ).
 struct KmqQueueMetadata {
   uint32_t hw_ctx_handle;
+  uint32_t syncobj_handle = 0;
   PDICache pdi_cache;
 };
 
@@ -362,10 +364,11 @@ static hsa_status_t SubmitCommand(int fd, uint32_t cmd_bo_handle,
  * @param[in] fd driver file descriptor
  * @param[in] cmd command to wait for
  * @param[in] hw_ctx_handle hardware context handle
+ * @param[in] syncobj_handle DRM syncobj handle for timeline wait
  * @param[in] seq sequence number of the command
  */
 static hsa_status_t WaitCommand(int fd, ert_start_kernel_cmd* cmd, uint32_t hw_ctx_handle,
-                                uint64_t seq) {
+                                uint32_t syncobj_handle, uint64_t seq) {
   assert(hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE);
 
   // Check command status before waiting to avoid unnecessary ioctl if the command has already
@@ -385,14 +388,28 @@ static hsa_status_t WaitCommand(int fd, ert_start_kernel_cmd* cmd, uint32_t hw_c
       return HSA_STATUS_ERROR;
   }
 
-  // Wait for command completion.
-  amdxdna_drm_wait_cmd wait_cmd = {};
-  wait_cmd.hwctx = hw_ctx_handle;
-  wait_cmd.timeout = 0;  // no timeout, wait until the command finishes
-  wait_cmd.seq = seq;
-  hsa_status_t err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_WAIT_CMD, &wait_cmd);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
+  // Prefer DRM syncobj timeline wait when available.
+  if (syncobj_handle != 0) {
+    drm_syncobj_timeline_wait timeline_wait = {};
+    timeline_wait.handles = reinterpret_cast<uintptr_t>(&syncobj_handle);
+    timeline_wait.points = reinterpret_cast<uintptr_t>(&seq);
+    timeline_wait.count_handles = 1;
+    timeline_wait.timeout_nsec = INT64_MAX;
+    timeline_wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
+    hsa_status_t err = xdna_ioctl(fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &timeline_wait);
+    if (err != HSA_STATUS_SUCCESS) {
+      return err;
+    }
+  } else {
+    // Fallback: XDNA-specific wait.
+    amdxdna_drm_wait_cmd wait_cmd = {};
+    wait_cmd.hwctx = hw_ctx_handle;
+    wait_cmd.timeout = 0;  // no timeout, wait until the command finishes
+    wait_cmd.seq = seq;
+    hsa_status_t err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_WAIT_CMD, &wait_cmd);
+    if (err != HSA_STATUS_SUCCESS) {
+      return err;
+    }
   }
 
   // Check if command failed.
@@ -720,6 +737,8 @@ hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, void** metadat
   }
 
   queue_metadata->hw_ctx_handle = create_hwctx_args.handle;
+  queue_metadata->syncobj_handle = create_hwctx_args.syncobj_handle;
+
   *metadata = queue_metadata.release();
 
   return HSA_STATUS_SUCCESS;
@@ -947,7 +966,7 @@ hsa_status_t XdnaDriver::FreeDeviceHeap() {
   return err;
 }
 
-hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) {
+hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) const {
   amdxdna_drm_create_bo create_cmd_bo = {};
   create_cmd_bo.type = AMDXDNA_BO_CMD;
   create_cmd_bo.size = size;
@@ -1122,7 +1141,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* kmq_metadata, uint
       return status;
     }
     status = WaitCommand(fd_, static_cast<ert_start_kernel_cmd*>(cmd_bo_handles[0].vaddr),
-                         queue_metadata->hw_ctx_handle, seq);
+                         queue_metadata->hw_ctx_handle, queue_metadata->syncobj_handle, seq);
     if (status != HSA_STATUS_SUCCESS) {
       assert(false && "Failed waiting for command.");
       return status;
@@ -1160,7 +1179,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* kmq_metadata, uint
       return status;
     }
     status = WaitCommand(fd_, static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr),
-                         queue_metadata->hw_ctx_handle, seq);
+                         queue_metadata->hw_ctx_handle, queue_metadata->syncobj_handle, seq);
     if (status != HSA_STATUS_SUCCESS) {
       assert(false && "Failed waiting for command chain.");
       return status;
@@ -1211,7 +1230,7 @@ hsa_status_t XdnaDriver::IsModelEnabled(bool* enable) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::DestroyBOHandle(BOHandle& bo_handle) {
+hsa_status_t XdnaDriver::DestroyBOHandle(BOHandle& bo_handle) const {
   if (!bo_handle.IsValid()) {
     return HSA_STATUS_SUCCESS;
   }
@@ -1302,6 +1321,7 @@ hsa_status_t XdnaDriver::ConfigHwCtx(void* kmq_metadata, uint32_t num_core_tiles
     return err;
   }
   queue_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
+  queue_metadata->syncobj_handle = 0;
 
   // Create the new hardware context
   // Currently we do not leverage QoS information.
@@ -1328,6 +1348,7 @@ hsa_status_t XdnaDriver::ConfigHwCtx(void* kmq_metadata, uint32_t num_core_tiles
   }
 
   queue_metadata->hw_ctx_handle = create_hwctx_args.handle;
+  queue_metadata->syncobj_handle = create_hwctx_args.syncobj_handle;
 
   return HSA_STATUS_SUCCESS;
 }
