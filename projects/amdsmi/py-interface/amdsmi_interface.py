@@ -7048,8 +7048,8 @@ def amdsmi_get_fabric_telemetry(
                 "category":         _FABRIC_CATEGORY_NAMES[cat_idx],
                 "generation_count": dataset.generation_count,
                 "timestamp": {
-                    "tv_sec":  dataset.timestamp[0],
-                    "tv_nsec": dataset.timestamp[1],
+                    "tv_sec":  dataset.timestamp.tv_sec,
+                    "tv_nsec": dataset.timestamp.tv_nsec,
                 },
                 "instances": instances,
             })
