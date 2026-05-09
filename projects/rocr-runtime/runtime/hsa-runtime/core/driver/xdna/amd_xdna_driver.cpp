@@ -395,7 +395,7 @@ static hsa_status_t WaitCommand(int fd, ert_start_kernel_cmd* cmd, uint32_t hw_c
     timeline_wait.points = reinterpret_cast<uintptr_t>(&seq);
     timeline_wait.count_handles = 1;
     timeline_wait.timeout_nsec = INT64_MAX;
-    timeline_wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
+    timeline_wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
     hsa_status_t err = xdna_ioctl(fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &timeline_wait);
     if (err != HSA_STATUS_SUCCESS) {
       return err;
