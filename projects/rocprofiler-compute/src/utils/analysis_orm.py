@@ -15,12 +15,12 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    TextClause,
     create_engine,
     func,
     select,
     text,
 )
+from sqlalchemy.dialects import sqlite
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -221,6 +221,7 @@ class Database:
     _session: Optional[Session] = None
     _engine: Optional[Engine] = None
     _db_name: Optional[str] = None
+    _view_sql_cache: Optional[dict[str, str]] = None
 
     @classmethod
     def init(cls, db_name: str) -> str:
@@ -234,6 +235,8 @@ class Database:
         Base.metadata.create_all(cls._engine)
         cls._session = sessionmaker(bind=cls._engine)()
         cls._db_name = db_name
+        # Compile views eagerly so a broken definition fails at init time.
+        cls._view_sql_cache = cls._compile_view_sql()
         console_debug("SQLite database initialized in memory")
         return db_name
 
@@ -287,15 +290,7 @@ class Database:
             # session.connection() is a SQLAlchemy Connection; its .connection
             # attribute is the underlying sqlite3.Connection.
             raw_conn = cls._session.connection().connection
-            for view_name, stmt in get_view_definitions().items():
-                # Render the Select as a self-contained SQL string so the raw
-                # cursor can execute it without parameter binding.
-                sql = str(
-                    stmt.compile(
-                        dialect=cls._engine.dialect,
-                        compile_kwargs={"literal_binds": True},
-                    )
-                )
+            for view_name, sql in cls.get_view_sql().items():
                 cursor = raw_conn.execute(sql)
                 csv_path = csv_dir / f"{view_name}.csv"
                 with csv_path.open("w", newline="") as f:
@@ -307,123 +302,143 @@ class Database:
             cls._session.close()
             cls._session = None
 
+    @classmethod
+    def create_views(cls) -> None:
+        """Materialize CREATE VIEW statements in the in-memory DB."""
+        for name, sql in cls.get_view_sql().items():
+            cls._session.execute(text(f"CREATE VIEW {PREFIX}{name}_view AS {sql}"))
 
-def get_view_definitions() -> dict[str, Select[Any]]:
-    median_sort_subquery = (
-        select(
-            Kernel.kernel_uuid,
-            (Dispatch.end_timestamp - Dispatch.start_timestamp).label("duration"),
-            func
-            .row_number()
-            .over(
-                partition_by=Kernel.kernel_uuid,
-                order_by=Dispatch.end_timestamp - Dispatch.start_timestamp,
+    @classmethod
+    def get_view_sql(cls) -> dict[str, str]:
+        """Return {bare_view_name: compiled SELECT SQL} for analysis views.
+
+        Returns a shallow copy of the cache populated in init() so callers
+        can't poison it.
+        """
+        return dict(cls._view_sql_cache)
+
+    @staticmethod
+    def _compile_view_sql() -> dict[str, str]:
+        """Build and compile the analysis views to SQLite SQL strings."""
+        median_sort_subquery = (
+            select(
+                Kernel.kernel_uuid,
+                (Dispatch.end_timestamp - Dispatch.start_timestamp).label("duration"),
+                func
+                .row_number()
+                .over(
+                    partition_by=Kernel.kernel_uuid,
+                    order_by=Dispatch.end_timestamp - Dispatch.start_timestamp,
+                )
+                .label("row_num"),
+                func.count().over(partition_by=Kernel.kernel_uuid).label("total_count"),
             )
-            .label("row_num"),
-            func.count().over(partition_by=Kernel.kernel_uuid).label("total_count"),
-        )
-        .select_from(Dispatch)
-        .join(Kernel, Dispatch.kernel_uuid == Kernel.kernel_uuid)
-    ).subquery()
+            .select_from(Dispatch)
+            .join(Kernel, Dispatch.kernel_uuid == Kernel.kernel_uuid)
+        ).subquery()
 
-    median_calc_subquery = (
-        select(
-            median_sort_subquery.c.kernel_uuid,
-            func.avg(median_sort_subquery.c.duration).label("duration_ns_median"),
-        )
-        .where(
-            # For odd counts: get the middle row
-            # For even counts: get the two middle rows and average them
-            median_sort_subquery.c.row_num.in_([
-                func.cast((median_sort_subquery.c.total_count + 1) / 2, Integer),
-                func.cast((median_sort_subquery.c.total_count + 2) / 2, Integer),
-            ])
-        )
-        .group_by(median_sort_subquery.c.kernel_uuid)
-    ).subquery()
+        median_calc_subquery = (
+            select(
+                median_sort_subquery.c.kernel_uuid,
+                func.avg(median_sort_subquery.c.duration).label("duration_ns_median"),
+            )
+            .where(
+                # For odd counts: get the middle row
+                # For even counts: get the two middle rows and average them
+                median_sort_subquery.c.row_num.in_([
+                    func.cast((median_sort_subquery.c.total_count + 1) / 2, Integer),
+                    func.cast((median_sort_subquery.c.total_count + 2) / 2, Integer),
+                ])
+            )
+            .group_by(median_sort_subquery.c.kernel_uuid)
+        ).subquery()
 
-    return {
-        "kernel": select(
-            Kernel.kernel_uuid.label("kernel_uuid"),
-            Kernel.workload_id.label("workload_id"),
-            Workload.name.label("workload_name"),
-            Kernel.kernel_name,
-            func.count(Dispatch.dispatch_id).label("dispatch_count"),
-            func.sum(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
-                "duration_ns_sum"
+        definitions: dict[str, Select[Any]] = {
+            "kernel": select(
+                Kernel.kernel_uuid.label("kernel_uuid"),
+                Kernel.workload_id.label("workload_id"),
+                Workload.name.label("workload_name"),
+                Kernel.kernel_name,
+                func.count(Dispatch.dispatch_id).label("dispatch_count"),
+                func.sum(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
+                    "duration_ns_sum"
+                ),
+                func.min(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
+                    "duration_ns_min"
+                ),
+                func.max(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
+                    "duration_ns_max"
+                ),
+                median_calc_subquery.c.duration_ns_median,
+                func.avg(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
+                    "duration_ns_mean"
+                ),
+            )
+            .select_from(Dispatch)
+            .join(Kernel, Dispatch.kernel_uuid == Kernel.kernel_uuid)
+            .join(Workload, Kernel.workload_id == Workload.workload_id)
+            .join(
+                median_calc_subquery,
+                Kernel.kernel_uuid == median_calc_subquery.c.kernel_uuid,
+            )
+            .group_by(
+                Kernel.kernel_uuid,
+                Kernel.workload_id,
+                Workload.name,
+                Kernel.kernel_name,
             ),
-            func.min(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
-                "duration_ns_min"
+            "kernel_metric": select(
+                Workload.workload_id.label("workload_id"),
+                Workload.name.label("workload_name"),
+                Kernel.kernel_uuid.label("kernel_uuid"),
+                Kernel.kernel_name,
+                MetricDefinition.metric_uuid.label("metric_uuid"),
+                MetricDefinition.name.label("metric_name"),
+                MetricDefinition.metric_id,
+                MetricDefinition.description,
+                MetricDefinition.table_name,
+                MetricDefinition.sub_table_name,
+                MetricDefinition.unit,
+                KernelMetricValue.value_uuid.label("value_uuid"),
+                KernelMetricValue.value_name,
+                KernelMetricValue.value,
+            )
+            .select_from(MetricDefinition)
+            .join(Workload, MetricDefinition.workload_id == Workload.workload_id)
+            .join(
+                KernelMetricValue,
+                MetricDefinition.metric_uuid == KernelMetricValue.metric_uuid,
+            )
+            .join(Kernel, KernelMetricValue.kernel_uuid == Kernel.kernel_uuid),
+            "workload_metric": select(
+                Workload.workload_id.label("workload_id"),
+                Workload.name.label("workload_name"),
+                MetricDefinition.metric_uuid.label("metric_uuid"),
+                MetricDefinition.name.label("metric_name"),
+                MetricDefinition.metric_id,
+                MetricDefinition.description,
+                MetricDefinition.table_name,
+                MetricDefinition.sub_table_name,
+                MetricDefinition.unit,
+                WorkloadMetricValue.value_uuid.label("value_uuid"),
+                WorkloadMetricValue.value_name,
+                WorkloadMetricValue.value,
+            )
+            .select_from(MetricDefinition)
+            .join(Workload, MetricDefinition.workload_id == Workload.workload_id)
+            .join(
+                WorkloadMetricValue,
+                MetricDefinition.metric_uuid == WorkloadMetricValue.metric_uuid,
             ),
-            func.max(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
-                "duration_ns_max"
-            ),
-            median_calc_subquery.c.duration_ns_median,
-            func.avg(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
-                "duration_ns_mean"
-            ),
-        )
-        .select_from(Dispatch)
-        .join(Kernel, Dispatch.kernel_uuid == Kernel.kernel_uuid)
-        .join(Workload, Kernel.workload_id == Workload.workload_id)
-        .join(
-            median_calc_subquery,
-            Kernel.kernel_uuid == median_calc_subquery.c.kernel_uuid,
-        )
-        .group_by(
-            Kernel.kernel_uuid, Kernel.workload_id, Workload.name, Kernel.kernel_name
-        ),
-        "kernel_metric": select(
-            Workload.workload_id.label("workload_id"),
-            Workload.name.label("workload_name"),
-            Kernel.kernel_uuid.label("kernel_uuid"),
-            Kernel.kernel_name,
-            MetricDefinition.metric_uuid.label("metric_uuid"),
-            MetricDefinition.name.label("metric_name"),
-            MetricDefinition.metric_id,
-            MetricDefinition.description,
-            MetricDefinition.table_name,
-            MetricDefinition.sub_table_name,
-            MetricDefinition.unit,
-            KernelMetricValue.value_uuid.label("value_uuid"),
-            KernelMetricValue.value_name,
-            KernelMetricValue.value,
-        )
-        .select_from(MetricDefinition)
-        .join(Workload, MetricDefinition.workload_id == Workload.workload_id)
-        .join(
-            KernelMetricValue,
-            MetricDefinition.metric_uuid == KernelMetricValue.metric_uuid,
-        )
-        .join(Kernel, KernelMetricValue.kernel_uuid == Kernel.kernel_uuid),
-        "workload_metric": select(
-            Workload.workload_id.label("workload_id"),
-            Workload.name.label("workload_name"),
-            MetricDefinition.metric_uuid.label("metric_uuid"),
-            MetricDefinition.name.label("metric_name"),
-            MetricDefinition.metric_id,
-            MetricDefinition.description,
-            MetricDefinition.table_name,
-            MetricDefinition.sub_table_name,
-            MetricDefinition.unit,
-            WorkloadMetricValue.value_uuid.label("value_uuid"),
-            WorkloadMetricValue.value_name,
-            WorkloadMetricValue.value,
-        )
-        .select_from(MetricDefinition)
-        .join(Workload, MetricDefinition.workload_id == Workload.workload_id)
-        .join(
-            WorkloadMetricValue,
-            MetricDefinition.metric_uuid == WorkloadMetricValue.metric_uuid,
-        ),
-    }
+        }
 
-
-def get_views() -> list[TextClause]:
-    return [
-        text(
-            f"CREATE VIEW {PREFIX}{name}_view AS "
-            f"{stmt.compile(compile_kwargs={'literal_binds': True})}"
-        )
-        for name, stmt in get_view_definitions().items()
-    ]
+        dialect = sqlite.dialect()
+        return {
+            name: str(
+                stmt.compile(
+                    dialect=dialect,
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
+            for name, stmt in definitions.items()
+        }
