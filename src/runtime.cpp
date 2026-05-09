@@ -61,6 +61,7 @@ void Runtime::ResetState() {
   max_single_alloc_size = 0;
   enable_thunk_sub_allocator = 0;
   heap.Reset();
+  ResetMemoryState();
   default_node = 1;
 }
 
@@ -94,9 +95,13 @@ bool Runtime::IsForkedChild() {
  * remains valid in the child process, so it is not cleared.
  */
 void Runtime::ClearAfterFork() {
-  reset_suballocator();
-  clear_allocation_map();
+  ResetMemoryState();
   Reset();
+}
+
+void Runtime::ResetMemoryState() {
+  fragment_allocator_.reset();
+  allocation_registry_.Clear();
 }
 
 void Runtime::InstallAtForkHandlers() {

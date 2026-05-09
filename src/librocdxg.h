@@ -161,16 +161,6 @@ bool is_forked_child(void);
 
 void clear_allocation_map(void);
 
-class BlockAllocator {
-private:
-    static const size_t block_size_ = 128 * 1024 * 1024;  // 128MB blocks.
-
-public:
-    void* alloc(size_t request_size, size_t& allocated_size) const;
-    void free(void* ptr, size_t length) const;
-    size_t block_size() const { return block_size_; }
-};
-
 void reset_suballocator(void);
 void trim_suballocator(void);
 

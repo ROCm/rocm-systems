@@ -33,46 +33,23 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include "impl/wddm/gpu_memory.h"
-#include "util/simple_heap.h"
 #include "hsakmttypes_legacy.h"
+#include "memory_allocation_registry.h"
 
-struct Allocation {
-  Allocation()
-      : handle(0), cpu_addr(0), gpu_addr(0), size(0), userptr(false),
-        user_data(nullptr), size_requested(0), node_id(0), mem_flags_value(0),
-        dmabuf_fd(-1), rocr_userdata(nullptr) {}
-  Allocation(wsl::thunk::GpuMemoryHandle handle_arg, void *cpu_addr_arg,
-             uint64_t gpu_addr_arg, size_t size_arg, bool userptr_arg = false,
-             void *user_data_arg = nullptr, size_t user_size_arg = 0,
-             HSAuint32 node_id_arg = 0, HSAuint32 mem_flags_value_arg = 0)
-      : handle(handle_arg), cpu_addr(cpu_addr_arg), gpu_addr(gpu_addr_arg),
-        size(size_arg), userptr(userptr_arg), user_data(user_data_arg),
-        size_requested(user_size_arg), node_id(node_id_arg),
-        mem_flags_value(mem_flags_value_arg), dmabuf_fd(-1), rocr_userdata(nullptr) {}
+using rocdxg::Allocation;
 
-  wsl::thunk::GpuMemoryHandle handle;
-  void *cpu_addr;
-  uint64_t gpu_addr;
-  bool userptr;
-  size_t size; /* actual size = align_up(size_requested, granularity) */
-  void *user_data;
-  size_t size_requested; /* size requested by user */
-  HSAuint32 node_id;
-  HSAuint32 mem_flags_value;
-  int dmabuf_fd;
-  void *rocr_userdata;
-};
+static rocdxg::AllocationRegistry &allocation_registry() {
+  return dxg_runtime->Allocations();
+}
 
-static std::map<const void *, Allocation>* allocation_map_ = new std::map<const void *, Allocation>();
-static std::mutex* allocation_map_lock_ = new std::mutex();
+static wsl::SimpleHeap<rocdxg::BlockAllocator> &fragment_allocator() {
+  return dxg_runtime->FragmentAllocator();
+}
 
 void clear_allocation_map(void)
 {
-  //delete allocation_map_lock_;
-  allocation_map_lock_ = new std::mutex();
-  std::lock_guard<std::mutex> lock(*allocation_map_lock_);
-  delete allocation_map_;
-  allocation_map_ = new std::map<const void *, Allocation>();
+  std::lock_guard<std::mutex> lock(allocation_registry().Mutex());
+  allocation_registry().Clear();
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryPolicy(HSAuint32 Node,
@@ -119,7 +96,7 @@ bool isSystemMemoryAvailable(HSAuint64 SizeInBytes) {
   return SizeInBytes <= info.freeram;
 }
 
-void* BlockAllocator::alloc(size_t request_size, size_t& allocated_size) const {
+void* rocdxg::BlockAllocator::alloc(size_t request_size, size_t& allocated_size) const {
   void *address;
   HsaMemFlags MemFlags;
 
@@ -133,19 +110,17 @@ void* BlockAllocator::alloc(size_t request_size, size_t& allocated_size) const {
   return nullptr;
 }
 
-void BlockAllocator::free(void* ptr, size_t length) const {
+void rocdxg::BlockAllocator::free(void* ptr, size_t length) const {
   if (HSAKMT_STATUS_SUCCESS != hsaKmtFreeMemoryInternal(ptr, length, true))
     pr_err("wsl-thunk: BlockAllocator::free() err, address %p, length:%zu\n", ptr, length);
 }
 
-static wsl::SimpleHeap<BlockAllocator> fragment_allocator_;
-
 void reset_suballocator(void) {
-  fragment_allocator_.reset();
+  fragment_allocator().reset();
 }
 
 void trim_suballocator(void) {
-  fragment_allocator_.trim();
+  fragment_allocator().trim();
 }
 
 HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
@@ -234,8 +209,8 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
     else
       real_size = wsl::AlignUp(create_info.size, getpagesize());
 
-    if (real_size < fragment_allocator_.default_block_size()) {
-      *MemoryAddress = fragment_allocator_.alloc(real_size);
+    if (real_size < fragment_allocator().default_block_size()) {
+      *MemoryAddress = fragment_allocator().alloc(real_size);
       if (*MemoryAddress)
         return HSAKMT_STATUS_SUCCESS;
     }
@@ -249,7 +224,7 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
 after_trim:
   auto code = dev->CreateGpuMemory(create_info, &gpu_mem);
   if (code == ErrorCode::Success) {
-    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
+    std::lock_guard<std::mutex> gard(allocation_registry().Mutex());
 
     /* For these physical allcations, use GpuMemory object's address as thunk handle*/
     if (create_info.flags.physical_only || create_info.dmabuf_fd > 0)
@@ -257,14 +232,14 @@ after_trim:
     else
       *MemoryAddress = reinterpret_cast<void *>(gpu_mem->GpuAddress());
 
-    (*allocation_map_)[*MemoryAddress] = Allocation(
+    allocation_registry().Insert(*MemoryAddress, Allocation(
         gpu_mem->GetGpuMemoryHandle(), *MemoryAddress, (uint64_t)*MemoryAddress,
         create_info.size, false, nullptr, SizeInBytes,
-        MemFlags.ui32.GTTAccess ? 0 : PreferredNode, MemFlags.Value);
+        MemFlags.ui32.GTTAccess ? 0 : PreferredNode, MemFlags.Value));
     return HSAKMT_STATUS_SUCCESS;
   } else if (trim_safe) {
     /* attempt to release memory from the block allocator and retry */
-    fragment_allocator_.trim();
+    fragment_allocator().trim();
     trim_safe = false;
     goto after_trim;
   }
@@ -292,19 +267,19 @@ HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   if (!SkipSubAlloc) {
-    if (fragment_allocator_.free(MemoryAddress))
+    if (fragment_allocator().free(MemoryAddress))
       return HSAKMT_STATUS_SUCCESS;
   }
 
   wsl::thunk::GpuMemory *gpu_mem = nullptr;
   {
-    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-    auto it = allocation_map_->find(MemoryAddress);
-    if (it == allocation_map_->end()) {
+    std::lock_guard<std::mutex> gard(allocation_registry().Mutex());
+    auto *allocation = allocation_registry().Find(MemoryAddress);
+    if (allocation == nullptr) {
       return HSAKMT_STATUS_ERROR;
     }
 
-    gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+    gpu_mem = wsl::thunk::GpuMemory::Convert(allocation->handle);
     if (gpu_mem->IsQueueReferenced())
       return HSAKMT_STATUS_ERROR;
 
@@ -316,11 +291,11 @@ HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,
       return HSAKMT_STATUS_SUCCESS;
     }
 
-    if (it->second.dmabuf_fd >= 0) {
-      close(it->second.dmabuf_fd);
-      it->second.dmabuf_fd = -1;
+    if (allocation->dmabuf_fd >= 0) {
+      close(allocation->dmabuf_fd);
+      allocation->dmabuf_fd = -1;
     }
-    allocation_map_->erase(it);
+    allocation_registry().Erase(MemoryAddress);
   }
 
   delete gpu_mem;
@@ -338,14 +313,14 @@ bool queue_acquire_buffer(void *MemoryAddress) {
 
   wsl::thunk::GpuMemory *gpu_mem = nullptr;
   {
-  std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-  auto it = allocation_map_->find(MemoryAddress);
-  if (it == allocation_map_->end()) {
-    return HSAKMT_STATUS_ERROR;
-  }
+    std::lock_guard<std::mutex> gard(allocation_registry().Mutex());
+    auto *allocation = allocation_registry().Find(MemoryAddress);
+    if (allocation == nullptr) {
+      return HSAKMT_STATUS_ERROR;
+    }
 
-  gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
-  gpu_mem->GetQueueReference();
+    gpu_mem = wsl::thunk::GpuMemory::Convert(allocation->handle);
+    gpu_mem->GetQueueReference();
   }
   if (gpu_mem == nullptr)
   return false;
@@ -359,13 +334,13 @@ bool queue_release_buffer(void *MemoryAddress) {
 
   wsl::thunk::GpuMemory *gpu_mem = nullptr;
   {
-    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-    auto it = allocation_map_->find(MemoryAddress);
-    if (it == allocation_map_->end()) {
+    std::lock_guard<std::mutex> gard(allocation_registry().Mutex());
+    auto *allocation = allocation_registry().Find(MemoryAddress);
+    if (allocation == nullptr) {
       return HSAKMT_STATUS_ERROR;
     }
 
-    gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+    gpu_mem = wsl::thunk::GpuMemory::Convert(allocation->handle);
     gpu_mem->PutQueueReference();
   }
   if (gpu_mem == nullptr)
@@ -375,13 +350,13 @@ bool queue_release_buffer(void *MemoryAddress) {
 }
 
 wsl::thunk::GpuMemory *get_gpu_mem(void *MemoryAddress) {
-  std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-  auto it = allocation_map_->find(MemoryAddress);
-  if (it == allocation_map_->end()) {
+  std::lock_guard<std::mutex> gard(allocation_registry().Mutex());
+  auto *allocation = allocation_registry().Find(MemoryAddress);
+  if (allocation == nullptr) {
     return nullptr;
   }
 
-  return wsl::thunk::GpuMemory::Convert(it->second.handle);
+  return wsl::thunk::GpuMemory::Convert(allocation->handle);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemory(HSAuint32 Node,
@@ -513,20 +488,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
                                                  HSAuint64 *Offset) {
   CHECK_DXG_OPEN();
 
-  std::lock_guard<std::mutex> gard(*allocation_map_lock_);
+  std::lock_guard<std::mutex> gard(allocation_registry().Mutex());
 
-  auto it = allocation_map_->upper_bound(MemoryAddress);
-  if (it != allocation_map_->begin()) {
-    --it;
-    if (it->second.dmabuf_fd == -1) {
-      auto gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+  auto *allocation = allocation_registry().FindPreceding(MemoryAddress);
+  if (allocation != nullptr) {
+    if (allocation->dmabuf_fd == -1) {
+      auto gpu_mem = wsl::thunk::GpuMemory::Convert(allocation->handle);
       auto code = gpu_mem->ExportPhysicalHandle(DMABufFd);
       if (code != ErrorCode::Success)
         return HSAKMT_STATUS_ERROR;
-      it->second.dmabuf_fd = *DMABufFd;
+      allocation->dmabuf_fd = *DMABufFd;
     }
-    *DMABufFd = dup(it->second.dmabuf_fd);
-    *Offset = reinterpret_cast<uint64_t>(MemoryAddress) - it->second.gpu_addr;
+    *DMABufFd = dup(allocation->dmabuf_fd);
+    *Offset = reinterpret_cast<uint64_t>(MemoryAddress) - allocation->gpu_addr;
     return HSAKMT_STATUS_SUCCESS;
   }
 
@@ -709,15 +683,16 @@ HSAKMT_STATUS import_dmabuf_fd(int DMABufFd,
   if (code == ErrorCode::SameProcessSameDevice) {
     /* Unit_hipMemPoolExportToShareableHandle_SameProc */
     pr_info("imported from same process, use the old one\n");
-    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-    auto it = allocation_map_->find((void*)gpu_va);
-    if (it == allocation_map_->end()) {
+    std::lock_guard<std::mutex> gard(allocation_registry().Mutex());
+    auto *allocation = allocation_registry().Find((void*)gpu_va);
+    if (allocation == nullptr) {
       pr_err("where's the conflict buffer? va %#lx\n", create_info.va_hint);
       return HSAKMT_STATUS_ERROR;
     }
-    wsl::thunk::GpuMemory *conflict_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+    wsl::thunk::GpuMemory *conflict_mem =
+        wsl::thunk::GpuMemory::Convert(allocation->handle);
     conflict_mem->IncSharedReference();
-    *GpuMemHandle = it->second.handle;
+    *GpuMemHandle = allocation->handle;
     return HSAKMT_STATUS_SUCCESS;
   } else if (code != ErrorCode::Success) {
     pr_err("fail to import fd, ret %d\n", (int)code);
@@ -732,15 +707,15 @@ HSAKMT_STATUS import_dmabuf_fd(int DMABufFd,
 
   *GpuMemHandle = gpu_mem->GetGpuMemoryHandle();
 
-  std::lock_guard<std::mutex> gard(*allocation_map_lock_);
+  std::lock_guard<std::mutex> gard(allocation_registry().Mutex());
   /*
    * the gpu_mem->Flags() need convert back from GpuMemoryCreateFlags to
    * HsaMemFlags, reference hsaKmtAllocMemoryAlign
    * */
-  (*allocation_map_)[MemoryAddress] = Allocation(
+  allocation_registry().Insert(MemoryAddress, Allocation(
     *GpuMemHandle, MemoryAddress, (uint64_t)MemoryAddress,
     gpu_mem->Size(), false, nullptr, gpu_mem->ClientSize(),
-    NodeId, gpu_mem->Flags());
+    NodeId, gpu_mem->Flags()));
 
   return HSAKMT_STATUS_SUCCESS;
 
@@ -807,26 +782,27 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDeregisterMemory(void *MemoryAddress) {
   pr_debug("address %p\n", MemoryAddress);
 
   {
-    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
+    std::lock_guard<std::mutex> gard(allocation_registry().Mutex());
 
-    auto it = allocation_map_->find(MemoryAddress);
-    if (it == allocation_map_->end()) {
+    auto *allocation = allocation_registry().Find(MemoryAddress);
+    if (allocation == nullptr) {
       return HSAKMT_STATUS_SUCCESS;
     }
 
-    auto *gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+    auto *gpu_mem = wsl::thunk::GpuMemory::Convert(allocation->handle);
     wsl::thunk::GpuMemoryDescFlags flags;
     flags.reserved = gpu_mem->Flags();
     // IPC mem(vram)
     if (flags.is_imported_vram_ipc &&
       gpu_mem->DecSharedReference() == 0) {
-      allocation_map_->erase(it);
+      allocation_registry().Erase(MemoryAddress);
       delete gpu_mem;
       return HSAKMT_STATUS_SUCCESS;
     }
-    if (it->second.userptr) {
-      allocation_map_->erase(it);
-      allocation_map_->erase((void *)it->second.gpu_addr);
+    if (allocation->userptr) {
+      const auto gpu_addr = allocation->gpu_addr;
+      allocation_registry().Erase(MemoryAddress);
+      allocation_registry().Erase((void *)gpu_addr);
       delete gpu_mem;
       return HSAKMT_STATUS_SUCCESS;
     }
@@ -864,15 +840,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
   size_t aligned_size = end - start;
 
   {
-    if (nullptr != fragment_allocator_.block_base(aligned_ptr))
+    if (nullptr != fragment_allocator().block_base(aligned_ptr))
       return HSAKMT_STATUS_SUCCESS;
   }
 
   {
-    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-    auto it = allocation_map_->find(aligned_ptr);
-    if (it != allocation_map_->end()) {
-      wsl::thunk::GpuMemory *gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+    std::lock_guard<std::mutex> gard(allocation_registry().Mutex());
+    auto *allocation = allocation_registry().Find(aligned_ptr);
+    if (allocation != nullptr) {
+      wsl::thunk::GpuMemory *gpu_mem =
+          wsl::thunk::GpuMemory::Convert(allocation->handle);
       wsl::thunk::GpuMemoryDescFlags flags;
       flags.reserved = gpu_mem->Flags();
       // IPC mem
@@ -893,9 +870,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
         return HSAKMT_STATUS_SUCCESS;
       }
 
-      if (!it->second.userptr) {
+      if (!allocation->userptr) {
       // GTT/Local mem
-        if (it->second.size >= MemorySizeInBytes) {
+        if (allocation->size >= MemorySizeInBytes) {
           *AlternateVAGPU = (uint64_t)MemoryAddress;
           return HSAKMT_STATUS_SUCCESS;
         } else {
@@ -905,12 +882,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
     }
 
     // userptr mem
-    it = allocation_map_->find(MemoryAddress);
-    if (it != allocation_map_->end()) {
-      if (it->second.userptr && it->second.size >= MemorySizeInBytes) {
+    allocation = allocation_registry().Find(MemoryAddress);
+    if (allocation != nullptr) {
+      if (allocation->userptr && allocation->size >= MemorySizeInBytes) {
         *AlternateVAGPU =
-            (uintptr_t)it->second.gpu_addr +
-            ((uintptr_t)MemoryAddress - (uintptr_t)it->second.cpu_addr);
+            (uintptr_t)allocation->gpu_addr +
+            ((uintptr_t)MemoryAddress - (uintptr_t)allocation->cpu_addr);
         return HSAKMT_STATUS_SUCCESS;
       }
     }
@@ -938,13 +915,15 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
   }
 
   {
-    std::lock_guard<std::mutex> guard(*allocation_map_lock_);
-   (*allocation_map_)[MemoryAddress] =
+    std::lock_guard<std::mutex> guard(allocation_registry().Mutex());
+    allocation_registry().Insert(
+        MemoryAddress,
         Allocation(handle, aligned_ptr, addr, aligned_size, true, MemoryAddress,
-                   MemorySizeInBytes);
-    (*allocation_map_)[(void *)addr] =
+                   MemorySizeInBytes));
+    allocation_registry().Insert(
+        (void *)addr,
         Allocation(handle, aligned_ptr, addr, aligned_size, true, nullptr,
-                   MemorySizeInBytes);
+                   MemorySizeInBytes));
   }
 
   *AlternateVAGPU = addr + ((uintptr_t)MemoryAddress - (uintptr_t)aligned_ptr);
@@ -964,20 +943,20 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
   pr_debug("address %p\n", MemoryAddress);
 
   {
-    if (nullptr != fragment_allocator_.block_base(MemoryAddress))
+    if (nullptr != fragment_allocator().block_base(MemoryAddress))
       return HSAKMT_STATUS_SUCCESS;
   }
 
   wsl::thunk::GpuMemory *gpu_mem = nullptr;
   {
-    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
+    std::lock_guard<std::mutex> gard(allocation_registry().Mutex());
 
-    auto it = allocation_map_->find(MemoryAddress);
-    if (it == allocation_map_->end()) {
+    auto *allocation = allocation_registry().Find(MemoryAddress);
+    if (allocation == nullptr) {
       return HSAKMT_STATUS_ERROR;
     }
 
-    gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+    gpu_mem = wsl::thunk::GpuMemory::Convert(allocation->handle);
     if (gpu_mem->IsQueueReferenced())
       return HSAKMT_STATUS_ERROR;
 
@@ -1046,16 +1025,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfo(const void *Pointer,
   Allocation allocation_info;
   bool found = false;
   {
-    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-    auto it = allocation_map_->upper_bound(Pointer);
-    if (it != allocation_map_->begin()) {
-      --it;
-      if (Pointer >= it->first &&
-        (Pointer < reinterpret_cast<const uint8_t*>(it->first) + it->second.size_requested)) {
-        allocation_info = it->second;
-        gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
-        found = true;
-      }
+    std::lock_guard<std::mutex> gard(allocation_registry().Mutex());
+    auto *allocation = allocation_registry().FindContaining(Pointer);
+    if (allocation != nullptr) {
+      allocation_info = *allocation;
+      gpu_mem = wsl::thunk::GpuMemory::Convert(allocation->handle);
+      found = true;
     }
   }
 
@@ -1090,10 +1065,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryUserData(const void *Pointer,
 
   uint64_t aligned_ptr = wsl::AlignDown((uint64_t)Pointer, 4096);
 
-  std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-  auto it = allocation_map_->find((void *)aligned_ptr);
-  if (it != allocation_map_->end()) {
-    it->second.rocr_userdata = UserData;
+  std::lock_guard<std::mutex> gard(allocation_registry().Mutex());
+  auto *allocation = allocation_registry().Find((void *)aligned_ptr);
+  if (allocation != nullptr) {
+    allocation->rocr_userdata = UserData;
     return HSAKMT_STATUS_SUCCESS;
   }
 

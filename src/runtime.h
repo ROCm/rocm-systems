@@ -33,12 +33,24 @@
 
 #include "heap_manager.h"
 #include "impl/wddm/va_mgr.h"
+#include "memory_allocation_registry.h"
 #include "shared/include/d3dkmt_types.h"
 #include "shared/include/dxcore_loader.h"
 #include "shared/include/status.h"
 #include "shared/include/thunk_proxy/thunk_proxy.h"
+#include "util/simple_heap.h"
 
 namespace rocdxg {
+
+class BlockAllocator {
+private:
+    static const size_t block_size_ = 128 * 1024 * 1024;  // 128MB blocks.
+
+public:
+    void* alloc(size_t request_size, size_t& allocated_size) const;
+    void free(void* ptr, size_t length) const;
+    size_t block_size() const { return block_size_; }
+};
 
 class Runtime {
 public:
@@ -54,6 +66,11 @@ public:
   void PrepareFork();
   void ParentFork();
   void ChildFork();
+  void ResetMemoryState();
+  AllocationRegistry &Allocations() { return allocation_registry_; }
+  wsl::SimpleHeap<BlockAllocator> &FragmentAllocator() {
+    return fragment_allocator_;
+  }
 
   void HeapInit();
   void HeapFini();
@@ -103,6 +120,8 @@ private:
   void ResetState();
 
   HeapManager heap;
+  AllocationRegistry allocation_registry_;
+  wsl::SimpleHeap<BlockAllocator> fragment_allocator_;
 };
 
 } // namespace rocdxg
