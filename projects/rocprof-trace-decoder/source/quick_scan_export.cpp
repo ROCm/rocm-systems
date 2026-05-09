@@ -35,8 +35,8 @@ namespace
 {
 
 // gfx9 sqtt_token_type_t nibbles for the rare cluster captured by the scanner.
-constexpr uint32_t TOKEN_REG         = 2;
-constexpr uint32_t TOKEN_REG_CS      = 5;
+constexpr uint32_t TOKEN_REG = 2;
+constexpr uint32_t TOKEN_REG_CS = 5;
 constexpr uint32_t TOKEN_REG_CS_PRIV = 15;
 
 // Bit layout of TOKEN_REG_CS / TOKEN_REG_CS_PRIV (see source/gfx9/gfx9token.h
@@ -63,10 +63,7 @@ inline bool is_gfx9_header(const rocprof_trace_decoder_gfx9_header_t& h)
 }
 
 rocprofiler_thread_trace_decoder_status_t quick_scan_gfx9(
-    const uint8_t* tokens,
-    uint64_t tokens_size,
-    rocprof_trace_decoder_trace_callback_t trace_callback,
-    void* userdata
+    const uint8_t* tokens, uint64_t tokens_size, rocprof_trace_decoder_trace_callback_t trace_callback, void* userdata
 )
 {
     // Cap matches the 32k generously-sized hint in the mi400 scanner — most
@@ -109,9 +106,7 @@ rocprofiler_thread_trace_decoder_status_t quick_scan_gfx9(
 
     if (events.empty()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 
-    return trace_callback(
-        ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, events.data(), events.size(), userdata
-    );
+    return trace_callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, events.data(), events.size(), userdata);
 }
 
 } // namespace
@@ -129,8 +124,7 @@ extern "C" rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
 
     const uint8_t* buf = static_cast<const uint8_t*>(data);
 
-    if (is_gfx9_header(header))
-        return quick_scan_gfx9(buf, data_size, trace_callback, userdata);
+    if (is_gfx9_header(header)) return quick_scan_gfx9(buf, data_size, trace_callback, userdata);
 
     // gfx10+ quick-scan dispatch is not yet wired into the public API. The
     // gfx12/mi400 scanners exist (source/gfx12/quick_scan.h, source/mi400/
