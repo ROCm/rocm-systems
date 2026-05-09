@@ -141,6 +141,12 @@ private:
     uint32_t xcc_number_;
     Builder  builder;
 
+    // WGP harvesting support (GFX11+): per-SA active WGP physical indices
+    static constexpr uint32_t kMaxSA       = 8;
+    static constexpr uint32_t kMaxWgpPerSa = 16;
+    uint32_t                  active_wgp_count_[kMaxSA]{};
+    uint32_t                  active_wgp_indices_[kMaxSA][kMaxWgpPerSa]{};
+
     void DebugTrace(uint32_t value)
     {
         CmdBuffer cmd_buffer;
@@ -237,6 +243,43 @@ public:
     {
         this->wgp_per_sa = (agent_info->cu_num / 2 + sarrays_per_se * se_number_ - 1) /
                            (se_number_ * sarrays_per_se);
+
+        // Build per-SA active WGP index tables from the CU bitmap when available.
+        // This ensures the Read loop iterates only active (non-harvested) physical
+        // WGP indices, avoiding aliased reads on GFX11+ parts with harvesting.
+        const uint32_t physical_wgp_per_sa =
+            (agent_info->cu_per_simd_array > 0) ? (agent_info->cu_per_simd_array / 2) : 0;
+
+        for(uint32_t se = 0; se < se_number_; ++se)
+        {
+            for(uint32_t sa = 0; sa < sarrays_per_se; ++sa)
+            {
+                const uint32_t sa_idx     = se * sarrays_per_se + sa;
+                active_wgp_count_[sa_idx] = 0;
+
+                if(physical_wgp_per_sa > 0 && agent_info->cu_bitmap[se][sa] != 0)
+                {
+                    // Each WGP covers two consecutive CUs: WGP i -> CU 2i and CU 2i+1
+                    const uint32_t cu_bm = agent_info->cu_bitmap[se][sa];
+                    for(uint32_t wgp = 0; wgp < physical_wgp_per_sa && wgp < kMaxWgpPerSa; ++wgp)
+                    {
+                        if(cu_bm & (3u << (wgp * 2)))
+                        {
+                            active_wgp_indices_[sa_idx][active_wgp_count_[sa_idx]++] = wgp;
+                        }
+                    }
+                }
+                else
+                {
+                    // Fallback: no bitmap - use sequential indices (pre-fix behaviour)
+                    for(uint32_t wgp = 0; wgp < wgp_per_sa && wgp < kMaxWgpPerSa; ++wgp)
+                    {
+                        active_wgp_indices_[sa_idx][active_wgp_count_[sa_idx]++] = wgp;
+                    }
+                }
+            }
+        }
+
         // Due to MI300 CP firmware issue we need to use mem_mapped_register mode to patch for GCEA
         // hang. Otherwise both perfcounters mode and mem_mapped_register mode should work.
         builder.bUsePerfCounterMode = (xcc_number_ > 1) ? false : true;
@@ -720,8 +763,11 @@ public:
 
                         if(bIsWGPcounter11)
                         {
-                            for(int wgp = 0; wgp < wgp_per_sa; wgp++)
+                            // Use harvesting-aware WGP index table for this SE/SA
+                            const uint32_t sa_idx = se_index * sarrays_per_se + sarray;
+                            for(uint32_t i = 0; i < active_wgp_count_[sa_idx]; ++i)
                             {
+                                const uint32_t wgp = active_wgp_indices_[sa_idx][i];
                                 grbm_value =
                                     Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, wgp);
                                 SetGrbmGfxIndex(cmd_buffer, grbm_value);

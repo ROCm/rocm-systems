@@ -61,6 +61,9 @@ GetAgentInfo(aqlprofile_agent_handle_t agent_id);
 aqlprofile_agent_handle_t
 RegisterAgent(const aqlprofile_agent_info_v1_t* agent_info);
 
+aqlprofile_agent_handle_t
+RegisterAgent(const aqlprofile_agent_info_v2_t* agent_info);
+
 // GPU enumeration
 enum gpu_id_t
 {

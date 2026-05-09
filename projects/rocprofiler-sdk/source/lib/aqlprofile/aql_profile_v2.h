@@ -61,6 +61,7 @@ typedef enum
     AQLPROFILE_AGENT_VERSION_NONE = 0,
     AQLPROFILE_AGENT_VERSION_V0   = 1,
     AQLPROFILE_AGENT_VERSION_V1   = 2,
+    AQLPROFILE_AGENT_VERSION_V2   = 3,
     AQLPROFILE_AGENT_VERSION_LAST
 } aqlprofile_agent_version_t;
 
@@ -231,6 +232,26 @@ typedef struct
     uint32_t location_id; /**< BDF (Bus/Device/function number) of the GPU agent
                              (HSA_AMD_AGENT_INFO_BDFID or KFD.location_id)*/
 } aqlprofile_agent_info_v1_t;
+
+/**
+ * @brief Extended agent info with physical CU topology for WGP harvesting support.
+ *
+ * cu_per_simd_array and cu_bitmap allow aqlprofile to iterate only over active
+ * (non-harvested) WGP indices when reading per-WGP counters on GFX11+ GPUs.
+ * Values are obtainable from the DRM driver (AMDGPU_INFO_DEV_INFO).
+ */
+typedef struct
+{
+    const char* agent_gfxip;          /**< Agent GFXIP string */
+    uint32_t    xcc_num;              /**< Number of XCCs */
+    uint32_t    se_num;               /**< Number of Shader Engines */
+    uint32_t    cu_num;               /**< Active CU count */
+    uint32_t    shader_arrays_per_se; /**< Shader Arrays per SE */
+    uint32_t    domain;               /**< PCI domain */
+    uint32_t    location_id;          /**< BDF (Bus/Device/Function) */
+    uint32_t    cu_per_simd_array;    /**< Physical CUs per SA (incl. harvested). 0 = unavailable. */
+    uint32_t    cu_bitmap[4][4];      /**< Per-SE/SA active CU bitmap (matches DRM ABI). */
+} aqlprofile_agent_info_v2_t;
 
 /**
  * @brief Struct containing a handle to a registered agent
