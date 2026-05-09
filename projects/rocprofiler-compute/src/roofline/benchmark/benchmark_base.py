@@ -57,7 +57,9 @@ VALU_NFMA = 1024
 # Bench_base Class (ABSTRACT)
 # =============================================================================
 class Bench_base(ABC):
-    def __init__(self, device_ids: list) -> None:
+    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+        self.device_id = device_id
+
         # Arch or hardware-specific variables must be set in child classes
         # self.lds_sizes: dict[str, int]
         self.unsupported_data_types: list[str]
@@ -69,6 +71,8 @@ class Bench_base(ABC):
         self.csv_cols_map: dict[str, str]
         self.WAVEFRONT_SIZE: int
         self.MATRIX_OPS_TYPE: str
+
+        self.cache_sizes = cache_sizes
 
         # Some data types have different rates. Set the number of iterations
         # to keep running time under control.
@@ -122,10 +126,12 @@ class Bench_base(ABC):
         self.matrix_f64_src: str
         self.matrix_i8_src: str
         self.set_kernel_source()
+        self.set_cache_kernel_selector()
 
     # -----------------------------------------------------------------------------
     # Helper Methods and Classes
     # -----------------------------------------------------------------------------
+
     @contextmanager
     def gpu_benchmark_lock(self, device: int) -> Generator[None, None, None]:
         """Acquire exclusive lock for benchmarking a specific GPU."""
@@ -247,6 +253,15 @@ class Bench_base(ABC):
 
         # Parse out only gfx
         return arch_str.split(":", 1)[0]
+
+    def set_cache_kernel_selector(self) -> None:
+        self.cache_kernel_selector = {}
+
+        for level in ["L1", "L2", "MALL"]:
+            if level in self.cache_sizes.keys():
+                self.cache_kernel_selector[level] = (
+                    f"Cache_bw<float, {self.cache_sizes[level]}, 256>"
+                )
 
     def run_get_samples(
         self,
@@ -777,7 +792,10 @@ class Bench_base(ABC):
         return self.flops_bench(device, "INT64", "IOP", "GOPS")
 
     def run_benchmark(self, device: int) -> dict[PerfMetrics]:
-        """Run the roofline tests on the specified device."""
+        """
+        Run the roofline tests on the specified device.
+        Returns a dictionary of PerfMetrics.
+        """
         with self.gpu_benchmark_lock(device):
             metrics_dict = {}
 
@@ -795,21 +813,10 @@ class Bench_base(ABC):
 
                 metrics_dict[name] = metrics
 
+            print("GPU Benchmarking completed")
             return metrics_dict
 
-    def run_on_devices(self, devices: list[str]) -> dict[dict[PerfMetrics]]:
-        """
-        Run the benchmark test on the all requested devices in a given list.
-        Returns a dictionary mapping device ID to dictionary of metrics.
-        """
-        metrics = {}
-        for d in devices:
-            metrics[d] = self.run_benchmark(int(d))
-
-        print("GPU Benchmarking completed")
-        return metrics
-
-    def dump_csv(self, metrics: dict[dict[PerfMetrics]], file_path: str) -> None:
+    def dump_csv(self, metrics: dict[PerfMetrics], file_path: str) -> None:
         """Generate a csv file containing the collected benchmark metrics."""
         # TODO: Better way to map CSV column names?
         with open(file_path, "w") as f:
@@ -826,11 +833,10 @@ class Bench_base(ABC):
 
             writer.writerow(row)
 
-            for d in metrics:
-                row = [d]
-                for t in types:
-                    row.append(metrics[d][t].mean)
-                    row.append(metrics[d][t].low)
-                    row.append(metrics[d][t].high)
+            row = [self.device_id]
+            for t in types:
+                row.append(metrics[t].mean)
+                row.append(metrics[t].low)
+                row.append(metrics[t].high)
 
-                writer.writerow(row)
+            writer.writerow(row)
