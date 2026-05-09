@@ -166,6 +166,18 @@ public:
   hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct, HSA::hsa_amd_queue_priority_internal_t priority,
                            void* queue_addr, uint64_t queue_size, HsaEvent* event) const override;
   hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
+
+  /// @brief Create Kernel Mode Queue (KMQ) metadata to dispatch packets in a user-mode access agent dispatch queue.
+  ///
+  /// @param[in] queue_size size of the dispatch queue in number of packets
+  /// @param[out] metadata KMQ metadata created for the dispatch queue
+  hsa_status_t CreateKernelModeQueue(size_t queue_size, void** metadata) const;
+
+  /// @brief Destroy the Kernel Mode Queue (KMQ) metadata.
+  ///
+  /// @param[in] metadata KMQ metadata to be destroyed
+  hsa_status_t DestroyKernelModeQueue(void* metadata) const;
+
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
                               uint32_t* queue_cu_mask) const override;
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
@@ -184,17 +196,17 @@ public:
                                      uint64_t* drm_fd_offset) override;
   hsa_status_t DestroyShareableHandle(core::ShareableHandle* handle) override;
 
-  /// @brief Submits a chain of command packets to the driver for execution.
+  /// @brief Submits packets to the driver for execution.
   ///
   /// @note The packets are contiguous in index but not necessarily contiguous in memory.
   ///
-  /// @param[in] q AIE KMQ queue with queued packets
-  /// @param[in,out] queue_id queue ID. It will be updated if the driver needs to create a new
-  /// hardware context for this command chain.
+  /// @param[in] q queue with packets
+  /// @param[in,out] kmq_metadata Kernel Mode Queue (KMQ) metadata. It will be updated if the driver
+  /// needs to create a new hardware context.
   /// @param[in] first_pkt_idx index of the first packet in the queue
-  /// @param[in] num_pkts number of packets in the queue to be submitted
+  /// @param[in] num_pkts number of packets in the queue to be submitted. Must be greater than 0.
   /// @param[in] num_core_tiles number of core tiles in the AIE device
-  hsa_status_t SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id, uint64_t first_pkt_idx,
+  hsa_status_t SubmitCmdChain(hsa_queue_t& q, void* kmq_metadata, uint64_t first_pkt_idx,
                               uint64_t num_pkts, uint32_t num_core_tiles);
 
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
@@ -234,13 +246,12 @@ public:
   /// @param[in] mem virtual address to query.
   BOHandle FindBOHandle(void* mem) const;
 
-  /// @brief Creates a new hardware context with the given PDI BO handles.
+  /// @brief Creates a new hardware context.
   ///
   /// @param[in] pdi_bo_handles PDI BO handles to use for the new hardware context.
-  /// @param[in,out] queue_id queue ID. It will be updated if the driver needs to create a new
-  /// hardware context for this command chain.
+  /// @param[in,out] kmq_metadata Kernel Mode Queue (KMQ) metadata
   /// @param[in] num_core_tiles number of core tiles in the AIE device
-  hsa_status_t ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID& queue_id,
+  hsa_status_t ConfigHwCtx(const PDICache& pdi_bo_handles, void* kmq_metadata,
                            uint32_t num_core_tiles) const;
 
   /// @brief Queries the driver version and updates internal state.

@@ -240,6 +240,11 @@ static hsa_status_t xdna_ioctl(int fd, unsigned long request, void* arg) {
   }
 }
 
+/// @brief Metadata for a Kernel Mode Queue (KMQ).
+struct KmqQueueMetadata {
+  uint32_t hw_ctx_handle;
+};
+
 /**
  * @brief Flushes the CPU cache for the packet's arguments.
  *
@@ -612,9 +617,24 @@ hsa_status_t XdnaDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint
                                      HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
                                      void* queue_addr, uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes,
                                      HsaEvent* event, HsaQueueResource& queue_resource) const {
-  if (queue_resource.QueueId != AMDXDNA_INVALID_CTX_HANDLE) {
-    return HSA_STATUS_ERROR;
-  }
+  // Driver doesn't support user-mode queues.
+  return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+}
+
+hsa_status_t XdnaDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
+                                     HSA::hsa_amd_queue_priority_internal_t priority,
+                                     void* queue_addr, uint64_t queue_size, HsaEvent* event) const {
+  // Driver doesn't support queue updates.
+  return HSA_STATUS_ERROR_INVALID_QUEUE;
+}
+
+hsa_status_t XdnaDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
+  // Driver doesn't support user-mode queues.
+  return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+}
+
+hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, void** metadata) const {
+  auto queue_metadata = std::make_unique<KmqQueueMetadata>();
 
   // Create QoS information. Currently we do not leverage this information.
   amdxdna_qos_info qos_info = {};
@@ -648,29 +668,22 @@ hsa_status_t XdnaDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint
     return err;
   }
 
-  queue_resource.QueueId = static_cast<HSA_QUEUEID>(create_hwctx_args.handle);
+  queue_metadata->hw_ctx_handle = create_hwctx_args.handle;
+  *metadata = queue_metadata.release();
 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
-  auto hw_ctx_handle = static_cast<uint32_t>(queue_id);
-  if (hw_ctx_handle == AMDXDNA_INVALID_CTX_HANDLE) {
+hsa_status_t XdnaDriver::DestroyKernelModeQueue(void* metadata) const {
+  std::unique_ptr<KmqQueueMetadata> queue_metadata;
+  queue_metadata.reset(static_cast<KmqQueueMetadata*>(metadata));
+
+  if (queue_metadata->hw_ctx_handle == AMDXDNA_INVALID_CTX_HANDLE) {
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
 
-  // Drop PDI cache.
-  const_cast<std::unordered_map<HSA_QUEUEID, PDICache>&>(queue_pdi_map_).erase(queue_id);
-
   // Destroy hardware context associated with the queue.
-  return DestroyHwCtx(fd_, hw_ctx_handle);
-}
-
-hsa_status_t XdnaDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
-                                     HSA::hsa_amd_queue_priority_internal_t priority, void* queue_addr,
-                                     uint64_t queue_size, HsaEvent* event) const {
-  // AIE doesn't support queue updates.
-  return HSA_STATUS_ERROR_INVALID_QUEUE;
+  return DestroyHwCtx(fd_, queue_metadata->hw_ctx_handle);
 }
 
 hsa_status_t XdnaDriver::SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
@@ -921,9 +934,10 @@ hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
-                                        uint64_t first_pkt_idx, uint64_t num_pkts,
-                                        uint32_t num_core_tiles) {
+hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* kmq_metadata, uint64_t first_pkt_idx,
+                                        uint64_t num_pkts, uint32_t num_core_tiles) {
+  auto queue_metadata = static_cast<KmqQueueMetadata*>(kmq_metadata);
+
   // Instruction and arguments BOs (performance hint: up to 3 argument BOs per packet).
   std::vector<uint32_t> bo_handles;
   bo_handles.reserve(num_pkts * 4);
@@ -941,7 +955,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
   // PDI cache to avoid reconfiguration. If the cache is empty or updated, a new hardware context
   // will be created for the queue.
   PDICache pdi_cache;
-  auto pdi_cache_it = queue_pdi_map_.find(queue_id);
+  auto pdi_cache_it = queue_pdi_map_.find(queue_metadata->hw_ctx_handle);
   if (pdi_cache_it != queue_pdi_map_.end()) {
     pdi_cache = pdi_cache_it->second;
   }
@@ -1037,12 +1051,12 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
     if (pdi_cache_it != queue_pdi_map_.end()) {
       queue_pdi_map_.erase(pdi_cache_it);
     }
-    hsa_status_t status = ConfigHwCtx(pdi_cache, queue_id, num_core_tiles);
+    hsa_status_t status = ConfigHwCtx(pdi_cache, queue_metadata, num_core_tiles);
     if (status != HSA_STATUS_SUCCESS) {
       assert(false && "Failed to configure hardware context for queue.");
       return status;
     }
-    queue_pdi_map_.emplace(queue_id, pdi_cache);
+    queue_pdi_map_.emplace(queue_metadata->hw_ctx_handle, pdi_cache);
   }
 
   // Remove duplicate BOs, since the driver reports an error if the same BO is provided multiple
@@ -1057,19 +1071,17 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
     FlushArguments(pkt);
   }
 
-  auto hw_ctx_handle = static_cast<uint32_t>(queue_id);
-
   if (num_pkts == 1) {
     // Single packet: submit the per-kernel cmd BO directly, no chain wrapper.
     uint64_t seq = 0;
-    hsa_status_t status =
-        SubmitCommand(fd_, cmd_bo_handles[0].handle, bo_handles, hw_ctx_handle, seq);
+    hsa_status_t status = SubmitCommand(fd_, cmd_bo_handles[0].handle, bo_handles,
+                                        queue_metadata->hw_ctx_handle, seq);
     if (status != HSA_STATUS_SUCCESS) {
       assert(false && "Failed to submit command.");
       return status;
     }
     status = WaitCommand(fd_, static_cast<ert_start_kernel_cmd*>(cmd_bo_handles[0].vaddr),
-                         hw_ctx_handle, seq);
+                         queue_metadata->hw_ctx_handle, seq);
     if (status != HSA_STATUS_SUCCESS) {
       assert(false && "Failed waiting for command.");
       return status;
@@ -1100,13 +1112,14 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
 
     // Execute all commands in the command chain.
     uint64_t seq = 0;
-    status = SubmitCommand(fd_, cmd_bo_handle.handle, bo_handles, hw_ctx_handle, seq);
+    status =
+        SubmitCommand(fd_, cmd_bo_handle.handle, bo_handles, queue_metadata->hw_ctx_handle, seq);
     if (status != HSA_STATUS_SUCCESS) {
       assert(false && "Failed to submit command chain.");
       return status;
     }
     status = WaitCommand(fd_, static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr),
-                         hw_ctx_handle, seq);
+                         queue_metadata->hw_ctx_handle, seq);
     if (status != HSA_STATUS_SUCCESS) {
       assert(false && "Failed waiting for command chain.");
       return status;
@@ -1218,8 +1231,10 @@ XdnaDriver::BOHandle XdnaDriver::FindBOHandle(void* mem) const {
   return it->second;
 }
 
-hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID& queue_id,
+hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, void* kmq_metadata,
                                      uint32_t num_core_tiles) const {
+  auto queue_metadata = static_cast<KmqQueueMetadata*>(kmq_metadata);
+
   const size_t config_cu_param_size =
       sizeof(amdxdna_hwctx_param_config_cu) + pdi_bo_handles.size() * sizeof(amdxdna_cu_config);
 
@@ -1238,17 +1253,15 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID
     xdna_config_cu_param->cu_configs[i].cu_func = default_cu_func;
   }
 
-  auto hw_ctx_handle = static_cast<uint32_t>(queue_id);
-
   // Destroy the hardware context
   // Note: we can do this because we have forced synchronization between command chains. If we move
   // to a more asynchronous model, we will need to figure out how hardware context destruction works
   // while applications are running.
-  hsa_status_t err = DestroyHwCtx(fd_, hw_ctx_handle);
+  hsa_status_t err = DestroyHwCtx(fd_, queue_metadata->hw_ctx_handle);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
-  queue_id = AMDXDNA_INVALID_CTX_HANDLE;
+  queue_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
 
   // Create the new hardware context
   // Currently we do not leverage QoS information.
@@ -1274,7 +1287,7 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID
     return err;
   }
 
-  queue_id = create_hwctx_args.handle;
+  queue_metadata->hw_ctx_handle = create_hwctx_args.handle;
 
   return HSA_STATUS_SUCCESS;
 }
