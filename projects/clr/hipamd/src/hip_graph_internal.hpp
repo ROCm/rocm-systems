@@ -821,7 +821,8 @@ class Graph {
     auto memory = getMemoryObject(dev_ptr, offset);
     if (memory != nullptr) {
       auto device_id = memory->getUserData().deviceId;
-      constexpr bool kSkipEvent = true;
+      // Skip event marker for non-DD path when pool frees memory
+      bool kSkipEvent = !AMD_DIRECT_DISPATCH;
       if (!g_devices[device_id]->FreeMemory(memory, stream, nullptr, kSkipEvent)) {
         LogError("Memory didn't belong to any pool!");
       }
