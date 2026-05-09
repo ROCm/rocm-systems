@@ -86,17 +86,19 @@ def export_sqlite_query(
 
         if not _pandas_available:
             if normalized_format in _stdlib_formats:
-                print(
+                sys.stderr.write(
                     "Module 'pandas' not found. Install it with: pip install pandas. Using fallback path.\n"
                 )
+                sys.stderr.flush()
                 return _export_without_pandas(
                     conn, query, params, normalized_format, export_path, **kwargs
                 )
             else:
-                print(
+                sys.stderr.write(
                     f"Export format '{normalized_format}' requires pandas. "
-                    "Install it with: pip install pandas"
+                    "Install it with: pip install pandas\n"
                 )
+                sys.stderr.flush()
                 return None
 
         # 1) Run the query via pandas
@@ -107,17 +109,16 @@ def export_sqlite_query(
             sys.stderr.flush()
             return None
 
-        if export_format == "console" or export_format is None:
+        if normalized_format in (None, "console"):
             # 2) Print to console
             print(df.to_string(index=False))
             return None
 
-        elif export_format == "clipboard":
+        elif normalized_format == "clipboard":
             df.to_clipboard(excel=False)
             return None
 
-        export_format = export_format.lower()
-        ext = export_format
+        ext = normalized_format
         export_path = export_path or f"query_output.{ext}"
         if not export_path.endswith(f".{ext}"):
             export_path = f"{export_path}.{ext}"
@@ -131,7 +132,7 @@ def export_sqlite_query(
                 ofs.flush()
 
         # 3) Export based on format
-        if export_format == "csv":
+        if normalized_format == "csv":
             import csv
 
             cols = [f"{itr}" for itr in df.columns.tolist()]
@@ -148,10 +149,10 @@ def export_sqlite_query(
                 quoting=csv.QUOTE_NONNUMERIC,
             )
 
-        elif export_format == "html":
+        elif normalized_format == "html":
             write_export(df.to_html(index=False))
 
-        elif export_format == "md":
+        elif normalized_format == "md":
             # pandas 1.0+ has to_markdown
             try:
                 write_export(df.to_markdown(index=False))
@@ -159,19 +160,19 @@ def export_sqlite_query(
                 # fallback: manually write markdown table
                 _df_to_markdown_fallback(df, export_path)
 
-        elif export_format == "pdf":
+        elif normalized_format == "pdf":
             _export_df_to_pdf(df, export_path)
 
-        elif export_format == "dashboard":
+        elif normalized_format == "dashboard":
             _export_dashboard(
                 df, export_path=export_path, template_path=dashboard_template_path
             )
 
-        elif export_format == "json":
+        elif normalized_format == "json":
             df.to_json(export_path, index=False, indent=2, orient="records")
 
         else:
-            print(f"Unsupported export format: {export_format}")
+            print(f"Unsupported export format: {normalized_format}")
             return None
 
         print(f"Exported to: {export_path}\n")
@@ -225,7 +226,7 @@ def _export_without_pandas(conn, query, params, export_format, export_path, **kw
         col_names = (
             [c.title() for c in col_names_raw] if title_columns else col_names_raw[:]
         )
-        with open(export_path, "w", newline="") as f:
+        with open(export_path, "w", newline="", encoding="utf-8") as f:
             writer = _csv.writer(f, quoting=_csv.QUOTE_NONNUMERIC)
             writer.writerow(col_names)
             writer.writerows(rows)

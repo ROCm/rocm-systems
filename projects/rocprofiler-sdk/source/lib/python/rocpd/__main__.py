@@ -126,10 +126,12 @@ Example usage:
 """
     input_help_string = "Input path and filename to one or more database(s). Wildcards accepted, as well as .rpdb folders"
 
+    rocpd_help_string = "Aggregate and/or analyze ROCm Profiling Data (rocpd). Provide rocpd .db files or .rpdb folders to generate reports, summaries, and other analyses."
+
     # Add the subparsers
     parser = argparse.ArgumentParser(
         prog="rocpd",
-        description="Aggregate and/or analyze ROCm Profiling Data (rocpd)",
+        description=rocpd_help_string,
         allow_abbrev=False,
     )
 

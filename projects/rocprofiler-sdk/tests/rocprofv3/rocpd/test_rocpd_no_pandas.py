@@ -23,17 +23,10 @@
 # THE SOFTWARE.
 ###############################################################################
 """
-Test driver: verify export_sqlite_query produces correct output for the five
-stdlib-only formats (console, csv, json, html, md) when pandas is unavailable.
-
-Pandas is blocked by inserting a None sentinel into sys.modules before any
-rocpd code is imported. Any lazy 'import pandas' inside the library will then
-raise ImportError, exercising the fallback path in export_sqlite_query.
+Wrapper script to test rocpd without pandas.
 """
 
 import sys
-import os
-import argparse
 
 # Block pandas before any rocpd submodule is imported so every lazy
 # 'import pandas' inside the library raises ImportError.
