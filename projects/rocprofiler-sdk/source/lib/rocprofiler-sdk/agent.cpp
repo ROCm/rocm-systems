@@ -1080,7 +1080,6 @@ try_register_agent_v2(const rocprofiler_agent_t* agent, aqlprofile_agent_handle_
             info_v2.shader_arrays_per_se       = agent->simd_arrays_per_engine;
             info_v2.domain                     = agent->domain;
             info_v2.location_id                = agent->location_id;
-            info_v2.cu_per_simd_array          = dev_info.num_cu_per_sh;
             memcpy(info_v2.cu_bitmap, dev_info.cu_bitmap, sizeof(info_v2.cu_bitmap));
 
             success = (aqlprofile_register_agent_info(

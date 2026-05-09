@@ -63,7 +63,6 @@ populate_cu_bitmap_from_drm(AgentInfo& agent_info)
            dev_info.num_shader_engines == agent_info.se_num &&
            dev_info.num_shader_arrays_per_engine == agent_info.shader_arrays_per_se)
         {
-            agent_info.cu_per_simd_array = dev_info.num_cu_per_sh;
             memcpy(agent_info.cu_bitmap, dev_info.cu_bitmap, sizeof(agent_info.cu_bitmap));
             return;
         }
@@ -138,7 +137,6 @@ RegisterAgent(const aqlprofile_agent_info_v2_t* agent_info)
     int_agent_info.shader_arrays_per_se = agent_info->shader_arrays_per_se;
     int_agent_info.domain               = agent_info->domain;
     int_agent_info.bdf_id               = agent_info->location_id;
-    int_agent_info.cu_per_simd_array    = agent_info->cu_per_simd_array;
     memcpy(int_agent_info.cu_bitmap, agent_info->cu_bitmap, sizeof(int_agent_info.cu_bitmap));
     populate_agent_name(int_agent_info, agent_info->agent_gfxip);
     get_cache().add(agent_id.handle, int_agent_info);

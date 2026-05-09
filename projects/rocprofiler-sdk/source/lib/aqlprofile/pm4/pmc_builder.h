@@ -247,21 +247,26 @@ public:
         // Build per-SA active WGP index tables from the CU bitmap when available.
         // This ensures the Read loop iterates only active (non-harvested) physical
         // WGP indices, avoiding aliased reads on GFX11+ parts with harvesting.
-        const uint32_t physical_wgp_per_sa =
-            (agent_info->cu_per_simd_array > 0) ? (agent_info->cu_per_simd_array / 2) : 0;
-
+        //
+        // The bitmap alone is sufficient: the highest set bit gives the maximum
+        // WGP coordinate to consider, and intermediate harvested WGPs (no CU
+        // bits set in their pair-window) are skipped automatically. We do not
+        // need a separate "physical CUs per SA" hint, which would double-encode
+        // information already implied by the bitmap and rely on the assumption
+        // that WGP i is always backed by CUs 2i and 2i+1.
         for(uint32_t se = 0; se < se_number_; ++se)
         {
             for(uint32_t sa = 0; sa < sarrays_per_se; ++sa)
             {
                 const uint32_t sa_idx     = se * sarrays_per_se + sa;
+                const uint32_t cu_bm      = agent_info->cu_bitmap[se][sa];
                 active_wgp_count_[sa_idx] = 0;
 
-                if(physical_wgp_per_sa > 0 && agent_info->cu_bitmap[se][sa] != 0)
+                if(cu_bm != 0)
                 {
-                    // Each WGP covers two consecutive CUs: WGP i -> CU 2i and CU 2i+1
-                    const uint32_t cu_bm = agent_info->cu_bitmap[se][sa];
-                    for(uint32_t wgp = 0; wgp < physical_wgp_per_sa && wgp < kMaxWgpPerSa; ++wgp)
+                    const uint32_t max_cu_bit = 31u - __builtin_clz(cu_bm);
+                    const uint32_t max_wgp    = max_cu_bit / 2u;
+                    for(uint32_t wgp = 0; wgp <= max_wgp && wgp < kMaxWgpPerSa; ++wgp)
                     {
                         if(cu_bm & (3u << (wgp * 2)))
                         {
@@ -271,7 +276,9 @@ public:
                 }
                 else
                 {
-                    // Fallback: no bitmap - use sequential indices (pre-fix behaviour)
+                    // No bitmap available: fall back to legacy sequential
+                    // iteration up to wgp_per_sa, preserving pre-fix behaviour
+                    // for V1 agents and pre-GFX11 parts.
                     for(uint32_t wgp = 0; wgp < wgp_per_sa && wgp < kMaxWgpPerSa; ++wgp)
                     {
                         active_wgp_indices_[sa_idx][active_wgp_count_[sa_idx]++] = wgp;

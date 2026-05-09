@@ -236,9 +236,12 @@ typedef struct
 /**
  * @brief Extended agent info with physical CU topology for WGP harvesting support.
  *
- * cu_per_simd_array and cu_bitmap allow aqlprofile to iterate only over active
- * (non-harvested) WGP indices when reading per-WGP counters on GFX11+ GPUs.
- * Values are obtainable from the DRM driver (AMDGPU_INFO_DEV_INFO).
+ * cu_bitmap allows aqlprofile to iterate only over active (non-harvested) WGP
+ * indices when reading per-WGP counters on GFX11+ GPUs. The bitmap alone is
+ * sufficient: the highest set bit determines the maximum WGP coordinate to
+ * iterate, and harvested WGPs (no CU bits set in their pair-window) are
+ * skipped automatically. Values are obtainable from the DRM driver
+ * (AMDGPU_INFO_DEV_INFO).
  */
 typedef struct
 {
@@ -249,7 +252,6 @@ typedef struct
     uint32_t    shader_arrays_per_se; /**< Shader Arrays per SE */
     uint32_t    domain;               /**< PCI domain */
     uint32_t    location_id;          /**< BDF (Bus/Device/Function) */
-    uint32_t    cu_per_simd_array;    /**< Physical CUs per SA (incl. harvested). 0 = unavailable. */
     uint32_t    cu_bitmap[4][4];      /**< Per-SE/SA active CU bitmap (matches DRM ABI). */
 } aqlprofile_agent_info_v2_t;
 

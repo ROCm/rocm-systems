@@ -147,10 +147,9 @@ struct AgentInfo
     // Timestamp frequency for realtime clock
     uint32_t timestamp_freq{0};
 
-    // Physical CUs per SA (incl. harvested). 0 = unavailable (falls back to old formula).
-    uint32_t cu_per_simd_array{};
-
-    // Per-SE/SA active CU bitmap from DRM. Bit set = active CU.
+    // Per-SE/SA active CU bitmap from DRM. Bit set = active CU. All-zero
+    // means the bitmap is unavailable, in which case GFX11+ WGP iteration
+    // falls back to the legacy sequential formula based on cu_num.
     uint32_t cu_bitmap[4][4]{};
 
     uint32_t se_per_xcc() const { return se_num / xcc_num; }
