@@ -81,6 +81,17 @@ class BlitSdmaBase : public core::Blit {
       std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal) = 0;
 
+  /// @brief Submit back-to-back linear copy commands for all destinations from a
+  /// shared source in a single SDMA ring submission (linearB2BCopy path).
+  /// Unlike broadcast, each destination gets one or more standard
+  /// SDMA_PKT_COPY_LINEAR packets (chunked when size exceeds the per-packet
+  /// limit); the compactness comes from batching all of them into one
+  /// SubmitCommand call.
+  virtual hsa_status_t SubmitLinearCopyB2BCommand(
+      const std::vector<void*>& dsts, const void* src, size_t size,
+      std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) = 0;
+
   virtual bool BroadcastSupported() const = 0;
   virtual bool PlatformAtomicSupport() const = 0;
 
@@ -177,6 +188,11 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   /// @param dep_signals Arrays of dependent signal.
   /// @param out_signal Output signal.
   hsa_status_t SubmitLinearCopyBroadcastCommand(
+      const std::vector<void*>& dsts, const void* src, size_t size,
+      std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) override;
+
+  hsa_status_t SubmitLinearCopyB2BCommand(
       const std::vector<void*>& dsts, const void* src, size_t size,
       std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal) override;

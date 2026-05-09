@@ -656,7 +656,7 @@ void GpuAgent::InitDerivedCuid() {
   amdcuid_id_t handle{};
   amdcuid_status_t status =
       amdcuid_get_handle_by_dev_path(device_node.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle);
-  
+
   if (status != AMDCUID_STATUS_SUCCESS) {
     debug_print("Secondary CUID not available: failed to get device handle.\n");
     return;
@@ -664,7 +664,7 @@ void GpuAgent::InitDerivedCuid() {
 
   // Query the derived CUID using the device handle
   uint32_t cuid_length;
-  status = amdcuid_query_device_property(handle, AMDCUID_QUERY_DERIVED_CUID, 
+  status = amdcuid_query_device_property(handle, AMDCUID_QUERY_DERIVED_CUID,
                                          derived_cuid_, &cuid_length);
 
   if (status != AMDCUID_STATUS_SUCCESS) {
@@ -1563,7 +1563,14 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
   const uint16_t num_entries = op.num_entries;
   constexpr size_t kBroadcastMaxSize = 1024 * 1024;
 
-  // Try HW broadcast for small transfers.
+  // linearB2BCopy outperforms HW broadcast for per-copy sizes >= 16KB
+  // HSA_SDMA_LINEAR_B2B: 1=force B2B, 0=force broadcast, unset=auto threshold.
+  constexpr size_t kLinearB2BMinSize = 16 * 1024;
+  const auto b2b_flag = core::Runtime::runtime_singleton_->flag().sdma_linear_b2b();
+  const bool use_linear_b2b = (b2b_flag == Flag::SDMA_ENABLE) ||
+                              (b2b_flag == Flag::SDMA_DEFAULT && op.size >= kLinearB2BMinSize);
+
+  // Try HW broadcast / linearB2B for transfers below 1MB.
   if (op.size < kBroadcastMaxSize) {
     SetCopyRequestRefCount(true);
     MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
@@ -1571,6 +1578,22 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
     lazy_ptr<core::Blit>& blit = GetBlitObject(BlitHostToDev);
     if (blit->isSDMA()) {
       BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
+
+      if (use_linear_b2b) {
+        if (profiling_enabled())
+          out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+
+        LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+                 "SDMA linearB2BCopy using engine %02u, src=%p, num_entries=%u, size=%zu, "
+                 "dep_signal=0x%zx, completion_signal=0x%zx",
+                 BlitHostToDev, op.src, num_entries, op.size,
+                 dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
+                 out_signal_obj->signal_);
+        std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
+        return sdma_blit->SubmitLinearCopyB2BCommand(
+            dsts, op.src, op.size, dep_signals, out_signal);
+      }
+
       if (sdma_blit->BroadcastSupported()) {
         if (profiling_enabled())
           out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));

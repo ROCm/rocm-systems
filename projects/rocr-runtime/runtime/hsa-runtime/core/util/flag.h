@@ -323,6 +323,11 @@ class Flag {
     // hsa_amd_counted_queue_acquire API. If not set, default queue size is set to 16384.
     var = os::GetEnvVar("HSA_COUNTED_QUEUE_SIZE");
     counted_queue_size_ = var.empty() ? DEFAULT_COUNTED_QUEUE_SIZE : atoi(var.c_str());
+
+    // HSA_SDMA_LINEAR_B2B: 1=force B2B, 0=force broadcast, unset=auto (size threshold)
+    var = os::GetEnvVar("HSA_SDMA_LINEAR_B2B");
+    sdma_linear_b2b_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -459,6 +464,8 @@ class Flag {
 
   bool enable_dxg_detection() const { return enable_dxg_detection_; }
 
+  SDMA_OVERRIDE sdma_linear_b2b() const { return sdma_linear_b2b_; }
+
   [[nodiscard]]
   bool core_dump_disable() const { return core_dump_disable_; }
 
@@ -536,6 +543,7 @@ class Flag {
   bool enable_3d_swizzle_ = false;
   bool enable_dtif_;
   bool enable_dxg_detection_;
+  SDMA_OVERRIDE sdma_linear_b2b_ = SDMA_DEFAULT;
 
   SDMA_OVERRIDE enable_sdma_;
   SDMA_OVERRIDE enable_peer_sdma_;
