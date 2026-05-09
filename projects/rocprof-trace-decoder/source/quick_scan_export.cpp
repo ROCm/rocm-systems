@@ -111,7 +111,8 @@ rocprofiler_thread_trace_decoder_status_t quick_scan_gfx9(
 
 } // namespace
 
-extern "C" rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick_scan(
+extern "C" __attribute__((visibility("default"))) rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_quick_scan(
     rocprof_trace_decoder_gfx9_header_t header,
     const void* data,
     uint64_t data_size,
@@ -126,8 +127,5 @@ extern "C" rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
 
     if (is_gfx9_header(header)) return quick_scan_gfx9(buf, data_size, trace_callback, userdata);
 
-    // gfx10+ quick-scan dispatch is not yet wired into the public API. The
-    // gfx12/mi400 scanners exist (source/gfx12/quick_scan.h, source/mi400/
-    // quick_scan.h) but their event-type mapping has not been validated.
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 }
