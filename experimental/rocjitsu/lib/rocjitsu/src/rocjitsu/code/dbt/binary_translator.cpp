@@ -277,12 +277,19 @@ TranslatedCodeObject BinaryTranslator::translate_once(const AmdGpuCodeObject &ob
     if (scope.blocks.empty())
       continue;
 
-    LivenessAnalysis liveness(KernelBlockScope(scope.blocks));
+    LivenessOptions liveness_options;
+    if (scope.translation != nullptr)
+      liveness_options.gpr_indexing_vgpr_count = scope.translation->guest_vgpr_count;
+    LivenessAnalysis liveness(KernelBlockScope(scope.blocks), liveness_options);
     TranslationContext context;
     context.target_vgpr_count =
         scope.translation != nullptr ? scope.translation->target_vgpr_count : 0;
     context.target_sgpr_count =
         scope.translation != nullptr ? scope.translation->target_sgpr_count : 0;
+    context.source_accvgpr_base =
+        scope.translation != nullptr ? scope.translation->source_accvgpr_base : 0;
+    context.target_accvgpr_base =
+        scope.translation != nullptr ? scope.translation->target_accvgpr_base : 0;
 
     for (BasicBlock *block : scope.blocks) {
       if (block == nullptr)

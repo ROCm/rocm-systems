@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/gpr_indexing.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
@@ -120,6 +121,8 @@ enum class TestOpcode : uint32_t {
   CBranchToElseAfterTwo = 13,
   IndirectCall = 14,
   IndirectBranch = 15,
+  GprIdxOn = 16,
+  GprIdxOff = 17,
 };
 
 class TestDecoder : public Decoder {
@@ -160,6 +163,10 @@ public:
       return new TestInstruction("test_indirect_call", {}, {}, INDIRECT_CALL);
     case TestOpcode::IndirectBranch:
       return new TestInstruction("test_indirect_branch", {}, {}, INDIRECT_BRANCH);
+    case TestOpcode::GprIdxOn:
+      return new TestInstruction("s_set_gpr_idx_on");
+    case TestOpcode::GprIdxOff:
+      return new TestInstruction("s_set_gpr_idx_off");
     }
     return new TestInstruction("test_end", {}, {}, PROGRAM_TERMINATOR);
   }
@@ -406,6 +413,45 @@ TEST(LivenessAnalysis, ExplicitBlockSubsetIgnoresOutsideSuccessors) {
   std::vector<BasicBlock *> kernel_blocks{kernel0};
   LivenessAnalysis kernel_liveness{KernelBlockScope(kernel_blocks)};
   EXPECT_FALSE(kernel_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
+}
+
+TEST(GprIndexingAnalysis, TracksActiveRegionAcrossOnOff) {
+  auto blocks = build_test_blocks({TestOpcode::GprIdxOn, TestOpcode::DefVgpr0,
+                                   TestOpcode::GprIdxOff, TestOpcode::DefVgpr0,
+                                   TestOpcode::End});
+  auto scope = block_scope(blocks);
+  GprIndexingAnalysis indexing{KernelBlockScope(scope)};
+
+  std::vector<const Instruction *> insts;
+  for (const auto &inst : blocks[0]->instructions())
+    insts.push_back(&inst);
+
+  ASSERT_EQ(insts.size(), 5u);
+  EXPECT_FALSE(indexing.may_be_active_before(*insts[0]));
+  EXPECT_TRUE(indexing.may_be_active_before(*insts[1]));
+  EXPECT_TRUE(indexing.may_be_active_before(*insts[2]));
+  EXPECT_FALSE(indexing.may_be_active_before(*insts[3]));
+}
+
+TEST(LivenessAnalysis, GprIndexedRegionProtectsGuestVgprWindowOnly) {
+  auto blocks = build_test_blocks({TestOpcode::GprIdxOn, TestOpcode::DefVgpr0,
+                                   TestOpcode::GprIdxOff, TestOpcode::DefVgpr0,
+                                   TestOpcode::End});
+  auto scope = block_scope(blocks);
+
+  LivenessOptions options;
+  options.gpr_indexing_vgpr_count = 8;
+  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+
+  std::vector<const Instruction *> insts;
+  for (const auto &inst : blocks[0]->instructions())
+    insts.push_back(&inst);
+
+  ASSERT_EQ(insts.size(), 5u);
+  EXPECT_TRUE(liveness.is_live_before(*insts[1], {RegClass::VGPR, 7, 1}));
+  EXPECT_FALSE(liveness.is_live_before(*insts[1], {RegClass::VGPR, 8, 1}));
+  EXPECT_EQ(liveness.find_free_run(insts[1], 1), 8);
+  EXPECT_EQ(liveness.find_free_run(insts[3], 1), 0);
 }
 
 } // namespace

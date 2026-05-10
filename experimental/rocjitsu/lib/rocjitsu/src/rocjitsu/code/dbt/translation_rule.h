@@ -125,6 +125,8 @@ struct LaneLayout;
 struct TranslationContext {
   uint32_t target_vgpr_count = 0;
   uint32_t target_sgpr_count = 0;
+  uint32_t source_accvgpr_base = 0;
+  uint32_t target_accvgpr_base = 0;
 
   uint32_t required_vgpr_count = 0;
   uint32_t required_sgpr_count = 0;

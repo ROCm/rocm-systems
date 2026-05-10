@@ -131,7 +131,6 @@ constexpr uint16_t kCdna3OpCvtF16F32 = 330;
 constexpr uint16_t kCdna3OpPermB32 = 493;
 constexpr uint16_t kCdna3OpMbcntLoU32B32 = 652;
 constexpr uint16_t kCdna3OpMbcntHiU32B32 = 653;
-constexpr uint16_t kCdna3OpPackB32F16 = 672;
 
 // CDNA3 VOP3P-MFMA opcodes used by CDNA4 wide-K MFMA expansion.
 constexpr uint8_t kCdna3OpMfmaF32_32x32x8F16 = 76;
@@ -198,6 +197,10 @@ void emit_s_mov_b64_lit(std::vector<uint32_t> &words, uint8_t sdst, uint64_t lit
 void emit_s_and_b64(std::vector<uint32_t> &words, uint8_t sdst, uint16_t ssrc0, uint16_t ssrc1) {
   words.push_back(pack_sop2(kCdna3Sop2OpAndB64, sdst, ssrc0, ssrc1));
 }
+
+void emit_cdna3_pack_low_b16_pair(std::vector<uint32_t> &words, uint8_t dst, uint8_t halfword_lo,
+                                  uint8_t halfword_hi, uint8_t shifted_hi_tmp,
+                                  uint8_t mask_tmp);
 
 [[maybe_unused]] void emit_cdna3_exec_mask(std::vector<uint32_t> &words, uint64_t mask) {
   emit_s_mov_b32_lit(words, kExecLo, static_cast<uint32_t>(mask));
@@ -372,18 +375,6 @@ void emit_cdna3_lds_dma_dwordx4_addr(std::vector<uint32_t> &words, uint8_t dst,
   emit_cdna3_vop3(words, kCdna3OpLshlrevB32, dst, scalar_positive_inline_u32(4), vgpr_src(dst));
   emit_cdna3_vop3(words, kCdna3OpAddU32, dst, kM0, vgpr_src(dst));
   emit_s_mov_b64(words, kExecLo, exec_save_sgpr);
-}
-
-void emit_cdna3_lds_dma_dwordx4_addr_full_exec(std::vector<uint32_t> &words, uint8_t dst) {
-  // MUBUF direct-to-LDS dwordx4 copies emitted by IREE's CDNA4 pipeline are
-  // used as full-wave LDS DMA staging operations. Avoid consuming an SGPR pair
-  // just to save/restore EXEC here: kernels using these copies often already
-  // allocate the maximum CDNA3 SGPR descriptor granule. This assumes EXEC is
-  // full so MBCNT materializes the physical lane id.
-  emit_cdna3_vop3(words, kCdna3OpMbcntLoU32B32, dst, kInlineConstNeg1, kInlineConst0);
-  emit_cdna3_vop3(words, kCdna3OpMbcntHiU32B32, dst, kInlineConstNeg1, vgpr_src(dst));
-  emit_cdna3_vop3(words, kCdna3OpLshlrevB32, dst, scalar_positive_inline_u32(4), vgpr_src(dst));
-  emit_cdna3_vop3(words, kCdna3OpAddU32, dst, kM0, vgpr_src(dst));
 }
 
 // -----------------------------------------------------------------------------
@@ -574,9 +565,12 @@ std::vector<uint32_t> lower_v_cvt_pk_f16_f32_cdna4_to_cdna3(const Instruction &i
   // The CDNA3 packed conversion opcode is the explicit RTZ form. CDNA4's
   // V_CVT_PK_F16_F32 follows the normal F32->F16 rounding path, so lower it as
   // two scalar half conversions followed by a pure halfword pack.
-  std::optional<uint16_t> scratch = liveness.find_free_run(&inst, 2, src.vdst + 1);
+  std::optional<uint16_t> scratch = find_free_vgpr_run_avoiding_range(
+      liveness, inst, 2, static_cast<uint16_t>(src.vdst), 1,
+      static_cast<uint16_t>(src.vdst + 1));
   if (!scratch)
-    scratch = liveness.find_free_run(&inst, 2);
+    scratch = find_free_vgpr_run_avoiding_range(liveness, inst, 2,
+                                                static_cast<uint16_t>(src.vdst), 1);
   if (!scratch)
     return {};
   context.require_vgprs(*scratch + 2);
@@ -587,8 +581,8 @@ std::vector<uint32_t> lower_v_cvt_pk_f16_f32_cdna4_to_cdna3(const Instruction &i
   std::vector<uint32_t> words;
   emit_cdna3_vop3(words, kCdna3OpCvtF16F32, lo, static_cast<uint16_t>(src.src0));
   emit_cdna3_vop3(words, kCdna3OpCvtF16F32, hi, static_cast<uint16_t>(src.src1));
-  emit_cdna3_vop3(words, kCdna3OpPackB32F16, static_cast<uint8_t>(src.vdst), vgpr_src(lo),
-                  vgpr_src(hi));
+  emit_cdna3_pack_low_b16_pair(words, static_cast<uint8_t>(src.vdst), lo, hi, hi,
+                               static_cast<uint8_t>(src.vdst));
   return words;
 }
 
@@ -745,6 +739,11 @@ std::vector<uint32_t> lower_mubuf_load_lds_dwordx4_cdna4_to_cdna3(
   // supports scalar-width MUBUF direct-to-LDS loads. Preserve the CDNA4
   // semantics by doing the vector buffer load into scratch VGPRs, then writing
   // those four dwords to LDS with an explicit DS_WRITE_B128.
+  auto exec_save = liveness.find_free_sgpr_pair(&inst);
+  if (!exec_save)
+    return {};
+  context.require_sgprs(*exec_save + 2);
+
   constexpr uint16_t kScratchCount = 5;
   const uint16_t preferred_start = static_cast<uint16_t>(src.vaddr + 2);
   auto scratch = find_free_run_avoiding(liveness, inst, kScratchCount, src.vaddr, src.vaddr + 1,
@@ -759,7 +758,7 @@ std::vector<uint32_t> lower_mubuf_load_lds_dwordx4_cdna4_to_cdna3(
   const uint8_t lds_addr = static_cast<uint8_t>(*scratch + 4);
 
   std::vector<uint32_t> words;
-  emit_cdna3_lds_dma_dwordx4_addr_full_exec(words, lds_addr);
+  emit_cdna3_lds_dma_dwordx4_addr(words, lds_addr, static_cast<uint8_t>(*exec_save));
   emit_cdna3_mubuf_load_dwordx4(words, src, data);
   emit_cdna3_vmem_wait(words);
   emit_cdna3_ds_write_b128(words, lds_addr, data);
@@ -841,16 +840,91 @@ std::vector<uint32_t> lower_wide_k_mfma_f16_cdna4_to_cdna3(const Instruction &in
   // in the same register file as the original destination, then use that
   // temporary as the accumulator source for the second MFMA.
   std::optional<uint16_t> tmp_vdst;
+  std::optional<uint16_t> copied_high_src0;
+  std::optional<uint16_t> copied_high_src1;
   if (mfma.acc_cd == 0) {
-    tmp_vdst = find_free_vgpr_run_avoiding_range(
-        liveness, inst, lowering.dst_regs, static_cast<uint16_t>(mfma.vdst), lowering.dst_regs,
-        static_cast<uint16_t>(mfma.vdst + lowering.dst_regs));
+    const uint16_t dst_base = static_cast<uint16_t>(mfma.vdst);
+    const uint16_t high_src0_base =
+        static_cast<uint16_t>(mfma.src0 - 256 + lowering.narrow_src_regs);
+    const uint16_t high_src1_base =
+        static_cast<uint16_t>(mfma.src1 - 256 + lowering.narrow_src_regs);
+    const bool dst_overlaps_high_src0 =
+        run_overlaps(dst_base, lowering.dst_regs, high_src0_base, lowering.narrow_src_regs);
+    const bool dst_overlaps_high_src1 =
+        run_overlaps(dst_base, lowering.dst_regs, high_src1_base, lowering.narrow_src_regs);
+
+    auto find_bounded_free_run = [&](uint16_t count, uint16_t upper_bound, uint16_t search_start,
+                                     uint16_t alignment = 1) -> std::optional<uint16_t> {
+      uint16_t search = search_start;
+      while (true) {
+        auto candidate = liveness.find_free_run(&inst, count, search);
+        if (!candidate)
+          return std::nullopt;
+        if (alignment > 1 && (*candidate % alignment) != 0) {
+          search = static_cast<uint16_t>(*candidate + 1);
+          continue;
+        }
+        if (upper_bound != 0 && *candidate + count > upper_bound) {
+          if (*candidate >= upper_bound)
+            return std::nullopt;
+          search = static_cast<uint16_t>(*candidate + 1);
+          continue;
+        }
+        if (!run_overlaps(*candidate, count, dst_base, lowering.dst_regs))
+          return candidate;
+        search = static_cast<uint16_t>(*candidate + 1);
+      }
+    };
+
+    // On GFX90A/CDNA, the ACCUM_OFFSET descriptor boundary affects how matrix
+    // instructions interpret VGPR numbers. Ordinary VALU can use scratch VGPRs
+    // above the guest boundary after descriptor growth, but using such a window
+    // as a temporary MFMA C/D operand can silently produce zeros on MI300. Keep
+    // MFMA temporary destinations fully below the guest accumulator boundary
+    // when the descriptor provided one.
+    const uint16_t matrix_vgpr_boundary =
+        context.source_accvgpr_base != 0
+            ? static_cast<uint16_t>(context.source_accvgpr_base)
+            : static_cast<uint16_t>(context.target_accvgpr_base);
+
+    const bool needs_high_src_copy = dst_overlaps_high_src0 || dst_overlaps_high_src1;
+    if (needs_high_src_copy) {
+      const uint16_t copy_count = static_cast<uint16_t>(
+          (dst_overlaps_high_src0 ? lowering.narrow_src_regs : 0) +
+          (dst_overlaps_high_src1 ? lowering.narrow_src_regs : 0));
+      auto copy_scratch =
+          find_bounded_free_run(copy_count, matrix_vgpr_boundary, 0, lowering.narrow_src_regs);
+      if (copy_scratch) {
+        uint16_t next = *copy_scratch;
+        if (dst_overlaps_high_src0) {
+          copied_high_src0 = next;
+          next = static_cast<uint16_t>(next + lowering.narrow_src_regs);
+        }
+        if (dst_overlaps_high_src1)
+          copied_high_src1 = next;
+        context.require_vgprs(*copy_scratch + copy_count);
+        tmp_vdst = dst_base;
+      }
+    } else {
+      tmp_vdst = dst_base;
+    }
+
+    if (!tmp_vdst)
+      tmp_vdst = find_bounded_free_run(lowering.dst_regs, matrix_vgpr_boundary,
+                                       static_cast<uint16_t>(mfma.vdst + lowering.dst_regs));
+    if (!tmp_vdst)
+      tmp_vdst = find_bounded_free_run(lowering.dst_regs, matrix_vgpr_boundary, 0);
+    if (!tmp_vdst)
+      tmp_vdst = find_free_vgpr_run_avoiding_range(
+          liveness, inst, lowering.dst_regs, static_cast<uint16_t>(mfma.vdst), lowering.dst_regs,
+          static_cast<uint16_t>(mfma.vdst + lowering.dst_regs));
     if (!tmp_vdst)
       tmp_vdst = find_free_vgpr_run_avoiding_range(
           liveness, inst, lowering.dst_regs, static_cast<uint16_t>(mfma.vdst), lowering.dst_regs);
     if (!tmp_vdst)
       return {};
-    context.require_vgprs(*tmp_vdst + lowering.dst_regs);
+    if (*tmp_vdst != dst_base)
+      context.require_vgprs(*tmp_vdst + lowering.dst_regs);
   } else {
     tmp_vdst = find_free_accvgpr_run_avoiding_range(
         liveness, inst, lowering.dst_regs, static_cast<uint16_t>(mfma.vdst), lowering.dst_regs);
@@ -874,12 +948,32 @@ std::vector<uint32_t> lower_wide_k_mfma_f16_cdna4_to_cdna3(const Instruction &in
   // writes the real destination, preserving CDNA4 read-before-write behavior
   // when the destination aliases A[2:3] or B[2:3].
   std::vector<uint32_t> words;
+  if (copied_high_src0) {
+    const uint16_t high_src0_base =
+        static_cast<uint16_t>(mfma.src0 - 256 + lowering.narrow_src_regs);
+    for (uint8_t i = 0; i < lowering.narrow_src_regs; ++i)
+      emit_cdna3_vop3(words, kCdna3OpMovB32, static_cast<uint8_t>(*copied_high_src0 + i),
+                      vgpr_src(static_cast<uint8_t>(high_src0_base + i)));
+  }
+  if (copied_high_src1) {
+    const uint16_t high_src1_base =
+        static_cast<uint16_t>(mfma.src1 - 256 + lowering.narrow_src_regs);
+    for (uint8_t i = 0; i < lowering.narrow_src_regs; ++i)
+      emit_cdna3_vop3(words, kCdna3OpMovB32, static_cast<uint8_t>(*copied_high_src1 + i),
+                      vgpr_src(static_cast<uint8_t>(high_src1_base + i)));
+  }
+
+  const uint16_t second_src0 =
+      copied_high_src0 ? vgpr_src(static_cast<uint8_t>(*copied_high_src0))
+                       : static_cast<uint16_t>(mfma.src0 + lowering.narrow_src_regs);
+  const uint16_t second_src1 =
+      copied_high_src1 ? vgpr_src(static_cast<uint8_t>(*copied_high_src1))
+                       : static_cast<uint16_t>(mfma.src1 + lowering.narrow_src_regs);
+
   emit_cdna3_mfma(words, lowering.narrow_op, mfma, static_cast<uint8_t>(*tmp_vdst),
                   static_cast<uint16_t>(mfma.src0),
                   static_cast<uint16_t>(mfma.src1), static_cast<uint16_t>(mfma.src2));
-  emit_cdna3_mfma(words, lowering.narrow_op, mfma,
-                  static_cast<uint16_t>(mfma.src0 + lowering.narrow_src_regs),
-                  static_cast<uint16_t>(mfma.src1 + lowering.narrow_src_regs), tmp_accum_src);
+  emit_cdna3_mfma(words, lowering.narrow_op, mfma, second_src0, second_src1, tmp_accum_src);
   return words;
 }
 
@@ -934,7 +1028,14 @@ std::vector<uint32_t> lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction 
   if (src.vdst > 254)
     return {};
 
-  constexpr uint16_t kScratchCount = 8;
+  auto exec_save = liveness.find_free_sgpr_pair(&inst);
+  if (!exec_save)
+    return {};
+  context.require_sgprs(*exec_save + 2);
+  const uint8_t exec_save_sgpr = static_cast<uint8_t>(*exec_save);
+  (void)exec_save_sgpr;
+
+  constexpr uint16_t kScratchCount = 9;
   uint16_t scratch_start =
       std::max<uint16_t>(static_cast<uint16_t>(vdst + 2), static_cast<uint16_t>(addr + 1));
   if ((scratch_start & 1) != 0)
@@ -968,6 +1069,7 @@ std::vector<uint32_t> lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction 
   const uint8_t halfword_lo = static_cast<uint8_t>(*scratch + 5);
   const uint8_t halfword_hi = static_cast<uint8_t>(*scratch + 6);
   const uint8_t gather_tmp = static_cast<uint8_t>(*scratch + 7);
+  const uint8_t addr_tmp = static_cast<uint8_t>(*scratch + 8);
 
   std::vector<uint32_t> words;
 
@@ -995,21 +1097,26 @@ std::vector<uint32_t> lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction 
   emit_cdna3_vop3(words, kCdna3OpOrB32, halfword_selector, vgpr_src(halfword_selector),
                   vgpr_src(tmp));
 
+  // CDNA4's B16 transpose load returns four selected halfwords across two
+  // destination VGPRs.
   emit_cdna3_b16_transpose_halfword(words, halfword_lo, gather_tmp, lane_base, raw_lo, raw_hi,
                                     halfword_selector);
   emit_cdna3_vop3(words, kCdna3OpAddU32, tmp, scalar_positive_inline_u32(16), vgpr_src(lane_base));
   emit_cdna3_b16_transpose_halfword(words, halfword_hi, gather_tmp, tmp, raw_lo, raw_hi,
                                     halfword_selector);
-  emit_cdna3_pack_low_b16_pair(words, vdst, halfword_lo, halfword_hi, tmp, gather_tmp);
+  emit_cdna3_vop3(words, kCdna3OpAddU32, addr_tmp, scalar_positive_inline_u32(32),
+                  vgpr_src(lane_base));
+  emit_cdna3_b16_transpose_halfword(words, tmp, gather_tmp, addr_tmp, raw_lo, raw_hi,
+                                    halfword_selector);
+  emit_cdna3_vop3(words, kCdna3OpAddU32, addr_tmp, scalar_positive_inline_u32(48),
+                  vgpr_src(lane_base));
+  emit_cdna3_b16_transpose_halfword(words, lane_base, gather_tmp, addr_tmp, raw_lo, raw_hi,
+                                    halfword_selector);
 
-  emit_cdna3_vop3(words, kCdna3OpAddU32, tmp, scalar_positive_inline_u32(32), vgpr_src(lane_base));
-  emit_cdna3_b16_transpose_halfword(words, halfword_lo, gather_tmp, tmp, raw_lo, raw_hi,
-                                    halfword_selector);
-  emit_cdna3_vop3(words, kCdna3OpAddU32, tmp, scalar_positive_inline_u32(48), vgpr_src(lane_base));
-  emit_cdna3_b16_transpose_halfword(words, halfword_hi, gather_tmp, tmp, raw_lo, raw_hi,
-                                    halfword_selector);
-  emit_cdna3_pack_low_b16_pair(words, static_cast<uint8_t>(vdst + 1), halfword_lo, halfword_hi,
-                               tmp, gather_tmp);
+  emit_cdna3_pack_low_b16_pair(words, vdst, halfword_lo, halfword_hi, gather_tmp,
+                               halfword_selector);
+  emit_cdna3_pack_low_b16_pair(words, static_cast<uint8_t>(vdst + 1), tmp, lane_base, gather_tmp,
+                               halfword_selector);
 
   return words;
 }

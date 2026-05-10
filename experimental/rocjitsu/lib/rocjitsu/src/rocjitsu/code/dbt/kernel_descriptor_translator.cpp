@@ -575,20 +575,20 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
 
   const bool relocate_accvgprs_after_vgprs =
       guest_arch == ROCJITSU_CODE_ARCH_CDNA4 && host_arch == ROCJITSU_CODE_ARCH_CDNA3;
-  if (relocate_accvgprs_after_vgprs && result.source_accvgpr_base != 0 &&
-      result.target_accvgpr_base != 0) {
+  if (relocate_accvgprs_after_vgprs && result.target_accvgpr_base != 0) {
     // Expansion rules allocate ordinary VGPR scratch from liveness. If the
-    // source descriptor packed AccVGPRs into otherwise-dead VGPR numbers, that
-    // scratch can legally reuse the old numbers only after the target descriptor
-    // moves logical aN registers to a non-overlapping physical window.
+    // target needs more ordinary VGPRs than the guest descriptor, the original
+    // ACCUM_OFFSET may split a newly allocated VGPR window. That is especially
+    // easy to hit for kernels with no logical AccVGPR use: LLVM still emits an
+    // ACCUM_OFFSET equal to the rounded next-free VGPR, and DBT scratch can grow
+    // past it. Move the logical AccVGPR boundary after the grown ordinary VGPR
+    // allocation before any instruction lowering can allocate scratch there.
     const uint32_t rounded_accvgpr_count =
         result.source_accvgpr_base < result.guest_vgpr_count
             ? result.guest_vgpr_count - result.source_accvgpr_base
             : 0;
-    if (rounded_accvgpr_count != 0) {
-      result.target_accvgpr_base = align_up(required_vgprs, 4);
-      required_vgprs = std::max(required_vgprs, result.target_accvgpr_base + rounded_accvgpr_count);
-    }
+    result.target_accvgpr_base = align_up(required_vgprs, 4);
+    required_vgprs = std::max(required_vgprs, result.target_accvgpr_base + rounded_accvgpr_count);
   }
   result.host_vgpr_count = required_vgprs;
   result.target_vgpr_count = required_vgprs;

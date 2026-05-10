@@ -4,6 +4,7 @@
 #include "rocjitsu/analysis/liveness.h"
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/gpr_indexing.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -74,6 +75,25 @@ std::vector<const Instruction *> instructions_in_order(BasicBlock &block) {
   return kills;
 }
 
+[[nodiscard]] RegisterSet indexed_vgpr_live_set(uint32_t count) {
+  RegisterSet live;
+  const uint32_t bounded_count =
+      std::min<uint32_t>(count, static_cast<uint32_t>(REGISTER_SET_MAX_VGPRS));
+  for (uint32_t i = 0; i < bounded_count; ++i)
+    live.expand({RegClass::VGPR, static_cast<uint16_t>(i), 1});
+  return live;
+}
+
+[[nodiscard]] RegisterSet uses_with_gpr_indexing(const InstDefUse &du,
+                                                 const GprIndexingAnalysis &gpr_indexing,
+                                                 const Instruction &inst,
+                                                 const RegisterSet &indexed_vgprs) {
+  RegisterSet uses = du.uses;
+  if (gpr_indexing.may_be_active_before(inst))
+    uses |= indexed_vgprs;
+  return uses;
+}
+
 } // namespace
 
 std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
@@ -96,7 +116,10 @@ std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
   return postorder;
 }
 
-LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks) { analyze(blocks); }
+LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, LivenessOptions options)
+    : options_(options) {
+  analyze(blocks);
+}
 
 void LivenessAnalysis::analyze(KernelBlockScope blocks) {
   liveness_.resize(blocks.size());
@@ -104,6 +127,9 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks) {
     if (blocks[i] != nullptr)
       block_index_.emplace(blocks[i], i);
   }
+
+  const GprIndexingAnalysis gpr_indexing(blocks);
+  const RegisterSet indexed_vgprs = indexed_vgpr_live_set(options_.gpr_indexing_vgpr_count);
 
   // Compute each block's local transfer function before iterating across CFG
   // edges. `gen` keeps only uses that occur before a local definition, because
@@ -116,7 +142,8 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks) {
     for (const auto &inst : block->instructions()) {
       InstDefUse du(inst);
       RegisterSet kills = kill_defs(du);
-      RegisterSet upward_uses = du.uses;
+      RegisterSet upward_uses =
+          uses_with_gpr_indexing(du, gpr_indexing, inst, indexed_vgprs);
       upward_uses -= state.kill;
       state.gen |= upward_uses;
       state.kill |= kills;
@@ -189,8 +216,9 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks) {
       const Instruction *inst = *it;
       InstDefUse du(*inst);
       RegisterSet kills = kill_defs(du);
+      RegisterSet uses = uses_with_gpr_indexing(du, gpr_indexing, *inst, indexed_vgprs);
       live -= kills;
-      live |= du.uses;
+      live |= uses;
       live_before_.emplace(inst, live);
     }
   }

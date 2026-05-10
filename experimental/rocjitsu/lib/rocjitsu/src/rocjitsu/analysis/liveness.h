@@ -30,6 +30,17 @@ class Instruction;
 /// @brief The basic blocks reachable from one kernel entry.
 using KernelBlockScope = std::span<BasicBlock *const>;
 
+/// @brief Optional kernel resource facts that make liveness more precise.
+struct LivenessOptions {
+  /// @brief Ordinary source VGPR allocation protected while VGPR indexing is on.
+  ///
+  /// @details If descriptor information is unavailable, default to the full
+  /// tracked VGPR file for safety. DBT passes the source kernel's allocated
+  /// VGPR count so scratch VGPRs added above that legal guest window remain
+  /// available even inside indexed regions.
+  uint32_t gpr_indexing_vgpr_count = REGISTER_SET_MAX_VGPRS;
+};
+
 /// @brief Block-level dataflow state for one kernel scope.
 ///
 /// @details `gen` is the upward-exposed use set: registers read in the block
@@ -62,7 +73,7 @@ public:
   /// entry being translated, not every block decoded from the containing code
   /// object.
   /// @param blocks Blocks in one kernel CFG scope.
-  LivenessAnalysis(KernelBlockScope blocks);
+  LivenessAnalysis(KernelBlockScope blocks, LivenessOptions options = {});
 
   /// @brief Block liveness by block object.
   [[nodiscard]] const BlockLiveness &block_liveness(const BasicBlock &block) const;
@@ -99,6 +110,7 @@ private:
   std::vector<BlockLiveness> liveness_;
   std::unordered_map<const BasicBlock *, size_t> block_index_;
   std::unordered_map<const Instruction *, RegisterSet> live_before_;
+  LivenessOptions options_;
   static constexpr RegisterSet empty_{};
 };
 
