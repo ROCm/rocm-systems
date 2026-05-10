@@ -5,7 +5,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-import os, sys, re
+import os, sys, re, io
 import CppHeaderParser
 import filecmp
 
@@ -742,10 +742,21 @@ if not os.path.exists(output_dir):
 with open(OUTPUT, 'w') as f:
   generate_prof_header(f, api_map, api_callback_ids, opts_map)
 
-# Also overwrite the original template file (source directory)
-message("Also writing to original template file: " + INPUT)
-with open(INPUT, 'w') as f:
-  generate_prof_header(f, api_map, api_callback_ids, opts_map)
+# Also overwrite the original template file (source directory), but only if content changed
+# to avoid triggering unnecessary rebuilds due to mtime changes.
+buffer = io.StringIO()
+generate_prof_header(buffer, api_map, api_callback_ids, opts_map)
+new_content = buffer.getvalue()
+
+with open(INPUT, 'r') as f:
+  old_content = f.read()
+
+if old_content != new_content:
+  message("Updating original template file (content changed): " + INPUT)
+  with open(INPUT, 'w') as f:
+    f.write(new_content)
+else:
+  message("Skipping update to original template file (content unchanged): " + INPUT)
 
 # Successfull exit
 sys.exit(0)

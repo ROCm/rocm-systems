@@ -117,7 +117,7 @@ constexpr uint64 InternalApiPsoHash       = UINT64_MAX;  ///< Default Hash for P
 /// Device::GetProperties, returned in DeviceProperties.engineProperties[].
 enum EngineType : uint32
 {
-    /// Corresponds to the graphics hardware engine (a.k.a. graphcis ring a.k.a 3D).
+    /// Corresponds to the graphics hardware engine (a.k.a. graphics ring a.k.a 3D).
     EngineTypeUniversal,
 
     /// Corresponds to asynchronous compute engines (ACE).
@@ -444,7 +444,7 @@ struct DirectCaptureInfo
             uint32 preflip              :  1;  ///< Requires pre-flip primary access
             uint32 postflip             :  1;  ///< Requires post-flip primary access. A DirectCapture resource cannot
                                                ///  have pre-flip and post-flip access at the same time
-            uint32 accessDesktop        :  1;  ///< Requires acces to the desktop
+            uint32 accessDesktop        :  1;  ///< Requires access to the desktop
             uint32 shared               :  1;  ///< This resource will be shared between APIs
             uint32 frameGenRatio        :  4;  ///< Frame generation ratio
             uint32 paceGeneratedFrame   :  1;  ///< Requires pacing the generated frames

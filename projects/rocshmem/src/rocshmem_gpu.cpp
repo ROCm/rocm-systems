@@ -91,6 +91,8 @@ __constant__ struct logd_constants logd_constants;
 namespace device {
     extern "C" __constant__ rocshmem_team_t
     __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD = nullptr;
+    extern "C" __constant__ rocshmem_team_t
+    __attribute__((visibility("default"))) ROCSHMEM_TEAM_SHARED = nullptr;
 }
 
 #if defined(ENABLE_IPC_BITCODE)
@@ -198,6 +200,12 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
                                    "ROCSHMEM_TEAM_WORLD",
                                    sizeof(rocshmem_team_t), module, stream,
                                    "ROCSHMEM_TEAM_WORLD") != ROCSHMEM_SUCCESS) {
+    return ROCSHMEM_ERROR;
+  }
+  if (copy_device_symbol_to_module(device::ROCSHMEM_TEAM_SHARED,
+                                   "ROCSHMEM_TEAM_SHARED",
+                                   sizeof(rocshmem_team_t), module, stream,
+                                   "ROCSHMEM_TEAM_SHARED") != ROCSHMEM_SUCCESS) {
     return ROCSHMEM_ERROR;
   }
   return ROCSHMEM_SUCCESS;
@@ -408,6 +416,12 @@ __host__ void set_internal_ctx(rocshmem_ctx_t *ctx) {
 
 __host__ void set_team_world_device(rocshmem_team_t team_world) {
   CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(device::ROCSHMEM_TEAM_WORLD), &team_world,
+                              sizeof(rocshmem_team_t), 0,
+                              hipMemcpyHostToDevice));
+}
+
+__host__ void set_team_shared_device(rocshmem_team_t team_shared) {
+  CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(device::ROCSHMEM_TEAM_SHARED), &team_shared,
                               sizeof(rocshmem_team_t), 0,
                               hipMemcpyHostToDevice));
 }

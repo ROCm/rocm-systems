@@ -53,6 +53,7 @@ subtrees:
 
 - caption: Conceptual
   entries:
+  - file: conceptual/gpu-violations.md
   - file: conceptual/perf-determinism.md
     title: Performance determinism
   - file: conceptual/ras.md

@@ -93,7 +93,7 @@ enum class UpdateSampleTraceMode : Pal::uint32
                                 ///  active sample.
 };
 
-/// Specifies basic type of sample to perfom - either a normal set of "global" perf counters, or a trace consisting
+/// Specifies basic type of sample to perform - either a normal set of "global" perf counters, or a trace consisting
 /// of SQ thread trace and/or streaming performance counters.
 enum class GpaSampleType : Pal::uint32
 {
@@ -472,7 +472,7 @@ struct QueueTimingsTraceInfo
 *       written, are allocated from internal pools managed by the session.
 *     - A session is moved from the _building_ state to the _complete_ state by calling End().
 *     - The application will submit all command buffers referenced by the session.
-*     - The session is confirmed as _ready_, either using standard PAL fences to confirm all assocated submission have
+*     - The session is confirmed as _ready_, either using standard PAL fences to confirm all associated submission have
 *       completed, or by polling IsReady() on the session.
 *     - Results for all samples in the session can be queried via GetResults().
 *     - Reset() should be called once results have been gathered and before building a new session.  Resources are

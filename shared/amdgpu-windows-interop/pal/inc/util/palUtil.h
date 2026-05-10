@@ -480,7 +480,7 @@ enum class Result : int32
     /// The returned results were incomplete.
     ErrorIncompleteResults                  = -(0x00000060),
 
-    /// The display mode is imcompatible with framebuffer or CRTC.
+    /// The display mode is incompatible with framebuffer or CRTC.
     ErrorIncompatibleDisplayMode            = -(0x00000061),
 
     /// Implicit fullscreen exclusive mode is not safe because the specified window size doesn't match the

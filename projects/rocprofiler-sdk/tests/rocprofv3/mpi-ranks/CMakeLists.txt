@@ -18,28 +18,36 @@ else()
     set(PRELOAD_ARGS)
 endif()
 
-# Check if mpirun is available
-find_program(MPIRUN_EXECUTABLE NAMES mpirun mpiexec)
+# Locate an MPI implementation (OpenMPI, MPICH, etc.). MPI is optional: when not found the
+# MPI-launched tests below are disabled.
+find_package(MPI)
 
-if(NOT MPIRUN_EXECUTABLE)
+if(NOT MPI_FOUND OR NOT MPIEXEC_EXECUTABLE)
     set(IS_DISABLED ON)
 else()
     set(IS_DISABLED OFF)
 endif()
 
-# Set OpenMPI environment variables for CI/root execution
+# Run-as-root permission for OpenMPI; ignored by other MPI implementations.
 set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
 
-# Test with MPI - profile only rank 0 out of 4 ranks Use %env{OMPI_COMM_WORLD_RANK}% to
-# create separate output directories per rank
+# Use rocprofv3's built-in %rank% output key so the rank directory is resolved via the
+# profiler's MPI-rank detection logic instead of relying on MPI-implementation-specific
+# environment variables.
+set(MPI_RANK_DIR_VAR "rank.%rank%")
+
+# Test with MPI - profile only rank 0 out of 4 ranks. Use ${MPI_RANK_DIR_VAR} to create
+# separate output directories per rank, independent of the MPI implementation.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-mpi-ranks-with-mpi
     COMMAND
-        ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPIRUN_EXECUTABLE} -n 4
+        ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPIEXEC_EXECUTABLE}
+        ${MPIEXEC_NUMPROC_FLAG} 4 ${MPIEXEC_PREFLAGS}
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
         --output-format csv json -d
-        ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-trace/rank.%env{OMPI_COMM_WORLD_RANK}% -o
-        out --profile-mpi-ranks 0 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
+        ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-trace/${MPI_RANK_DIR_VAR} -o out
+        --profile-mpi-ranks 0 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
+        ${MPIEXEC_POSTFLAGS}
     DEPENDS simple-transpose
     TIMEOUT 120
     LABELS "integration-tests" "mpi-tests"
@@ -47,17 +55,18 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-mpi-ranks-with-mpi
     DISABLED ${IS_DISABLED})
 
-# Test with MPI - profile ranks 0-1,3 out of 4 ranks Use %env{OMPI_COMM_WORLD_RANK}% to
-# create separate output directories per rank
+# Test with MPI - profile ranks 0-1,3 out of 4 ranks. Use ${MPI_RANK_DIR_VAR} to create
+# separate output directories per rank, independent of the MPI implementation.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-mpi-ranks-with-mpi-multiple
     COMMAND
-        ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPIRUN_EXECUTABLE} -n 4
+        ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPIEXEC_EXECUTABLE}
+        ${MPIEXEC_NUMPROC_FLAG} 4 ${MPIEXEC_PREFLAGS}
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace
         --output-format csv json -d
-        ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-multiple-trace/rank.%env{OMPI_COMM_WORLD_RANK}%
-        -o out --profile-mpi-ranks 0-1,3 ${PRELOAD_ARGS} --
-        $<TARGET_FILE:simple-transpose>
+        ${CMAKE_CURRENT_BINARY_DIR}/mpi-ranks-multiple-trace/${MPI_RANK_DIR_VAR} -o out
+        --profile-mpi-ranks 0-1,3 ${PRELOAD_ARGS} -- $<TARGET_FILE:simple-transpose>
+        ${MPIEXEC_POSTFLAGS}
     DEPENDS simple-transpose
     TIMEOUT 120
     LABELS "integration-tests" "mpi-tests"

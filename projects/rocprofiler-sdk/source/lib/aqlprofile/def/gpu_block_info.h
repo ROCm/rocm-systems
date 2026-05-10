@@ -24,7 +24,7 @@
 #define SRC_DEF_GPU_BLOCK_INFO_H_
 
 #include <stdint.h>
-#include "util/reg_offsets.h"
+#include "lib/aqlprofile/util/reg_offsets.h"
 
 // Counter Block attributes
 enum CounterBlockAttr

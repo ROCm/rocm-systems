@@ -137,6 +137,7 @@ class TestPython(RocprofsysTest):
         "depths": [0, 1, 1],
     }
 
+    @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "annotated, exclude",
         [
@@ -158,7 +159,6 @@ class TestPython(RocprofsysTest):
             annotated=annotated,
             python_version=python_version,
             run_args=["-v", "10", "-n", "5"],
-            timeout=120,
         )
         self.assert_regex(result)
 
@@ -180,6 +180,7 @@ class TestPython(RocprofsysTest):
                 fail_regex=[r"(\|_inefficient).*(\|_sum)"],
             )
 
+    @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "annotated",
         [
@@ -198,7 +199,6 @@ class TestPython(RocprofsysTest):
             annotated=annotated,
             python_version=python_version,
             run_args=["-v", "10", "-n", "5"],
-            timeout=120,
         )
         self.assert_regex(result)
         if not annotated:
@@ -226,6 +226,7 @@ class TestPython(RocprofsysTest):
                 rules_files=python_builtin_rocpd_rules,
             )
 
+    @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "annotated",
         [
@@ -241,7 +242,6 @@ class TestPython(RocprofsysTest):
             annotated=annotated,
             python_version=python_version,
             run_args=["-v", "15", "-n", "5"],
-            timeout=120,
         )
         self.assert_regex(result)
         if not annotated:
@@ -263,7 +263,6 @@ class TestPython(RocprofsysTest):
             python_version=python_version,
             run_args=["-v", "5", "-n", "5", "-s", "3"],
             standalone=True,
-            timeout=120,
         )
         self.assert_regex(result)
         self.assert_timemory(

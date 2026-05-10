@@ -37,31 +37,61 @@ For more info on build options/flags when using the install script, use `./insta
 RCCL build & installation helper script
  Options:
        --address-sanitizer     Build with address sanitizer enabled
-    -c|--enable-code-coverage  Enable code coverage
-    -d|--dependencies          Install RCCL dependencies
+       --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)
+       --cmake-options         Pass additional CMake options (e.g. --cmake-options "-DFOO=BAR -DBAZ=ON")
        --debug                 Build debug library
-       --enable_backtrace      Build with custom backtrace support
+       --debug-fast            Build debug library with lto optimization disabled (fast build times)
+    -d|--dependencies          Install RCCL dependencies
        --disable-colltrace     Build without collective trace
        --disable-roctx         Build without ROCTX logging
+       --disable-warp-speed    Disable WARP_SPEED kernel optimizations
+       --dump-asm              Disassemble code and dump assembly with inline code
+    -c|--enable-code-coverage  Enable code coverage
+       --enable_backtrace      Build with custom backtrace support
+       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)
     -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)
+       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes
+       --generate-sym-kernels  Generate symmetric memory kernels (default: OFF)
     -h|--help                  Prints this help message
     -i|--install               Install RCCL library (see --prefix argument below)
     -j|--jobs                  Specify how many parallel compilation jobs to run ($nproc by default)
+       --kernel-resource-use   Dump GPU kernel resource usage (e.g., VGPRs, scratch, spill) at link stage
     -l|--local_gpu_only        Only compile for local GPU architecture
-       --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)
+       --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)
        --no_clean              Don't delete files if they already exist
        --npkit-enable          Compile with npkit enabled
-       --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)
        --openmp-test-enable    Enable OpenMP in rccl unit tests
     -p|--package_build         Build RCCL package
        --prefix                Specify custom directory to install RCCL to (default: `/opt/rocm`)
+    -q|--quiet-warnings        Suppress majority of compiler warnings (not recommended)
+       --rocshmem              Build with rocSHMEM support (for GDA AllToAll)
        --run_tests_all         Run all rccl unit tests (must be built already)
     -r|--run_tests_quick       Run small subset of rccl unit tests (must be built already)
        --static                Build RCCL as a static library instead of shared library
     -t|--tests_build           Build rccl unit tests, but do not run
        --time-trace            Plot the build time of RCCL (requires `ninja-build` package installed on the system)
-       --rocshmem              Build with rocSHMEM support (for GDA AllToAll)
        --verbose               Show compile commands
+
+  Available RCCL-specific CMake options for --cmake-options:
+    -DBUILD_EXT_EXAMPLES=ON               Build ext-{net,tuner,profiler} example plugins (default: OFF)
+    -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)
+    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)
+    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)
+    -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)
+    -DPROFILE=ON                          Enable profiling (default: OFF)
+    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)
+    -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)
+
+  Environment variables:
+    ONLY_FUNCS                 Build only specified collective functions (debug builds only).
+                               Restricts GPU kernel generation to the listed collectives, significantly
+                               reducing build time during development. Use '|' to separate multiple functions.
+                               Example: ONLY_FUNCS="AllReduce|SendRecv" ./install.sh --debug -t
+                               Available: AllReduce, Broadcast, Reduce, AllGather, ReduceScatter,
+                                          AlltoAllPivot, SendRecv, AlltoAllGda, AlltoAllvGda
+                               Advanced: Specify algo, protocol, redop, and type per collective.
+                                 ONLY_FUNCS="AllReduce RING SIMPLE Sum f32|SendRecv"
+    ROCSHMEM_INSTALL_DIR       Path to a pre-built rocSHMEM installation (skips building from source)
 ```
 
 By default, RCCL builds for all GPU targets defined in `DEFAULT_GPUS` in `CMakeLists.txt`. To target specific GPU(s), and potentially reduce build time, use `--amdgpu_targets` as a `;` separated string listing GPU(s) to target.

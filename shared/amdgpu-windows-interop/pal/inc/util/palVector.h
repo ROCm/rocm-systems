@@ -149,7 +149,7 @@ public:
     /// Increases maximum capacity to the number of elements in the vector, plus the specified increment amount.
     /// Equivalent to this->Reserve(this->NumElements() + amount);
     ///
-    /// @param [in] amount Number of items beyond the current element count to increas the capacity to.
+    /// @param [in] amount Number of items beyond the current element count to increase the capacity to.
     ///
     /// @returns Result ErrorOutOfMemory if the operation failed.
     Result Grow(uint32 amount) { return Reserve(NumElements() + amount); }

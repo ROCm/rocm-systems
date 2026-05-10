@@ -374,7 +374,7 @@ inline Result PAL_STDCALL GetGpuInfoForAsicRevision(
  *
  * After a successful call to CreatePlatform(), the client should call @ref IPlatform::EnumerateDevices() in order to
  * get a list of supported devices attached to the system.  This function returns an array of @ref IDevice objects
- * which are used by the client to query properties of the devicess and eventually execute work on those devices.
+ * which are used by the client to query properties of the devices and eventually execute work on those devices.
  * IPlatform::EnumerateDevices() is not available to util-only clients (PAL_BUILD_CORE=0).
  *
  * The client may re-enumerate devices at any time by calling IPlatform::EnumerateDevices().  The client must make sure

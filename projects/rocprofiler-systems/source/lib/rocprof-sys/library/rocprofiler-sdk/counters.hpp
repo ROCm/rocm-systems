@@ -7,6 +7,7 @@
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
+#include <cstdint>
 
 #include <timemory/utility/types.hpp>
 
@@ -46,8 +47,6 @@ using counter_track_type   = ::perfetto::CounterTrack;
 
 struct counter_event
 {
-    ROCPROFSYS_DEFAULT_OBJECT(counter_event)
-
     explicit counter_event(counter_dispatch_record&& _v)
     : record{ _v }
     {}
@@ -62,8 +61,8 @@ struct counter_event
 struct counter_storage
 {
     const client_data*                    tool_data          = nullptr;
-    uint64_t                              device_id          = 0;
-    int64_t                               index              = 0;
+    std::uint64_t                         device_id          = 0;
+    std::int64_t                          index              = 0;
     std::string                           metric_name        = {};
     std::string                           metric_description = {};
     std::string                           storage_name       = {};
@@ -72,7 +71,7 @@ struct counter_storage
     std::unique_ptr<counter_storage_type> storage            = {};
     std::unique_ptr<counter_track_type>   track              = {};
 
-    counter_storage(const client_data* _tool_data, uint64_t _devid, size_t _idx,
+    counter_storage(const client_data* _tool_data, std::uint64_t _devid, size_t _idx,
                     std::string_view _name);
 
     ~counter_storage()                                 = default;
@@ -110,8 +109,6 @@ struct set_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
     using storage_array_t = std::array<storage<type>*, max_threads>;
     friend struct get_storage<rocprofsys::rocprofiler_sdk::counter_data_tracker>;
 
-    ROCPROFSYS_DEFAULT_OBJECT(set_storage)
-
     auto operator()(storage<type>* _v, size_t _idx) const { get().at(_idx) = _v; }
     auto operator()(type&, size_t) const {}
     auto operator()(storage<type>* _v) const { get().fill(_v); }
@@ -128,8 +125,6 @@ template <>
 struct get_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
 {
     using type = ::rocprofsys::rocprofiler_sdk::counter_data_tracker;
-
-    ROCPROFSYS_DEFAULT_OBJECT(get_storage)
 
     auto operator()(const type&) const
     {

@@ -17,7 +17,6 @@ permissions:
   packages: read
 
 jobs:
-
   AIS_CI_Pre-check:
     outputs:
       changed_dockerfile: ${{ steps.ci-flags.outputs.changed_dockerfile }}
@@ -62,6 +61,20 @@ jobs:
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
       upload_artifacts: true
+
+  build_and_test_cxx20:
+    # cancelled() needed. Otherwise success() implicitly added and fails if build_AIS_CI_image skipped.
+    if: ${{ !cancelled() && needs.build_AIS_CI_image.outputs.ci_image_build_satisfied == 'true' }}
+    needs: [AIS_CI_Pre-check, build_AIS_CI_image]
+    uses: ./.github/workflows/hipfile-build.yml
+    with:
+      ci_image: ${{ needs.build_AIS_CI_image.outputs.ci_image }}
+      cxx_compiler: amdclang++
+      cxx_standard: 20
+      platform: ${{ inputs.platform }}
+      rocm_version: ${{ inputs.rocm_version }}
+      upload_artifacts: false
+      generate_coverage: false
 
   build_and_test_other_compilers:
     # Try building on other compilers, but keep as separate job.

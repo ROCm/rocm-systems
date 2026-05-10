@@ -40,7 +40,7 @@ usage()
     echo "Usage: ${BASH_SOURCE[0]} <OPTIONS> -- <build-release.sh OPTIONS>"
     echo "  e.g:"
     echo "       ${BASH_SOURCE[0]} --distro ubuntu --versions 22.04 --rocm-versions 6.4 6.3     -- --base +nopython --mpi +nopython"
-    echo "       ${BASH_SOURCE[0]} --distro ubuntu --versions 22.04 --python-version 6 7 8 9 10 -- --base +python   --mpi +nopython"
+    echo "       ${BASH_SOURCE[0]} --distro ubuntu --versions 22.04 --python-version 8 9 10 11 12 13 -- --base +python   --mpi +nopython"
 }
 
 send-error()
@@ -101,7 +101,7 @@ reset-last
 : ${VERSIONS:=22.04}
 : ${ROCM_VERSIONS:=6.4 6.3}
 : ${MPI:=0}
-: ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
+: ${PYTHON_VERSIONS:="8 9 10 11 12 13"}
 : ${RETRY:=3}
 
 n=0

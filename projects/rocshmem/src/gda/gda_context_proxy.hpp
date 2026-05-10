@@ -28,14 +28,14 @@
 
 #include "device_proxy.hpp"
 #include "backend_gda.hpp"
+#include "memory/hip_allocator.hpp"
 
 namespace rocshmem {
 
 class GDABackend;
 
-template <typename ALLOCATOR>
 class GDADefaultContextProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, GDAContext>;
+  using ProxyT = DeviceProxy<HIPAllocator, GDAContext>;
 
  public:
   GDADefaultContextProxy() = default;
@@ -45,6 +45,7 @@ class GDADefaultContextProxy {
    */
   explicit GDADefaultContextProxy(GDABackend* backend, TeamInfo *tinfo,
                                   int gda_provider,
+                                  [[maybe_unused]] const HIPAllocator& alloc = HIPAllocator(),
                                   size_t num_elems = 1)
   : proxy_{num_elems}, constructed_{true} {
     auto ctx{proxy_.get()};
@@ -95,8 +96,6 @@ class GDADefaultContextProxy {
    */
   bool constructed_{false};
 };
-
-using GDADefaultContextProxyT = GDADefaultContextProxy<HIPAllocator>;
 
 }  // namespace rocshmem
 

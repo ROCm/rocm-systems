@@ -1,11 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <cstdint>
 #include <timemory/log/color.hpp>
 //
 //  above should always be included first
 //
 #include "api.hpp"
+#include "common/defines.h"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
 #include "core/agent.hpp"
@@ -16,7 +18,6 @@
 #include "core/config.hpp"
 #include "core/constraint.hpp"
 #include "core/cpu.hpp"
-#include "core/defines.hpp"
 #include "core/dynamic_library.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
@@ -37,7 +38,7 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
-#include "library/components/shmem_gotcha.hpp"
+#include "library/components/shmem_gotcha_policy.hpp"
 #include "library/components/ucx_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
@@ -110,7 +111,7 @@ auto               _timemory_manager  = tim::manager::instance();
 auto               _timemory_settings = tim::settings::shared_instance();
 
 void
-set_metadata_process_start_timestamp(int64_t _ts)
+set_metadata_process_start_timestamp(std::int64_t _ts)
 {
     auto process_info  = trace_cache::get_metadata_registry().get_process_info();
     process_info.start = _ts;
@@ -118,7 +119,7 @@ set_metadata_process_start_timestamp(int64_t _ts)
 }
 
 void
-set_metadata_process_end_timestamp(int64_t _ts)
+set_metadata_process_end_timestamp(std::int64_t _ts)
 {
     auto process_info = trace_cache::get_metadata_registry().get_process_info();
     process_info.end  = _ts;
@@ -146,7 +147,7 @@ escape_quotes(std::string str)
 }
 
 bool
-ensure_initialization(bool _offset, int64_t _glob_n, int64_t _offset_n)
+ensure_initialization(bool _offset, std::int64_t _glob_n, std::int64_t _offset_n)
 {
     auto _exit_info = component::exit_gotcha::get_exit_info();
     if(_exit_info.is_known && _exit_info.exit_code != EXIT_SUCCESS) return _offset;
@@ -223,7 +224,7 @@ ensure_finalization(bool _static_init = false)
     if(!tim::get_shared_ptr_pair_callback())
     {
         tim::get_shared_ptr_pair_callback() =
-            new tim::shared_ptr_pair_callback_t{ [](int64_t _n) {
+            new tim::shared_ptr_pair_callback_t{ [](std::int64_t _n) {
                 if(_n == 0) rocprofsys_finalize_hidden();
             } };
     }
@@ -251,7 +252,11 @@ struct fini_bundle
 {
     using data_type = std::tuple<Tp...>;
 
-    ROCPROFSYS_DEFAULT_OBJECT(fini_bundle)
+    fini_bundle()                                  = default;
+    fini_bundle(const fini_bundle&)                = default;
+    fini_bundle(fini_bundle&&) noexcept            = default;
+    fini_bundle& operator=(const fini_bundle&)     = default;
+    fini_bundle& operator=(fini_bundle&&) noexcept = default;
 
     fini_bundle(std::string_view _label)
     : m_label{ _label }
@@ -1289,6 +1294,7 @@ rocprofsys_reset_for_reattach_hidden(void)
     rocprofsys_finalization_done.store(false);
     rocprofsys_init_library_done.store(false);
     rocprofsys_init_tooling_done.store(0);
+    ::rocprofsys::reset_database_path_memo();
     ::rocprofsys::reset_state();
 }
 

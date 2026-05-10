@@ -1,4 +1,4 @@
-name: hipfile-toplevel
+name: hipFile
 run-name: Kicks off several hipFile CI workflows for various platforms
 
 # In particular, this root workflow's only purpose is to allow
@@ -26,7 +26,7 @@ permissions:
 
 jobs:
 
-  hipfile-CI:
+  Linux:
     strategy:
       fail-fast: false
       matrix:

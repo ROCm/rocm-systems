@@ -181,7 +181,7 @@ struct DecoderInfo {
 };
 
 /**
- * @brief Funtion to save internal frame buffer to file for device buffer : chroma format is assumed to be NV12 for internal device memory
+ * @brief Function to save internal frame buffer to file for device buffer : chroma format is assumed to be NV12 for internal device memory
  * 
  * @param p_dec_info 
  * @param surf_mem  device mem pointers of luma and chroma planes
@@ -263,7 +263,7 @@ void save_frame_to_file(DecoderInfo *p_dec_info, void *surf_mem[], uint32_t *pit
 }
 
 /**
- * @brief Funtion to save internal frame buffer to file for host buffer
+ * @brief Function to save internal frame buffer to file for host buffer
  * 
  * @param p_dec_info 
  * @param frame_mem 
@@ -598,7 +598,7 @@ void create_parser(DecoderInfo& dec_info) {
     RocdecParserParams params = {};
     params.codec_type = dec_info.rocdec_codec_id;
     params.max_num_decode_surfaces = 6;
-    params.max_display_delay = 1;       // min display delay of 1 is recommented to get optimal performance from hardware decoder
+    params.max_display_delay = 1;       // min display delay of 1 is recommended to get optimal performance from hardware decoder
     params.user_data = &dec_info;
     params.pfn_sequence_callback = handle_video_sequence;
     params.pfn_decode_picture = handle_picture_decode;

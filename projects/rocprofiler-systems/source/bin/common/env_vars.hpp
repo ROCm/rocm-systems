@@ -78,7 +78,8 @@ constexpr std::string_view ROCM_DOMAINS        = "ROCPROFSYS_ROCM_DOMAINS";
 constexpr std::string_view ROCM_GROUP_BY_QUEUE = "ROCPROFSYS_ROCM_GROUP_BY_QUEUE";
 
 // --- Domains: CPU ---
-constexpr std::string_view CPU_FREQ = "ROCPROFSYS_CPU_FREQ";
+constexpr std::string_view CPU_FREQ    = "ROCPROFSYS_CPU_FREQ";
+constexpr std::string_view CPU_METRICS = "ROCPROFSYS_CPU_METRICS";
 
 // --- Domains: Parallel runtimes ---
 constexpr std::string_view USE_MPIP    = "ROCPROFSYS_USE_MPIP";

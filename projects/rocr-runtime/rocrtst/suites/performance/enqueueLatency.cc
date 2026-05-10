@@ -110,6 +110,7 @@ EnqueueLatency::~EnqueueLatency() {
 void EnqueueLatency::SetUp() {
   hsa_status_t err;
   TestBase::SetUp();
+  if (test_skipped_) return;
   // If it indicates to use default signal, set env var properly
 
   err = SetDefaultAgents(this);

@@ -32,6 +32,8 @@ subtrees:
     
 - caption: Reference
   entries:
+  - file: reference/rocJPEG-env-vars.rst
+    title: Environment variables
   - file: reference/rocjpeg-formats-and-architectures.rst
     title: Subsampling and hardware capabilities
   - file: doxygen/html/files

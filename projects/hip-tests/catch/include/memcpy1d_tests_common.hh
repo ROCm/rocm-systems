@@ -119,17 +119,18 @@ void MemcpyDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = 
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
 
   HIP_CHECK(hipSetDevice(src_device));
-  if constexpr (enable_peer_access) {
-    if (src_device == dst_device) {
-      return;
-    }
+  if (src_device != dst_device) {
     int can_access_peer = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
     if (!can_access_peer) {
       HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       return;
     }
-    HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
+    if constexpr (enable_peer_access) {
+      HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
+    }
+  } else if constexpr (enable_peer_access) {
+    return;
   }
 
   LinearAllocGuard<int> src_allocation(LinearAllocs::hipMalloc, allocation_size);

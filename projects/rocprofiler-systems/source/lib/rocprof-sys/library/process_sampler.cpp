@@ -3,9 +3,9 @@
 
 #include "library/process_sampler.hpp"
 #include "core/config.hpp"
-#include "library/cpu_freq.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 
@@ -77,7 +77,8 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
 
     auto _now = std::chrono::steady_clock::now();
     auto _end =
-        _now + std::chrono::nanoseconds{ static_cast<uint64_t>(_duration * units::sec) };
+        _now +
+        std::chrono::nanoseconds{ static_cast<std::uint64_t>(_duration * units::sec) };
     while(_state && _state->load() < State::Finalized && get_state() < State::Finalized)
     {
         std::this_thread::sleep_until(_now);
@@ -134,24 +135,13 @@ sampler::setup()
         _pmc->pause        = []() { pmc::pause(); };
     }
 
-    if(get_cpu_freq_enabled())
-    {
-        auto& _cpu_freq         = instances.emplace_back(std::make_unique<instance>());
-        _cpu_freq->setup        = []() { cpu_freq::setup(); };
-        _cpu_freq->shutdown     = []() { cpu_freq::shutdown(); };
-        _cpu_freq->post_process = []() { cpu_freq::post_process(); };
-        _cpu_freq->config       = []() { cpu_freq::config(); };
-        _cpu_freq->sample       = []() { cpu_freq::sample(); };
-        _cpu_freq->pause        = []() { cpu_freq::pause(); };
-    }
-
     for(auto& itr : instances)
         itr->setup();
 
     polling_finished = std::make_unique<promise_t>();
 
-    auto     _freq      = get_process_sampling_freq();
-    uint64_t _msec_freq = (1.0 / _freq) * 1.0e3;
+    auto          _freq      = get_process_sampling_freq();
+    std::uint64_t _msec_freq = (1.0 / _freq) * 1.0e3;
 
     polling_finished = std::make_unique<promise_t>();
 
@@ -179,7 +169,7 @@ sampler::shutdown()
     {
         size_t           _nitr     = 0;
         constexpr size_t _nitr_max = 100;
-        uint64_t         _freq     = (1.0 / get_process_sampling_freq()) * 1.0e3;
+        std::uint64_t    _freq     = (1.0 / get_process_sampling_freq()) * 1.0e3;
 
         // wait until the sampler is no longer sampling
         std::this_thread::sleep_for(msec_t{ _freq });

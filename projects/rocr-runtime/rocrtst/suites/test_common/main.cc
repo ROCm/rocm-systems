@@ -92,6 +92,9 @@
 #include "suites/functional/counted_queues.h"
 #include "suites/functional/cuid.h"
 #include "common/os.h"
+#include "common/platform_filter.h"
+#include "common/base_rocr_utils.h"
+#include "common/env_config.h"
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
 
@@ -103,13 +106,16 @@ static void SetFlags(TestBase *test) {
   test->set_monitor_verbosity(sRocrtstGlvalues->monitor_verbosity);
 }
 
-static void RunCustomTestProlog(TestBase *test) {
+static bool RunCustomTestProlog(TestBase *test) {
   SetFlags(test);
 
   test->DisplayTestInfo();
   test->SetUp();
+  if (test->isTestSkipped()) {
+    return false;  // Test was skipped, don't run test method
+  }
   test->Run();
-  return;
+  return true;  // Test ran successfully, OK to run test method
 }
 static void RunCustomTestEpilog(TestBase *test) {
   test->DisplayResults();
@@ -124,7 +130,9 @@ static void RunCustomTestEpilog(TestBase *test) {
 //   * <insert call to actual test function within test case>
 //   * RunCustomTestEpilog(test)
 static void RunGenericTest(TestBase *test) {
-  RunCustomTestProlog(test);
+  if (!RunCustomTestProlog(test)) {
+    return;  // Test was skipped, don't run epilog
+  }
   RunCustomTestEpilog(test);
   return;
 }
@@ -158,7 +166,7 @@ TEST(rocrtst, Test_MetadataPrefetchPacket) {
 
 TEST(rocrtstFunc, MemoryAccessTests) {
   MemoryAccessTest mt;
-  RunCustomTestProlog(&mt);
+  if (!RunCustomTestProlog(&mt)) return;
   mt.CPUAccessToGPUMemoryTest();
   mt.GPUAccessToCPUMemoryTest();
   RunCustomTestEpilog(&mt);
@@ -166,83 +174,83 @@ TEST(rocrtstFunc, MemoryAccessTests) {
 
 TEST(rocrtstFunc, MemoryAccessCoherent) {
   MemoryAccessTest mt;
-  RunCustomTestProlog(&mt);
+  if (!RunCustomTestProlog(&mt)) return;
   mt.MemoryAccessCoherentTest();
   RunCustomTestEpilog(&mt);
 }
 
 TEST(rocrtstFunc, GroupMemoryAllocationTest) {
   MemoryAllocationTest ma(true, false);
-  RunCustomTestProlog(&ma);
+  if (!RunCustomTestProlog(&ma)) return;
   ma.GroupMemoryDynamicAllocation();
   RunCustomTestEpilog(&ma);
 }
 
 TEST(rocrtstFunc, MemoryAllocateAndFreeTest) {
   MemoryAllocationTest ma(false, true);
-  RunCustomTestProlog(&ma);
+  if (!RunCustomTestProlog(&ma)) return;
   ma.MemoryBasicAllocationAndFree();
   RunCustomTestEpilog(&ma);
 }
 
 TEST(rocrtstFunc, MemoryAllocateContiguousTest) {
   MemoryAllocationTest ma(false, true);
-  RunCustomTestProlog(&ma);
+  if (!RunCustomTestProlog(&ma)) return;
   ma.MemoryAllocateContiguousTest();
   RunCustomTestEpilog(&ma);
 }
 
 TEST(rocrtstFunc, Concurrent_Init_Test) {
   ConcurrentInitTest ci;
-  RunCustomTestProlog(&ci);
+  if (!RunCustomTestProlog(&ci)) return;
   ci.TestConcurrentInit();
   RunCustomTestEpilog(&ci);
 }
 
 TEST(rocrtstFunc, Concurrent_Init_Shutdown_Test) {
   ConcurrentInitShutdownTest ci;
-  RunCustomTestProlog(&ci);
+  if (!RunCustomTestProlog(&ci)) return;
   ci.TestConcurrentInitShutdown();
   RunCustomTestEpilog(&ci);
 }
 TEST(rocrtstFunc, Concurrent_Shutdown) {
   ConcurrentShutdownTest cs;
-  RunCustomTestProlog(&cs);
+  if (!RunCustomTestProlog(&cs)) return;
   cs.TestConcurrentShutdown();
   RunCustomTestEpilog(&cs);
 }
 
 TEST(rocrtstFunc, Reference_Count) {
   ReferenceCountTest rc(true, false);
-  RunCustomTestProlog(&rc);
+  if (!RunCustomTestProlog(&rc)) return;
   rc.TestReferenceCount();
   RunCustomTestEpilog(&rc);
 }
 
 TEST(rocrtstFunc, Max_Reference_Count) {
   ReferenceCountTest rc(false, true);
-  RunCustomTestProlog(&rc);
+  if (!RunCustomTestProlog(&rc)) return;
   rc.TestMaxReferenceCount();
   RunCustomTestEpilog(&rc);
 }
 
 TEST(rocrtstFunc, Signal_Destroy_Concurrently) {
   SignalConcurrentTest sd(true, false, false, false);
-  RunCustomTestProlog(&sd);
+  if (!RunCustomTestProlog(&sd)) return;
   sd.TestSignalDestroyConcurrent();
   RunCustomTestEpilog(&sd);
 }
 
 TEST(rocrtstFunc, Signal_Max_Consumer) {
   SignalConcurrentTest sd(false, true, false, false);
-  RunCustomTestProlog(&sd);
+  if (!RunCustomTestProlog(&sd)) return;
   sd.TestSignalCreateMaxConsumers();
   RunCustomTestEpilog(&sd);
 }
 
 TEST(rocrtstFunc, Signal_Create_Concurrently) {
   SignalConcurrentTest sd(false, false, false, true);
-  RunCustomTestProlog(&sd);
+  if (!RunCustomTestProlog(&sd)) return;
   sd.TestSignalCreateConcurrent();
   RunCustomTestEpilog(&sd);
 }
@@ -254,423 +262,347 @@ TEST(rocrtstFunc, DISABLED_CU_Masking) {
 }
 
 TEST(rocrtstFunc, IPC) {
-  RUN_IF_NOT_EMU_MODE(
     IPCTest ipc;
     RunGenericTest(&ipc);
-  );
 }
 
 TEST(rocrtstFunc, DISABLED_Signal_Kernel_Set) {
-  RUN_IF_NOT_EMU_MODE(
     SignalKernelTest sk(SET);
-    RunCustomTestProlog(&sk);
+    if (!RunCustomTestProlog(&sk)) return;
     sk.TestSignalKernelSet();
     RunCustomTestEpilog(&sk);
-  );
 }
 
 TEST(rocrtstFunc, DISABLED_Signal_Kernel_Multi_Set) {
-  RUN_IF_NOT_EMU_MODE(
     SignalKernelTest sk(MULTISET);
-    RunCustomTestProlog(&sk);
+    if (!RunCustomTestProlog(&sk)) return;
     sk.TestSignalKernelMultiSet();
     RunCustomTestEpilog(&sk);
-  );
 }
 
 TEST(rocrtstFunc, DISABLED_Signal_Kernel_Wait) {
-  RUN_IF_NOT_EMU_MODE(
     SignalKernelTest sw(WAIT);
-    RunCustomTestProlog(&sw);
+    if (!RunCustomTestProlog(&sw)) return;
     sw.TestSignalKernelWait();
     RunCustomTestEpilog(&sw);
-  );
 }
 
 TEST(rocrtstFunc, DISABLED_Signal_Kernel_Multi_Wait) {
-  RUN_IF_NOT_EMU_MODE(
     SignalKernelTest sw(MULTIWAIT);
-    RunCustomTestProlog(&sw);
+    if (!RunCustomTestProlog(&sw)) return;
     sw.TestSignalKernelMultiWait();
     RunCustomTestEpilog(&sw);
-  );
 }
 
 TEST(rocrtstFunc, DISABLED_Aql_Barrier_Bit_Set) {
-  RUN_IF_NOT_EMU_MODE(
     AqlBarrierBitTest ab(true, false);
-    RunCustomTestProlog(&ab);
+    if (!RunCustomTestProlog(&ab)) return;
     ab.BarrierBitSet();
     RunCustomTestEpilog(&ab);
-  );
 }
 
 TEST(rocrtstFunc, DISABLED_Aql_Barrier_Bit_Not_Set) {
-  RUN_IF_NOT_EMU_MODE(
     AqlBarrierBitTest ab(false, true);
-    RunCustomTestProlog(&ab);
+    if (!RunCustomTestProlog(&ab)) return;
     ab.BarrierBitNotSet();
     RunCustomTestEpilog(&ab);
-  );
 }
 
 TEST(rocrtstFunc, Memory_Max_Mem) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryTest mt;
 
-    RunCustomTestProlog(&mt);
+    if (!RunCustomTestProlog(&mt)) return;
     mt.MaxSingleAllocationTest();
     RunCustomTestEpilog(&mt);
-  );
 }
 
 TEST(rocrtstFunc, Memory_Available) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryTest mt;
 
-    RunCustomTestProlog(&mt);
+    if (!RunCustomTestProlog(&mt)) return;
     mt.MemAvailableTest();
     RunCustomTestEpilog(&mt);
-  );
 }
 
 TEST(rocrtstFunc, Time_Stamp) {
   TimeStamp ts;
-  RunCustomTestProlog(&ts);
+  if (!RunCustomTestProlog(&ts)) return;
   ts.TimeStampTest();
   RunCustomTestEpilog(&ts);
 }
 
 TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
-  RUN_IF_NOT_EMU_MODE(
     GpuCoreDumpTest gcd;
-    RunCustomTestProlog(&gcd);
+    if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestDefaultPattern();
     RunCustomTestEpilog(&gcd);
-  );
 }
 
 TEST(rocrtstFunc, GpuCoreDump_CustomPattern) {
-  RUN_IF_NOT_EMU_MODE(
     GpuCoreDumpTest gcd;
-    RunCustomTestProlog(&gcd);
+    if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestCustomPattern();
     RunCustomTestEpilog(&gcd);
-  );
 }
 
 TEST(rocrtstFunc, GpuCoreDump_DisableFlag) {
-  RUN_IF_NOT_EMU_MODE(
     GpuCoreDumpTest gcd;
-    RunCustomTestProlog(&gcd);
+    if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestDisableFlag();
     RunCustomTestEpilog(&gcd);
-  );
 }
 
 TEST(rocrtstFunc, GpuCoreDump_PatternSubstitution) {
-  RUN_IF_NOT_EMU_MODE(
     GpuCoreDumpTest gcd;
-    RunCustomTestProlog(&gcd);
+    if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestPatternSubstitution();
     RunCustomTestEpilog(&gcd);
-  );
 }
 
 TEST(rocrtstFunc, GpuCoreDump_InvalidPath) {
-  RUN_IF_NOT_EMU_MODE(
     GpuCoreDumpTest gcd;
-    RunCustomTestProlog(&gcd);
+    if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestInvalidPath();
     RunCustomTestEpilog(&gcd);
-  );
 }
 
 TEST(rocrtstFunc, GpuCoreDump_ContentIntegrity) {
-  RUN_IF_NOT_EMU_MODE(
     GpuCoreDumpTest gcd;
-    RunCustomTestProlog(&gcd);
+    if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestCoreDumpContentIntegrity();
     RunCustomTestEpilog(&gcd);
-  );
 }
 
 TEST(rocrtstFunc, GpuCoreDump_PipePattern) {
-  RUN_IF_NOT_EMU_MODE(
     GpuCoreDumpTest gcd;
-    RunCustomTestProlog(&gcd);
+    if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestPipePattern();
     RunCustomTestEpilog(&gcd);
-  );
 }
 
 
 TEST(rocrtstFunc, Memory_Atomic_Add_Test) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryAtomic ma(ADD);
-    RunCustomTestProlog(&ma);
+    if (!RunCustomTestProlog(&ma)) return;
     ma.MemoryAtomicTest();
     RunCustomTestEpilog(&ma);
-  );
 }
 
 TEST(rocrtstFunc, Memory_Atomic_Sub_Test) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryAtomic ma(SUB);
-    RunCustomTestProlog(&ma);
+    if (!RunCustomTestProlog(&ma)) return;
     ma.MemoryAtomicTest();
     RunCustomTestEpilog(&ma);
-  );
 }
 
 TEST(rocrtstFunc, Memory_Atomic_And_Test) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryAtomic ma(AND);
-    RunCustomTestProlog(&ma);
+    if (!RunCustomTestProlog(&ma)) return;
     ma.MemoryAtomicTest();
     RunCustomTestEpilog(&ma);
-  );
 }
 
 TEST(rocrtstFunc, Memory_Atomic_Or_Test) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryAtomic ma(OR);
-    RunCustomTestProlog(&ma);
+    if (!RunCustomTestProlog(&ma)) return;
     ma.MemoryAtomicTest();
     RunCustomTestEpilog(&ma);
-  );
 }
 
 TEST(rocrtstFunc, Memory_Atomic_Xor_Test) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryAtomic ma(XOR);
-    RunCustomTestProlog(&ma);
+    if (!RunCustomTestProlog(&ma)) return;
     ma.MemoryAtomicTest();
     RunCustomTestEpilog(&ma);
-  );
 }
 
 TEST(rocrtstFunc, Memory_Atomic_Min_Test) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryAtomic ma(MIN);
-    RunCustomTestProlog(&ma);
+    if (!RunCustomTestProlog(&ma)) return;
     ma.MemoryAtomicTest();
     RunCustomTestEpilog(&ma);
-  );
 }
 
 TEST(rocrtstFunc, Memory_Atomic_Max_Test) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryAtomic ma(MAX);
-    RunCustomTestProlog(&ma);
+    if (!RunCustomTestProlog(&ma)) return;
     ma.MemoryAtomicTest();
     RunCustomTestEpilog(&ma);
-  );
 }
 
 TEST(rocrtstFunc, Memory_Atomic_Inc_Test) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryAtomic ma(INC);
-    RunCustomTestProlog(&ma);
+    if (!RunCustomTestProlog(&ma)) return;
     ma.MemoryAtomicTest();
     RunCustomTestEpilog(&ma);
-  );
 }
 
 TEST(rocrtstFunc, Memory_Atomic_Dec_Test) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryAtomic ma(DEC);
-    RunCustomTestProlog(&ma);
+    if (!RunCustomTestProlog(&ma)) return;
     ma.MemoryAtomicTest();
     RunCustomTestEpilog(&ma);
-  );
 }
 
 TEST(rocrtstFunc, Memory_Atomic_Xchg_Test) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryAtomic ma(XCHG);
-    RunCustomTestProlog(&ma);
+    if (!RunCustomTestProlog(&ma)) return;
     ma.MemoryAtomicTest();
     RunCustomTestEpilog(&ma);
-  );
 }
 
 TEST(rocrtstFunc, DISABLED_DebugBasicTests) {
-  RUN_IF_NOT_EMU_MODE(
     DebugBasicTest mt;
-    RunCustomTestProlog(&mt);
+    if (!RunCustomTestProlog(&mt)) return;
     mt.VectorAddDebugTrapTest();
     RunCustomTestEpilog(&mt);
-  );
 }
 
 TEST(rocrtstFunc, Memory_Alignment_Test) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryAlignmentTest ma;
-    RunCustomTestProlog(&ma);
+    if (!RunCustomTestProlog(&ma)) return;
     ma.MemoryPoolAlignment();
     RunCustomTestEpilog(&ma);
-  );
 }
 
 TEST(rocrtstFunc, Deallocation_Notifier_Test) {
-  RUN_IF_NOT_EMU_MODE(
     DeallocationNotifierTest notifier;
     RunGenericTest(&notifier);
-  );
 }
 
 TEST(rocrtstFunc, AgentPropertiesTests) {
-  RUN_IF_NOT_EMU_MODE(
     AgentPropTest propTest;
-    RunCustomTestProlog(&propTest);
+    if (!RunCustomTestProlog(&propTest)) return;
     propTest.QueryAgentUUID();
     propTest.QueryAgentClockCounters();
     RunCustomTestEpilog(&propTest);
-  );
 }
 
 TEST(rocrtstFunc, SvmMemory_Basic_Test) {
-  RUN_IF_NOT_EMU_MODE(
     SvmMemoryTestBasic smt;
 
-    RunCustomTestProlog(&smt);
+    if (!RunCustomTestProlog(&smt)) return;
     smt.TestCreateDestroy();
     smt.TestSVMPrefetch();
     smt.TestSVMBatchDiscard();
     RunCustomTestEpilog(&smt);
-  );
 }
 
 TEST(rocrtstFunc, SvmMemory_Negative_Test) {
-  RUN_IF_NOT_EMU_MODE(
     SvmMemoryTestBasic smt;
-    RunCustomTestProlog(&smt);
+    if (!RunCustomTestProlog(&smt)) return;
     smt.TestSVMDiscardNegative();
     RunCustomTestEpilog(&smt);
-  );
 }
 
 TEST(rocrtstFunc, VirtMemory_Basic_Test) {
-  RUN_IF_NOT_EMU_MODE(
     VirtMemoryTestBasic vmt;
 
-    RunCustomTestProlog(&vmt);
+    if (!RunCustomTestProlog(&vmt)) return;
     vmt.TestCreateDestroy();
     vmt.TestRefCount();
     vmt.TestPartialMapping();
     RunCustomTestEpilog(&vmt);
-  );
 }
 
 TEST(rocrtstFunc, VirtMemory_Access_Test) {
-  RUN_IF_NOT_EMU_MODE(
     VirtMemoryTestBasic vmt;
 
-    RunCustomTestProlog(&vmt);
+    if (!RunCustomTestProlog(&vmt)) return;
     vmt.CPUAccessToGPUMemoryTest();
     vmt.GPUAccessToCPUMemoryTest();
     vmt.GPUAccessToGPUMemoryTest();
     RunCustomTestEpilog(&vmt);
-  );
 }
 
 TEST(rocrtstFunc, VirtMemory_Accounting_Test) {
-  RUN_IF_NOT_EMU_MODE(
     VirtMemoryTestBasic vmt;
 
-    RunCustomTestProlog(&vmt);
+    if (!RunCustomTestProlog(&vmt)) return;
     vmt.MemoryAccountingTest();
     RunCustomTestEpilog(&vmt);
-  );
 }
 
 TEST(rocrtstFunc, VirtMemory_Aliasing_Test) {
-  RUN_IF_NOT_EMU_MODE(
     VirtMemoryTestBasic vmt;
 
-    RunCustomTestProlog(&vmt);
+    if (!RunCustomTestProlog(&vmt)) return;
     vmt.TestVirtAddressAlias();
     RunCustomTestEpilog(&vmt);
-  );
 }
 
 TEST(rocrtstFunc, VirtMemory_Interprocess_Test) {
-  RUN_IF_NOT_EMU_MODE(
     VirtMemoryTestInterProcess vmt;
-    RunCustomTestProlog(&vmt);
+    if (!RunCustomTestProlog(&vmt)) return;
     RunCustomTestEpilog(&vmt);
-  );
 }
 
 TEST(rocrtstFunc, Filter_Devices_Test) {
-  RUN_IF_NOT_EMU_MODE(
     FilterDevicesTest fd;
-    RunCustomTestProlog(&fd);
+    if (!RunCustomTestProlog(&fd)) return;
     fd.TestRocrVisibleDevicesFiltering();
     RunCustomTestEpilog(&fd);
-  );
 }
 
 TEST(rocrtstFunc, Counted_Queue_Basic_Test) {
   CountedQueuesTest cq;
-  RunCustomTestProlog(&cq);
+  if (!RunCustomTestProlog(&cq)) return;
   cq.CountedQueueBasicApiTest();
   RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Same_Priority_Max_Limit_Test) {
   CountedQueuesTest cq;
-  RunCustomTestProlog(&cq);
+  if (!RunCustomTestProlog(&cq)) return;
   cq.CountedQueues_SamePriority_MaxLimitTest();
   RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Invalid_Args_Test) {
   CountedQueuesTest cq;
-  RunCustomTestProlog(&cq);
+  if (!RunCustomTestProlog(&cq)) return;
   cq.InvalidArgsTest();
   RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Multiple_Priorities_Limit_Test) {
   CountedQueuesTest cq;
-  RunCustomTestProlog(&cq);
+  if (!RunCustomTestProlog(&cq)) return;
   cq.CountedQueuesAllPrioritiesLimitTest();
   RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Set_Priority_Nack_Test) {
   CountedQueuesTest cq;
-  RunCustomTestProlog(&cq);
+  if (!RunCustomTestProlog(&cq)) return;
   cq.CountedQueuesSetPriorityNackTest();
   RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Set_CUMask_Nack_Test) {
   CountedQueuesTest cq;
-  RunCustomTestProlog(&cq);
+  if (!RunCustomTestProlog(&cq)) return;
   cq.CountedQueuesSetCUMaskNackTest();
   RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Dispatch_Test) {
   CountedQueuesTest cq;
-  RunCustomTestProlog(&cq);
+  if (!RunCustomTestProlog(&cq)) return;
   cq.CountedQueuesDispatchTest();
   RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Multithreaded_Dispatch_Test) {
   CountedQueuesTest cq;
-  RunCustomTestProlog(&cq);
+  if (!RunCustomTestProlog(&cq)) return;
   cq.CountedQueuesMultithreadedDispatchTest();
   RunCustomTestEpilog(&cq);
 }
 
 TEST(rocrtstFunc, Counted_Queue_Overflow_And_Wraparound_Test) {
   CountedQueuesTest cq;
-  RunCustomTestProlog(&cq);
+  if (!RunCustomTestProlog(&cq)) return;
   cq.CountedQueuesOverflowWrapAroundTest();
   RunCustomTestEpilog(&cq);
 }
@@ -678,16 +610,15 @@ TEST(rocrtstFunc, Counted_Queue_Overflow_And_Wraparound_Test) {
 #ifdef HSA_ENABLE_AMDCUID_SUPPORT
 TEST(rocrtstFunc, Cuid_GPU_Validation_Test) {
   CuidTest ct;
-  RunCustomTestProlog(&ct);
+  if (!RunCustomTestProlog(&ct)) return;
   ct.ValidateGpuCuidTest();
   RunCustomTestEpilog(&ct);
 }
 #endif
 
 TEST(rocrtstNeg, Memory_Negative_Tests) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryAllocateNegativeTest mt;
-    RunCustomTestProlog(&mt);
+    if (!RunCustomTestProlog(&mt)) return;
     mt.ZeroMemoryAllocateTest();
     mt.MaxMemoryAllocateTest();
 
@@ -696,106 +627,83 @@ TEST(rocrtstNeg, Memory_Negative_Tests) {
     // mt.FreeQueueRingBufferTest();
 
     RunCustomTestEpilog(&mt);
-  );
 }
 
 TEST(rocrtstNeg, Queue_Validation_InvalidDimension) {
-  RUN_IF_NOT_EMU_MODE(
     QueueValidation qv(true, false, false, false, false);
-    RunCustomTestProlog(&qv);
+    if (!RunCustomTestProlog(&qv)) return;
     qv.QueueValidationForInvalidDimension();
     RunCustomTestEpilog(&qv);
-  );
 }
 
 TEST(rocrtstNeg, Queue_Validation_InvalidGroupMemory) {
-  RUN_IF_NOT_EMU_MODE(
     QueueValidation qv(false, true, false, false, false);
-    RunCustomTestProlog(&qv);
+    if (!RunCustomTestProlog(&qv)) return;
     qv.QueueValidationInvalidGroupMemory();
     RunCustomTestEpilog(&qv);
-  );
 }
 
 TEST(rocrtstNeg, Queue_Validation_InvalidKernelObject) {
-  RUN_IF_NOT_EMU_MODE(
     QueueValidation qv(false, false, true, false, false);
-    RunCustomTestProlog(&qv);
+    if (!RunCustomTestProlog(&qv)) return;
     qv.QueueValidationForInvalidKernelObject();
     RunCustomTestEpilog(&qv);
-  );
 }
 
 TEST(rocrtstNeg, Queue_Validation_InvalidPacket) {
-  RUN_IF_NOT_EMU_MODE(
     QueueValidation qv(false, false, false, true, false);
-    RunCustomTestProlog(&qv);
+    if (!RunCustomTestProlog(&qv)) return;
     qv.QueueValidationForInvalidPacket();
     RunCustomTestEpilog(&qv);
-  );
 }
 
 TEST(rocrtstNeg, DISABLED_Queue_Validation_InvalidWorkGroupSize) {
-  RUN_IF_NOT_EMU_MODE(
     QueueValidation qv(false, false, false, false, true);
-    RunCustomTestProlog(&qv);
+    if (!RunCustomTestProlog(&qv)) return;
     qv.QueueValidationForInvalidWorkGroupSize();
     RunCustomTestEpilog(&qv);
-  );
 }
 
 TEST(rocrtstStress, Memory_Concurrent_Allocate_Test) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryConcurrentTest mt(true, false, false);
-    RunCustomTestProlog(&mt);
+    if (!RunCustomTestProlog(&mt)) return;
     mt.MemoryConcurrentAllocate();
     RunCustomTestEpilog(&mt);
-  );
 }
 
 TEST(rocrtstStress, Memory_Concurrent_Free_Test) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryConcurrentTest mt(false, true, false);
-    RunCustomTestProlog(&mt);
+    if (!RunCustomTestProlog(&mt)) return;
     mt.MemoryConcurrentFree();
     RunCustomTestEpilog(&mt);
-  );
 }
 
 TEST(rocrtstStress, Memory_Concurrent_Pool_Info_Test) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryConcurrentTest mt(false, false, true);
-    RunCustomTestProlog(&mt);
+    if (!RunCustomTestProlog(&mt)) return;
     mt.MemoryConcurrentPoolGetInfo();
     RunCustomTestEpilog(&mt);
-  );
 }
 
 TEST(rocrtstStress, Queue_Add_Write_Index_ConcurrentTest) {
-  RUN_IF_NOT_EMU_MODE(
     QueueWriteIndexConcurrentTest Qw(true, false, false);
-    RunCustomTestProlog(&Qw);
+    if (!RunCustomTestProlog(&Qw)) return;
     Qw.QueueAddWriteIndexAtomic();
     RunCustomTestEpilog(&Qw);
-  );
 }
 
 TEST(rocrtstStress, Queue_CAS_Write_Index_ConcurrentTest) {
-  RUN_IF_NOT_EMU_MODE(
     QueueWriteIndexConcurrentTest Qw(false, true, false);
-    RunCustomTestProlog(&Qw);
+    if (!RunCustomTestProlog(&Qw)) return;
     Qw.QueueCasWriteIndexAtomic();
     RunCustomTestEpilog(&Qw);
-  );
 }
 
 TEST(rocrtstStress, Queue_LoadStore_Write_Index_ConcurrentTest) {
-  RUN_IF_NOT_EMU_MODE(
     QueueWriteIndexConcurrentTest Qw(false, false, true);
-    RunCustomTestProlog(&Qw);
+    if (!RunCustomTestProlog(&Qw)) return;
     Qw.QueueLoadStoreWriteIndexAtomic();
     RunCustomTestEpilog(&Qw);
-  );
 }
 
 TEST(rocrtstPerf, Memory_Async_Copy) {
@@ -811,10 +719,8 @@ TEST(rocrtstPerf, Memory_Async_Copy) {
 }
 
 TEST(rocrtstPerf, Memory_Async_Copy_On_Engine) {
-  RUN_IF_NOT_EMU_MODE(
     MemoryAsyncCopyOnEngine mac;
     RunGenericTest(&mac);
-  );
 }
 
 TEST(rocrtstPerf, ENQUEUE_LATENCY) {
@@ -856,8 +762,39 @@ TEST(rocrtstPerf, Agent_Preload_Latency) {
   RunGenericTest(&apt);
 }
 
+
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
+
+  // Initialize environment configuration (must be done first)
+  rocrtst::EnvironmentConfig::getInstance().initialize();
+
+  // Initialize platform-aware test filtering
+  rocrtst::TestFilterManager& filterMgr =
+      rocrtst::TestFilterManager::getInstance();
+
+  // Locate config file (matches hsaco file search pattern)
+  std::string configPath = rocrtst::LocateConfigFile();
+  filterMgr.initialize(configPath);
+
+  // Display platform information
+  rocrtst::PlatformType platform = filterMgr.getPlatform();
+  std::cout << "========================================================\n";
+  std::cout << "ROC Runtime Test Suite\n";
+  std::cout << "Platform detected: "
+            << rocrtst::PlatformDetector::platformName(platform) << '\n';
+  std::cout << "Configuration: " << filterMgr.getConfigPath() << '\n';
+
+  std::vector<std::string> activeGroups = filterMgr.getActiveGroups();
+  if (!activeGroups.empty()) {
+    std::cout << "Active groups: ";
+    for (size_t i = 0; i < activeGroups.size(); ++i) {
+      std::cout << activeGroups[i];
+      if (i < activeGroups.size() - 1) std::cout << ", ";
+    }
+    std::cout << '\n';
+  }
+  std::cout << "========================================================\n";
 
   if (rocrtst::isEmuModeEnabled()) {
     std::cout << "--- Emulation build ---" << std::endl;

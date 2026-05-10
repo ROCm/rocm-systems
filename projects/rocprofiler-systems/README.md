@@ -173,6 +173,14 @@ source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
 > git config --global --add safe.directory /home/development/external/timemory
 > ```
 
+Install the Python test dependencies (requires Python 3.8+):
+
+```shell
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
 Then, use the following command to start automated testing:
 
 ```shell

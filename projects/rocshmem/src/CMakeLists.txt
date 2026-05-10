@@ -64,6 +64,31 @@ target_compile_options(${PROJECT_NAME} PUBLIC ${ROCSHMEM_COMPILE_FLAGS})
 #)
 
 ###############################################################################
+# DEVICE DEBUG INFO WORKAROUND
+###############################################################################
+# rocshmem_gpu.cpp and team.cpp trigger a clang/ROCm compiler bug: the HIP
+# heterogeneous DWARF extensions generate invalid DIExpression metadata in
+# device-side bitcode, causing the LLVM LTO verifier inside lld to abort at
+# link time when any binary links against librocshmem.a with -fgpu-rdc.
+#
+# Root cause: the device sub-pass emits heterogeneous DWARF extensions for
+# GPU-address-space-qualified variables that the LTO verifier cannot accept.
+#
+# Fix: -gno-heterogeneous-dwarf suppresses the heterogeneous DWARF extensions
+# that generate invalid DIExpression metadata in the device sub-pass, causing
+# the LLVM LTO verifier inside lld to abort at link time.  Standard DWARF
+# DIExpressions are emitted instead and pass the verifier.  The flag is passed
+# only to the device sub-pass via -Xarch_device; the host sub-pass continues
+# to receive full -g.
+set_property(
+  SOURCE rocshmem_gpu.cpp team.cpp
+  TARGET_DIRECTORY ${PROJECT_NAME}
+  APPEND PROPERTY COMPILE_OPTIONS
+    "$<$<CONFIG:Debug,RelWithDebInfo>:-Xarch_device>"
+    "$<$<CONFIG:Debug,RelWithDebInfo>:-gno-heterogeneous-dwarf>"
+)
+
+###############################################################################
 # ROCSHMEM TARGET FOR BACKENDS
 ###############################################################################
 if (USE_GDA)

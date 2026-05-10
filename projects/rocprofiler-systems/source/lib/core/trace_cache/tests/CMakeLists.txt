@@ -25,5 +25,8 @@ target_link_libraries(
 
 target_include_directories(
     trace-cache-tests
-    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/source/lib
+        ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
+        ${CMAKE_BINARY_DIR}/source/lib/
 )

@@ -71,6 +71,44 @@ namespace codeobj
 {
 namespace disassembly
 {
+struct FallbackOp
+{
+    const char* str{};
+    size_t      size{};
+};
+
+inline FallbackOp
+get_fallback_op_gfx1250(uint32_t header)
+{
+    if((header >> 7) == 0) return {"v_vop_generic ", 4};
+
+    switch(header)
+    {
+        case 0b11001100: return {"v_vop3p_generic ", 8};
+        case 0b11001111: return {"v_vopd3_generic ", 12};
+        default: break;
+    }
+
+    header >>= 2;
+
+    switch(header)
+    {
+        case 0b110001: return {"buffer_load_generic ", 12};
+        case 0b111011: return {"global_load_generic ", 12};
+        case 0b110100: return {"image_load_generic ", 12};
+        case 0b110010: return {"v_vopd_generic ", 8};
+        case 0b110101: return {"v_vopsd_generic ", 8};
+        case 0b110110: return {"ds_generic ", 8};
+        case 0b111101: return {"s_load_generic ", 8};
+        default: break;
+    }
+
+    header >>= 4;
+    if(header == 0b10) return {"s_sop ", 4};
+
+    return {nullptr, 0};
+}
+
 class CodeObjectBinary
 {
 public:
@@ -206,6 +244,8 @@ public:
             &DisassemblyInstance::inst_callback,
             [](uint64_t, void*) {},
             &info));
+
+        if(input_isa.find("gfx1250") != std::string::npos) gfxip = 1250;
     }
     ~DisassemblyInstance()
     {
@@ -218,8 +258,25 @@ public:
         uint64_t size_read;
         uint64_t addr_in_buffer = reinterpret_cast<uint64_t>(buffer.data()) + faddr;
 
-        THROW_COMGR(
-            amd_comgr_disassemble_instruction(info, addr_in_buffer, (void*) this, &size_read));
+        auto _status =
+            amd_comgr_disassemble_instruction(info, addr_in_buffer, (void*) this, &size_read);
+        if(_status != AMD_COMGR_STATUS_SUCCESS)
+        {
+            if(faddr + 4 > buffer.size()) THROW_COMGR(_status);
+
+            uint32_t read = 0;
+            std::memcpy(&read, buffer.data() + faddr, 4);
+
+            FallbackOp fallback{};
+
+            if(gfxip == 1250) fallback = get_fallback_op_gfx1250(read >> 24);
+
+            if(fallback.str == nullptr || fallback.size == 0) THROW_COMGR(_status);
+
+            this->last_instruction = fallback.str;
+            size_read              = fallback.size;
+        }
+
         return {std::move(this->last_instruction), size_read};
     }
 
@@ -295,6 +352,7 @@ public:
             return offset;
     }
 
+    int                            gfxip{};
     std::vector<char>              buffer{};
     std::string                    last_instruction{};
     amd_comgr_disassembly_info_t   info{};

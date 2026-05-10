@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
 
 #include <timemory/components/gotcha/backends.hpp>
@@ -33,8 +33,6 @@ struct unblocking_gotcha : comp::base<unblocking_gotcha, void>
 
     template <size_t Idx>
     using gotcha_index = std::integral_constant<size_t, Idx>;
-
-    ROCPROFSYS_DEFAULT_OBJECT(unblocking_gotcha)
 
     // string id for component
     static std::string label();

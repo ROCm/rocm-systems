@@ -1,8 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "lib/aqlprofile/core/logger.h"
+
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+
 #include <fstream>
 #include <filesystem>
 #include <thread>
@@ -10,13 +13,12 @@
 #include <sstream>
 #include <cctype>
 #include <cstdlib>
+
 #ifdef _WIN32
 #    include <stdlib.h>  // _putenv_s, _unsetenv via _putenv_s
 #else
 #    include <unistd.h>
 #endif
-
-#include "../logger.h"
 
 #ifdef _WIN32
 static inline int
@@ -31,13 +33,6 @@ unsetenv(const char* name)
     return static_cast<int>(_putenv_s(name, ""));
 }
 #endif
-
-// Define static members for Logger class
-namespace aql_profile
-{
-Logger::mutex_t Logger::mutex_;
-Logger*         Logger::instance_ = nullptr;
-}  // namespace aql_profile
 
 namespace aql_profile
 {
@@ -72,8 +67,7 @@ protected:
         }
     }
 
-    const std::string log_file_path_ =
-        (std::filesystem::temp_directory_path() / "aql_profile_log.txt").string();
+    const std::string log_file_path_ = fmt::format("/tmp/aql_profile_log_{}.txt", getpid());
 
     // Helper function to read log file content
     std::string ReadLogFile()
@@ -181,18 +175,18 @@ TEST_F(LoggerTest, ConcurrentLogging)
 {
     EnableFileLogging();
 
-    const int num_threads         = 4;
-    const int messages_per_thread = 10;
+    static constexpr int num_threads         = 4;
+    static constexpr int messages_per_thread = 10;
 
-    std::vector<std::thread> threads;
-
+    auto threads = std::vector<std::thread>{};
+    threads.reserve(num_threads);
     for(int i = 0; i < num_threads; ++i)
     {
-        threads.emplace_back([i, messages_per_thread]() {
+        threads.emplace_back([i]() {
             Logger& logger = Logger::Instance();
             for(int j = 0; j < messages_per_thread; ++j)
             {
-                logger << "Thread " << i << " Message " << j;
+                logger << "Thread " << i << " Message " << j << "\n";
             }
         });
     }
