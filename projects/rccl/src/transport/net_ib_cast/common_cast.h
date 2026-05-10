@@ -550,9 +550,8 @@ static inline ncclResult_t IbCastCommBaseGetQpByQpNum(struct ncclIbNetCommBase* 
 // "splitDataOnQps" configuration parameter, a request may be transffered over
 // a single QP per device or on all QPs of each device.
 static inline int IbCastCommBaseGetNqpsPerRequest(struct ncclIbNetCommBase* baseComm) {
-  assert(baseComm->nDataQps != -1);
   assert(baseComm->nqps != -1);
-  return (baseComm->splitDataOnQps == 1) ? baseComm->nqps : baseComm->nDataQps;
+  return (baseComm->schedParms.splitData || baseComm->schedParms.doWrr) ? baseComm->nqps : 1;
 }
 
 static inline ncclResult_t IbCastPostRecvWorkRequest(struct ibv_qp* qp, struct ibv_recv_wr* wr) {
