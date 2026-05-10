@@ -362,7 +362,7 @@ void emit_cdna3_ds_write_b128(std::vector<uint32_t> &words, uint8_t addr, uint8_
 void emit_cdna3_lds_dma_dwordx4_addr(std::vector<uint32_t> &words, uint8_t dst,
                                      uint8_t exec_save_sgpr) {
   // GLOBAL_LOAD_LDS takes a wave-uniform LDS base in M0 and implicitly adds
-  // 16 * lane_id for the four-dword vector payload.  DS_WRITE_B128 has no such
+  // 16 * lane_id for the four-dword vector payload. DS_WRITE_B128 has no such
   // implicit lane offset, so materialize the byte address in a scratch VGPR.
   //
   // MBCNT counts active lanes before the current lane. Temporarily enabling
@@ -1084,6 +1084,18 @@ std::vector<uint32_t> lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction 
   emit_cdna3_vop3(words, kCdna3OpLshlrevB32, halfword_selector, scalar_positive_inline_u32(1),
                   vgpr_src(halfword_selector));
 
+  // A B16 transpose load groups each 16-lane quarter-wave into four source
+  // lanes per K element. For destination lane L, source element e is gathered
+  // from source lane:
+  //
+  //   (L & 0x30) + ((L & 0x0c) >> 2) + e * 4
+  //
+  // DS_BPERMUTE takes a byte address, so the base byte address is:
+  //
+  //   ((L & 0x30) << 2) | (L & 0x0c)
+  //
+  // and element e advances by 16 bytes. The selected halfword within each
+  // source lane is fixed by L & 3.
   emit_cdna3_vop3(words, kCdna3OpAndB32, lane_base, scalar_positive_inline_u32(0x30),
                   vgpr_src(tmp));
   emit_cdna3_vop3(words, kCdna3OpLshlrevB32, lane_base, scalar_positive_inline_u32(2),
