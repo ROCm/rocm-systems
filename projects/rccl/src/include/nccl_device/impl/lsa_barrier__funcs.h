@@ -8,10 +8,15 @@
 #define _NCCL_DEVICE_MEM_BARRIER__FUNCS_H_
 #include "lsa_barrier__types.h"
 #include "comm__types.h"
+#include <atomic>
 
-#define __CUDACC__ 0
-
-#if __CUDACC__
+// AMD/HIP port of upstream NCCL lsa_barrier device methods.  Body copied
+// verbatim from rocm-systems/projects/rccl/src/include/nccl_device/impl/mem_barrier__funcs.h
+// on the develop branch which already had the AMD platform branches written
+// using __atomic_* GCC builtins.  Without this port, fixed-sym fails to link
+// once GENERATE_SYM_KERNELS=ON because the LSA barrier device template stays
+// undefined under the hipify-mangled __CUDACC__ guards.
+#if __HIPCC__
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(
     Coop coop, ncclDevComm const& comm, ncclTeam team,
@@ -32,7 +37,7 @@ NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(
 }
 #endif
 
-#if __CUDACC__
+#if __HIPCC__
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(
     Coop coop, ncclDevComm const& comm, ncclTeamTagLsa, uint32_t index, bool multimem
@@ -42,7 +47,7 @@ NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::ncclLsaBarrierSession(
 }
 #endif
 
-#if __CUDACC__
+#if __HIPCC__
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::~ncclLsaBarrierSession() {
   uint32_t* state = (uint32_t*)ncclGetResourceBufferLocalPointer(this->comm, this->handle.bufHandle);
@@ -59,7 +64,31 @@ NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>::~ncclLsaBarrierSession() {
 }
 #endif
 
-#if __CUDACC__
+#if __HIPCC__
+#if __HIP_PLATFORM_AMD__
+template<typename Coop>
+NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::arrive(Coop, std::memory_order order) {
+  this->coop.sync();
+  if (this->multimem) {
+    if (this->coop.thread_rank() == 0) {
+      uint32_t* inbox = this->mcInbox(/*multimem=*/true);
+      if (nccl::utility::releaseOrderOf(order) != std::memory_order_relaxed) {
+        (void)__atomic_fetch_add(inbox, 1u, __ATOMIC_RELEASE);
+      } else {
+        (void)__atomic_fetch_add(inbox, 1u, __ATOMIC_RELAXED);
+      }
+    }
+  } else {
+    #pragma unroll 1
+    for (int i = this->coop.thread_rank(); i < this->team.nRanks - 1; i += this->coop.size()) {
+      int peer = i + (this->team.rank <= i ? 1 : 0);
+      uint32_t* inbox = this->ucInbox(peer, this->team.rank);
+      int ao = nccl::utility::toAtomicBuiltinOrder(nccl::utility::acquireOrderOf(order));
+      __atomic_store_n(inbox, this->epoch + 1, ao);
+    }
+  }
+}
+#else
 template<typename Coop>
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::arrive(Coop, cuda::memory_order order) {
   this->coop.sync();
@@ -84,8 +113,40 @@ NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::arrive(Coop, cuda::memory_o
   }
 }
 #endif
+#endif
 
-#if __CUDACC__
+#if __HIPCC__
+#if __HIP_PLATFORM_AMD__
+template<typename Coop>
+NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::wait(Coop, std::memory_order order) {
+  if (this->multimem) {
+    if (this->coop.thread_rank() == 0) {
+      uint32_t* inbox = this->mcInbox(/*multimem=*/false);
+      int ao = nccl::utility::toAtomicBuiltinOrder(nccl::utility::acquireOrderOf(order));
+      #pragma unroll 1
+      while (true) {
+        uint32_t got = __atomic_load_n(inbox, ao);
+        if (got - (this->epoch + this->team.nRanks) <= uint32_t(-1)>>1) break;
+      }
+    }
+    this->epoch += this->team.nRanks;
+  } else {
+    #pragma unroll 1
+    for (int i = this->coop.thread_rank(); i < this->team.nRanks-1; i += this->coop.size()) {
+      int peer = i + (this->team.rank <= i ? 1 : 0);
+      uint32_t* inbox = this->ucInbox(this->team.rank, peer);
+      int ao = nccl::utility::toAtomicBuiltinOrder(nccl::utility::acquireOrderOf(order));
+      #pragma unroll 1
+      while (true) {
+        uint32_t got = __atomic_load_n(inbox, ao);
+        if (got - (this->epoch + 1) <= uint32_t(-1)>>1) break;
+      }
+    }
+    this->epoch += 1;
+  }
+  this->coop.sync();
+}
+#else
 template<typename Coop>
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::wait(Coop, cuda::memory_order order) {
   if (this->multimem) {
@@ -116,10 +177,15 @@ NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::wait(Coop, cuda::memory_ord
   this->coop.sync();
 }
 #endif
+#endif
 
-#if __CUDACC__
+#if __HIPCC__
 template<typename Coop>
+#if __HIP_PLATFORM_AMD__
+NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::sync(Coop coop, std::memory_order order) {
+#else
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::sync(Coop coop, cuda::memory_order order) {
+#endif
   this->arrive(coop, order);
   this->wait(coop, order);
 }

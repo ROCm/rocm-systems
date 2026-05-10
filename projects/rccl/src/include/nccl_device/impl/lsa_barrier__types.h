@@ -9,14 +9,12 @@
 #include "../lsa_barrier.h"
 #include "core__types.h"
 
-#define __CUDACC__ 0
-
 struct ncclLsaBarrierHandle {
   ncclDevResourceHandle_t bufHandle;
   int nBarriers;
 };
 
-#if __CUDACC__
+#if __HIPCC__
 template<typename Coop>
 struct ncclLsaBarrierSession_internal {
   Coop coop;
