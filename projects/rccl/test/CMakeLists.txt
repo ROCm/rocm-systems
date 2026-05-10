@@ -151,6 +151,7 @@ if(BUILD_TESTS)
     AllToAllTests.cpp
     AllToAllVTests.cpp
     BroadcastTests.cpp
+    EnqueueDrainErrorTest.cpp
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
@@ -191,6 +192,13 @@ if(BUILD_TESTS)
 
   # Create rccl-UnitTests binary
   add_executable(rccl-UnitTests ${TEST_SOURCE_FILES})
+
+  # EnqueueDrainErrorTest defines hipFuncGetAttributes (with a .symver alias
+  # to hip_4.2) and intercepts librccl.so's call to validate NVIDIA NCCL PR #1864.
+  # -rdynamic exports the executable's symbol so the dynamic linker resolves
+  # librccl's import to it.  When the test does not arm injection, the override
+  # is a transparent pass-through to the real symbol, so other tests are unaffected.
+  target_link_options(rccl-UnitTests PRIVATE "LINKER:--export-dynamic")
 
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.
