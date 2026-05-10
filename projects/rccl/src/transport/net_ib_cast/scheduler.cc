@@ -135,7 +135,7 @@ ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms *parms) {
       }
     }
   
-    INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) NCCL_IB_QPS_PER_CONNECTION set to %d", ncclParamIbCastQpsPerConn());
+    INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) NCCL_IB_QPS_PER_CONNECTION set to %ld", ncclParamIbCastQpsPerConn());
   
   exit:
     free(logFileName);
@@ -362,6 +362,11 @@ int IbCastQpSchedGetEffectiveTxNqps(struct ncclIbRequest* req, int *startQpIndex
 
   *wrrSched = false;
 
+  if (!parms->enable) {
+    qpIndex = req->id % req->base->nqps;
+    goto exit;
+  }
+
   if (req->base->nqps == 1)
     goto exit;
 
@@ -369,7 +374,7 @@ int IbCastQpSchedGetEffectiveTxNqps(struct ncclIbRequest* req, int *startQpIndex
     goto oneQp;
 
   dataPerQp = (req->send.size * req->nreqs) / req->base->nqps;
-  if ((dataPerQp >= parms->splitDataMin) ||  !parms->enable) {
+  if (dataPerQp >= parms->splitDataMin) {
     goto exit;
   }
 
