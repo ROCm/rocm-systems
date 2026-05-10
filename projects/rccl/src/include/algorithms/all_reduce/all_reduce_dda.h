@@ -40,6 +40,7 @@ __global__ void ddaAllReduceFlatIpc(
       true /* hasPreviousMemAccess */,
       true /* hasSubsequentMemAccess */>();
 
+  // pattern=2: full reduce into recvbuff (one-shot, not scatter)
   reduceScatter<T, NRANKS, hasAcc>(
       ipcbuffs, recvbuff, acc, selfRank, idxStart, idxEnd, idxStride, 2);
 
