@@ -8,6 +8,7 @@
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <algorithm>
+#include <cstdlib>
 #include <iostream>
 #include <random>
 #include <type_traits>
@@ -84,7 +85,7 @@ const char* ApiToString(apiToTest api) {
 
 }  // namespace
 
-template <typename TestType> void Memcpy_And_verify(size_t NUM_ELM) {
+template <typename TestType> void Memcpy_And_verify(size_t NUM_ELM, std::mt19937& gen) {
   // level_0 (quick level): skip H2D/D2H/H2DAsync/D2HAsync entirely,
   // and cap async APIs (MemcpyAsync/DtoDAsync) at 64 KiB.
   // All other levels run every API at every size.
@@ -114,8 +115,6 @@ template <typename TestType> void Memcpy_And_verify(size_t NUM_ELM) {
       HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, B_h, nullptr, false);
       continue;
     }
-    std::random_device rd_seed;
-    std::mt19937 gen(rd_seed());
 
     TestType* A_d[MAX_GPU]{};
     hipStream_t stream[MAX_GPU]{};
@@ -369,6 +368,15 @@ HIP_TEST_CASE(Stress_hipMemcpy_multiDevice_AllAPIs) {
     }
   }
 
+  std::random_device rd;
+  unsigned int seed = rd();
+  const char* seed_env = std::getenv("HIP_TEST_SEED");
+  if (seed_env && seed_env[0] != '\0') {
+    seed = static_cast<unsigned int>(std::atol(seed_env));
+  }
+  std::mt19937 gen(seed);
+  std::cout << "[Stress_hipMemcpy_multiDevice_AllAPIs] seed=" << seed << std::endl;
+
   int step = 0;
   for (size_t NUM_ELM : all_sizes) {
     NUM_ELM = std::max(NUM_ELM, size_t{1});
@@ -380,7 +388,7 @@ HIP_TEST_CASE(Stress_hipMemcpy_multiDevice_AllAPIs) {
     std::cout << "[Stress_hipMemcpy_multiDevice_AllAPIs] " << step << "/" << total_steps
               << " NUM_ELM=" << NUM_ELM << " bytes=" << requested_bytes << std::endl;
     if (requested_bytes <= free) {
-      Memcpy_And_verify<char>(NUM_ELM);
+      Memcpy_And_verify<char>(NUM_ELM, gen);
       HIP_CHECK(hipDeviceSynchronize());
     } else {
       std::cout << "[Stress_hipMemcpy_multiDevice_AllAPIs] skip (need " << requested_bytes
