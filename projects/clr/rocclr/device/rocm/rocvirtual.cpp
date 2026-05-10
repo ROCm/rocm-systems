@@ -1387,7 +1387,7 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
                                      ? [this]() -> const char* {
                                          if (!roc_device_.settings().queue_pipe_dist_) return "";
                                          static thread_local char buf[32];
-                                         snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                                         snprintf(buf, sizeof(buf), " virtual_pipe_id=%zu,",
                                                   gpu_queue_->id % roc_device_.NumHwPipes());
                                          return buf;
                                        }()
@@ -1773,7 +1773,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
                         ? [this]() -> const char* {
                             if (!roc_device_.settings().queue_pipe_dist_) return "";
                             static thread_local char buf[32];
-                            snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                            snprintf(buf, sizeof(buf), " virtual_pipe_id=%zu,",
                                      gpu_queue_->id % roc_device_.NumHwPipes());
                             return buf;
                           }()
@@ -1858,7 +1858,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
                              ? [this]() -> const char* {
                                  if (!roc_device_.settings().queue_pipe_dist_) return "";
                                  static thread_local char buf[32];
-                                 snprintf(buf, sizeof(buf), " virtual_pipe_id=%lu,",
+                                 snprintf(buf, sizeof(buf), " virtual_pipe_id=%zu,",
                                           gpu_queue_->id % roc_device_.NumHwPipes());
                                  return buf;
                                }()
