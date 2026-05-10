@@ -1,26 +1,12 @@
 /*
-Copyright (c) 2021 - present Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
-#include <hip_test_params.hh>
 #include <algorithm>
 #include <iostream>
 #include <random>
@@ -100,20 +86,18 @@ const char* ApiToString(apiToTest api) {
 
 template <typename TestType> void Memcpy_And_verify(size_t NUM_ELM) {
   // MEMCPYH2D / DtoH / H2DAsync / DtoHAsync: only run when transfer <= 64 KiB (level_2+). Not run at all for
-  // level_0 smoke. MEMCPY / DtoD (sync): no per-API cap beyond smoke 32 MiB.
-  // level_0 smoke: MemcpyAsync / DtoDAsync only when transfer <= 64 KiB.
+  // level_0 (quick level). MEMCPY / DtoD (sync): no per-API cap beyond quick level 32 MiB.
+  // level_0 (quick level): MemcpyAsync / DtoDAsync only when transfer <= 64 KiB.
   // Each API uses one randomly chosen GPU (and a second for P2P when applicable); device memory is
   // allocated only for GPUs used in that iteration.
   constexpr size_t kNonPrimaryApiMaxBytes = 64u * 1024u;
-  constexpr size_t kSmokeAsyncMaxBytes = 64u * 1024u;
+  constexpr size_t kQuickAsyncMaxBytes = 64u * 1024u;
   const size_t requested_bytes = NUM_ELM * sizeof(TestType);
-  const bool smoke_level =
-      (TestParameterStore::instance().currentTestLevel == "level_0");
 
   TestType *A_h, *B_h;
   for (apiToTest api = TEST_MEMCPY; api <= TEST_MEMCPYD2DASYNC; api = apiToTest(api + 1)) {
-    if (smoke_level && (api == TEST_MEMCPYH2D || api == TEST_MEMCPYD2H || api == TEST_MEMCPYH2DASYNC ||
-                        api == TEST_MEMCPYD2HASYNC)) {
+    if (isQuickLevel() && (api == TEST_MEMCPYH2D || api == TEST_MEMCPYD2H || api == TEST_MEMCPYH2DASYNC ||
+                           api == TEST_MEMCPYD2HASYNC)) {
       continue;
     }
     const bool primary_api = (api == TEST_MEMCPY || api == TEST_MEMCPYD2D || api == TEST_MEMCPYASYNC ||
@@ -123,7 +107,7 @@ template <typename TestType> void Memcpy_And_verify(size_t NUM_ELM) {
     }
     const bool async_api = (api == TEST_MEMCPYASYNC || api == TEST_MEMCPYH2DASYNC ||
                             api == TEST_MEMCPYD2HASYNC || api == TEST_MEMCPYD2DASYNC);
-    if (smoke_level && async_api && requested_bytes > kSmokeAsyncMaxBytes) {
+    if (isQuickLevel() && async_api && requested_bytes > kQuickAsyncMaxBytes) {
       continue;
     }
 
@@ -350,9 +334,9 @@ template <typename TestType> void Memcpy_And_verify(size_t NUM_ELM) {
 }
 
 HIP_TEST_CASE(Stress_hipMemcpy_multiDevice_AllAPIs) {
-  constexpr size_t kSmokeMaxBytes = 32u * 1024u * 1024u;
-  // Memcpy_And_verify (smoke): MemcpyAsync / DtoDAsync run only for transfer <= 64 KiB.
-  static constexpr int kNumElmStepsSmoke[] = {
+  constexpr size_t kQuickMaxBytes = 32u * 1024u * 1024u;
+  // Memcpy_And_verify (quick level): MemcpyAsync / DtoDAsync run only for transfer <= 64 KiB.
+  static constexpr int kNumElmStepsQuick[] = {
       1,  3,  7,  15, 31,  33,  63,  65,  255, 257,  1023, 1025,  4095, 4097,
       8191, 8193,  32767, 32769,  65535, 65537,
       10 * 1024,
@@ -379,15 +363,13 @@ HIP_TEST_CASE(Stress_hipMemcpy_multiDevice_AllAPIs) {
   constexpr int kPow2StartPower = 0;
   constexpr int kPow2EndPower = 32;
 
-  const bool smoke = (TestParameterStore::instance().currentTestLevel == "level_0");
-
   size_t free = 0, total = 0;
   HIP_CHECK(hipMemGetInfo(&free, &total));
 
-  const int* const extra_elm_steps = smoke ? kNumElmStepsSmoke : kNumElmSteps;
+  const int* const extra_elm_steps = isQuickLevel() ? kNumElmStepsQuick : kNumElmSteps;
   const size_t extra_elm_count =
-      smoke ? sizeof(kNumElmStepsSmoke) / sizeof(kNumElmStepsSmoke[0])
-            : sizeof(kNumElmSteps) / sizeof(kNumElmSteps[0]);
+      isQuickLevel() ? sizeof(kNumElmStepsQuick) / sizeof(kNumElmStepsQuick[0])
+                     : sizeof(kNumElmSteps) / sizeof(kNumElmSteps[0]);
 
   std::vector<size_t> all_sizes;
   all_sizes.reserve((kPow2EndPower - kPow2StartPower + 1) + extra_elm_count);
@@ -403,8 +385,8 @@ HIP_TEST_CASE(Stress_hipMemcpy_multiDevice_AllAPIs) {
   auto use_size = [&](size_t NUM_ELM) -> bool {
     NUM_ELM = std::max(NUM_ELM, size_t{1});
     const size_t requested_bytes = NUM_ELM * sizeof(char);
-    // level_0 smoke: cap all scheduled sizes at 32 MiB (Memcpy_And_verify uses a subset of APIs).
-    if (smoke && requested_bytes > kSmokeMaxBytes) {
+    // level_0 (quick level): cap all scheduled sizes at 32 MiB (Memcpy_And_verify uses a subset of APIs).
+    if (isQuickLevel() && requested_bytes > kQuickMaxBytes) {
       return false;
     }
     return true;

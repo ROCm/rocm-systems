@@ -6,7 +6,6 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_helper.hh>
-#include <hip_test_params.hh>
 
 #include <algorithm>
 #include <iostream>
@@ -14,9 +13,9 @@
 #define ADDITIONAL_MEMORY_PERCENT 10
 
 namespace {
-constexpr size_t kSmokeAllocCapBytes = 32u * 1024u * 1024u;
+constexpr size_t kQuickAllocCapBytes = 32u * 1024u * 1024u;
 // End-of-buffer memset uses samplesize bytes; keep alloc large enough for non-overlap (AllGpu only).
-constexpr size_t kSmokeAllGpuMinAllocBytes = 4096u;
+constexpr size_t kQuickAllGpuMinAllocBytes = 4096u;
 }  // namespace
 
 // Stress allocation tests
@@ -24,9 +23,6 @@ constexpr size_t kSmokeAllGpuMinAllocBytes = 4096u;
 // But since max allocation can fail, we need to try the next value
 
 HIP_TEST_CASE(Stress_hipHostMalloc_MaxAllocation) {
-  const bool smoke =
-      (TestParameterStore::instance().currentTestLevel == "level_0");
-
   size_t devMemAvail{0}, devMemFree{0};
   HIP_CHECK(hipMemGetInfo(&devMemFree, &devMemAvail));
   auto hostMemFree = HipTest::getAvailableSystemMemoryInMB() * 1024 * 1024;  // In bytes
@@ -35,9 +31,9 @@ HIP_TEST_CASE(Stress_hipHostMalloc_MaxAllocation) {
   REQUIRE(hostMemFree > 0);
   // which is the limiter cpu or gpu
   size_t memFree = std::min(devMemFree, hostMemFree);
-  if (smoke) {
-    memFree = std::min(memFree, kSmokeAllocCapBytes);
-    std::cout << "[Stress_hipHostMalloc_MaxAllocation] level_0 cap: " << kSmokeAllocCapBytes
+  if (isQuickLevel()) {
+    memFree = std::min(memFree, kQuickAllocCapBytes);
+    std::cout << "[Stress_hipHostMalloc_MaxAllocation] level_0 cap: " << kQuickAllocCapBytes
               << " bytes" << std::endl;
   }
   REQUIRE(memFree > 0);
@@ -63,12 +59,9 @@ HIP_TEST_CASE(Stress_hipHostMalloc_MaxAllocation) {
 
 // Allocate more memory than total GPU memory in each available GPU.
 // hipHostMalloc should return hipSuccess.
-// Level 0 (smoke / emulator): cap per-device allocation; level 2 keeps full oversubscription.
+// Level 0 (quick level): cap per-device allocation; level 2 keeps full oversubscription.
 
 HIP_TEST_CASE(Stress_hipHostMalloc_MaxAllocation_AllGpu) {
-  const bool smoke =
-      (TestParameterStore::instance().currentTestLevel == "level_0");
-
   char* A = nullptr;
   size_t maxGpuMem = 0, availableMem = 0;
   int count = 0;
@@ -78,11 +71,11 @@ HIP_TEST_CASE(Stress_hipHostMalloc_MaxAllocation_AllGpu) {
     HIP_CHECK(hipSetDevice(dev));
     HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
     size_t allocsize = maxGpuMem + ((maxGpuMem * ADDITIONAL_MEMORY_PERCENT) / 100);
-    if (smoke) {
-      allocsize = std::min(allocsize, kSmokeAllocCapBytes);
-      allocsize = std::max(allocsize, kSmokeAllGpuMinAllocBytes);
+    if (isQuickLevel()) {
+      allocsize = std::min(allocsize, kQuickAllocCapBytes);
+      allocsize = std::max(allocsize, kQuickAllGpuMinAllocBytes);
       std::cout << "[Stress_hipHostMalloc_MaxAllocation_AllGpu] dev " << dev
-                << " level_0 cap: " << kSmokeAllocCapBytes << " bytes, allocsize: " << allocsize
+                << " level_0 cap: " << kQuickAllocCapBytes << " bytes, allocsize: " << allocsize
                 << " bytes" << std::endl;
     }
     // Get free host In bytes

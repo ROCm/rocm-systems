@@ -1,24 +1,10 @@
 /*
-   Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
  #include <hip_test_common.hh>
- #include <hip_test_params.hh>
 
  #include <algorithm>
  #include <cstdlib>
@@ -29,20 +15,18 @@
 
 // Stress allocation tests
 // Try to allocate as much memory as possible, backing off gradually on failure.
-// Level 0 (smoke / emulator): cap allocation and host staging; level 2 uses ~95% free VRAM.
+// Level 0 (quick level): cap allocation and host staging; level 2 uses ~95% free VRAM.
 HIP_TEST_CASE(Stress_hipMalloc_HighSizeAlloc) {
   size_t devMemTotal{0}, devMemFree{0};
   HIP_CHECK(hipMemGetInfo(&devMemFree, &devMemTotal));
   REQUIRE(devMemFree > 0);
   REQUIRE(devMemTotal > 0);
 
-  const bool smoke =
-      (TestParameterStore::instance().currentTestLevel == "level_0");
-  constexpr size_t kSmokeAllocCap = 32u * 1024u * 1024u;
+  constexpr size_t kQuickAllocCap = 32u * 1024u * 1024u;
 
   size_t alloc_size = static_cast<size_t>(devMemFree * 0.95);
-  if (smoke) {
-    alloc_size = std::min(alloc_size, kSmokeAllocCap);
+  if (isQuickLevel()) {
+    alloc_size = std::min(alloc_size, kQuickAllocCap);
   }
   alloc_size = std::max(alloc_size, size_t{1});
 
@@ -52,7 +36,7 @@ HIP_TEST_CASE(Stress_hipMalloc_HighSizeAlloc) {
   std::cout << "[Stress_hipMalloc_HighSizeAlloc] Free Mem Available: " << devMemFree
             << " bytes out of " << devMemTotal << " bytes" << std::endl;
   std::cout << "[Stress_hipMalloc_HighSizeAlloc] Target allocation: " << alloc_size << " bytes"
-            << (smoke ? " (level_0 cap)" : "") << std::endl;
+            << (isQuickLevel() ? " (level_0 cap)" : "") << std::endl;
   while (hipMalloc(&d_ptr, alloc_size) != hipSuccess && alloc_size > 1) {
     counter++;
     alloc_size = static_cast<size_t>(alloc_size * 0.95);
