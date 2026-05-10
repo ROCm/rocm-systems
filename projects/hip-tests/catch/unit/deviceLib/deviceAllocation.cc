@@ -1209,15 +1209,19 @@ HIP_TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_Graph) {
   SECTION("Test char datatype allocation with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<char>(TEST_MALLOC_FREE));
   }
+
   SECTION("Test short datatype allocation with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<int16_t>(TEST_MALLOC_FREE));
   }
+
   SECTION("Test int datatype allocation with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<int32_t>(TEST_MALLOC_FREE));
   }
+
   SECTION("Test float datatype allocation with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<float>(TEST_MALLOC_FREE));
   }
+
   SECTION("Test double datatype allocation with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<double>(TEST_MALLOC_FREE));
   }
@@ -1238,15 +1242,19 @@ HIP_TEST_CASE(Unit_deviceAllocation_New_PerThread_Graph) {
   SECTION("Test char datatype allocation with new") {
     REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<char>(TEST_NEW_DELETE));
   }
+
   SECTION("Test short datatype allocation with new") {
     REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<int16_t>(TEST_NEW_DELETE));
   }
+
   SECTION("Test int datatype allocation with new") {
     REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<int32_t>(TEST_NEW_DELETE));
   }
+
   SECTION("Test float datatype allocation with new") {
     REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<float>(TEST_NEW_DELETE));
   }
+
   SECTION("Test double datatype allocation with new") {
     REQUIRE(true == TestMemoryAcrossMulKernelsUsingGraph<double>(TEST_NEW_DELETE));
   }
