@@ -18,10 +18,15 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
 ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, int startQpIndex, bool wrrSched, bool useWriteOp);
 
 static inline ncclResult_t IbCastRecvCommGetQpForCts(struct ncclIbRecvComm* recvComm, uint32_t id, ncclIbQp** qp) {
-  int devIndex = id % recvComm->base.vProps.ndevs;
-  // CTS message is always posted the first QP on the device
-  int qpIndex = 0;
-  IbCastCommBaseGetQpByIndex(&recvComm->base, devIndex, qpIndex, qp);
+  // AINIC requires CTS and data to be posted on the same QP.
+  if (recvComm->useCtsOffload) {
+    *qp = recvComm->base.activeQps[id % recvComm->base.nqps];
+  } else {
+    int devIndex = id % recvComm->base.vProps.ndevs;
+    // CTS message is always posted the first QP on the device
+    int qpIndex = 0;
+    IbCastCommBaseGetQpByIndex(&recvComm->base, devIndex, qpIndex, qp);
+  }
   assert(*qp != NULL);
   return ncclSuccess;
 }
