@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <thread>
 #include "hip_test_features.hh"
+#include "hip_test_params.hh"
 
 #ifdef ENABLE_YAML_TAGS
 #include "hip_test_config.hh"
@@ -39,13 +40,7 @@
  * Use this to reduce test parameters for faster execution.
  */
 inline bool isQuickLevel() {
-  static bool quick = false;
-  static std::once_flag flag;
-  std::call_once(flag, [] {
-    const char* level = std::getenv("HIP_TEST_LEVEL");
-    quick = (level && std::strcmp(level, "level_0") == 0);
-  });
-  return quick;
+  return TestParameterStore::instance().currentTestLevel == "level_0";
 }
 
 #if HT_LINUX
