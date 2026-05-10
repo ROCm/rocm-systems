@@ -198,42 +198,18 @@ template <typename TestType> void Memcpy_And_verify(size_t NUM_ELM) {
         break;
       }
       case TEST_MEMCPYASYNC: {
-        // Same pattern as hipMemcpyDtoD: random intra (async H2D/D2H), random peer, P2P async intra→peer.
-        const int intra_dev = RandomDeviceIndex(Available_Gpus, gen);
-        const int peer_dst = RandomPeerDst(intra_dev, Available_Gpus, gen);
-
-        HIP_CHECK(hipSetDevice(intra_dev));
-        HIP_CHECK(hipMalloc(&A_d[intra_dev], NUM_ELM * sizeof(TestType)));
-        HIP_CHECK(hipStreamCreate(&stream[intra_dev]));
-        stream_ok[intra_dev] = true;
-        if (peer_dst >= 0) {
-          HIP_CHECK(hipSetDevice(peer_dst));
-          HIP_CHECK(hipMalloc(&A_d[peer_dst], NUM_ELM * sizeof(TestType)));
-        }
-
-        {
-          const int i = intra_dev;
-          std::cout << "[Stress_hipMemcpy_multiDevice_AllAPIs] hipMemcpyAsync intra dev=" << i
-                    << " bytes=" << (NUM_ELM * sizeof(TestType)) << std::endl;
-          HIP_CHECK(hipSetDevice(i));
-          HIP_CHECK(hipMemcpyAsync(A_d[i], A_h, NUM_ELM * sizeof(TestType), hipMemcpyHostToDevice,
-                                   stream[i]));
-          HIP_CHECK(hipMemcpyAsync(B_h, A_d[i], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost,
-                                   stream[i]));
-          HIP_CHECK(hipStreamSynchronize(stream[i]));
-          HipTest::checkTest(A_h, B_h, NUM_ELM);
-        }
-
-        if (peer_dst >= 0) {
-          std::cout << "[Stress_hipMemcpy_multiDevice_AllAPIs] hipMemcpyAsync peer " << intra_dev << "->"
-                    << peer_dst << " bytes=" << (NUM_ELM * sizeof(TestType)) << std::endl;
-          HIP_CHECK(hipSetDevice(peer_dst));
-          HIP_CHECK(hipMemcpyAsync(A_d[peer_dst], A_d[intra_dev], NUM_ELM * sizeof(TestType),
-                                   hipMemcpyDefault, stream[intra_dev]));
-          HIP_CHECK(hipStreamSynchronize(stream[intra_dev]));
-          HIP_CHECK(hipMemcpy(B_h, A_d[peer_dst], NUM_ELM * sizeof(TestType), hipMemcpyDefault));
-          HipTest::checkTest(A_h, B_h, NUM_ELM);
-        }
+        // One random GPU; P2P is covered in TEST_MEMCPYD2DASYNC.
+        const int d = RandomDeviceIndex(Available_Gpus, gen);
+        HIP_CHECK(hipSetDevice(d));
+        HIP_CHECK(hipMalloc(&A_d[d], NUM_ELM * sizeof(TestType)));
+        HIP_CHECK(hipStreamCreate(&stream[d]));
+        stream_ok[d] = true;
+        HIP_CHECK(hipMemcpyAsync(A_d[d], A_h, NUM_ELM * sizeof(TestType), hipMemcpyHostToDevice,
+                                 stream[d]));
+        HIP_CHECK(hipMemcpyAsync(B_h, A_d[d], NUM_ELM * sizeof(TestType), hipMemcpyDeviceToHost,
+                                 stream[d]));
+        HIP_CHECK(hipStreamSynchronize(stream[d]));
+        HipTest::checkTest(A_h, B_h, NUM_ELM);
         break;
       }
       case TEST_MEMCPYH2DASYNC:  // To test hipMemcpyHtoDAsync()
