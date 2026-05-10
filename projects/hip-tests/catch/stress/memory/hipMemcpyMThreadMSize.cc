@@ -85,12 +85,11 @@ const char* ApiToString(apiToTest api) {
 }  // namespace
 
 template <typename TestType> void Memcpy_And_verify(size_t NUM_ELM) {
-  // MEMCPYH2D / DtoH / H2DAsync / DtoHAsync: only run when transfer <= 64 KiB (level_2+). Not run at all for
-  // level_0 (quick level). MEMCPY / DtoD (sync): no per-API cap beyond quick level 32 MiB.
-  // level_0 (quick level): MemcpyAsync / DtoDAsync only when transfer <= 64 KiB.
+  // level_0 (quick level): skip H2D/D2H/H2DAsync/D2HAsync entirely,
+  // and cap async APIs (MemcpyAsync/DtoDAsync) at 64 KiB.
+  // All other levels run every API at every size.
   // Each API uses one randomly chosen GPU (and a second for P2P when applicable); device memory is
   // allocated only for GPUs used in that iteration.
-  constexpr size_t kNonPrimaryApiMaxBytes = 64u * 1024u;
   constexpr size_t kQuickAsyncMaxBytes = 64u * 1024u;
   const size_t requested_bytes = NUM_ELM * sizeof(TestType);
 
@@ -98,11 +97,6 @@ template <typename TestType> void Memcpy_And_verify(size_t NUM_ELM) {
   for (apiToTest api = TEST_MEMCPY; api <= TEST_MEMCPYD2DASYNC; api = apiToTest(api + 1)) {
     if (isQuickLevel() && (api == TEST_MEMCPYH2D || api == TEST_MEMCPYD2H || api == TEST_MEMCPYH2DASYNC ||
                            api == TEST_MEMCPYD2HASYNC)) {
-      continue;
-    }
-    const bool primary_api = (api == TEST_MEMCPY || api == TEST_MEMCPYD2D || api == TEST_MEMCPYASYNC ||
-                              api == TEST_MEMCPYD2DASYNC);
-    if (!primary_api && requested_bytes > kNonPrimaryApiMaxBytes) {
       continue;
     }
     const bool async_api = (api == TEST_MEMCPYASYNC || api == TEST_MEMCPYH2DASYNC ||
