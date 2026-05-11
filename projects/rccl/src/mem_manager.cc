@@ -928,13 +928,18 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
         // Use proxy to convert cuMem handle to FD
         int fd = -1;
 
+        // RCCL: use a local result so a successful conversion does not clobber
+        // a prior partial-failure ret set earlier in the loop
         // The handleData contains the cuMem handle - request FD conversion
-        ret = ncclProxyClientGetFdBlocking(comm, entry->desc.imported.ownerRank,
-                                           &matchedInfo->handleData, &fd);
-        if (ret != ncclSuccess || fd < 0) {
+        ncclResult_t fdRet =
+          ncclProxyClientGetFdBlocking(comm, entry->desc.imported.ownerRank,
+                                       &matchedInfo->handleData, &fd);
+        if (fdRet != ncclSuccess || fd < 0) {
           WARN("MemManager: Failed to get FD from rank %d for ptr=%p",
                entry->desc.imported.ownerRank, entry->ptr);
-          if (ret == ncclSuccess) ret = ncclSystemError;  // fd < 0 with success ret
+          if (ret == ncclSuccess) {
+            ret = (fdRet != ncclSuccess) ? fdRet : ncclSystemError;
+          }
           entry = entry->next;
           continue;
         }
@@ -1026,7 +1031,122 @@ fail:
   return ret;
 }
 
-ncclResult_t ncclCommMemStats(struct ncclComm* comm, ncclCommMemStat_t stat, uint64_t* value) {
+/*
+ * Public Communicator Suspend/Resume APIs
+ *
+ * Tasks are queued and drained in groupLaunch (group context) so that
+ * ncclGroupStart()/ncclGroupEnd() wrapping multi-comm Suspend/Resume becomes
+ * atomic. When called outside a group, ncclGroupStartInternal/EndInternal
+ * provides an implicit single-comm group that drains immediately.
+ */
+
+ncclResult_t ncclCommSuspend_impl(ncclComm_t comm, int flags) {
+  NCCL_NVTX3_FUNC_RANGE;
+
+  NCCLCHECK(CommCheck(comm, "ncclCommSuspend", "comm"));
+  NCCLCHECK(ncclCommEnsureReady(comm));
+
+  // RCCL: reject flags==0 and unknown bits before group barrier.
+  if (flags == 0 || (flags & ~NCCL_SUSPEND_MEM) != 0) {
+    WARN("ncclCommSuspend: invalid flags 0x%x (must be NCCL_SUSPEND_MEM)", flags);
+    return ncclInvalidArgument;
+  }
+
+  ncclResult_t ret = ncclSuccess;
+  int saveDev;
+  CUDACHECK(cudaGetDevice(&saveDev));
+  NCCLCHECK(ncclGroupStartInternal());
+  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
+
+  if (flags & NCCL_SUSPEND_MEM) {
+    if (ncclParamMemManagerDisable()) {
+      WARN("MemManager: Suspend not supported, memory manager is disabled");
+      ret = ncclInvalidUsage;
+      goto fail;
+    }
+    if (comm->memManager && comm->memManager->refCount > 1) {
+      WARN("Memory suspend not supported with split_share communicators (refCount=%d)",
+           comm->memManager->refCount);
+      ret = ncclInvalidUsage;
+      goto fail;
+    }
+    // RCCL: reject double-Suspend. Queue-aware: pending Resume in
+    // resumeTaskQueue will flip released=0 during drain, so accept it.
+    if (comm->memManager &&
+        __atomic_load_n(&comm->memManager->released, __ATOMIC_ACQUIRE) &&
+        ncclIntruQueueEmpty(&comm->resumeTaskQueue)) {
+      WARN("ncclCommSuspend: rank %d already suspended", comm->rank);
+      ret = ncclInvalidUsage;
+      goto fail;
+    }
+    INFO(NCCL_INIT, "ncclCommSuspend: rank %d suspending memory", comm->rank);
+    struct ncclMemManagerTask* task;
+    NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
+    task->comm = comm;
+    ncclIntruQueueEnqueue(&comm->suspendTaskQueue, task);
+    ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister); // Reuse to avoid creating a new task type
+  }
+
+exit:
+  ncclGroupErrCheck(ret);
+  NCCLCHECK(ncclGroupEndInternal());
+  if (comm && !comm->config.blocking) { NCCLCHECK(ncclCommGetAsyncError(comm, &ret)); }
+  CUDACHECK(cudaSetDevice(saveDev));
+  return ret;
+fail:
+  goto exit;
+}
+
+ncclResult_t ncclCommResume_impl(ncclComm_t comm) {
+  NCCL_NVTX3_FUNC_RANGE;
+
+  NCCLCHECK(CommCheck(comm, "ncclCommResume", "comm"));
+  NCCLCHECK(ncclCommEnsureReady(comm));
+
+  ncclResult_t ret = ncclSuccess;
+  int saveDev;
+  CUDACHECK(cudaGetDevice(&saveDev));
+  NCCLCHECK(ncclGroupStartInternal());
+  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
+
+  if (ncclParamMemManagerDisable()) {
+    WARN("MemManager: Resume not supported, memory manager is disabled");
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
+  if (comm->memManager && comm->memManager->refCount > 1) {
+    WARN("Memory resume not supported with split_share communicators (refCount=%d)",
+         comm->memManager->refCount);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
+  // RCCL: reject Resume on active comm. Queue-aware: pending Suspend in
+  // suspendTaskQueue will flip released=1 during drain, so accept it.
+  if (comm->memManager &&
+      !__atomic_load_n(&comm->memManager->released, __ATOMIC_ACQUIRE) &&
+      ncclIntruQueueEmpty(&comm->suspendTaskQueue)) {
+    WARN("ncclCommResume: rank %d not suspended", comm->rank);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
+  INFO(NCCL_INIT, "ncclCommResume: rank %d resuming all resources", comm->rank);
+  struct ncclMemManagerTask* task;
+  NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
+  task->comm = comm;
+  ncclIntruQueueEnqueue(&comm->resumeTaskQueue, task);
+  ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister); // Reuse to avoid creating a new task type
+
+exit:
+  ncclGroupErrCheck(ret);
+  NCCLCHECK(ncclGroupEndInternal());
+  if (comm && !comm->config.blocking) { NCCLCHECK(ncclCommGetAsyncError(comm, &ret)); }
+  CUDACHECK(cudaSetDevice(saveDev));
+  return ret;
+fail:
+  goto exit;
+}
+
+ncclResult_t ncclCommMemStats_impl(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value) {
   NCCL_NVTX3_FUNC_RANGE;
 
   NCCLCHECK(CommCheck(comm, "ncclCommMemStats", "comm"));

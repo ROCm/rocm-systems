@@ -508,6 +508,16 @@ static inline ncclResult_t ncclCuMemFree(void *ptr, struct ncclMemManager* manag
     INFO(NCCL_ALLOC, "ncclCuMemFree: Skipping free (process shutdown) pointer %p", ptr);
     return ncclSuccess;
   }
+
+  // RCCL: skip teardown when the comm is Suspended. Suspend has already
+  // released physical memory and unmapped the VA; ncclMemManagerDestroy
+  // takes care of cuMemAddressFree for every Released entry
+  if(manager != nullptr && __atomic_load_n(&manager->released, __ATOMIC_ACQUIRE))
+  {
+      INFO(NCCL_ALLOC, "ncclCuMemFree: comm suspended, leaving %p to ncclMemManagerDestroy", ptr);
+      return ncclSuccess;
+  }
+
   ncclResult_t result = ncclSuccess;
   size_t totalSize = 0;
   for (int segment = 0; segment < numSegments; segment++) {
@@ -729,6 +739,18 @@ ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegment
   if (rcclShutdownFlag().load(std::memory_order_acquire)) {
     INFO(NCCL_ALLOC, "ncclCudaFree: Skipping free (process shutdown) pointer %p", ptr);
     return ncclSuccess;
+  }
+
+  // RCCL: ncclCommDestroy may be invoked while the comm is in the Suspended
+  // state. Suspend has already done cuMemUnmap + cuMemRelease on every tracked
+  // entry, and ncclMemManagerDestroy reclaims the VA reservation for each
+  // Released entry.
+  if(manager != nullptr && __atomic_load_n(&manager->released, __ATOMIC_ACQUIRE))
+  {
+      INFO(NCCL_ALLOC,
+           "ncclCudaFree: comm suspended, leaving %p to ncclMemManagerDestroy",
+           (void*)ptr);
+      return ncclSuccess;
   }
 
   ncclResult_t result = ncclSuccess;

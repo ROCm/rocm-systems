@@ -182,7 +182,11 @@ ncclResult_t ncclDynMemMarkExportToPeer(struct ncclMemManager* manager, void* pt
 
 ncclResult_t ncclCommMemSuspend(struct ncclComm* comm);
 ncclResult_t ncclCommMemResume(struct ncclComm* comm);
-ncclResult_t ncclCommMemStats(struct ncclComm* comm, ncclCommMemStat_t stat, uint64_t* value);
+
+// RCCL: Public API _impl entry points (dispatched from src/misc/api_trace.cc)
+ncclResult_t ncclCommSuspend_impl(ncclComm_t comm, int flags);
+ncclResult_t ncclCommResume_impl(ncclComm_t comm);
+ncclResult_t ncclCommMemStats_impl(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
 
 #ifdef __cplusplus
 }
