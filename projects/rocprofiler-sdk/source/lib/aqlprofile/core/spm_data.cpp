@@ -25,7 +25,7 @@
 #include <thread>
 #include <condition_variable>
 
-#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
 #include "lib/aqlprofile/util/hsa_rsrc_factory.h"
 
@@ -116,7 +116,7 @@ producer(spm_state_t* s)
         status = HsaSpmSetDestBuffer(args);
         if(status != HSA_STATUS_SUCCESS)
         {
-            ERR_LOGGING << "hsa_amd_spm_set_dest_buffer() error";
+            ERR_LOGGING("hsa_amd_spm_set_dest_buffer() error");
             goto exit_;
         }
 #if DEBUG_SPM >= 2
@@ -216,7 +216,7 @@ consumer(spm_state_t* s)
 
         if(status != HSA_STATUS_SUCCESS)
         {
-            ERR_LOGGING << "SPM consumer callback failed";
+            ERR_LOGGING("SPM consumer callback failed");
             s->stop_cons_thread = true;
         }
     } while(!s->stop_cons_thread);
@@ -240,7 +240,7 @@ start_spm_threads(spm_state_t& s)
         rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_acquire_fn(s.profile->agent);
     if(status != HSA_STATUS_SUCCESS)
     {
-        ERR_LOGGING << "hsa_amd_spm_acquire() error";
+        ERR_LOGGING("hsa_amd_spm_acquire() error");
         abort();
         return status;
     }
@@ -306,7 +306,7 @@ start_spm_threads(spm_state_t& s)
     status                        = HsaSpmSetDestBuffer(args);
     if(status != HSA_STATUS_SUCCESS)
     {
-        ERR_LOGGING << "hsa_amd_spm_set_dest_buffer() init error";
+        ERR_LOGGING("hsa_amd_spm_set_dest_buffer() init error");
         abort();
         return status;
     }
