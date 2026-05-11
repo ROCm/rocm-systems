@@ -1,10 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-import csv
 from pathlib import Path
 
 import common
+import pandas as pd
 import pytest
 
 config = {}
@@ -29,20 +29,11 @@ def load_metrics(csv_file_path):
             "Metric_2": { ... },
             ...
         }
+    N/A values (unevaluable metrics) are parsed as NaN by pandas.
     """
-    metrics_data = {}
-    with open(csv_file_path, newline="") as csvfile:
-        reader = csv.DictReader(csvfile)  # reads header from first line
-
-        for row in reader:
-            metric_name = row["Metric"].strip()
-            metrics_data[metric_name] = {
-                "Avg": float(row["Avg"]) if row["Avg"] else None,
-                "Min": float(row["Min"]) if row["Min"] else None,
-                "Max": float(row["Max"]) if row["Max"] else None,
-                "Unit": row["Unit"].strip() if row["Unit"] else None,
-            }
-    return metrics_data
+    df = pd.read_csv(csv_file_path, na_values=["N/A"])
+    df["Metric"] = df["Metric"].str.strip()
+    return df.set_index("Metric").to_dict(orient="index")
 
 
 _, soc = common.gpu_soc()
