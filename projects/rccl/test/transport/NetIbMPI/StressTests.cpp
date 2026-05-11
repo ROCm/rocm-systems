@@ -173,5 +173,36 @@ TEST_F(NetIbMPITest, NullCommClose) {
 // E4.  TagZeroReuse — 50 messages all sent with tag=0.
 //      Verifies FIFO ordering: messages arrive in send order because
 //      the FIFO is a strict ring (slot = fifoHead % MAX_REQUESTS).
+TEST_F(NetIbMPITest, TagZeroReuse) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    ConnectionPair cp;
+    NetConnectionGuard guard(net_);
+    SetupConnectionWithGuard(/*dev=*/0, cp, guard);
+
+    const size_t sz = kSmallBufferSize;
+    auto buf = makeHostBufferAutoGuard(malloc(sz));
+    ASSERT_NE(buf.get(), nullptr);
+
+    void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
+    void* mh   = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf.get(), sz, NCCL_PTR_HOST, &mh), ncclSuccess);
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+    static constexpr int kIters = 50;
+    for (int i = 0; i < kIters; i++) {
+        DoSendRecv(cp.sendComm, cp.recvComm,
+                   buf.get(), buf.get(), sz,
+                   /*tag=*/0, mh, mh,
+                   /*patternSeed=*/i);
+    }
+}
+
+// E6.  AdaptiveRoutingThresholdBoundary — sizes around AR_THRESHOLD (8192).
+//      When AR is enabled and size > threshold, ncclIbMultiSend adds a
+//      0-byte RDMA_WRITE_WITH_IMM work request (net_ib.cc:2396).
 
 #endif /* MPI_TESTS_ENABLED */
