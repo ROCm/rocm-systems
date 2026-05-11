@@ -9,9 +9,8 @@ Build and installing rocDecode from source
 Prerequisites
 =============
 
-rocDecode requires a supported `AMD GPU <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_. See the ROCm system requirements for the current list of supported GPUs and gfx targets.
-
-rocDecode is built and installed as part of `TheRock <https://github.com/ROCm/TheRock>`_. All core dependencies are provided by the TheRock build, including:
+rocDecode requires a supported AMD GPU. For more information, see :ref:`ROCm
+Core SDK components <rocm:release-components>`.
 
 * HIP runtime and development libraries
 * AMD Clang++ compiler (C++17 required)
