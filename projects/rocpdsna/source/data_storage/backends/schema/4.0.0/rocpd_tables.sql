@@ -269,21 +269,6 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (name_id) REFERENCES `rocpd_string{{uuid}}` (id) ON UPDATE CASCADE
     );
 
--- Stores all the timestamps
-CREATE TABLE IF NOT EXISTS
-    `rocpd_timestamp{{uuid}}` (
-        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
-        "value" BIGINT NOT NULL,
-        "phase" INTEGER CHECK ("phase" IN (0, 1, 2)),
-        -- Phases:
-        --      0 = none/instantaneous
-        --      1 = start/enter/load
-        --      2 = end/exit/unload
-        "track_id" INTEGER, -- set to NULL if this timestamp is associated with more than one track (not recommended)
-        FOREIGN KEY (track_id) REFERENCES `rocpd_track{{uuid}}` (id) ON UPDATE CASCADE
-    );
-
 -- Storage for a region, instant, and counter
 CREATE TABLE IF NOT EXISTS
     `rocpd_event{{uuid}}` (
@@ -358,14 +343,12 @@ CREATE TABLE IF NOT EXISTS
         "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
         "track_id" INTEGER NOT NULL,
         "name_id" INTEGER NOT NULL,
-        "start_id" INTEGER NOT NULL,
-        "end_id" INTEGER NOT NULL,
+        "start" BIGINT NOT NULL,
+        "end" BIGINT NOT NULL,
         "event_id" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (track_id) REFERENCES `rocpd_track{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (name_id) REFERENCES `rocpd_string{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (start_id) REFERENCES `rocpd_timestamp{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (end_id) REFERENCES `rocpd_timestamp{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );
 
@@ -376,12 +359,11 @@ CREATE TABLE IF NOT EXISTS
         "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
         "track_id" INTEGER NOT NULL,
         "name_id" INTEGER NOT NULL,
-        "timestamp_id" INTEGER NOT NULL,
+        "timestamp" BIGINT NOT NULL,
         "event_id" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (track_id) REFERENCES `rocpd_track{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (name_id) REFERENCES `rocpd_string{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (timestamp_id) REFERENCES `rocpd_timestamp{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );
 
@@ -392,8 +374,8 @@ CREATE TABLE IF NOT EXISTS
         "track_id" INTEGER NOT NULL,
         "kernel_id" INTEGER NOT NULL,
         "dispatch_id" INTEGER NOT NULL,
-        "start_id" INTEGER NOT NULL,
-        "end_id" INTEGER NOT NULL,
+        "start" BIGINT NOT NULL,
+        "end" BIGINT NOT NULL,
         "private_segment_size" INTEGER,
         "group_segment_size" INTEGER,
         "workgroup_size_x" INTEGER NOT NULL,
@@ -407,8 +389,6 @@ CREATE TABLE IF NOT EXISTS
         "extdata" JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (track_id) REFERENCES `rocpd_track{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (kernel_id) REFERENCES `rocpd_info_kernel_symbol{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (start_id) REFERENCES `rocpd_timestamp{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (end_id) REFERENCES `rocpd_timestamp{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (region_name_id) REFERENCES `rocpd_string{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );
@@ -418,8 +398,8 @@ CREATE TABLE IF NOT EXISTS
         "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
         "track_id" INTEGER NOT NULL,
-        "start_id" INTEGER NOT NULL,
-        "end_id" INTEGER NOT NULL,
+        "start" BIGINT NOT NULL,
+        "end" BIGINT NOT NULL,
         "name_id" INTEGER NOT NULL,
         "dst_agent_id" INTEGER,
         "dst_address" INTEGER,
@@ -430,8 +410,6 @@ CREATE TABLE IF NOT EXISTS
         "event_id" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (track_id) REFERENCES `rocpd_track{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (start_id) REFERENCES `rocpd_timestamp{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (end_id) REFERENCES `rocpd_timestamp{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (name_id) REFERENCES `rocpd_string{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (dst_agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (src_agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE,
@@ -447,8 +425,8 @@ CREATE TABLE IF NOT EXISTS
         "track_id" INTEGER NOT NULL,
         "type" TEXT CHECK ("type" IN ('ALLOC', 'FREE', 'REALLOC', 'RECLAIM')),
         "level" TEXT CHECK ("level" IN ('REAL', 'VIRTUAL', 'SCRATCH')),
-        "start_id" INTEGER NOT NULL,
-        "end_id" INTEGER NOT NULL,
+        "start" BIGINT NOT NULL,
+        "end" BIGINT NOT NULL,
         "name_id" INTEGER NOT NULL,
         "address" INTEGER,
         "size" INTEGER NOT NULL,
@@ -456,8 +434,6 @@ CREATE TABLE IF NOT EXISTS
         "event_id" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (track_id) REFERENCES `rocpd_track{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (start_id) REFERENCES `rocpd_timestamp{{uuid}}` (id) ON UPDATE CASCADE,
-        FOREIGN KEY (end_id) REFERENCES `rocpd_timestamp{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (name_id) REFERENCES `rocpd_string{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (region_name_id) REFERENCES `rocpd_string{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE

@@ -25,7 +25,7 @@ namespace rocpdsna
  *
  * Key differences from schema_v3:
  * - Uses track_id instead of nid/pid/tid columns
- * - Uses start_id/end_id (references rocpd_timestamp) instead of direct start/end BIGINT
+ * - Uses inline start/end BIGINT timestamps instead of FK references to rocpd_timestamp
  * - Uses name_id instead of direct name reference
  */
 template <>
@@ -69,14 +69,7 @@ public:
         // 4. Get track_id from trace environment
         const auto track_pk = m_common_ops->resolve_track_id(trace_env);
 
-        // 5. Insert timestamps and get their IDs (v4 uses rocpd_timestamp table)
-        // Phase: 1 = start/enter/load, 2 = end/exit/unload (per SQL CHECK constraint)
-        const auto start_id =
-            m_common_ops->insert_timestamp(data.start_timestamp, 1, track_pk);
-        const auto end_id =
-            m_common_ops->insert_timestamp(data.end_timestamp, 2, track_pk);
-
-        // 6. Insert event data and get event_id
+        // 5. Insert event data and get event_id
         std::optional<primary_key_t> event_pk = std::nullopt;
         if(data.event.has_value())
         {
@@ -84,12 +77,17 @@ public:
                 data.event.value(), trace_env.node_id, trace_env.process_id);
         }
 
-        // 7. Insert region data and get region_id
+        // 6. Insert region data and get region_id
         const auto pk = m_ctx->key_providers->region_data().get_primary_key_value();
 
-        // v4 region: id, track_id, name_id, start_id, end_id, event_id, extdata
-        m_stmts->region_statement()(
-            pk, track_pk, name_pk, start_id, end_id, event_pk, data.extdata);
+        // v4 region: id, track_id, name_id, start, end, event_id, extdata
+        m_stmts->region_statement()(pk,
+                                    track_pk,
+                                    name_pk,
+                                    data.start_timestamp,
+                                    data.end_timestamp,
+                                    event_pk,
+                                    data.extdata);
 
         if(event_pk.has_value())
         {
