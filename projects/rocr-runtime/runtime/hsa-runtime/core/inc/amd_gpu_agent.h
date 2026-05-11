@@ -570,6 +570,9 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Get list of AQL queues for core dump filtering
   const std::vector<core::Queue*>& GetAqlQueues() const { return aql_queues_; }
 
+  /// @brief Stop tracking a queue
+  void RemoveAqlQueue(core::Queue* q);
+
  protected:
   // Sizes are in packets.
   const uint32_t minAqlSize_ = 0x40;     // 4KB min

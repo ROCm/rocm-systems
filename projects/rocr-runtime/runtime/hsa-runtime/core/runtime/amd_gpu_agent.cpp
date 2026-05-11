@@ -1006,9 +1006,35 @@ void GpuAgent::PreloadBlits() {
   }
 }
 
+void GpuAgent::RemoveAqlQueue(core::Queue* q) {
+  auto it = std::find(aql_queues_.begin(), aql_queues_.end(), q);
+  if (it != aql_queues_.end()) aql_queues_.erase(it);
+}
+
 void GpuAgent::ReleaseResources() {
   if (this->Enabled()) {
     this->Disable();
+
+    aql_queues_.erase(
+        std::remove_if(aql_queues_.begin(), aql_queues_.end(),
+                       [this](core::Queue* q) {
+                         for (int i = 0; i < QueueCount; i++) {
+                           if (queues_[i] == q) return true;
+                         }
+                         return false;
+                       }),
+        aql_queues_.end());
+    if (!aql_queues_.empty()) {
+      debug_print("Warning: %zu AQL queue(s) leaked into hsa_shut_down on agent %p.\n",
+                  aql_queues_.size(), this);
+
+      for (auto iter : aql_queues_) {
+        auto aqlQueue = static_cast<AqlQueue*>(iter);
+        aqlQueue->Inactivate();
+        delete aqlQueue;
+      }
+      aql_queues_.clear();
+    }
 
     // Remove all shared hardware queues from pool
     queue_pool_.Cleanup();

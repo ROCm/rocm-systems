@@ -411,6 +411,9 @@ void AqlQueue::Destroy() {
     agent_->GWSRelease();
     return;
   }
+  // Drop from agent's tracking list before deletion so
+  // GpuAgent::ReleaseResources() does not touch a destroyed queue.
+  agent_->RemoveAqlQueue(this);
   delete this;
 }
 
