@@ -23,6 +23,7 @@
  *****************************************************************************/
 
 #include <cstring>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 #include <cstdlib>
@@ -263,10 +264,20 @@ void IPCBackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
   std::memset(tmp_buffer, 0, num_pes * num_bytes);
   std::memcpy (&tmp_buffer[my_pe * num_bytes], inbuf, num_bytes);
 
-  if (num_pes == backend_bootstr->getNranks() ) {
+  TeamInfo *tinfo = team_obj->tinfo_wrt_world;
+
+  // Fast path: team is TEAM_WORLD (all PEs in identity order)
+  if (num_pes == backend_bootstr->getNranks() &&
+      tinfo->pe_start == 0 && tinfo->stride == 1) {
     backend_bootstr->allGather(tmp_buffer, num_bytes);
   } else {
-    LOG_ERROR_ABORT("create_new_team: non-mpi version only supports parent_teams that contain all processes");
+    // Build a vector of world ranks for this team using team_info_wrt_world
+    std::vector<int> world_ranks;
+    world_ranks.reserve(num_pes);
+    for (int i = 0; i < num_pes; i++) {
+      world_ranks.push_back(tinfo->pe_start + i * tinfo->stride);
+    }
+    backend_bootstr->groupAllGather(tmp_buffer, num_bytes, world_ranks);
   }
 
   for (size_t i = 0; i < num_bytes; i++) {
