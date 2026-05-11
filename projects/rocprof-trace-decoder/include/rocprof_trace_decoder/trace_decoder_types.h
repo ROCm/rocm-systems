@@ -84,12 +84,12 @@ typedef struct rocprofiler_thread_trace_decoder_occupancy_t
     uint8_t cu;                               ///< Compute unit ID (gfx9) or WGP ID (gfx10+).
     uint8_t simd;                             ///< SIMD ID [0,3] within compute unit
     uint8_t wave_id;                          ///< Wave slot ID within SIMD
-    uint32_t start : 1;                       ///< 1 if wave_start, 0 if a wave_end
-    // The following fields are only valid for wave_start
-    uint32_t me_id        : 3; ///< MicroEngine ID
+    uint32_t start        : 1;                ///< 1 if wave_start, 0 if a wave_end
+    uint32_t me_id        : 3;                ///< MicroEngine ID
     uint32_t pipe_id      : 4;
+    uint32_t is_ext       : 1; ///< Is workgroup_id valid?
     uint32_t workgroup_id : 7;
-    uint32_t _rsvd        : 17;
+    uint32_t _rsvd        : 16;
 } rocprofiler_thread_trace_decoder_occupancy_t;
 
 /**

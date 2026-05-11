@@ -61,7 +61,10 @@ union wstart_type
             .pipe = pipe,
             .me = me,
             .count = count,
-            .isExt = 0};
+            .isExt = 0,
+            .wgid = 0,
+            .last = 0,
+            .dynvgpr = 0};
     }
 };
 } // namespace gfx10

@@ -58,9 +58,10 @@ struct Wave : public group_id
         pipe = get_bits(16, 17);
         me = get_bits(18, 19);
         count = get_bits(22, 28);
+        tg_id = get_bits(29, 31);
     };
 
-    int16_t pipe, me, count;
+    int16_t pipe, me, count, tg_id;
 };
 
 struct Regfields

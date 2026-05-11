@@ -218,6 +218,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                                  0,
                                  (uint64_t) start.me,
                                  (uint64_t) start.pipe,
+                                 start.isExt,
                                  (uint64_t) start.wgid}
                             );
                             saved_waves[start.getGPULocation()] = it->second;
@@ -240,6 +241,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                              1,
                              (uint64_t) start.me,
                              (uint64_t) start.pipe,
+                             start.isExt,
                              (uint64_t) start.wgid}
                         );
                     }
@@ -258,6 +260,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                      1,
                      (uint64_t) start.me,
                      (uint64_t) start.pipe,
+                     start.isExt,
                      (uint64_t) start.wgid}
                 );
                 if (double_buffer && occupancy.size() >= MAX_ACCUM_RECORDS) send_occupancy();
@@ -308,9 +311,9 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     running_waves.erase(end.getGPULocation());
                 }
                 else
-                    occupancy.insert(occupancy.begin(), {startpc, 0, end.SACU(), end.simd, end.wid, 1});
+                    occupancy.insert(occupancy.begin(), {startpc, 0, end.SACU(), end.simd, end.wid, 1, 0, 0, 0, 0});
 
-                occupancy.push_back({startpc, token.time, end.SACU(), end.simd, end.wid, 0});
+                occupancy.push_back({startpc, token.time, end.SACU(), end.simd, end.wid, 0, 0, 0, 0, 0});
                 break;
             }
             case RdnaType::INST:

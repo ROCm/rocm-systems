@@ -78,9 +78,10 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         uint64_t simd,
         uint64_t slot,
         uint64_t start,
-        uint64_t me = 0,
-        uint64_t pipe = 0,
-        uint64_t wg = 0
+        uint64_t me,
+        uint64_t pipe,
+        uint64_t is_ext,
+        uint64_t wg
     )
     {
         this->pc = pc;
@@ -92,6 +93,7 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         this->start = start;
         this->me_id = me & 0x7;
         this->pipe_id = pipe & 0xF;
+        this->is_ext = is_ext;
         this->workgroup_id = wg & 0x7F;
         this->_rsvd = 0;
     }
@@ -102,9 +104,10 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         int8_t simd,
         int8_t slot,
         uint64_t start,
-        uint64_t me = 0,
-        uint64_t pipe = 0,
-        uint64_t wg = 0
+        uint64_t me,
+        uint64_t pipe,
+        uint64_t is_ext,
+        uint64_t wg
     )
     {
         this->pc = pc;
@@ -116,6 +119,7 @@ struct occupancy_info_t : public rocprofiler_thread_trace_decoder_occupancy_t
         this->start = start;
         this->me_id = me & 0x7;
         this->pipe_id = pipe & 0xF;
+        this->is_ext = is_ext;
         this->workgroup_id = wg & 0x7F;
         this->_rsvd = 0;
     }
