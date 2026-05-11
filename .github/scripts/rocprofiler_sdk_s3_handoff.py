@@ -10,6 +10,7 @@ AWS credentials or boto3 installed.
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import mimetypes
 import os
@@ -130,10 +131,7 @@ def upload_one(client, bucket, prefix, source):
     finally:
         checksum_path.unlink()
 
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as f:
-            f.write("- [{}]({})\n".format(source.name, s3_url(bucket, key)))
+    return source.name, s3_url(bucket, key)
 
 
 def download_url(url, dest):
@@ -182,6 +180,34 @@ def download_one(bucket, prefix, dest):
             )
         )
     log("Verified sha256 for {}".format(dest))
+    return str(dest)
+
+
+def run_parallel(operation, items, jobs, func):
+    if jobs <= 1 or len(items) <= 1:
+        return [func(item) for item in items]
+
+    workers = min(jobs, len(items))
+    log("{} {} file(s) with {} worker(s).".format(operation, len(items), workers))
+    results = []
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(func, item): item for item in items}
+        for future in as_completed(futures):
+            item = futures[future]
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                raise RuntimeError("{} failed for {}".format(operation, item)) from exc
+    return results
+
+
+def append_step_summary(uploads):
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary:
+        return
+    with open(summary, "a", encoding="utf-8") as f:
+        for name, url in uploads:
+            f.write("- [{}]({})\n".format(name, url))
 
 
 def parse_args(argv):
@@ -192,15 +218,29 @@ def parse_args(argv):
     upload.add_argument("--bucket", required=True)
     upload.add_argument("--prefix", required=True)
     upload.add_argument("--file", action="append", required=True)
+    upload.add_argument(
+        "--jobs",
+        type=int,
+        default=int(os.environ.get("ROCPROFILER_SDK_S3_JOBS", "4")),
+        help="Maximum parallel file transfers.",
+    )
 
     download = subparsers.add_parser("download")
     download.add_argument("--bucket", required=True)
     download.add_argument("--prefix", required=True)
     download.add_argument("--file", action="append", required=True)
+    download.add_argument(
+        "--jobs",
+        type=int,
+        default=int(os.environ.get("ROCPROFILER_SDK_S3_JOBS", "4")),
+        help="Maximum parallel file transfers.",
+    )
 
     args = parser.parse_args(argv)
     if not args.command:
         parser.error("expected a command: upload or download")
+    if args.jobs < 1:
+        parser.error("--jobs must be greater than zero")
     return args
 
 
@@ -209,11 +249,22 @@ def main(argv=None):
     try:
         if args.command == "upload":
             client = boto3_client()
-            for file_path in args.file:
-                upload_one(client, args.bucket, args.prefix, file_path)
+            uploads = run_parallel(
+                "Uploading",
+                args.file,
+                args.jobs,
+                lambda file_path: upload_one(
+                    client, args.bucket, args.prefix, file_path
+                ),
+            )
+            append_step_summary(uploads)
         elif args.command == "download":
-            for file_path in args.file:
-                download_one(args.bucket, args.prefix, file_path)
+            run_parallel(
+                "Downloading",
+                args.file,
+                args.jobs,
+                lambda file_path: download_one(args.bucket, args.prefix, file_path),
+            )
         else:
             raise AssertionError("unhandled command {}".format(args.command))
     except Exception as exc:
