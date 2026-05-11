@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include "core/trace_cache/archive.hpp"
+#include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
 
 #include <cstdint>
@@ -86,7 +88,32 @@ struct kernel_dispatch_sample : cacheable_t
     std::uint32_t grid_size_y;
     std::uint32_t grid_size_z;
     size_t        stream_handle;
+
+    // Field order MUST match the legacy free serialize() below; the
+    // archive-based path is bytewise wire-compatible with the handrolled
+    // path so flipping use_custom<kernel_dispatch_sample> does not change
+    // the on-disk format. stream_handle is widened to uint64 for portability,
+    // matching the legacy static_cast.
+    template <class Archive>
+    void serialize(Archive& ar)
+    {
+        auto stream_handle_u64 = static_cast<std::uint64_t>(stream_handle);
+        ar(start_timestamp, end_timestamp, thread_id, agent_id_handle, kernel_id,
+           dispatch_id, queue_id_handle, correlation_id_internal, correlation_id_ancestor,
+           private_segment_size, group_segment_size, workgroup_size_x, workgroup_size_y,
+           workgroup_size_z, grid_size_x, grid_size_y, grid_size_z, stream_handle_u64);
+        if constexpr(std::is_same_v<Archive, input_archive>)
+        {
+            stream_handle = static_cast<std::size_t>(stream_handle_u64);
+        }
+    }
 };
+
+namespace type_traits
+{
+template <>
+inline constexpr bool use_custom<kernel_dispatch_sample> = true;
+}  // namespace type_traits
 
 template <>
 inline void

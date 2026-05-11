@@ -1,10 +1,12 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "core/trace_cache/archive.hpp"
 #include "core/trace_cache/sample_type.hpp"
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -46,6 +48,57 @@ TEST_F(sample_type_test, kernel_dispatch_sample_serialize_deserialize)
     EXPECT_EQ(deserialized.grid_size_y, original.grid_size_y);
     EXPECT_EQ(deserialized.grid_size_z, original.grid_size_z);
     EXPECT_EQ(deserialized.stream_handle, original.stream_handle);
+}
+
+TEST_F(sample_type_test, kernel_dispatch_sample_custom_round_trip)
+{
+    kernel_dispatch_sample original(1000, 2000, 42, 100, 200, 300, 400, 500, 600, 1024,
+                                    2048, 64, 32, 16, 256, 128, 64, 0xABCD);
+
+    const std::size_t bytes = serialized_size(original);
+    EXPECT_LE(bytes, buffer.size());
+
+    serialize_to(buffer.data(), original);
+
+    std::uint8_t* cursor       = buffer.data();
+    auto          deserialized = deserialize_from<kernel_dispatch_sample>(cursor);
+
+    EXPECT_EQ(static_cast<std::size_t>(cursor - buffer.data()), bytes);
+    EXPECT_EQ(deserialized.start_timestamp, original.start_timestamp);
+    EXPECT_EQ(deserialized.end_timestamp, original.end_timestamp);
+    EXPECT_EQ(deserialized.thread_id, original.thread_id);
+    EXPECT_EQ(deserialized.agent_id_handle, original.agent_id_handle);
+    EXPECT_EQ(deserialized.kernel_id, original.kernel_id);
+    EXPECT_EQ(deserialized.dispatch_id, original.dispatch_id);
+    EXPECT_EQ(deserialized.queue_id_handle, original.queue_id_handle);
+    EXPECT_EQ(deserialized.correlation_id_internal, original.correlation_id_internal);
+    EXPECT_EQ(deserialized.correlation_id_ancestor, original.correlation_id_ancestor);
+    EXPECT_EQ(deserialized.private_segment_size, original.private_segment_size);
+    EXPECT_EQ(deserialized.group_segment_size, original.group_segment_size);
+    EXPECT_EQ(deserialized.workgroup_size_x, original.workgroup_size_x);
+    EXPECT_EQ(deserialized.workgroup_size_y, original.workgroup_size_y);
+    EXPECT_EQ(deserialized.workgroup_size_z, original.workgroup_size_z);
+    EXPECT_EQ(deserialized.grid_size_x, original.grid_size_x);
+    EXPECT_EQ(deserialized.grid_size_y, original.grid_size_y);
+    EXPECT_EQ(deserialized.grid_size_z, original.grid_size_z);
+    EXPECT_EQ(deserialized.stream_handle, original.stream_handle);
+}
+
+TEST_F(sample_type_test, kernel_dispatch_sample_wire_parity_legacy_vs_custom)
+{
+    kernel_dispatch_sample original(1000, 2000, 42, 100, 200, 300, 400, 500, 600, 1024,
+                                    2048, 64, 32, 16, 256, 128, 64, 0xABCD);
+
+    std::array<std::uint8_t, 4096> legacy{};
+    std::array<std::uint8_t, 4096> custom{};
+
+    serialize(legacy.data(), original);
+    serialize_to(custom.data(), original);
+
+    const std::size_t legacy_size = get_size(original);
+    const std::size_t custom_size = serialized_size(original);
+    EXPECT_EQ(legacy_size, custom_size);
+    EXPECT_EQ(std::memcmp(legacy.data(), custom.data(), legacy_size), 0);
 }
 
 TEST_F(sample_type_test, kernel_dispatch_sample_get_size)
