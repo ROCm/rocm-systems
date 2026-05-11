@@ -40,7 +40,7 @@ struct base_thread_data
 {
     base_thread_data()
     {
-        auto _func = [](int64_t _sz) -> int64_t {
+        auto _func = [](std::int64_t _sz) -> std::int64_t {
             decltype(auto) _v = Tp::private_instance();
             if(_v && _v->capacity() < static_cast<size_t>(_sz + 1))
             {
@@ -349,7 +349,7 @@ thread_data<std::optional<Tp>, Tag, MaxThreads>::construct(construct_on_thread&&
         container::stable_vector<bool, MaxThreads, container::cacheline_align_v>{};
     static auto _grow = []() {
         container::resize(_constructed, MaxThreads, false);
-        grow_functors().emplace_back([](int64_t _n) -> int64_t {
+        grow_functors().emplace_back([](std::int64_t _n) -> std::int64_t {
             if(static_cast<size_t>(_n) >= _constructed.size())
             {
                 _constructed.reserve(_constructed.capacity() + 1);
@@ -517,7 +517,7 @@ thread_data<identity<Tp>, Tag, MaxThreads>::construct(construct_on_thread&& _t,
         container::stable_vector<bool, MaxThreads, container::cacheline_align_v>{};
     static auto _grow = []() {
         container::resize(_constructed, MaxThreads, false);
-        grow_functors().emplace_back([](int64_t _n) -> int64_t {
+        grow_functors().emplace_back([](std::int64_t _n) -> std::int64_t {
             if(static_cast<size_t>(_n) >= _constructed.size())
             {
                 _constructed.reserve(_constructed.capacity() + 1);

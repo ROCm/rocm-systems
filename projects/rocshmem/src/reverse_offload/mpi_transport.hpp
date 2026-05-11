@@ -44,7 +44,7 @@ public:
 
   virtual ~MPITransport();
 
-  void initTransport(int num_queues, BackendProxyT *proxy) override;
+  void initTransport(int num_queues, BackendProxy *proxy) override;
 
   void finalizeTransport() override;
 
@@ -182,7 +182,7 @@ private:
 
   std::atomic<bool> transport_up{false};
 
-  BackendProxyT *backend_proxy{nullptr};
+  BackendProxy *backend_proxy{nullptr};
 
   std::thread progress_thread{};
 

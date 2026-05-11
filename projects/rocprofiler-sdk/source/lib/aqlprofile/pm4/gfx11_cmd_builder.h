@@ -273,18 +273,18 @@ public:
         APPEND_COMMAND_WRAPPER(cmdbuf, pm4mec_copy_data_cmd);
     }
 
-    uint32_t BuildCopyCounterDataPacket(CmdBuffer*  cmdbuf,
-                                        uint32_t    src_reg_addr_lo,
-                                        uint32_t    src_reg_addr_hi,
-                                        const void* dst_addr,
-                                        uint32_t    dw_mask)
+    uint32_t BuildCopyCounterDataPacket(CmdBuffer*      cmdbuf,
+                                        uint32_t        src_reg_addr_lo,
+                                        uint32_t        src_reg_addr_hi,
+                                        const uint32_t* dst_addr,
+                                        uint32_t        dw_mask)
     {
         uint32_t read_counter = 0;
         if(dw_mask & 0x1)
         {
             BuildCopyRegDataPacket(cmdbuf,
                                    src_reg_addr_lo,
-                                   (uint32_t*) dst_addr + read_counter,
+                                   dst_addr + read_counter,
                                    PACKET3_COPY_DATA__COUNT_SEL__32_BITS_OF_DATA,
                                    false);
             ++read_counter;
@@ -293,7 +293,7 @@ public:
         {
             BuildCopyRegDataPacket(cmdbuf,
                                    src_reg_addr_hi,
-                                   (uint32_t*) dst_addr + read_counter,
+                                   dst_addr + read_counter,
                                    PACKET3_COPY_DATA__COUNT_SEL__32_BITS_OF_DATA,
                                    false);
             ++read_counter;
@@ -457,7 +457,7 @@ public:
     void BuildCopyCounterDataPacket(CmdBuffer*      cmd,
                                     const Register& reg_lo,
                                     const Register& reg_hi,
-                                    const void*     dst_addr,
+                                    const uint32_t* dst_addr,
                                     uint32_t        mask)
     {
         BuildCopyCounterDataPacket(cmd,

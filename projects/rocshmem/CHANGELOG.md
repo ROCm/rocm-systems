@@ -13,6 +13,8 @@
    * `rocshmem_barrier`
    * `rocshmem_barrier_wave`
    * `rocshmem_barrier_wg`
+   * `rocshmem_buffer_register`
+   * `rocshmem_buffer_unregister`
    * `rocshmem_info_get_version`
    * `rocshmem_info_get_name`
    * `rocshmem_vendor_get_version_info`
