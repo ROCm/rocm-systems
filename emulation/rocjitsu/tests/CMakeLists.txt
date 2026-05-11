@@ -280,7 +280,8 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             COMMAND ${GEMM_BIN} --gtest_filter=RocblasGemmTest.Large_2048x2048)
         set_tests_properties("RocblasGemmTest.Large_2048x2048" PROPERTIES
             ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
-            TIMEOUT 600)
+            TIMEOUT 600
+            DISABLED TRUE)  # Disabled by default since it takes 10 minutes.
         foreach(I RANGE 0 4)
             rj_add_hip_test_case(hip_gemm_test "RocblasGemmFuzz.Iter${I}")
         endforeach()
