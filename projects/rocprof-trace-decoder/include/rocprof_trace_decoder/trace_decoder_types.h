@@ -240,21 +240,16 @@ typedef enum rocprofiler_thread_trace_decoder_event_type_t
 {
     ROCPROF_TRACE_DECODER_EVENT_NONE = 0,
     ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH,
-    ROCPROF_TRACE_DECODER_EVENT_BOTTOM_OF_PIPE,
+    ROCPROF_TRACE_DECODER_EVENT_BOTTOM_OF_PIPE_TS,
     ROCPROF_TRACE_DECODER_EVENT_SAVE_CONTEXT,
-    ROCPROF_TRACE_DECODER_EVENT_DISPATCH_BEGIN,
     ROCPROF_TRACE_DECODER_EVENT_DISPATCH_END,
     ROCPROF_TRACE_DECODER_EVENT_CACHE_FLUSH,
     ROCPROF_TRACE_DECODER_EVENT_PACKET_LOSS,
+    ROCPROF_TRACE_DECODER_EVENT_CODE_OBJECT_LOAD,   ///< Payload is the ID
+    ROCPROF_TRACE_DECODER_EVENT_CODE_OBJECT_UNLOAD, ///< Payload is the ID
     ROCPROF_TRACE_DECODER_EVENT_TT_STALL_BEGIN,
     ROCPROF_TRACE_DECODER_EVENT_TT_STALL_END,
     ROCPROF_TRACE_DECODER_EVENT_TT_FLUSH,
-    ROCPROF_TRACE_DECODER_EVENT_REG_PGM_LO,
-    ROCPROF_TRACE_DECODER_EVENT_REG_PGM_HI,
-    ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC1,
-    ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC2,
-    ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC3,
-    ROCPROF_TRACE_DECODER_EVENT_REG_NOWHERE,
     ROCPROF_TRACE_DECODER_EVENT_LAST
 } rocprofiler_thread_trace_decoder_event_type_t;
 
@@ -266,8 +261,37 @@ typedef struct rocprofiler_thread_trace_decoder_event_t
     uint8_t me_id;
     uint8_t pipe_id;
     uint16_t reserved;
-    uint64_t payload; ///< Reg data for EVENT_REG_ types
-} rocprof_trace_decoder_event_t;
+    uint64_t payload;
+} rocprofiler_thread_trace_decoder_event_t;
+
+typedef enum rocprofiler_thread_trace_decoder_dispatch_flags_t
+{
+    ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_NONE = 0,
+    ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_SCALAR_CACHE_INVALIDATE = 0x1,
+    ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_VECTOR_CACHE_INVALIDATE = 0x2,
+    ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_IS_CTX_RESTORE = 0x4,
+    ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_SCRATCH_ENABLED = 0x8,
+    ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_LAST =
+        ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_SCRATCH_ENABLED,
+} rocprofiler_thread_trace_decoder_dispatch_flags_t;
+
+typedef struct rocprofiler_thread_trace_decoder_dispatch_t
+{
+    uint64_t size; ///< Size of this struct
+    int64_t time;  ///< Time of event. Note: Behaves differently for quick_scan
+    rocprofiler_thread_trace_decoder_pc_t entry_point;
+    uint8_t me_id;
+    uint8_t pipe_id;
+    uint16_t user_sgprs;
+    int flags;
+    uint32_t vgprs; ///< Includes accum
+    uint32_t sgprs;
+    uint32_t lds_size;
+    uint32_t thread_dim_x;
+    uint32_t thread_dim_y;
+    uint32_t thread_dim_z;
+    uint64_t dispatch_pkt_addr;
+} rocprofiler_thread_trace_decoder_dispatch_t;
 
 /**
  * @brief Defines the type of payload received by rocprofiler_thread_trace_decoder_callback_t
@@ -284,6 +308,7 @@ typedef enum rocprofiler_thread_trace_decoder_record_type_t
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME,   ///< rocprofiler_thread_trace_decoder_realtime_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY,
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD,
+    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH,
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST
 
     /// @var ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY

@@ -22,14 +22,13 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <vector>
 
 #include "rocprof_trace_decoder/rocprof_trace_decoder.h"
 #include "rocprof_trace_decoder/trace_decoder_instrument.h"
 
 #include "gfx9/quick_scan.h"
-#include "trace_parser.hpp" // sqtt_token_reg_t (COMPUTE_DISPATCH_INITIATOR / COMPUTE_PGM_*)
+#include "trace_parser.hpp" // CSRegisterHandler, sqtt_token_reg_t, sqtt_event_type_t
 
 namespace
 {
@@ -39,22 +38,45 @@ constexpr uint32_t TOKEN_REG = 2;
 constexpr uint32_t TOKEN_REG_CS = 5;
 constexpr uint32_t TOKEN_REG_CS_PRIV = 15;
 
-// Bit layout of TOKEN_REG_CS / TOKEN_REG_CS_PRIV (see source/gfx9/gfx9token.h
-// `RegCs`): pipe at bits 5-6, me at bits 7-8 (post-fixup +1 mod 2),
-// regaddr at bits 9-15, regdata at bits 16-47.
-inline rocprofiler_thread_trace_decoder_event_type_t map_regcs_to_event(uint16_t regaddr)
+// Duck-typed payload matching the interface CSRegisterHandler::UpdateRegCS /
+// UpdateRegNoCS expect (.me, .pipe, .regaddr, .regdata, .disable). Lets us
+// reuse the same register-tracking logic as gfx9wave.cpp without pulling in
+// the full gfx9 token parser.
+struct QuickReg
 {
-    switch (regaddr)
-    {
-        case COMPUTE_DISPATCH_INITIATOR: return ROCPROF_TRACE_DECODER_EVENT_DISPATCH_BEGIN;
-        case COMPUTE_PGM_LO: return ROCPROF_TRACE_DECODER_EVENT_REG_PGM_LO;
-        case COMPUTE_PGM_HI: return ROCPROF_TRACE_DECODER_EVENT_REG_PGM_HI;
-        case COMPUTE_PGM_RSRC1: return ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC1;
-        case COMPUTE_PGM_RSRC2: return ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC2;
-        case COMPUTE_PGM_RSRC3: return ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC3;
-        case COMPUTE_NOWHERE: return ROCPROF_TRACE_DECODER_EVENT_REG_NOWHERE;
-        default: return ROCPROF_TRACE_DECODER_EVENT_NONE;
-    }
+    int8_t me;
+    int8_t pipe;
+    uint32_t regaddr;
+    uint32_t regdata;
+    int8_t disable;
+};
+
+// Decode a TOKEN_REG_CS / TOKEN_REG_CS_PRIV (see gfx9::RegCs in
+// source/gfx9/gfx9token.h:85): pipe at bits 5-6, me at bits 7-8 (post-fixup
+// +1 mod 2), regaddr at bits 9-15, regdata at bits 16-47.
+inline QuickReg decode_regcs(uint64_t val)
+{
+    QuickReg r{};
+    r.pipe = static_cast<int8_t>((val >> 5) & 0x3);
+    r.me = static_cast<int8_t>(((val >> 7) & 0x3) + 1) & 0x1;
+    r.regaddr = static_cast<uint32_t>((val >> 9) & 0x7F);
+    r.regdata = static_cast<uint32_t>((val >> 16) & 0xFFFFFFFFu);
+    r.disable = 0;
+    return r;
+}
+
+// Decode a TOKEN_REG (see gfx9::Reg in source/gfx9/gfx9token.h:73): pipe at
+// bits 5-6, me at bits 7-8 (post-fixup +1 mod 2), regaddr at bits 16-31,
+// regdata at bits 32-63, disable = !bit15.
+inline QuickReg decode_reg(uint64_t val)
+{
+    QuickReg r{};
+    r.pipe = static_cast<int8_t>((val >> 5) & 0x3);
+    r.me = static_cast<int8_t>(((val >> 7) & 0x3) + 1) & 0x1;
+    r.regaddr = static_cast<uint32_t>((val >> 16) & 0xFFFF);
+    r.regdata = static_cast<uint32_t>((val >> 32) & 0xFFFFFFFFu);
+    r.disable = static_cast<int8_t>(!((val >> 15) & 1));
+    return r;
 }
 
 inline bool is_gfx9_header(const rocprof_trace_decoder_gfx9_header_t& h)
@@ -76,37 +98,57 @@ rocprofiler_thread_trace_decoder_status_t quick_scan_gfx9(
 
     if (n == 0) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 
-    std::vector<rocprof_trace_decoder_event_t> events;
-    events.reserve(n);
+    // Mirror the register-tracking path in gfx9wave.cpp: feed each REG /
+    // REG_CS / REG_CS_PRIV write through CSRegisterHandler so that when we
+    // see COMPUTE_DISPATCH_INITIATOR with the launch bit set, we have all
+    // the previously-latched dispatch state (entry point, thread dims, lds
+    // size, dispatch packet addr) ready to publish.
+    CSRegisterHandler csregister;
 
     for (size_t i = 0; i < n; ++i)
     {
         const auto& tok = raw[i];
-        if (tok.type != TOKEN_REG_CS && tok.type != TOKEN_REG_CS_PRIV) continue;
 
-        const uint64_t val = tok.contents;
-        const uint8_t pipe = static_cast<uint8_t>((val >> 5) & 0x3);
-        const uint8_t me = static_cast<uint8_t>((val >> 7) & 0x3);
-        const uint16_t regaddr = static_cast<uint16_t>((val >> 9) & 0x7F);
-        const uint32_t regdata = static_cast<uint32_t>((val >> 16) & 0xFFFFFFFFu);
+        if (tok.type == TOKEN_REG_CS || tok.type == TOKEN_REG_CS_PRIV)
+        {
+            QuickReg r = decode_regcs(tok.contents);
+            csregister.UpdateRegCS(r);
 
-        auto type = map_regcs_to_event(regaddr);
-        if (type == ROCPROF_TRACE_DECODER_EVENT_NONE) continue;
-
-        rocprof_trace_decoder_event_t ev{};
-        ev.size = sizeof(ev);
-        ev.time = 0; // Timestamp not available from quick scan.
-        ev.type = type;
-        ev.me_id = me;
-        ev.pipe_id = pipe;
-        ev.reserved = 0;
-        ev.payload = regdata;
-        events.push_back(ev);
+            if (r.regaddr == COMPUTE_DISPATCH_INITIATOR && (r.regdata & 1) != 0)
+            {
+                // Time is unavailable from quick_scan; PopulateDispatch will
+                // record 0, which matches the contract documented in
+                // rocprof_trace_decoder.h.
+                rocprofiler_thread_trace_decoder_dispatch_t dispatch = csregister.PopulateDispatch(0, r.me, r.pipe);
+                auto status = trace_callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH, &dispatch, 1, userdata);
+                if (status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return status;
+            }
+            else if (r.regaddr == COMPUTE_NOWHERE && r.regdata == EVENT_CS_PARTIAL_FLUSH)
+            {
+                rocprofiler_thread_trace_decoder_event_t ev{};
+                ev.size = sizeof(ev);
+                ev.time = 0;
+                ev.type = ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH;
+                ev.me_id = static_cast<uint8_t>(r.me);
+                ev.pipe_id = static_cast<uint8_t>(r.pipe);
+                ev.reserved = 0;
+                ev.payload = 0;
+                auto status = trace_callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &ev, 1, userdata);
+                if (status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return status;
+            }
+        }
+        else if (tok.type == TOKEN_REG)
+        {
+            QuickReg r = decode_reg(tok.contents);
+            if (r.disable) continue;
+            // Only userdata2 writes update register state we care about for
+            // dispatch attribution (codeobj load/unload markers); other REG
+            // tokens are ignored, mirroring gfx9wave.cpp's TOKEN_REG branch.
+            csregister.UpdateRegNoCS(r);
+        }
     }
 
-    if (events.empty()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
-
-    return trace_callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, events.data(), events.size(), userdata);
+    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 
 } // namespace
@@ -117,7 +159,8 @@ rocprof_trace_decoder_quick_scan(
     const void* data,
     uint64_t data_size,
     rocprof_trace_decoder_trace_callback_t trace_callback,
-    void* userdata
+    void* userdata,
+    int flags
 )
 {
     if (!data || data_size == 0 || !trace_callback)

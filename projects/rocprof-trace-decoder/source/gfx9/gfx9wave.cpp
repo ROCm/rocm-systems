@@ -562,32 +562,61 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
             case TOKEN_REG_CS:
             case TOKEN_REG_CS_PRIV:
             {
-                rocprofiler_thread_trace_decoder_event_type_t type = ROCPROF_TRACE_DECODER_EVENT_NONE;
-                switch (int(token.fields.regcs.regaddr))
-                {
-                    case COMPUTE_DISPATCH_INITIATOR: type = ROCPROF_TRACE_DECODER_EVENT_DISPATCH_BEGIN; break;
-                    case COMPUTE_PGM_LO: type = ROCPROF_TRACE_DECODER_EVENT_REG_PGM_LO; break;
-                    case COMPUTE_PGM_HI: type = ROCPROF_TRACE_DECODER_EVENT_REG_PGM_HI; break;
-                    case COMPUTE_PGM_RSRC1: type = ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC1; break;
-                    case COMPUTE_PGM_RSRC2: type = ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC2; break;
-                    case COMPUTE_PGM_RSRC3: type = ROCPROF_TRACE_DECODER_EVENT_REG_PGM_RSRC3; break;
-                    case COMPUTE_NOWHERE: type = ROCPROF_TRACE_DECODER_EVENT_REG_NOWHERE; break;
-                    default: break;
-                }
-                if (type != ROCPROF_TRACE_DECODER_EVENT_NONE)
-                    stitch.sendEvent(
-                        type, token.time, token.fields.regcs.me, token.fields.regcs.pipe, token.fields.regcs.regdata
-                    );
                 csregister.UpdateRegCS(token.fields.regcs);
+
+                if (token.fields.regcs.regaddr == COMPUTE_DISPATCH_INITIATOR && (token.fields.regcs.regdata & 1) != 0)
+                {
+                    stitch.sendDispatch(csregister, token.time, token.fields.regcs.me, token.fields.regcs.pipe);
+                }
+                else if (token.fields.regcs.regaddr == COMPUTE_NOWHERE && token.fields.regcs.regdata == EVENT_CS_PARTIAL_FLUSH)
+                {
+                    stitch.sendEvent(
+                        ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH,
+                        token.time,
+                        token.fields.regcs.me,
+                        token.fields.regcs.pipe,
+                        0
+                    );
+                }
+
                 break;
             }
             case TOKEN_REG:
+            {
                 if (token.fields.reg.disable) break;
                 if (csregister.IsUserdata3(token.fields.reg.regaddr))
+                {
                     csregister.HandleRealtimeClock(token.time, token.fields.reg.regdata);
-                else if (csregister.UpdateRegNoCS(token.fields.reg))
-                    convertPerfEventsTs(perfEvents, csregister.counter_frequency);
+                    break;
+                }
+                auto ev = csregister.UpdateRegNoCS(token.fields.reg);
+                switch (ev.kind)
+                {
+                    case CSRegisterHandler::RegUpdateEvent::COUNTER_FREQUENCY_CHANGED:
+                        convertPerfEventsTs(perfEvents, csregister.counter_frequency);
+                        break;
+                    case CSRegisterHandler::RegUpdateEvent::CODEOBJ_LOAD:
+                        stitch.sendEvent(
+                            ROCPROF_TRACE_DECODER_EVENT_CODE_OBJECT_LOAD,
+                            token.time,
+                            token.fields.reg.me,
+                            token.fields.reg.pipe,
+                            static_cast<uint32_t>(ev.id)
+                        );
+                        break;
+                    case CSRegisterHandler::RegUpdateEvent::CODEOBJ_UNLOAD:
+                        stitch.sendEvent(
+                            ROCPROF_TRACE_DECODER_EVENT_CODE_OBJECT_UNLOAD,
+                            token.time,
+                            token.fields.reg.me,
+                            token.fields.reg.pipe,
+                            static_cast<uint32_t>(ev.id)
+                        );
+                        break;
+                    case CSRegisterHandler::RegUpdateEvent::NONE: break;
+                }
                 break;
+            }
             case TOKEN_SHADERDATA:
                 shaderdata.push_back(att_shader_data_t{
                     token.time,
