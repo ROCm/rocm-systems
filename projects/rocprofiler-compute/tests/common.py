@@ -13,6 +13,8 @@ import pandas as pd
 from utils import rocpd_data
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
+src_candidate = os.path.join(ROOT, "src")
+SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
 
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},

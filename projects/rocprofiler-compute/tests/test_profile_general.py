@@ -154,8 +154,6 @@ def get_available_sets_for_arch(gpu_arch):
     or [] if gpu_arch is falsy."""
     if not gpu_arch:
         return []
-    if common.SRC not in sys.path:
-        sys.path.insert(0, common.SRC)
     sets_file = (
         Path(common.SRC)
         / "rocprof_compute_soc"

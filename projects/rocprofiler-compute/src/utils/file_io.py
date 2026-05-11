@@ -67,15 +67,28 @@ def load_panel_configs(
 
 def load_profiling_config(config_dir: str) -> dict[str, Any]:
     """
-    Load profiling config from yaml file.
+    Workloads that predate ``profiling_config.yaml`` (or were profiled
+    on ROCm < 7 where rocpd does not exist) carry no explicit format
+    declaration. Infer from directory contents so analyze can read
+    them transparently.
     """
     config_path = Path(config_dir) / "profiling_config.yaml"
+    cfg: dict[str, Any] = {}
     try:
         with open(config_path) as file:
-            return yaml.safe_load(file) or {}
+            cfg = yaml.safe_load(file) or {}
     except FileNotFoundError:
         console_log(f"Could not find profiling_config.yaml in {config_dir}")
-    return {}
+
+    if "format_rocprof_output" not in cfg:
+        ddir = Path(config_dir)
+        if rocpd_data.find_workload_db_paths(ddir):
+            cfg["format_rocprof_output"] = "rocpd"
+        elif (ddir / "pmc_perf.csv").exists() or any(
+            ddir.glob("pmc_perf_*.csv")
+        ):
+            cfg["format_rocprof_output"] = "csv"
+    return cfg
 
 
 @demarcate
