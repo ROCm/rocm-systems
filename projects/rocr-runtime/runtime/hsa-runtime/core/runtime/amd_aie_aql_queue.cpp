@@ -104,7 +104,9 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
 }
 
 AieAqlQueue::~AieAqlQueue() {
-  AieAqlQueue::Inactivate();
+  auto err = AieAqlQueue::Inactivate();
+  assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
+  (void)err;
   if (ring_buf_) {
     auto& agent = static_cast<AieAgent&>(*GetAgent());
     agent.system_deallocator()(ring_buf_);
@@ -116,14 +118,15 @@ AieAqlQueue::~AieAqlQueue() {
 
 hsa_status_t AieAqlQueue::Inactivate() {
   bool active = active_.exchange(false, std::memory_order_relaxed);
-  if (active) {
-    auto& driver = static_cast<XdnaDriver&>(GetAgent()->driver());
-    hsa_status_t err = driver.DestroyKernelModeQueue(kmq_metadata_);
-    assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
-    (void)err;
-    atomic::Fence(std::memory_order_acquire);
+  if (!active) {
+    return HSA_STATUS_SUCCESS;
   }
-  return HSA_STATUS_SUCCESS;
+
+  auto& driver = static_cast<XdnaDriver&>(GetAgent()->driver());
+  hsa_status_t err = driver.DestroyKernelModeQueue(kmq_metadata_);
+  kmq_metadata_ = nullptr;
+  atomic::Fence(std::memory_order_acquire);
+  return err;
 }
 
 hsa_status_t AieAqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
