@@ -52,5 +52,43 @@ TEST_F(NetIbMPITest, InvalidRecvCount) {
 //      refs to 1 without freeing (ncclIbDeregMrInternal refs>0 branch). The second
 //      DeregMr decrements to 0 and actually calls wrap_ibv_dereg_mr.
 //      Covers ncclIbDeregMrInternal L2326 "refs > 0" path.
+TEST_F(NetIbMPITest, MrCacheRefCount) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    ConnectionPair cp;
+    NetConnectionGuard guard(net_);
+    SetupConnectionWithGuard(/*dev=*/0, cp, guard);
+
+    void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
+
+    const size_t sz = 4096;
+    auto buf = makeHostBufferAutoGuard(malloc(sz));
+    ASSERT_NE(buf.get(), nullptr);
+
+    // First registration — inserts into cache with refs=1
+    void* mh1 = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf.get(), sz, NCCL_PTR_HOST, &mh1), ncclSuccess);
+    ASSERT_NE(mh1, nullptr);
+
+    // Second registration of the same buffer — hits cache, bumps refs to 2
+    void* mh2 = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf.get(), sz, NCCL_PTR_HOST, &mh2), ncclSuccess);
+    ASSERT_NE(mh2, nullptr);
+
+    // First deregMr — refs drops to 1; underlying MR stays alive
+    ASSERT_EQ(DeregisterMemory(comm, mh1), ncclSuccess);
+
+    // Second deregMr — refs drops to 0; underlying MR is freed
+    ASSERT_EQ(DeregisterMemory(comm, mh2), ncclSuccess);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// E2.  SendSizeClamping — sender posts a buffer larger than the receiver's posted size.
+//      Covers the ncclIbIsend L2543 branch: if (size > slots[r].size) size = slots[r].size.
+//      The transfer should complete cleanly; only recv_size bytes are transferred.
 
 #endif /* MPI_TESTS_ENABLED */
