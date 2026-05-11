@@ -11,6 +11,7 @@ name: rocjitsu amdisa Generated Code Report
       - 'emulation/rocjitsu/lib/python/amdisa/**'
       - 'emulation/rocjitsu/lib/python/pyproject.toml'
       - 'emulation/rocjitsu/scripts/amdisa_generated_code_report.py'
+      - 'emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

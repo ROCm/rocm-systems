@@ -30,6 +30,8 @@ set(HSA_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_hea
 option(RJ_BUILD_GUI "Build the simulation GUI (requires OpenGL)" ON)
 set(RJ_AMDGPU_ISA_DIR "${CMAKE_SOURCE_DIR}/../../shared/machine-readable-isa/isa"
   CACHE PATH "Directory containing AMDGPU machine-readable ISA XML files")
+option(RJ_AMDGPU_ISA_CODEGEN_FAIL_ON_CHANGES
+  "Fail the AMDGPU ISA codegen target if regenerated checked-in sources differ from git" OFF)
 
 include(rj_log)
 
@@ -141,6 +143,7 @@ endforeach()
 add_custom_target(flatbuffers_schemas DEPENDS ${GENERATED_HEADERS})
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_package(Git QUIET)
 include(rj_setup_python_venv)
 
 rj_setup_python_venv(
@@ -164,9 +167,9 @@ rj_setup_python_venv(
 
 get_filename_component(RJ_AMDGPU_ISA_DIR "${RJ_AMDGPU_ISA_DIR}" ABSOLUTE
   BASE_DIR "${CMAKE_SOURCE_DIR}")
-set(RJ_AMDGPU_ISA_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated")
+set(RJ_AMDGPU_ISA_CODEGEN_TARGET rocjitsu_generate_amdgpu_isa)
 set(RJ_AMDGPU_ISA_OUTPUT_DIR
-  "${RJ_AMDGPU_ISA_GENERATED_INCLUDE_DIR}/rocjitsu/isa/arch/amdgpu")
+  "${CMAKE_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu")
 
 set(RJ_AMDGPU_ISA_ARCHES
   cdna1 cdna2 cdna3 cdna4 rdna1 rdna2 rdna3 rdna3_5 rdna4)
@@ -269,21 +272,30 @@ add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
 add_subdirectory(lib/rocjitsu)
 
-get_property(RJ_AMDGPU_ISA_GENERATED_OUTPUTS GLOBAL PROPERTY RJ_AMDGPU_ISA_GENERATED_OUTPUTS)
-list(APPEND RJ_AMDGPU_ISA_GENERATED_OUTPUTS
-  "${RJ_AMDGPU_ISA_OUTPUT_DIR}/shared/execute_shared.h")
-list(REMOVE_DUPLICATES RJ_AMDGPU_ISA_GENERATED_OUTPUTS)
-
 set(RJ_AMDGPU_ISA_OUTPUT_DIRS "${RJ_AMDGPU_ISA_OUTPUT_DIR}/shared")
+set(RJ_AMDGPU_ISA_FORMAT_PATHS "${RJ_AMDGPU_ISA_OUTPUT_DIR}/shared/execute_shared.h")
 foreach(arch IN LISTS RJ_AMDGPU_ISA_ARCHES)
   list(APPEND RJ_AMDGPU_ISA_OUTPUT_DIRS "${RJ_AMDGPU_ISA_OUTPUT_DIR}/${arch}")
+  list(APPEND RJ_AMDGPU_ISA_FORMAT_PATHS "${RJ_AMDGPU_ISA_OUTPUT_DIR}/${arch}")
 endforeach()
 
 set(RJ_AMDGPU_ISA_CODEGEN_STAMP
   "${CMAKE_BINARY_DIR}/generated/amdisa_amdgpu_isa_codegen.stamp")
+set(RJ_AMDGPU_ISA_CODEGEN_CHECK_COMMAND)
+if(RJ_AMDGPU_ISA_CODEGEN_FAIL_ON_CHANGES)
+  if(NOT GIT_FOUND)
+    message(FATAL_ERROR
+      "RJ_AMDGPU_ISA_CODEGEN_FAIL_ON_CHANGES requires git to be available")
+  endif()
+  list(APPEND RJ_AMDGPU_ISA_CODEGEN_CHECK_COMMAND
+    COMMAND ${CMAKE_COMMAND}
+      -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+      -DREPO_ROOT=${CMAKE_SOURCE_DIR}
+      -DGENERATED_DIR=${RJ_AMDGPU_ISA_OUTPUT_DIR}
+      -P ${CMAKE_SOURCE_DIR}/cmake/rj_fail_if_git_dirty.cmake)
+endif()
 add_custom_command(
   OUTPUT "${RJ_AMDGPU_ISA_CODEGEN_STAMP}"
-  BYPRODUCTS ${RJ_AMDGPU_ISA_GENERATED_OUTPUTS}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${RJ_AMDGPU_ISA_OUTPUT_DIRS}
   COMMAND ${CMAKE_COMMAND} -E env
     "PYTHONPATH=${CMAKE_SOURCE_DIR}/lib/python"
@@ -291,6 +303,8 @@ add_custom_command(
     --gen-all --gen-shared-execute
     -o "${RJ_AMDGPU_ISA_OUTPUT_DIR}"
     --multi ${RJ_AMDGPU_ISA_MULTI_ARGS}
+  COMMAND ${CMAKE_SOURCE_DIR}/scripts/clang_format.sh ${RJ_AMDGPU_ISA_FORMAT_PATHS}
+  ${RJ_AMDGPU_ISA_CODEGEN_CHECK_COMMAND}
   COMMAND ${CMAKE_COMMAND} -E touch "${RJ_AMDGPU_ISA_CODEGEN_STAMP}"
   DEPENDS ${RJ_AMDGPU_ISA_XMLS} ${RJ_AMDISA_PYTHON_SOURCES}
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -305,7 +319,7 @@ get_property(RJ_AMDGPU_ISA_CONSUMER_TARGETS GLOBAL PROPERTY RJ_AMDGPU_ISA_CONSUM
 list(REMOVE_DUPLICATES RJ_AMDGPU_ISA_CONSUMER_TARGETS)
 foreach(target IN LISTS RJ_AMDGPU_ISA_CONSUMER_TARGETS)
   if(TARGET ${target})
-    add_dependencies(${target} rocjitsu_generate_amdgpu_isa)
+    add_dependencies(${target} ${RJ_AMDGPU_ISA_CODEGEN_TARGET})
   endif()
 endforeach()
 
@@ -328,7 +342,7 @@ target_link_libraries(rocjitsu_shared PRIVATE
 )
 target_include_directories(rocjitsu_shared PRIVATE ${GENERATED_DIR})
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
-add_dependencies(rocjitsu_shared rocjitsu_generate_amdgpu_isa)
+add_dependencies(rocjitsu_shared ${RJ_AMDGPU_ISA_CODEGEN_TARGET})
 
 # Tools
 if(RJ_BUILD_GUI)

@@ -584,7 +584,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--generated-dir",
         type=Path,
-        help="Generated AMDGPU ISA source directory. Defaults to the CMake build-tree output.",
+        help="Generated AMDGPU ISA source directory. Defaults to the checked-in rocjitsu source tree.",
     )
     parser.add_argument(
         "--build-dir",
@@ -656,7 +656,7 @@ def main() -> int:
     generated_dir = (
         args.generated_dir.resolve()
         if args.generated_dir
-        else build_dir / "generated" / "rocjitsu" / "isa" / "arch" / "amdgpu"
+        else rocjitsu_root / "lib" / "rocjitsu" / "src" / "rocjitsu" / "isa" / "arch" / "amdgpu"
     )
 
     if args.base_ref:

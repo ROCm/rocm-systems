@@ -58,8 +58,7 @@ function(rj_configure_target target)
             ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include
             ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src
             ${HSA_INCLUDE_DIR})
-        if(DEFINED RJ_AMDGPU_ISA_GENERATED_INCLUDE_DIR)
-            target_include_directories(${target} PRIVATE ${RJ_AMDGPU_ISA_GENERATED_INCLUDE_DIR})
+        if(DEFINED RJ_AMDGPU_ISA_CODEGEN_TARGET)
             set_property(GLOBAL APPEND PROPERTY RJ_AMDGPU_ISA_CONSUMER_TARGETS ${target})
         endif()
     endif()

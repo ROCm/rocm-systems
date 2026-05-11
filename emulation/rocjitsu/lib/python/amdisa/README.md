@@ -44,9 +44,12 @@ cmake --build build --target rocjitsu_generate_amdgpu_isa
 ```
 
 This regenerates all ISA files (decoders, encoders, instruction classes, shared execute
-templates) for all 9 ISAs into `build/generated/rocjitsu/isa/arch/amdgpu/`.
+templates) for all 9 ISAs into `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/`.
 The target uses `../../shared/machine-readable-isa/isa` by default; configure with
 `-DRJ_AMDGPU_ISA_DIR=/path/to/isa` to use a different MR ISA checkout.
+The CMake target also runs clang-format on the generated AMDGPU ISA files.
+Configure with `-DRJ_AMDGPU_ISA_CODEGEN_FAIL_ON_CHANGES=ON` to fail the target
+when regeneration changes checked-in generated files.
 
 To review what regeneration changes relative to a base ref, write a Markdown report:
 
