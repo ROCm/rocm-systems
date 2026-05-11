@@ -80,8 +80,9 @@ inline QuickReg decode_reg(uint64_t val)
     return r;
 }
 
-inline bool is_gfx9_header(const rocprof_trace_decoder_gfx9_header_t& h)
+inline bool is_gfx9_header(uint64_t header)
 {
+    rocprof_trace_decoder_gfx9_header_t h{.raw = header};
     return (h.legacy_version == 0 || h.legacy_version == 0x11) && (h.gfx9_version2 >= 4 && h.gfx9_version2 <= 6);
 }
 
@@ -170,11 +171,17 @@ rocprof_trace_decoder_quick_scan(
     auto decoder = Handle::get_handle_data(handle);
     if (!decoder) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    if (decoder->header.raw == 0 || chunk_index == 0) decoder->header.raw = static_cast<const uint64_t*>(data)[0];
+    int gfxip = 0;
+    {
+        auto lk = std::unique_lock{decoder->mut};
+        if (decoder->gfxip == 0 || chunk_index == 0)
+            decoder->gfxip = is_gfx9_header(static_cast<const uint64_t*>(data)[0]) ? 9 : 0;
+        gfxip = decoder->gfxip;
+    }
 
     const uint8_t* buf = static_cast<const uint8_t*>(data);
 
-    if (is_gfx9_header(decoder->header)) return quick_scan_gfx9(buf, data_size, trace_callback, userdata);
+    if (gfxip == 9) return quick_scan_gfx9(buf, data_size, trace_callback, userdata);
 
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 }

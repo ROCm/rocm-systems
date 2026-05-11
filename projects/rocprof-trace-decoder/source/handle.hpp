@@ -54,7 +54,8 @@ struct HandleData
     void* se_data_userdata{nullptr};
 
     // quick_scan state data
-    rocprof_trace_decoder_gfx9_header_t header{};
+    std::mutex mut{};
+    int gfxip = 0;
     std::unordered_map<uint64_t, std::unique_ptr<class CSRegisterHandler>> pipestate{};
 };
 
