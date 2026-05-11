@@ -334,6 +334,7 @@ void TeamCtxInfraTester::postLaunchKernel() {
   if (_splitType == ROCSHMEM_TEST_TEAM_SUBSET_PARENT &&
       subset_parent_team != ROCSHMEM_TEAM_INVALID) {
     rocshmem_team_destroy(subset_parent_team);
+    subset_parent_team = ROCSHMEM_TEAM_INVALID;
   }
 }
 
