@@ -61,7 +61,7 @@ jobs:
         #     ci-args: '--memcheck UndefinedBehaviorSanitizer'
         #     ci-tag: '-undefined-behavior-sanitizer'
 
-    runs-on: linux-mi325-1gpu-ossci-rocm
+    runs-on: linux-gfx942-1gpu-ossci-rocm
     container:
       image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
       credentials:
@@ -106,12 +106,13 @@ jobs:
         CC=${{ matrix.compiler }} &&
         CXX=$(echo ${{ matrix.compiler }} | sed 's/clang-/clang++-/1' | sed 's/gcc-/g++-/1') &&
         apt-get update &&
-        apt-get install -y build-essential python3 environment-modules ${{ matrix.compiler }} ${CXX} &&
+        apt-get install -y build-essential python3 python3-venv environment-modules ${{ matrix.compiler }} ${CXX} &&
         update-alternatives --install /usr/bin/cc cc /usr/bin/${CC} 100 &&
         update-alternatives --install /usr/bin/c++ c++ /usr/bin/${CXX} 100 &&
-        python3 -m pip install --upgrade pip &&
-        python3 -m pip install 'cmake==3.22.0' &&
-        python3 -m pip install -r requirements.txt
+        python3 -m venv "${RUNNER_TEMP}/rocprofiler-register-venv" &&
+        "${RUNNER_TEMP}/rocprofiler-register-venv/bin/python" -m pip install --upgrade pip &&
+        "${RUNNER_TEMP}/rocprofiler-register-venv/bin/python" -m pip install -r requirements.txt &&
+        echo "${RUNNER_TEMP}/rocprofiler-register-venv/bin" >> "${GITHUB_PATH}"
 
     - name: Setup GCov
       timeout-minutes: 25
