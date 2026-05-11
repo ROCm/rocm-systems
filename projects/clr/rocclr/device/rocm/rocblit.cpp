@@ -2592,6 +2592,89 @@ bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Co
   return result;
 }
 
+struct CopyBufferBatchDescriptor {
+  uint64_t source_address;
+  uint64_t destination_address;
+  uint64_t aligned_element_count;
+  uint32_t aligned_element_size;
+  uint32_t trailing_byte_count;
+  uint32_t workgroup_count;
+};
+
+// ================================================================================================
+bool KernelBlitManager::shaderCopyBufferBatch(
+    const std::vector<amd::BatchCopyOp> &copy_operations,
+    bool attach_signal) const {
+  std::scoped_lock transfer_operations_lock(lockXferOps_);
+
+  constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
+  constexpr uint32_t kLocalWorkSize = 512;
+  const uint32_t max_workgroups_per_copy =
+      std::max<uint32_t>(dev().settings().limit_blit_wg_ / copy_operations.size(), 1);
+  const size_t descriptor_bytes =
+      copy_operations.size() * sizeof(CopyBufferBatchDescriptor);
+  void *descriptor_buffer = gpu().allocKernArg(descriptor_bytes, kCBAlignment);
+  CopyBufferBatchDescriptor *descriptors =
+      static_cast<CopyBufferBatchDescriptor *>(descriptor_buffer);
+  size_t descriptor_index = 0;
+  uint32_t max_workgroups_used = 1;
+
+  for (const auto &copy_operation : copy_operations) {
+    device::Memory *source_device_memory =
+        copy_operation.srcMemory->getDeviceMemory(
+            *copy_operation.srcMemory->getContext().devices()[0]);
+    device::Memory *destination_device_memory =
+        copy_operation.dstMemory->getDeviceMemory(
+            *copy_operation.dstMemory->getContext().devices()[0]);
+
+    const uint64_t source_address =
+        source_device_memory->virtualAddress() + copy_operation.srcOffset;
+    const uint64_t destination_address =
+        destination_device_memory->virtualAddress() + copy_operation.dstOffset;
+    const bool addresses_aligned = ((source_address % kMaxAlignment) == 0) &&
+                                   ((destination_address % kMaxAlignment) == 0);
+    const uint32_t aligned_element_size =
+        (addresses_aligned) ? kMaxAlignment : sizeof(uint32_t);
+    const uint64_t aligned_element_count =
+        copy_operation.size / aligned_element_size;
+    const uint32_t trailing_byte_count =
+        copy_operation.size % aligned_element_size;
+
+    uint32_t workgroup_count = static_cast<uint32_t>(
+        std::min<uint64_t>(max_workgroups_per_copy,
+                           amd::alignUp(aligned_element_count,
+                                        static_cast<uint64_t>(kLocalWorkSize)) /
+                               kLocalWorkSize));
+    workgroup_count = std::max<uint32_t>(workgroup_count, 1);
+    max_workgroups_used = std::max(max_workgroups_used, workgroup_count);
+
+    descriptors[descriptor_index++] = {
+        source_address,        destination_address, aligned_element_count,
+        aligned_element_size,  trailing_byte_count, workgroup_count};
+  }
+
+  amd::Kernel *const kernel = kernels_[BlitCopyBufferBatch];
+  constexpr bool kDirectVa = true;
+  setArgument(kernel, 0, sizeof(cl_mem), descriptor_buffer, 0, nullptr,
+              kDirectVa);
+
+  setArgument(kernel, 1, sizeof(kLocalWorkSize), &kLocalWorkSize);
+
+  size_t global_work_size[2] = {static_cast<size_t>(max_workgroups_used) *
+                                    kLocalWorkSize,
+                                copy_operations.size()};
+  size_t local_work_size[2] = {kLocalWorkSize, 1};
+  amd::NDRangeContainer nd_range(2, nullptr, global_work_size, local_work_size);
+
+  address parameters = captureArguments(kernel);
+  bool submit_result =
+      gpu().submitKernelInternal(nd_range, *kernel, parameters, nullptr, 0,
+                                 nullptr, nullptr, attach_signal);
+  releaseArguments(parameters);
+
+  return submit_result;
+}
+
 // ================================================================================================
 bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOps) const {
   if (copyOps.empty()) {
@@ -2610,6 +2693,8 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   // Partition into intra-device (kernel blit) and inter-device (DMA batch) groups.
   std::vector<amd::BatchCopyOp> d2dCopyOps;
   std::vector<amd::BatchCopyOp> p2pCopyOps;
+  d2dCopyOps.reserve(copyOps.size());
+  p2pCopyOps.reserve(copyOps.size());
 
   for (const auto& op : copyOps) {
     device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
@@ -2622,9 +2707,18 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
       return false;
     }
 
-    // Resolve real agents for partition decision (handles IPC shared memory)
+    // Normal same-device allocations do not need the heavier agent-resolution path.
     const Memory& srcMem = gpuMem(*srcDevMem);
     const Memory& dstMem = gpuMem(*dstDevMem);
+    const bool isLocalD2D = (&srcMem.dev() == &dstMem.dev()) && !op.srcMemory->ipcShared() &&
+                            !op.dstMemory->ipcShared() && !op.srcMemory->vmmImported() &&
+                            !op.dstMemory->vmmImported() && !op.metadata.preferCE_;
+    if (isLocalD2D) {
+      d2dCopyOps.push_back(op);
+      continue;
+    }
+
+    // Resolve real agents for IPC/VMM and remote resources.
     address srcAddr = reinterpret_cast<address>(srcMem.getDeviceMemory()) + op.srcOffset;
     address dstAddr = reinterpret_cast<address>(dstMem.getDeviceMemory()) + op.dstOffset;
 
@@ -2665,29 +2759,30 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
       gpu().Barriers().AddExternalSignal(priorSignal);
     }
 
+    bool attachSignal = false;
     for (const auto& op : d2dCopyOps) {
-      device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
-          *op.srcMemory->getContext().devices()[0]);
-      device::Memory* dstDevMem = op.dstMemory->getDeviceMemory(
-          *op.dstMemory->getContext().devices()[0]);
+      attachSignal |= !op.metadata.isAsync_;
+    }
 
-      amd::Coord3D srcOrigin(op.srcOffset);
-      amd::Coord3D dstOrigin(op.dstOffset);
-      amd::Coord3D size(op.size);
+    std::map<size_t, std::vector<amd::BatchCopyOp>, std::greater<size_t>> d2dCopyOpsBySize;
+    for (const auto& op : d2dCopyOps) {
+      d2dCopyOpsBySize[op.size].push_back(op);
+    }
 
-      if (!copyBuffer(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size,
-                      false, op.metadata)) {
-        LogError("KernelBlitManager::copyBufferBatch: Intra-device copy failed!");
+    for (const auto& copyOpsBySizeEntry : d2dCopyOpsBySize) {
+      const auto& copyOpsBySize = copyOpsBySizeEntry.second;
+      if (!shaderCopyBufferBatch(copyOpsBySize, attachSignal)) {
+        LogError("KernelBlitManager::shaderCopyBufferBatch: Intra-device batch copy failed!");
         return false;
       }
+    }
 
-      // Track non-Compute intra signals as external so the final barrier
-      // synchronizes the compute stream with them.
-      // Compute signals are implicitly ordered on the same AQL queue.
-      ProfilingSignal* sig = gpu().Barriers().GetLastSignal();
-      if (sig != nullptr && sig->engine_ != HwQueueEngine::Compute) {
-        gpu().Barriers().AddExternalSignal(sig);
-      }
+    // Track non-Compute intra signals as external so the final barrier
+    // synchronizes the compute stream with them.
+    // Compute signals are implicitly ordered on the same AQL queue.
+    ProfilingSignal* sig = gpu().Barriers().GetLastSignal();
+    if (sig != nullptr && sig->engine_ != HwQueueEngine::Compute) {
+      gpu().Barriers().AddExternalSignal(sig);
     }
   }
 
