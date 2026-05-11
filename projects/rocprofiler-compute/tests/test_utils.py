@@ -7813,7 +7813,9 @@ def test_format_table_ascii_text_wrapping():
     # Should have multiple lines for the wrapped description
     assert len(desc_lines) > 1, "Long description should wrap to multiple lines"
 
-# -- Rocpd Data Merge Test ---------------------------------------------------  
+
+# -- Rocpd Data Merge Test ---------------------------------------------------
+
 
 def _seed_rocpd_db(db_path, rows, pmc_event_table, pmc_event_rows):
     """Build a minimal rocpd-shaped sqlite file for merge_pass_dbs tests.

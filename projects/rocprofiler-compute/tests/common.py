@@ -82,11 +82,13 @@ def _check_in_workload(workload_dir, db_query, db_params, csv_pattern):
 
 
 def check_counter_in_workload(counter_name, workload_dir):
-    """Return True when `counter_name` was collected in this workload."""
+    """Return True when `counter_name` (or its `_sum` variant)
+    was collected in this workload.
+    """
     return _check_in_workload(
         workload_dir,
-        "SELECT 1 FROM counters_collection WHERE counter_name = ? LIMIT 1",
-        (counter_name,),
+        "SELECT 1 FROM counters_collection WHERE counter_name IN (?, ?) LIMIT 1",
+        (counter_name, counter_name + "_sum"),
         counter_name,
     )
 
@@ -99,6 +101,20 @@ def check_kernel_in_workload(kernel_name_substr, workload_dir):
         (f"%{kernel_name_substr}%",),
         kernel_name_substr,
     )
+
+
+def load_workload_counters_long(workload_dir):
+    """Return the long-format counters DataFrame for a rocpd workload.
+
+    Reads ``counters_collection`` from every ``<workload>/*.db`` and returns
+    rows with ``Counter_Name``/``Counter_Value`` columns.
+    """
+    from utils import utils_analysis
+
+    db_paths = rocpd_data.find_workload_db_paths(Path(workload_dir))
+    if not db_paths:
+        return pd.DataFrame()
+    return utils_analysis.load_rocpd_pmc_df(db_paths)
 
 
 def load_workload_timestamps(workload_dir):

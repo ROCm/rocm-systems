@@ -14,7 +14,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, rocpd_data, schema, utils_analysis
+from utils import file_io, parser, rocpd_data, schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -409,13 +409,6 @@ class OmniAnalyze_Base:
         kokkos_trace = profiling_config.get("kokkos_trace", False)
 
         if format_rocprof == "rocpd":
-            db_paths = rocpd_data.find_workload_db_paths(workload_dir)
-            if db_paths:
-                long_df = utils_analysis.load_rocpd_pmc_df(db_paths)
-                if not long_df.empty:
-                    df = utils_analysis.process_rocpd_csv(long_df)
-                    df.to_csv(output_file, index=False)
-                    console_debug(f"Created file: {output_file}")
             return None
 
         # Collect files to process - normalize to Path objects
