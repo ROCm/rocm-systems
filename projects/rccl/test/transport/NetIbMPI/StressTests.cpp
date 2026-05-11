@@ -159,5 +159,19 @@ TEST_F(NetIbMPITest, SendSizeClamping) {
 //      Covers the ncclIbCloseSend/ncclIbCloseRecv null-guard branch
 //      (net_ib.cc:3063 and 3083: if (comm) {...}).
 //      The API must return ncclSuccess without crashing.
+TEST_F(NetIbMPITest, NullCommClose) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    AssertInitAndGetDevices(nullptr);
+
+    EXPECT_EQ(CloseSendComm(nullptr), ncclSuccess);
+    EXPECT_EQ(CloseRecvComm(nullptr), ncclSuccess);
+    EXPECT_EQ(CloseListenComm(nullptr), ncclSuccess);
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// E4.  TagZeroReuse — 50 messages all sent with tag=0.
+//      Verifies FIFO ordering: messages arrive in send order because
+//      the FIFO is a strict ring (slot = fifoHead % MAX_REQUESTS).
 
 #endif /* MPI_TESTS_ENABLED */
