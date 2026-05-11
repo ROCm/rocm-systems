@@ -1528,5 +1528,14 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
 // E5.  SetNetAttrNoOp — calls ncclIbSetNetAttr (the last entry in ncclNet_t).
 //      The function is a pure no-op (two (void) casts + return ncclSuccess).
 //      All it needs is a call to reach its body; FNDA shows 0 hits without this test.
+TEST_F(NetIbMPITest, SetNetAttrNoOp) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    AssertInitAndGetDevices(nullptr);
+    ASSERT_NE(net_->setNetAttr, nullptr);
+    EXPECT_EQ(net_->setNetAttr(initCtx_, nullptr), ncclSuccess);
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 
 #endif /* MPI_TESTS_ENABLED */
