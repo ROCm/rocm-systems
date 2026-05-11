@@ -3495,7 +3495,7 @@ hipError_t ihipGraphNodeSetParams(hip::GraphNode* n, hipGraphNodeParams* nodePar
           reinterpret_cast<hip::GraphMemcpyNode*>(n)->SetParams(&nodeParams->memcpy.copyParams);
       break;
     case hipGraphNodeTypeMemset:
-      status = reinterpret_cast<hip::GraphMemsetNode*>(n)->SetParams(&nodeParams->memset);
+      status = reinterpret_cast<hip::GraphMemsetNode*>(n)->SetParams(&nodeParams->memset, exec);
       break;
     case hipGraphNodeTypeHost:
       if (nodeParams->host.fn == nullptr || nodeParams->host.userData == nullptr) {
