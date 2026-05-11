@@ -18,7 +18,6 @@ import pandas as pd
 import pytest
 import yaml
 from scipy.stats import zscore
-from tests.test_pc_sampling import skip_unsupported_pc_sampling_soc
 
 # Runtime config options
 config = {}
@@ -2031,9 +2030,18 @@ def test_comprehensive_error_paths():
 
 
 @pytest.mark.live_attach_detach
-@pytest.mark.parametrize("profile_format", ["rocpd", "csv"])  
-def test_live_attach_detach_block(binary_handler_profile_rocprof_compute, profile_format):
-    options = ["--block", "3.1.1", "4.1.1", "5.1.1","--format-rocprof-output", profile_format]
+@pytest.mark.parametrize("profile_format", ["rocpd", "csv"])
+def test_live_attach_detach_block(
+    binary_handler_profile_rocprof_compute, profile_format
+):
+    options = [
+        "--block",
+        "3.1.1",
+        "4.1.1",
+        "5.1.1",
+        "--format-rocprof-output",
+        profile_format,
+    ]
     workload_dir = common.get_output_dir()
 
     # TODO: temp fix for sdk defautly disable attach/detach,
