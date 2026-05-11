@@ -304,4 +304,13 @@ __device__ uint64_t IPCContext::signal_fetch_wave(const uint64_t *sig_addr) {
   return value;
 }
 
+/******************************************************************************
+ ******************** TILE API STUB IMPLEMENTATION ****************************
+ *****************************************************************************/
+
+__device__ int IPCContext::tile_collective_wait(rocshmem_team_t team,
+                                                uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
 }  // namespace rocshmem

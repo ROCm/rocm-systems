@@ -231,6 +231,147 @@ class IPCContext : public Context {
   __device__ uint64_t signal_fetch_wg(const uint64_t *sig_addr);
   __device__ uint64_t signal_fetch_wave(const uint64_t *sig_addr);
 
+  /**************************************************************************
+   ****************** TILE API METHODS (NOT IMPLEMENTED) ********************
+   **************************************************************************/
+
+  // RMA Operations
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_put(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                          tuple_t boundary, int pe, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_put_wave(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                               tuple_t boundary, int pe, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_put_wg(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                             tuple_t boundary, int pe, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_get(dst_tensor_t dst, src_tensor_t src, tuple_t start_coord,
+                          tuple_t boundary, int pe, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_get_wg(dst_tensor_t dst, src_tensor_t src, tuple_t start_coord,
+                             tuple_t boundary, int pe, uint64_t flags);
+
+  // Collective Allgather
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_allgather(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_allgather_wave(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                     tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_allgather_wg(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                   tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+
+  // Collective Broadcast
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_broadcast(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                tuple_t boundary, int pe_root, rocshmem_team_t team,
+                                uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_broadcast_wave(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                     tuple_t boundary, int pe_root, rocshmem_team_t team,
+                                     uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_broadcast_wg(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                   tuple_t boundary, int pe_root, rocshmem_team_t team,
+                                   uint64_t flags);
+
+  // Collective Wait
+  __device__ int tile_collective_wait(rocshmem_team_t team, uint64_t flags);
+
+  // SUM Reductions
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_sum_reduce(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                 tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_sum_reduce_wave(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                      tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_sum_reduce_wg(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                    tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_sum_rooted_reduce(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                        tuple_t boundary, int pe_root, rocshmem_team_t team,
+                                        uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_sum_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+                                             tuple_t start_coord, tuple_t boundary, int pe_root,
+                                             rocshmem_team_t team, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_sum_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+                                           tuple_t start_coord, tuple_t boundary, int pe_root,
+                                           rocshmem_team_t team, uint64_t flags);
+
+  // MAX Reductions
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_max_reduce(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                 tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_max_reduce_wave(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                      tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_max_reduce_wg(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                    tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_max_rooted_reduce(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                        tuple_t boundary, int pe_root, rocshmem_team_t team,
+                                        uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_max_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+                                             tuple_t start_coord, tuple_t boundary, int pe_root,
+                                             rocshmem_team_t team, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_max_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+                                           tuple_t start_coord, tuple_t boundary, int pe_root,
+                                           rocshmem_team_t team, uint64_t flags);
+
+  // MIN Reductions
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_min_reduce(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                 tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_min_reduce_wave(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                      tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_min_reduce_wg(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                    tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_min_rooted_reduce(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+                                        tuple_t boundary, int pe_root, rocshmem_team_t team,
+                                        uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_min_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+                                             tuple_t start_coord, tuple_t boundary, int pe_root,
+                                             rocshmem_team_t team, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_min_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+                                           tuple_t start_coord, tuple_t boundary, int pe_root,
+                                           rocshmem_team_t team, uint64_t flags);
+
  private:
 
   //context class has IpcImpl object (ipcImpl_)

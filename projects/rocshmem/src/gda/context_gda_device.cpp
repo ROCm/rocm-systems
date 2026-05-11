@@ -620,4 +620,13 @@ __device__ void GDAContext::internal_getmem_nbi_wave(void *dest, const void *sou
   }
 }
 
+/******************************************************************************
+ **************** TILE API STUB IMPLEMENTATION (NOT IMPLEMENTED) **************
+ *****************************************************************************/
+
+__device__ int GDAContext::tile_collective_wait(rocshmem_team_t team,
+                                                 uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
 }  // namespace rocshmem

@@ -771,4 +771,13 @@ __device__ volatile char *ROContext::get_status_flag() {
   return status_addr;
 }
 
+/******************************************************************************
+ **************** TILE API STUB IMPLEMENTATION (NOT IMPLEMENTED) **************
+ *****************************************************************************/
+
+__device__ int ROContext::tile_collective_wait(rocshmem_team_t team,
+                                                uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
 }  // namespace rocshmem

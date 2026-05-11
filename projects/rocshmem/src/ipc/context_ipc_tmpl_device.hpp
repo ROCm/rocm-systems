@@ -649,6 +649,231 @@ IPC_CONTEXT_PUT_SIGNAL_DEF()
 IPC_CONTEXT_PUT_SIGNAL_DEF(_wg)
 IPC_CONTEXT_PUT_SIGNAL_DEF(_wave)
 
+/******************************************************************************
+ ******************** TILE API STUB IMPLEMENTATIONS ***************************
+ *****************************************************************************/
+
+// RMA Operations
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_put(src_tensor_t src, dst_tensor_t dst,
+                                    tuple_t start_coord, tuple_t boundary,
+                                    int pe, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_put_wave(src_tensor_t src, dst_tensor_t dst,
+                                         tuple_t start_coord, tuple_t boundary,
+                                         int pe, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_put_wg(src_tensor_t src, dst_tensor_t dst,
+                                       tuple_t start_coord, tuple_t boundary,
+                                       int pe, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_get(dst_tensor_t dst, src_tensor_t src,
+                                    tuple_t start_coord, tuple_t boundary,
+                                    int pe, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src,
+                                       tuple_t start_coord, tuple_t boundary,
+                                       int pe, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+// Collective Allgather
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_allgather(src_tensor_t src, dst_tensor_t dst,
+                                          tuple_t start_coord, tuple_t boundary,
+                                          rocshmem_team_t team, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_allgather_wave(src_tensor_t src, dst_tensor_t dst,
+                                               tuple_t start_coord, tuple_t boundary,
+                                               rocshmem_team_t team, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_allgather_wg(src_tensor_t src, dst_tensor_t dst,
+                                             tuple_t start_coord, tuple_t boundary,
+                                             rocshmem_team_t team, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+// Collective Broadcast
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_broadcast(src_tensor_t src, dst_tensor_t dst,
+                                          tuple_t start_coord, tuple_t boundary,
+                                          int pe_root, rocshmem_team_t team,
+                                          uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_broadcast_wave(src_tensor_t src, dst_tensor_t dst,
+                                               tuple_t start_coord, tuple_t boundary,
+                                               int pe_root, rocshmem_team_t team,
+                                               uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_broadcast_wg(src_tensor_t src, dst_tensor_t dst,
+                                             tuple_t start_coord, tuple_t boundary,
+                                             int pe_root, rocshmem_team_t team,
+                                             uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+// SUM Reductions
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_sum_reduce(src_tensor_t src, dst_tensor_t dst,
+                                           tuple_t start_coord, tuple_t boundary,
+                                           rocshmem_team_t team, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_sum_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+                                                tuple_t start_coord, tuple_t boundary,
+                                                rocshmem_team_t team, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_sum_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+                                              tuple_t start_coord, tuple_t boundary,
+                                              rocshmem_team_t team, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_sum_rooted_reduce(src_tensor_t src, dst_tensor_t dst,
+                                                  tuple_t start_coord, tuple_t boundary,
+                                                  int pe_root, rocshmem_team_t team,
+                                                  uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_sum_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+                                                       tuple_t start_coord, tuple_t boundary,
+                                                       int pe_root, rocshmem_team_t team,
+                                                       uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_sum_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+                                                     tuple_t start_coord, tuple_t boundary,
+                                                     int pe_root, rocshmem_team_t team,
+                                                     uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+// MAX Reductions
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_max_reduce(src_tensor_t src, dst_tensor_t dst,
+                                           tuple_t start_coord, tuple_t boundary,
+                                           rocshmem_team_t team, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_max_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+                                                tuple_t start_coord, tuple_t boundary,
+                                                rocshmem_team_t team, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_max_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+                                              tuple_t start_coord, tuple_t boundary,
+                                              rocshmem_team_t team, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_max_rooted_reduce(src_tensor_t src, dst_tensor_t dst,
+                                                  tuple_t start_coord, tuple_t boundary,
+                                                  int pe_root, rocshmem_team_t team,
+                                                  uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_max_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+                                                       tuple_t start_coord, tuple_t boundary,
+                                                       int pe_root, rocshmem_team_t team,
+                                                       uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_max_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+                                                     tuple_t start_coord, tuple_t boundary,
+                                                     int pe_root, rocshmem_team_t team,
+                                                     uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+// MIN Reductions
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_min_reduce(src_tensor_t src, dst_tensor_t dst,
+                                           tuple_t start_coord, tuple_t boundary,
+                                           rocshmem_team_t team, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_min_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+                                                tuple_t start_coord, tuple_t boundary,
+                                                rocshmem_team_t team, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_min_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+                                              tuple_t start_coord, tuple_t boundary,
+                                              rocshmem_team_t team, uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_min_rooted_reduce(src_tensor_t src, dst_tensor_t dst,
+                                                  tuple_t start_coord, tuple_t boundary,
+                                                  int pe_root, rocshmem_team_t team,
+                                                  uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_min_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+                                                       tuple_t start_coord, tuple_t boundary,
+                                                       int pe_root, rocshmem_team_t team,
+                                                       uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int IPCContext::tile_min_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+                                                     tuple_t start_coord, tuple_t boundary,
+                                                     int pe_root, rocshmem_team_t team,
+                                                     uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_IPC_CONTEXT_TMPL_DEVICE_HPP_

@@ -37,6 +37,7 @@ target_sources(
     context_device.cpp
     mpi_instance.cpp
     rocshmem_gpu.cpp
+    rocshmem_tile_gpu.cpp
     rocshmem.cpp
     team.cpp
     team_tracker.cpp
@@ -82,7 +83,7 @@ target_compile_options(${PROJECT_NAME} PUBLIC ${ROCSHMEM_COMPILE_FLAGS})
 # only to the device sub-pass via -Xarch_device; the host sub-pass continues
 # to receive full -g.
 set_property(
-  SOURCE rocshmem_gpu.cpp team.cpp
+  SOURCE rocshmem_gpu.cpp rocshmem_tile_gpu.cpp team.cpp
   TARGET_DIRECTORY ${PROJECT_NAME}
   APPEND PROPERTY COMPILE_OPTIONS
     "$<$<CONFIG:Debug,RelWithDebInfo>:-Xarch_device>"
