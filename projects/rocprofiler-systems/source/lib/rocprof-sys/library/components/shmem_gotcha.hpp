@@ -125,48 +125,24 @@ expand_tokens_to_apis(const std::set<std::string>& tokens)
 
 namespace rocprofsys::component::traits
 {
-template <typename Policy, typename = void>
-struct has_comm_data : std::false_type
-{};
+template <typename Policy>
+concept has_comm_data = requires { typename Policy::comm_data; };
 
 template <typename Policy>
-struct has_comm_data<Policy, std::void_t<typename Policy::comm_data>> : std::true_type
-{};
-
-template <typename Policy, typename = void>
-struct has_gotcha_data : std::false_type
-{};
+concept has_gotcha_data = requires { typename Policy::gotcha_data; };
 
 template <typename Policy>
-struct has_gotcha_data<Policy, std::void_t<typename Policy::gotcha_data>> : std::true_type
-{};
-
-template <typename Policy, typename = void>
-struct has_category_region : std::false_type
-{};
+concept has_category_region = requires { typename Policy::category_region; };
 
 template <typename Policy>
-struct has_category_region<Policy, std::void_t<typename Policy::category_region>>
-: std::true_type
-{};
-
-template <typename Policy, typename = void>
-struct has_shmem_bundle_t : std::false_type
-{};
+concept has_shmem_bundle_t = requires { typename Policy::shmem_bundle_t; };
 
 template <typename Policy>
-struct has_shmem_bundle_t<Policy, std::void_t<typename Policy::shmem_bundle_t>>
-: std::true_type
-{};
-
-template <typename Policy, typename = void>
-struct has_shmem_gotcha_t : std::false_type
-{};
+concept has_shmem_gotcha_t = requires { typename Policy::shmem_gotcha_t; };
 
 template <typename Policy>
-struct has_shmem_gotcha_t<Policy, std::void_t<typename Policy::shmem_gotcha_t>>
-: std::true_type
-{};
+concept valid_shmem_policy =
+    has_comm_data<Policy> && has_gotcha_data<Policy> && has_category_region<Policy>;
 
 }  // namespace rocprofsys::component::traits
 
@@ -174,15 +150,9 @@ namespace rocprofsys::component
 {
 
 template <typename SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
 {
-    static_assert(traits::has_comm_data<SHMEMPolicy>::value,
-                  "SHMEMPolicy must have a comm_data type");
-    static_assert(traits::has_gotcha_data<SHMEMPolicy>::value,
-                  "SHMEMPolicy must have a gotcha_data type");
-    static_assert(traits::has_category_region<SHMEMPolicy>::value,
-                  "SHMEMPolicy must have a category_region type");
-
     static constexpr size_t gotcha_capacity = 120;
 
     shmem_gotcha()                                   = default;
@@ -237,12 +207,13 @@ get_shmem_gotcha()
 }  // namespace detail
 
 template <typename SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::configure()
 {
-    static_assert(traits::has_shmem_bundle_t<SHMEMPolicy>::value,
+    static_assert(traits::has_shmem_bundle_t<SHMEMPolicy>,
                   "SHMEMPolicy must have a shmem_bundle_t type");
-    static_assert(traits::has_shmem_gotcha_t<SHMEMPolicy>::value,
+    static_assert(traits::has_shmem_gotcha_t<SHMEMPolicy>,
                   "SHMEMPolicy must have a shmem_gotcha_t type");
 
     using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
@@ -501,6 +472,7 @@ shmem_gotcha<SHMEMPolicy>::configure()
 }
 
 template <typename SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::shutdown()
 {
@@ -509,6 +481,7 @@ shmem_gotcha<SHMEMPolicy>::shutdown()
 }
 
 template <typename SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::start()
 {
@@ -525,14 +498,17 @@ shmem_gotcha<SHMEMPolicy>::start()
 }
 
 template <typename SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::stop()
 {}
 
 template <typename SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 std::mutex shmem_gotcha<SHMEMPolicy>::s_mutex = {};
 
 template <typename SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::pause()
 {
@@ -542,6 +518,7 @@ shmem_gotcha<SHMEMPolicy>::pause()
 }
 
 template <typename SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::resume()
 {
@@ -551,6 +528,7 @@ shmem_gotcha<SHMEMPolicy>::resume()
 }
 
 template <typename SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing)
@@ -559,6 +537,7 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 }
 
 template <typename SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing, void* ret)
@@ -567,6 +546,7 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 }
 
 template <typename SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing, int ret)
@@ -575,6 +555,7 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 }
 
 template <typename SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing, long ret)
