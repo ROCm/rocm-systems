@@ -125,7 +125,7 @@ decode_marker_value(uint32_t v) noexcept
 namespace detail
 {
 inline void
-emit_warning(std::string msg, size_t line_no, bool silent)
+emit_warning(const std::string& msg, size_t line_no, bool silent)
 {
     if(silent) return;
     std::cerr << "rocprofiler-sdk: .sqtt_funcmap warning";
@@ -228,7 +228,7 @@ parse_funcmap_section(std::string_view blob, bool silent)
                     std::string msg  = "duplicate marker ID " + std::to_string(id) +
                                       " — previous \"" + prev->name + "\" replaced by \"" +
                                       entry->name + "\"";
-                    detail::emit_warning(std::move(msg), line_no, silent);
+                    detail::emit_warning(msg, line_no, silent);
                     inserted.first->second = entry;
                 }
             };
@@ -298,9 +298,11 @@ parse_funcmap_section(std::string_view blob, bool silent)
                                          silent);
                     break;
                 }
-                FuncmapEntryKind kind = (prefix == 'F')   ? FuncmapEntryKind::Function
-                                        : (prefix == 'U') ? FuncmapEntryKind::UserScope
-                                                          : FuncmapEntryKind::Point;
+                FuncmapEntryKind kind = FuncmapEntryKind::Point;
+                if(prefix == 'F')
+                    kind = FuncmapEntryKind::Function;
+                else if(prefix == 'U')
+                    kind = FuncmapEntryKind::UserScope;
                 record(kind, split->first, std::move(name), std::move(loc));
                 break;
             }
