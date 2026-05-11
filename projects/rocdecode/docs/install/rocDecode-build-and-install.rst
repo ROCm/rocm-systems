@@ -2,16 +2,23 @@
   :description: Build and install rocDecode with the source code
   :keywords: install, building, rocDecode, AMD, ROCm, source code, developer
 
-******************************************
-Build and installing rocDecode from source
-******************************************
+***************************************
+Build and install rocDecode from source
+***************************************
+
+To build rocDecode as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build rocDecode standalone using the following
+instructions.
 
 Prerequisites
 =============
 
-rocDecode requires a supported `AMD GPU <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_. See the ROCm system requirements for the current list of supported GPUs and gfx targets.
-
-rocDecode is built and installed as part of `TheRock <https://github.com/ROCm/TheRock>`_. All core dependencies are provided by the TheRock build, including:
+rocDecode requires a supported AMD GPU. For more information, see :ref:`ROCm
+Core SDK components <rocm:release-components>`.
 
 * HIP runtime and development libraries
 * AMD Clang++ compiler (C++17 required)
@@ -31,40 +38,30 @@ Build and install
 
 rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. For TheRock installation details, refer to the `TheRock documentation <https://github.com/ROCm/TheRock#readme>`_.
 
-1. The rocDecode source code is available from the `ROCm systems GitHub repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode>`_. Use sparse checkout when cloning the rocDecode project. Clone the repo using `sparse-checkout`.
+1. The rocDecode source code is available from the `ROCm systems GitHub repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode>`__. Use sparse checkout when cloning the rocDecode project. Clone the repo using `sparse-checkout`.
 
-   .. code-block:: bash
+.. code:: shell
 
-      git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
-      cd rocm-systems
-      git sparse-checkout init --cone
-      git sparse-checkout set projects/rocdecode
+  cd rocm-systems/projects/rocdecode
 
-2. Then use ``git checkout`` to check out the branch you need.
+Build and install rocDecode using the following commands:
 
-   .. code-block:: bash
+.. code:: shell
 
-      git checkout develop
-      cd rocm-systems/projects/rocdecode
+  mkdir build && cd build
+  cmake ../
+  make -j8
+  sudo make install
 
-3. Build and install rocDecode using the following commands:
+After installation, the rocDecode libraries will be copied to ``/opt/rocm/lib`` and the rocDecode header files will be copied to ``/opt/rocm/include/rocdecode``.
 
-   .. code-block:: bash
+To run the installed CTest-based verification:
 
-      mkdir build && cd build
-      cmake ../
-      make -j8
-      sudo make install
+.. code:: shell
 
-   After installation, the rocDecode libraries will be copied to ``/opt/rocm/lib`` and the rocDecode header files will be copied to ``/opt/rocm/include/rocdecode``.
+  mkdir rocdecode-test && cd rocdecode-test
+  cmake /opt/rocm/share/rocdecode/test/
+  ctest -VV
 
-4. To run the installed CTest-based verification:
-
-   .. code-block:: bash
-
-     mkdir rocdecode-test && cd rocdecode-test
-     cmake /opt/rocm/share/rocdecode/test/
-     ctest -VV
-
-   Run ``make test`` to test your build. To run the test with the verbose option, run ``make test ARGS="-VV"``.
+Run ``make test`` to test your build. To run the test with the verbose option, run ``make test ARGS="-VV"``.
 

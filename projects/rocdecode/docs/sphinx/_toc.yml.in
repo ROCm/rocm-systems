@@ -8,6 +8,8 @@ subtrees:
 
 - caption: Install
   entries:
+  - file: install/rocDecode-install.rst
+    title: Install rocDecode
   - file: install/rocDecode-build-and-install.rst
     title: Build from source
 
