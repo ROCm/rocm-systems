@@ -141,6 +141,25 @@ endforeach()
 add_custom_target(flatbuffers_schemas DEPENDS ${GENERATED_HEADERS})
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+include(rj_setup_python_venv)
+
+rj_setup_python_venv(
+  NAME codegen
+  BOOTSTRAP_PYTHON "${Python3_EXECUTABLE}"
+  EDITABLE_PATH "${CMAKE_SOURCE_DIR}/lib/python"
+  OUT_VENV_DIR RJ_CODEGEN_VENV_DIR
+  OUT_PYTHON RJ_CODEGEN_PYTHON_EXECUTABLE
+)
+
+rj_setup_python_venv(
+  NAME tests
+  BOOTSTRAP_PYTHON "${Python3_EXECUTABLE}"
+  REQUIREMENTS_FILE "${CMAKE_SOURCE_DIR}/tests/requirements.txt"
+  OUT_VENV_DIR RJ_TESTS_VENV_DIR
+  OUT_PYTHON RJ_TESTS_PYTHON_EXECUTABLE
+  OUT_PROGRAM_DIRS RJ_TESTS_VENV_PROGRAM_DIRS
+  OUT_LIBRARY_DIRS RJ_TESTS_VENV_LIBRARY_DIRS
+)
 
 get_filename_component(RJ_AMDGPU_ISA_DIR "${RJ_AMDGPU_ISA_DIR}" ABSOLUTE
   BASE_DIR "${CMAKE_SOURCE_DIR}")
@@ -267,7 +286,7 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E make_directory ${RJ_AMDGPU_ISA_OUTPUT_DIRS}
   COMMAND ${CMAKE_COMMAND} -E env
     "PYTHONPATH=${CMAKE_SOURCE_DIR}/lib/python"
-    ${Python3_EXECUTABLE} -m amdisa
+    ${RJ_CODEGEN_PYTHON_EXECUTABLE} -m amdisa
     --gen-all --gen-shared-execute
     -o "${RJ_AMDGPU_ISA_OUTPUT_DIR}"
     --multi ${RJ_AMDGPU_ISA_MULTI_ARGS}

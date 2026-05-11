@@ -67,7 +67,24 @@ rj_configure_target(scaling_test TEST)
 
 # --- LD_PRELOAD test environment for KMD interposer tests ---
 
+set(RJ_TESTS_RUNTIME_ENV)
+if(RJ_TESTS_VENV_PROGRAM_DIRS)
+    list(JOIN RJ_TESTS_VENV_PROGRAM_DIRS ":" RJ_TESTS_PATH)
+    if(DEFINED ENV{PATH} AND NOT "$ENV{PATH}" STREQUAL "")
+        string(APPEND RJ_TESTS_PATH ":$ENV{PATH}")
+    endif()
+    list(APPEND RJ_TESTS_RUNTIME_ENV "PATH=${RJ_TESTS_PATH}")
+endif()
+if(RJ_TESTS_VENV_LIBRARY_DIRS)
+    list(JOIN RJ_TESTS_VENV_LIBRARY_DIRS ":" RJ_TESTS_LD_LIBRARY_PATH)
+    if(DEFINED ENV{LD_LIBRARY_PATH} AND NOT "$ENV{LD_LIBRARY_PATH}" STREQUAL "")
+        string(APPEND RJ_TESTS_LD_LIBRARY_PATH ":$ENV{LD_LIBRARY_PATH}")
+    endif()
+    list(APPEND RJ_TESTS_RUNTIME_ENV "LD_LIBRARY_PATH=${RJ_TESTS_LD_LIBRARY_PATH}")
+endif()
+
 set(RJ_KMD_PRELOAD_ENV
+    ${RJ_TESTS_RUNTIME_ENV}
     "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
     "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"
     "RJ_SCHEMA=${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs"
@@ -78,7 +95,7 @@ set(RJ_KMD_PRELOAD_ENV
 # Spawns rocminfo as a subprocess against the simulated GPU and validates output.
 
 find_program(ROCMINFO_EXECUTABLE NAMES rocminfo
-    HINTS ${CMAKE_SOURCE_DIR}/.venv ENV ROCM_PATH /opt/rocm
+    HINTS ${RJ_TESTS_VENV_PROGRAM_DIRS} ${CMAKE_SOURCE_DIR}/.venv ENV ROCM_PATH /opt/rocm
     PATH_SUFFIXES bin
     DOC "Path to the rocminfo executable"
 )
@@ -126,7 +143,10 @@ endif()
 # Standalone binary (not gtest) to avoid library initialization order issues
 # with the interposer on machines that have a real GPU.
 
-find_library(HSA_RUNTIME64 hsa-runtime64 PATHS /opt/rocm/lib ENV ROCM_PATH PATH_SUFFIXES lib)
+find_library(HSA_RUNTIME64 hsa-runtime64
+    HINTS ${RJ_TESTS_VENV_LIBRARY_DIRS}
+    PATHS /opt/rocm/lib ENV ROCM_PATH
+    PATH_SUFFIXES lib)
 if(HSA_RUNTIME64)
     add_executable(hsa_init_test hsa_init_test.cpp)
     target_include_directories(hsa_init_test PRIVATE /opt/rocm/include ${HSA_INCLUDE_DIR})
@@ -185,11 +205,13 @@ if(HSA_RUNTIME64)
                 COMMAND hsa_translate_test --gtest_filter=*VectorAdd*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
             set_tests_properties("HsaTranslateTest.TranslateAndDispatchVectorAdd" PROPERTIES
+                ENVIRONMENT "${RJ_TESTS_RUNTIME_ENV}"
                 TIMEOUT 30)
             add_test(NAME "HsaTranslateTest.TranslateAndDispatchMfma16x16"
                 COMMAND hsa_translate_test --gtest_filter=*Mfma16x16*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
             set_tests_properties("HsaTranslateTest.TranslateAndDispatchMfma16x16" PROPERTIES
+                ENVIRONMENT "${RJ_TESTS_RUNTIME_ENV}"
                 TIMEOUT 60)
             message(STATUS "HSA translate test enabled (RDNA4 GPU detected)")
         else()
@@ -203,7 +225,10 @@ endif()
 # --- HIP vector_add test (requires hipcc + LD_PRELOAD at runtime) ---
 # Standalone binary compiled with hipcc for device code generation.
 
-find_program(HIPCC_EXECUTABLE hipcc PATHS /opt/rocm/bin ENV ROCM_PATH PATH_SUFFIXES bin)
+find_program(HIPCC_EXECUTABLE hipcc
+    HINTS ${RJ_TESTS_VENV_PROGRAM_DIRS}
+    PATHS /opt/rocm/bin ENV ROCM_PATH
+    PATH_SUFFIXES bin)
 if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
@@ -251,14 +276,18 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     rj_add_hip_test(hip_vector_add_test)
 
     # --- rocBLAS GEMM test ---
-    find_library(ROCBLAS_LIB rocblas PATHS /opt/rocm/lib ENV ROCM_PATH PATH_SUFFIXES lib)
+    find_library(ROCBLAS_LIB rocblas
+        HINTS ${RJ_TESTS_VENV_LIBRARY_DIRS}
+        PATHS /opt/rocm/lib ENV ROCM_PATH
+        PATH_SUFFIXES lib)
     if(ROCBLAS_LIB)
+        get_filename_component(ROCBLAS_LIB_DIR ${ROCBLAS_LIB} DIRECTORY)
         set(GEMM_SRC ${CMAKE_CURRENT_SOURCE_DIR}/hip_gemm_test.cpp)
         set(GEMM_BIN ${CMAKE_CURRENT_BINARY_DIR}/hip_gemm_test)
         add_custom_command(OUTPUT ${GEMM_BIN}
             COMMAND ${HIPCC_EXECUTABLE} --offload-arch=gfx950 -std=c++20
                 -isystem ${GTEST_INC}
-                -L${GTEST_LIB_DIR} -lgtest -lpthread -lrocblas
+                -L${GTEST_LIB_DIR} -L${ROCBLAS_LIB_DIR} -lgtest -lpthread -lrocblas
                 -Wl,-rpath,${GTEST_LIB_DIR}
                 -o ${GEMM_BIN} ${GEMM_SRC}
             DEPENDS ${GEMM_SRC} GTest::gtest
