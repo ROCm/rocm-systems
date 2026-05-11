@@ -62,6 +62,8 @@ struct HardwareConfig {
   bool has_spm_core1;                 // SPM dual-core support (MI100/MI200)
   bool spm_sq_32bit_mode;             // SPM SQ 32-bit mode
   bool supports_spm_v2;               // SPM v2 support (MI200/MI300/MI350)
+  bool has_asymmetric_cu_design;      // CUs not uniformly distributed (gfx1250/MI450)
+  bool has_sriov_spm_restriction;     // SPM blocked when SR-IOV virtualization is active (gfx942/MI300)
   bool has_sqtt_status2_register;     // SQTT uses STATUS2 register (GFX12+)
   bool has_wptr_relative_addressing;  // SQTT wptr is relative to buffer base (GFX11)
   bool needs_sqtt_header_packet;      // SQTT data needs a header packet prepended (GFX9)
@@ -97,6 +99,8 @@ struct HardwareConfig {
         has_spm_core1(false),
         spm_sq_32bit_mode(true),
         supports_spm_v2(false),
+        has_asymmetric_cu_design(false),
+        has_sriov_spm_restriction(false),
         has_sqtt_status2_register(false),
         has_wptr_relative_addressing(false),
         needs_sqtt_header_packet(false),

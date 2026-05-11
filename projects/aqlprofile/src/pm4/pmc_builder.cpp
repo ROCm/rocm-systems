@@ -73,9 +73,7 @@ GpuPmcBuilder::GpuPmcBuilder(const aql_profile::HardwareConfig& config, CmdBuild
   // Due to MI300 CP firmware issue we need to use mem_mapped_register mode to patch for GCEA
   // hang. Otherwise both perfcounters mode and mem_mapped_register mode should work.
   builder_->bUsePerfCounterMode = !is_multi_xcc_;
-  // TODO: Temporary patch for gfx1250's asymmetric CU design, will remove
-  //       after CU mask support is added to agent_info
-  this->asymmetric_cu_patch = strncmp(config.gfxip.c_str(), "gfx1250", 7) == 0;
+  this->asymmetric_cu_patch = config.has_asymmetric_cu_design;
 }
 
 int GpuPmcBuilder::GetNumWGPs() {

@@ -94,7 +94,9 @@ class __attribute__((visibility("default"))) Pm4Factory {
   virtual bool HasSqttStatus2Register() const { return architecture_->GetConfig().has_sqtt_status2_register; }
   virtual bool HasWptrRelativeAddressing() const { return architecture_->GetConfig().has_wptr_relative_addressing; }
   virtual bool NeedsSqttHeaderPacket() const { return architecture_->GetConfig().needs_sqtt_header_packet; }
+  virtual bool SupportsSpm() const { return architecture_->GetConfig().supports_spm; }
   virtual bool SupportsSpmV2() const { return architecture_->GetConfig().supports_spm_v2; }
+  virtual bool HasSriovSpmRestriction() const { return architecture_->GetConfig().has_sriov_spm_restriction; }
   virtual uint32_t GetSqttHeaderVersion() const { return architecture_->GetSqttHeaderVersion(); }
 
   virtual const GpuBlockInfo* GetBlockInfo(const aqlprofile_pmc_event_t* event) const {

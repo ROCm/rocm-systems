@@ -117,9 +117,7 @@ class GpuPmcBuilder : public PmcBuilder {
   const PrimitivesProvider* prim_;
   bool is_concurrent_;
 
-  // TODO: Temporary patch for gfx1250's asymmetric CU design, will remove
-  //       after CU mask support is added to agent_info
-  bool asymmetric_cu_patch;
+  bool asymmetric_cu_patch;  // Set from HardwareConfig::has_asymmetric_cu_design
 
   void DebugTrace(uint32_t value);
 

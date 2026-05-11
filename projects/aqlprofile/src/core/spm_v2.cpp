@@ -150,22 +150,19 @@ bool is_virtualization_enabled() {
   return false;
 }
 
-bool is_agent_supported_for_spm(const AgentInfo* agentInfo) {
+bool is_agent_supported_for_spm(const aql_profile::Pm4Factory* factory) {
   const char* env_val = getenv("AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK");
   if (env_val && *env_val != '0' && *env_val != '\0') return true;
 
-  // if the device is gfx90a, then spm is not supported
-  if (strncmp(agentInfo->gfxip, "gfx90a", 6) == 0) {
-    printf("Streaming Performance Monitor (SPM) is not supported on gfx90a devices\n");
+  if (!factory->SupportsSpm()) {
+    printf("Streaming Performance Monitor (SPM) is not supported on this device\n");
     return false;
-  } else if (strncmp(agentInfo->gfxip, "gfx942", 6) == 0) {
-    // if the device is gfx942, check if virtualization is enabled
-    if (is_virtualization_enabled()) {
-      printf(
-          "Streaming Performance Monitor (SPM) is not supported on gfx942 devices "
-          "when GPU virtualization (SR-IOV) is enabled\n");
-      return false;
-    }
+  }
+  if (factory->HasSriovSpmRestriction() && is_virtualization_enabled()) {
+    printf(
+        "Streaming Performance Monitor (SPM) is not supported on this device "
+        "when GPU virtualization (SR-IOV) is enabled\n");
+    return false;
   }
   return true;
 }
@@ -257,7 +254,15 @@ hsa_status_t _internal_aqlprofile_spm_create_packets(
     aqlprofile_spm_profile_t             profile,
     size_t                               flags
 ) {
-    if (!is_agent_supported_for_spm(aql_profile::GetAgentInfo(profile.aql_agent)))
+    aql_profile::Pm4Factory* pm4_factory = nullptr;
+    try
+    {
+        pm4_factory = aql_profile::Pm4Factory::Create(profile.aql_agent);
+        if (!pm4_factory) throw std::exception();
+    }
+    catch(...) { return HSA_STATUS_ERROR_INVALID_AGENT; }
+
+    if (!is_agent_supported_for_spm(pm4_factory))
       return HSA_STATUS_ERROR_INVALID_AGENT;
 
     auto s = std::make_shared<spm_state_t>();
@@ -290,14 +295,6 @@ hsa_status_t _internal_aqlprofile_spm_create_packets(
     spm_state_map->insert(*handle, s);
 
     {
-        aql_profile::Pm4Factory* pm4_factory = nullptr;
-        try
-        {
-            pm4_factory = aql_profile::Pm4Factory::Create(profile.aql_agent);
-            if (!pm4_factory) throw std::exception();
-        }
-        catch(...) { return HSA_STATUS_ERROR_INVALID_AGENT; }
-
         const pm4_builder::counters_vector countersVec = CountersVec(profile.events, profile.event_count, pm4_factory);
 
         pm4_builder::TraceConfig& trace_config = memory->config;
