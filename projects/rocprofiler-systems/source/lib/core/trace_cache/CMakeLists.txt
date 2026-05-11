@@ -21,6 +21,7 @@ set(trace_cache_headers
     ${CMAKE_CURRENT_LIST_DIR}/cacheable.hpp
     ${CMAKE_CURRENT_LIST_DIR}/type_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cache_type_traits.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/cereal_buffer_archive.hpp
     ${CMAKE_CURRENT_LIST_DIR}/metadata_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocpd_processor.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto_processor.hpp

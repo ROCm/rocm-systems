@@ -77,7 +77,9 @@ target_include_directories(
 
 target_include_directories(
     rocprofiler-systems-core-library
-    PRIVATE ${PROJECT_SOURCE_DIR}/external/timemory/source/timemory/tpls/cereal
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/external/timemory/source/timemory/tpls/cereal
+        ${PROJECT_SOURCE_DIR}/external/timemory/source
 )
 
 target_link_libraries(

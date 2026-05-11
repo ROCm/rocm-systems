@@ -30,5 +30,6 @@ target_include_directories(
     PRIVATE
         ${PROJECT_SOURCE_DIR}/source/lib
         ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
+        ${PROJECT_SOURCE_DIR}/external/timemory/source
         ${CMAKE_BINARY_DIR}/source/lib/
 )
