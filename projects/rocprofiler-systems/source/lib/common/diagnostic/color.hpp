@@ -25,13 +25,13 @@ constexpr const char* bright_red = "\033[91m";
 
 // Composite styles used by the format spec.
 constexpr const char* error_kw    = "\033[1;91m";
-constexpr const char* caret       = "\033[1;92m";
 constexpr const char* fn_name     = "\033[36m";
 constexpr const char* file_path   = "\033[90m";
 constexpr const char* line_num    = "\033[33m";
 constexpr const char* tag         = "\033[90m";
-constexpr const char* divider     = "\033[90m";
 constexpr const char* keyword_dim = "\033[2m";
+constexpr const char* frame_idx   = "\033[90m";
+constexpr const char* trailer     = "\033[2m";
 
 /// True iff `fd` refers to a TTY.
 bool

@@ -43,7 +43,7 @@ TEST(diagnostic_format_exception_test, FormatsRuntimeErrorWithMessage)
         auto s                  = format_exception(e, opt);
         EXPECT_NE(s.find("error:"), std::string::npos);
         EXPECT_NE(s.find("value out of range"), std::string::npos);
-        EXPECT_NE(s.find("at "), std::string::npos);
+        EXPECT_NE(s.find("#0 "), std::string::npos);
     }
 }
 

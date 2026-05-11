@@ -41,17 +41,18 @@ enum class trace_color_mode
 
 struct trace_format_options
 {
-    trace_color_mode color               = trace_color_mode::auto_detect;
-    bool             with_module         = true;
-    bool             with_offset         = false;
-    bool             with_file_line      = true;
-    bool             with_inlined        = true;
-    bool             with_source_excerpt = false;
+    trace_color_mode color          = trace_color_mode::auto_detect;
+    bool             with_module    = true;
+    bool             with_offset    = false;
+    bool             with_file_line = true;
     // Empty here means "use default_skip_filters() at to_string time".
     // Set to an explicit list to override.
     std::vector<std::string> skip_substrings;
-    std::size_t              max_function_width = 100;
-    std::size_t              max_frames_shown   = 32;
+    /// Cap on padded function-name column width. Names longer than this skip
+    /// padding entirely (single space + `in <file>:<line>` follows on the
+    /// same line). Keeps one frame per line even with extreme demangled names.
+    std::size_t max_function_width = 60;
+    std::size_t max_frames_shown   = 32;
 };
 
 /// Captured stack with lazy symbolization.

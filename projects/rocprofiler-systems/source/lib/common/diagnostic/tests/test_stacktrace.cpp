@@ -3,6 +3,7 @@
 
 #include "common/diagnostic/stacktrace.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -99,6 +100,20 @@ private:
     bool        m_had  = false;
     std::string m_saved;
 };
+
+// Count occurrences of `needle` in `hay`.
+std::size_t
+count_occurrences(const std::string& hay, const std::string& needle)
+{
+    if(needle.empty()) return 0;
+    std::size_t n = 0;
+    for(std::size_t pos = 0; (pos = hay.find(needle, pos)) != std::string::npos;
+        pos += needle.size())
+    {
+        ++n;
+    }
+    return n;
+}
 }  // namespace
 
 TEST(diagnostic_stacktrace_test, CaptureReturnsNonEmpty)
@@ -116,9 +131,62 @@ TEST(diagnostic_stacktrace_test, CaptureIncludesCallerName)
     auto opts  = stacktrace::format_options{};
     opts.color = stacktrace::color_mode::off;
     auto s     = t.to_string(opts);
-    // The marker function name MUST appear in the rendered trace.
     EXPECT_NE(s.find("diagnostic_test_marker_capture"), std::string::npos)
         << "trace was:\n"
+        << s;
+}
+
+TEST(diagnostic_stacktrace_test, FrameZeroAppears)
+{
+    auto t     = make_marker_trace();
+    auto opts  = stacktrace::format_options{};
+    opts.color = stacktrace::color_mode::off;
+    auto s     = t.to_string(opts);
+    EXPECT_NE(s.find("#0 "), std::string::npos) << "trace was:\n" << s;
+}
+
+TEST(diagnostic_stacktrace_test, FramesNumberedMonotonically)
+{
+    auto t     = make_marker_trace();
+    auto opts  = stacktrace::format_options{};
+    opts.color = stacktrace::color_mode::off;
+    auto s     = t.to_string(opts);
+
+    std::size_t prev = std::string::npos;
+    for(std::size_t i = 0; i < 4; ++i)
+    {
+        const std::string tag = "#" + std::to_string(i) + " ";
+        auto              pos = s.find(tag);
+        ASSERT_NE(pos, std::string::npos) << "frame index " << i << " missing in:\n" << s;
+        if(prev != std::string::npos)
+        {
+            EXPECT_GT(pos, prev) << "frame indices not in order: " << s;
+        }
+        prev = pos;
+    }
+}
+
+TEST(diagnostic_stacktrace_test, SingleLinePerFrame)
+{
+    auto t     = make_marker_trace();
+    auto opts  = stacktrace::format_options{};
+    opts.color = stacktrace::color_mode::off;
+    auto s     = t.to_string(opts);
+
+    // One newline per `#N` token. Trailing trailers (... skipped ..., ... more
+    // ...) add their own lines; subtract them.
+    std::size_t newlines = std::count(s.begin(), s.end(), '\n');
+    std::size_t trailers = count_occurrences(s, "...");
+
+    // Total `#N` tokens. Walk frame indices 0..N-1.
+    std::size_t frame_lines = 0;
+    while(s.find("#" + std::to_string(frame_lines) + " ") != std::string::npos)
+    {
+        ++frame_lines;
+    }
+    ASSERT_GT(frame_lines, 0u);
+    EXPECT_EQ(newlines, frame_lines + trailers / 2)
+        << "expected one line per `#N` frame plus trailers; trace was:\n"
         << s;
 }
 
@@ -140,6 +208,32 @@ TEST(diagnostic_stacktrace_test, ForceColorModeProducesAnsi)
     EXPECT_NE(s.find("\033["), std::string::npos);
 }
 
+TEST(diagnostic_stacktrace_test, NoColorEnvDisablesColor)
+{
+    env_guard nc{ "NO_COLOR", "1" };
+    env_guard cf{ "CLICOLOR_FORCE", nullptr };
+    auto      t    = make_marker_trace();
+    auto      opts = stacktrace::format_options{};
+    opts.color     = stacktrace::color_mode::auto_detect;
+    auto s         = t.to_string(opts);
+    EXPECT_EQ(s.find("\033["), std::string::npos)
+        << "NO_COLOR must suppress all ANSI escapes; trace was:\n"
+        << s;
+}
+
+TEST(diagnostic_stacktrace_test, ClicolorForceOverridesNoTty)
+{
+    env_guard nc{ "NO_COLOR", nullptr };
+    env_guard cf{ "CLICOLOR_FORCE", "1" };
+    auto      t    = make_marker_trace();
+    auto      opts = stacktrace::format_options{};
+    opts.color     = stacktrace::color_mode::auto_detect;
+    auto s         = t.to_string(opts);
+    EXPECT_NE(s.find("\033["), std::string::npos)
+        << "CLICOLOR_FORCE must enable color even off-TTY; trace was:\n"
+        << s;
+}
+
 TEST(diagnostic_stacktrace_test, DefaultFiltersDropLibcStartMain)
 {
     auto t     = make_marker_trace();
@@ -152,19 +246,11 @@ TEST(diagnostic_stacktrace_test, DefaultFiltersDropLibcStartMain)
 TEST(diagnostic_stacktrace_test, NoFilterEnvKeepsLibcFrames)
 {
     env_guard g{ "ROCPROFSYS_TRACE_NO_FILTER", "1" };
-    // overrides cache once per process; this test is robustly true ONLY
-    // if it runs first. We can still assert that with empty filters
-    // and no_filter on, libc frames stay.
-    auto t     = make_marker_trace();
-    auto opts  = stacktrace::format_options{};
-    opts.color = stacktrace::color_mode::off;
-    // Sentinel value: a substring that won't match any real function so
-    // the "use defaults if empty" branch doesn't fire and no frames are
-    // dropped by the explicit list.
+    auto      t          = make_marker_trace();
+    auto      opts       = stacktrace::format_options{};
+    opts.color           = stacktrace::color_mode::off;
     opts.skip_substrings = { "__ZZZ_no_match_ZZZ__" };
     auto s               = t.to_string(opts);
-    // We don't assert __libc_start_main appears (depends on link), but
-    // the rendered string must not be empty.
     EXPECT_FALSE(s.empty());
 }
 
@@ -178,18 +264,16 @@ TEST(diagnostic_stacktrace_test, TruncatesAtMaxFramesShown)
     EXPECT_NE(s.find("more"), std::string::npos) << "trace was:\n" << s;
 }
 
-TEST(diagnostic_stacktrace_test, ModuleSuffixOnlyForNonExe)
+TEST(diagnostic_stacktrace_test, ModuleBasenameOnly)
 {
     auto t           = make_marker_trace();
     auto opts        = stacktrace::format_options{};
     opts.color       = stacktrace::color_mode::off;
     opts.with_module = true;
     auto s           = t.to_string(opts);
-    // The marker is in the test exe; its frame must not have a (module)
-    // suffix. The function name itself contains '(' from its parameter
-    // list, so we check for the module-suffix marker " (" that follows
-    // the function-name closing ')' or any other token. The reliable
-    // signal: a ".so" string on the same line indicates module rendering.
+
+    // Frame for the marker is in the test exe; its line must NOT carry a
+    // module suffix.
     auto pos = s.find("diagnostic_test_marker_capture");
     ASSERT_NE(pos, std::string::npos);
     auto eol = s.find('\n', pos);
@@ -198,30 +282,17 @@ TEST(diagnostic_stacktrace_test, ModuleSuffixOnlyForNonExe)
     EXPECT_EQ(line.find(".so"), std::string::npos)
         << "exe-local frame must not have a .so module suffix; line was:\n"
         << line;
-    // Also: the unit-test binary basename should never appear as a module.
     EXPECT_EQ(line.find("(rocprof-sys-unit-tests)"), std::string::npos)
         << "exe-local frame must not echo the exe basename; line was:\n"
         << line;
-}
 
-TEST(diagnostic_stacktrace_test, WithSourceExcerptIncludesSourceLine)
-{
-    auto t                   = make_marker_trace();
-    auto opts                = stacktrace::format_options{};
-    opts.color               = stacktrace::color_mode::off;
-    opts.with_source_excerpt = true;
-    auto s                   = t.to_string(opts);
-    // We look for the divider char used in the excerpt format.
-    // If the test binary was built without -g this excerpt is silently
-    // skipped; in CI builds we always have at least -g1.
-    auto pos = s.find("diagnostic_test_marker_capture");
-    ASSERT_NE(pos, std::string::npos);
-    // The presence of " | " sequence anywhere in the trace indicates an
-    // excerpt was rendered.
-    if(s.find(" | ") == std::string::npos)
+    // No module string anywhere in the formatted output should contain a '/'.
+    for(std::size_t open = 0; (open = s.find('(', open)) != std::string::npos; ++open)
     {
-        GTEST_SKIP() << "binary built without source line info; "
-                        "excerpt cannot be tested";
+        auto close = s.find(')', open);
+        if(close == std::string::npos) break;
+        auto inside = s.substr(open + 1, close - open - 1);
+        EXPECT_EQ(inside.find('/'), std::string::npos)
+            << "module shown with full path; substring was: " << inside;
     }
-    EXPECT_NE(s.find(" | "), std::string::npos);
 }

@@ -8,7 +8,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -361,67 +360,17 @@ display_path(const std::string& p)
     return p;
 }
 
-// Source excerpt: read 1 line of context above and below `line` from `path`.
-// Returns empty string on any failure.
-std::string
-read_source_excerpt(const std::string& path, std::uint32_t line, bool color_on)
+// Number of decimal digits needed to render `n` (minimum 1).
+std::size_t
+decimal_width(std::size_t n)
 {
-    if(path.empty() || line == 0)
+    std::size_t w = 1;
+    while(n >= 10)
     {
-        return {};
+        n /= 10;
+        ++w;
     }
-
-    std::ifstream f{ path };
-    if(!f.is_open())
-    {
-        return {};
-    }
-
-    std::vector<std::string> lines;
-    lines.reserve(line + 2);
-    std::string buf;
-    while(std::getline(f, buf) && lines.size() < line + 1)
-    {
-        lines.push_back(std::move(buf));
-        buf.clear();
-    }
-
-    if(line > lines.size())
-    {
-        return {};
-    }
-
-    const std::size_t lo = (line >= 2) ? line - 1 : line;
-    const std::size_t hi = std::min<std::size_t>(line + 1, lines.size());
-
-    std::ostringstream out;
-    const char*        divider = color_on ? color::divider : "";
-    const char*        reset   = color_on ? color::reset : "";
-    const char*        caret   = color_on ? color::caret : "";
-
-    for(std::size_t i = lo; i <= hi; ++i)
-    {
-        char hdr[64];
-        std::snprintf(hdr, sizeof(hdr), "        %5zu | ", i);
-        out << divider << hdr << reset << lines[i - 1] << '\n';
-        if(i == line)
-        {
-            // Caret line: trim leading whitespace count to align caret start.
-            const std::string& src   = lines[i - 1];
-            std::size_t        first = 0;
-            while(first < src.size() &&
-                  std::isspace(static_cast<unsigned char>(src[first])))
-            {
-                ++first;
-            }
-            std::size_t span = src.size() > first ? src.size() - first : 0;
-            if(span == 0) span = 1;
-            out << divider << "              | " << reset << std::string(first, ' ')
-                << caret << std::string(span, '^') << reset << '\n';
-        }
-    }
-
-    return out.str();
+    return w;
 }
 }  // namespace
 
@@ -589,8 +538,25 @@ stacktrace::to_string(format_options opt) const
         visible.push_back(&f);
     }
 
-    std::size_t shown = std::min(visible.size(), opt.max_frames_shown);
-    std::size_t more  = visible.size() > shown ? visible.size() - shown : 0;
+    const std::size_t shown = std::min(visible.size(), opt.max_frames_shown);
+    const std::size_t more  = visible.size() > shown ? visible.size() - shown : 0;
+
+    // Compute padding widths once. Frame index uses the largest index that
+    // will appear (shown - 1). Function-name column pads to the longest name
+    // among visible frames, capped by max_function_width.
+    const std::size_t idx_width = (shown == 0) ? 1 : decimal_width(shown - 1);
+
+    std::size_t fn_col_width = 0;
+    for(std::size_t i = 0; i < shown; ++i)
+    {
+        const auto& f      = *visible[i];
+        std::size_t fn_len = f.function.empty() ? 18  // hex address: 0x + 16 hex digits
+                                                : f.function.size();
+        if(fn_len <= opt.max_function_width)
+        {
+            fn_col_width = std::max(fn_col_width, fn_len);
+        }
+    }
 
     std::ostringstream out;
     const std::string& exe = exe_basename();
@@ -599,78 +565,80 @@ stacktrace::to_string(format_options opt) const
     {
         const auto& f = *visible[i];
 
-        // Function line.
-        out << "  " << col(color::keyword_dim) << "at" << col(color::reset) << ' '
-            << col(color::fn_name);
+        // Frame index: "  #N  " with N right-padded to idx_width.
+        char idx_buf[16];
+        std::snprintf(idx_buf, sizeof(idx_buf), "#%-*zu", static_cast<int>(idx_width), i);
+        out << "  " << col(color::frame_idx) << idx_buf << col(color::reset) << "  ";
+
+        // Function name (or hex address if unresolved).
+        std::string fn_text;
         if(!f.function.empty())
         {
-            // Wrap super-long demangled names.
-            if(f.function.size() > opt.max_function_width)
-            {
-                out << f.function.substr(0, opt.max_function_width) << "...";
-            }
-            else
-            {
-                out << f.function;
-            }
+            fn_text = f.function;
         }
         else
         {
             char buf[32];
             std::snprintf(buf, sizeof(buf), "0x%016lx",
                           static_cast<unsigned long>(f.address));
-            out << buf;
+            fn_text = buf;
         }
-        out << col(color::reset);
 
-        if(opt.with_inlined && f.inlined)
+        const bool oversized = fn_text.size() > opt.max_function_width;
+        if(oversized)
         {
-            out << ' ' << col(color::tag) << "[inlined]" << col(color::reset);
+            // Don't pad oversized names; single space + `in ...` follows.
+            out << col(color::fn_name) << fn_text << col(color::reset);
         }
+        else
+        {
+            out << col(color::fn_name) << fn_text << col(color::reset);
+            if(fn_text.size() < fn_col_width)
+            {
+                out << std::string(fn_col_width - fn_text.size(), ' ');
+            }
+        }
+
+        // Suffixes attached to function-name slot: offset + module tag.
         if(opt.with_offset && f.offset != 0)
         {
             char buf[32];
-            std::snprintf(buf, sizeof(buf), "[+0x%x]", f.offset);
-            out << ' ' << col(color::tag) << buf << col(color::reset);
+            std::snprintf(buf, sizeof(buf), " [+0x%x]", f.offset);
+            out << col(color::tag) << buf << col(color::reset);
         }
         if(opt.with_module && !f.module.empty() && f.module != exe)
         {
             out << ' ' << col(color::tag) << '(' << f.module << ')' << col(color::reset);
         }
-        out << '\n';
 
-        // Location line (only if we have a file).
+        // Location: `  in <file>:<line>` on the same line.
         if(opt.with_file_line && !f.file.empty())
         {
             const std::string p = display_path(f.file);
-            out << "     " << col(color::keyword_dim) << "in" << col(color::reset) << ' '
+            out << "  " << col(color::keyword_dim) << "in" << col(color::reset) << ' '
                 << col(color::file_path) << p << col(color::reset);
             if(f.line > 0)
             {
-                out << col(color::line_num) << ':' << f.line;
-                if(f.column > 0)
-                {
-                    out << ':' << f.column;
-                }
-                out << col(color::reset);
-            }
-            out << '\n';
-
-            if(opt.with_source_excerpt && f.line > 0 && !f.inlined)
-            {
-                out << read_source_excerpt(f.file, f.line, color_on);
+                out << col(color::line_num) << ':' << f.line << col(color::reset);
             }
         }
+
+        if(f.inlined)
+        {
+            out << ' ' << col(color::tag) << "[inlined]" << col(color::reset);
+        }
+
+        out << '\n';
     }
 
     if(skipped > 0)
     {
-        out << "  " << col(color::keyword_dim) << "... " << skipped
+        out << "       " << col(color::trailer) << "... " << skipped
             << " frames skipped (libc, runtime) ..." << col(color::reset) << '\n';
     }
     if(more > 0)
     {
-        out << "  " << col(color::keyword_dim) << "... " << more << " more ..."
+        out << "       " << col(color::trailer) << "... " << more << " more ..."
             << col(color::reset) << '\n';
     }
 
