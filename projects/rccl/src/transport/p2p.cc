@@ -1201,8 +1201,7 @@ static void initCeOperation() {
   }
 }
 
-// Function to check if P2P is using memcpy (for registration optimization)
 bool ncclP2pUsesMemcpy() {
-  initCeOperation(); // Ensure initialization
+  initCeOperation();
   return useMemcpy != 0;
 }
