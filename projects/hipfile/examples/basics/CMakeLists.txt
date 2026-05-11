@@ -14,7 +14,6 @@ set(BASICS_EXAMPLES
     iterative-read
     iterative-devmem-offset-read
     various-mem-rw
-    error-and-properties
     subregion-write
     roundtrip-verify
 )
