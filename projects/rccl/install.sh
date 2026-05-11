@@ -496,6 +496,11 @@ if [[ "${build_package}" == true ]]; then
     check_exit_code "$?"
 fi
 
+# For ASAN builds, enable XNACK for GPU address sanitizer support
+if [[ "${build_address_sanitizer}" == true ]]; then
+    export HSA_XNACK=1
+fi
+
 # Optionally, run RCCL-UnitTests, if they're enabled.
 if [[ "${run_tests}" == true ]]; then
     if [[ ! -x "./test/rccl-UnitTests" ]]; then

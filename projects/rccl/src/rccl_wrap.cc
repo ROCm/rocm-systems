@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include "enqueue.h"
 #include <algorithm>
 #include "debug.h"
+#include "net.h"
 #include "amdsmi_wrap.h"
 #include "include/graph.h"
 #include "register.h"
@@ -421,6 +422,16 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   // Multi-node Direct AllGather requires PXN
   if (comm->nNodes > 1 && ncclPxnDisable(comm) != 0) {
     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on multi-node due to PXN being disabled.");
+    return false;
+  }
+
+  if (rcclUseAinic()) {
+    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on AINIC. ");
+    return false;
+  }
+
+  if (comm->nNodes > 32) {
+    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled when using more than 32 nodes.");
     return false;
   }
 

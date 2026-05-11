@@ -20,12 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "util/hsa_rsrc_factory.h"
+#include "lib/aqlprofile/util/hsa_rsrc_factory.h"
 
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "lib/common/logging.hpp"
+#include "lib/common/static_object.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+
 #ifdef _WIN32
 #    ifndef NOMINMAX
 #        define NOMINMAX
@@ -44,18 +44,113 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
 #include <vector>
 
+#define HSA_AMD_INTERFACE_VERSION                                                                  \
+    ROCPROFILER_COMPUTE_VERSION(HSA_AMD_INTERFACE_VERSION_MAJOR, HSA_AMD_INTERFACE_VERSION_MINOR, 0)
+
+#if HSA_AMD_INTERFACE_VERSION >= ROCPROFILER_COMPUTE_VERSION(1, 7, 0)
+constexpr auto hsa_amd_memory_pool_executable_flag = HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
+#else
+constexpr auto hsa_amd_memory_pool_executable_flag = (1 << 2);
+#endif
+
+namespace rocprofiler
+{
+namespace aqlprofile
+{
+namespace
+{
+bool is_initialized       = false;
+bool is_dlsym_initialized = false;
+
+auto*
+get_core_table_impl()
+{
+    static auto*& _v = rocprofiler::common::static_object<::CoreApiTable>::construct();
+    return _v;
+}
+
+auto*
+get_amd_ext_table_impl()
+{
+    static auto*& _v = rocprofiler::common::static_object<::AmdExtTable>::construct();
+    return _v;
+}
+
+void
+fallback_init()
+{
+    if(!is_initialized)
+    {
+        ROCP_INFO << "Falling back to dlsym'ing HSA API table...";
+
+        if(::rocprofiler::hsa::dlsym_table<::CoreApiTable> &&
+           ::rocprofiler::hsa::dlsym_table<::AmdExtTable>)
+        {
+            ::rocprofiler::hsa::dlsym_table(get_core_table_impl());
+            ::rocprofiler::hsa::dlsym_table(get_amd_ext_table_impl());
+            is_initialized       = true;
+            is_dlsym_initialized = true;
+        }
+        else
+        {
+            ROCP_WARNING << "::rocprofiler::hsa::dlsym_table not available!";
+        }
+    }
+}
+}  // namespace
+
+void
+hsa_rsrc_factory_init(::HsaApiTable* table)
+{
+    if(!is_initialized || is_dlsym_initialized)
+    {
+        ROCP_INFO << "Initializing hsa_rsrc_factory...";
+        *get_core_table_impl()    = *table->core_;
+        *get_amd_ext_table_impl() = *table->amd_ext_;
+        is_initialized            = true;
+        if(is_dlsym_initialized)
+        {
+            HsaRsrcFactory::Destroy();
+            HsaRsrcFactory::Create(false);
+            is_dlsym_initialized = false;
+        }
+    }
+}
+
+const ::CoreApiTable*
+get_core_table()
+{
+    fallback_init();
+    ROCP_FATAL_IF(!is_initialized) << "hsa_rsrc_factory requires HSA to be initialized!";
+    return get_core_table_impl();
+}
+
+const ::AmdExtTable*
+get_amd_ext_table()
+{
+    fallback_init();
+    ROCP_FATAL_IF(!is_initialized) << "hsa_rsrc_factory requires HSA to be initialized!";
+    return get_amd_ext_table_impl();
+}
+}  // namespace aqlprofile
+}  // namespace rocprofiler
+
 // Callback function to get available in the system agents
 hsa_status_t
 HsaRsrcFactory::GetHsaAgentsCallback(hsa_agent_t agent, void* data)
 {
     HsaRsrcFactory* hsa_rsrc = reinterpret_cast<HsaRsrcFactory*>(data);
-    // AddAgentInfo may return NULL for unsupported agent types (e.g., NPU).
+    // AddAgentInfo may return nullptr for unsupported agent types (e.g., NPU).
     // We should continue iterating regardless.
     hsa_rsrc->AddAgentInfo(agent);
     return HSA_STATUS_SUCCESS;
@@ -82,14 +177,16 @@ FindGlobalPool(hsa_amd_memory_pool_t pool, void* data, bool kern_arg)
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
+    err = rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_memory_pool_get_info_fn(
+        pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
     CHECK_STATUS("hsa_amd_memory_pool_get_info", err);
     if(HSA_AMD_SEGMENT_GLOBAL != segment)
     {
         return HSA_STATUS_SUCCESS;
     }
 
-    err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flag);
+    err = rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_memory_pool_get_info_fn(
+        pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flag);
     CHECK_STATUS("hsa_amd_memory_pool_get_info", err);
 
     uint32_t karg_st = flag & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
@@ -125,46 +222,49 @@ FindKernArgPool(hsa_amd_memory_pool_t pool, void* data)
 HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa)
 : initialize_hsa_(initialize_hsa)
 {
-    hsa_status_t status;
+    hsa_status_t status = HSA_STATUS_SUCCESS;
 
-    cpu_pool_      = NULL;
-    kern_arg_pool_ = NULL;
+    cpu_pool_      = nullptr;
+    kern_arg_pool_ = nullptr;
 
     // Initialize the Hsa Runtime
     if(initialize_hsa_)
     {
-        status = hsa_init();
+        status = rocprofiler::aqlprofile::get_core_table()->hsa_init_fn();
         CHECK_STATUS("Error in hsa_init", status);
     }
 
     // Discover the set of Gpu devices available on the platform
-    status = hsa_iterate_agents(GetHsaAgentsCallback, this);
+    status = CHECK_NOTNULL(rocprofiler::aqlprofile::get_core_table()->hsa_iterate_agents_fn)(
+        GetHsaAgentsCallback, this);
     CHECK_STATUS("Error Calling hsa_iterate_agents", status);
-    if(cpu_pool_ == NULL) CHECK_STATUS("CPU memory pool is not found", HSA_STATUS_ERROR);
-    if(kern_arg_pool_ == NULL) CHECK_STATUS("Kern-arg memory pool is not found", HSA_STATUS_ERROR);
+    if(cpu_pool_ == nullptr) CHECK_STATUS("CPU memory pool is not found", HSA_STATUS_ERROR);
+    if(kern_arg_pool_ == nullptr)
+        CHECK_STATUS("Kern-arg memory pool is not found", HSA_STATUS_ERROR);
 
     // Get AqlProfile API table
     aqlprofile_api_ = {0};
 #ifdef ROCP_LD_AQLPROFILE
     status = LoadAqlProfileLib(&aqlprofile_api_);
 #else
-    status       = hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_AQLPROFILE,
-                                                  hsa_ven_amd_aqlprofile_VERSION_MAJOR,
-                                                  sizeof(aqlprofile_api_),
-                                                  &aqlprofile_api_);
+    status = rocprofiler::aqlprofile::get_core_table()->hsa_system_get_major_extension_table_fn(
+        HSA_EXTENSION_AMD_AQLPROFILE,
+        hsa_ven_amd_aqlprofile_VERSION_MAJOR,
+        sizeof(aqlprofile_api_),
+        &aqlprofile_api_);
 #endif
     CHECK_STATUS("aqlprofile API table load failed", status);
 
     // Get Loader API table
     loader_api_ = {0};
-    status      = hsa_system_get_major_extension_table(
+    status = rocprofiler::aqlprofile::get_core_table()->hsa_system_get_major_extension_table_fn(
         HSA_EXTENSION_AMD_LOADER, 1, sizeof(loader_api_), &loader_api_);
     CHECK_STATUS("loader API table query failed", status);
 
     // Instantiate HSA timer
     timer_ = new HsaTimer;
     CHECK_STATUS("HSA timer allocation failed",
-                 (timer_ == NULL) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS);
+                 (timer_ == nullptr) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS);
 
     // System timeout
     timeout_ = (timeout_ns_ == HsaTimer::TIMESTAMP_MAX) ? timeout_ns_
@@ -181,7 +281,7 @@ HsaRsrcFactory::~HsaRsrcFactory()
         delete p;
     if(initialize_hsa_)
     {
-        hsa_status_t status = hsa_shut_down();
+        hsa_status_t status = rocprofiler::aqlprofile::get_core_table()->hsa_shut_down_fn();
         CHECK_STATUS("Error in hsa_shut_down", status);
     }
 }
@@ -194,7 +294,7 @@ HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api)
     return HSA_STATUS_ERROR;
 #else
     void* handle = dlopen(kAqlProfileLib, RTLD_NOW);
-    if(handle == NULL)
+    if(handle == nullptr)
     {
         fprintf(stderr, "Loading '%s' failed, %s\n", kAqlProfileLib, dlerror());
         return HSA_STATUS_ERROR;
@@ -234,10 +334,11 @@ HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent)
 {
     // Determine if device is a Gpu agent
     hsa_status_t status;
-    AgentInfo*   agent_info = NULL;
+    AgentInfo*   agent_info = nullptr;
 
     hsa_device_type_t type;
-    status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
+    status = rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+        agent, HSA_AGENT_INFO_DEVICE, &type);
     CHECK_STATUS("Error Calling hsa_agent_get_info", status);
 
     if(type == HSA_DEVICE_TYPE_CPU)
@@ -247,12 +348,15 @@ HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent)
         agent_info->dev_type  = HSA_DEVICE_TYPE_CPU;
         agent_info->dev_index = cpu_list_.size();
 
-        status = hsa_amd_agent_iterate_memory_pools(agent, FindStandardPool, &agent_info->cpu_pool);
-        if((status == HSA_STATUS_INFO_BREAK) && (cpu_pool_ == NULL))
+        status =
+            rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_agent_iterate_memory_pools_fn(
+                agent, FindStandardPool, &agent_info->cpu_pool);
+        if((status == HSA_STATUS_INFO_BREAK) && (cpu_pool_ == nullptr))
             cpu_pool_ = &agent_info->cpu_pool;
         status =
-            hsa_amd_agent_iterate_memory_pools(agent, FindKernArgPool, &agent_info->kern_arg_pool);
-        if((status == HSA_STATUS_INFO_BREAK) && (kern_arg_pool_ == NULL))
+            rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_agent_iterate_memory_pools_fn(
+                agent, FindKernArgPool, &agent_info->kern_arg_pool);
+        if((status == HSA_STATUS_INFO_BREAK) && (kern_arg_pool_ == nullptr))
             kern_arg_pool_ = &agent_info->kern_arg_pool;
         agent_info->gpu_pool = {};
 
@@ -265,48 +369,60 @@ HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent)
         agent_info           = new AgentInfo{};
         agent_info->dev_id   = agent;
         agent_info->dev_type = HSA_DEVICE_TYPE_GPU;
-        hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_info->name);
+        rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+            agent, HSA_AGENT_INFO_NAME, agent_info->name);
         const int gfxip_label_len = strlen(agent_info->name) - 2;
         memcpy(agent_info->gfxip, agent_info->name, gfxip_label_len);
         agent_info->gfxip[gfxip_label_len] = '\0';
-        hsa_agent_get_info(agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, &agent_info->max_wave_size);
-        hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &agent_info->max_queue_size);
-        hsa_agent_get_info(agent, HSA_AGENT_INFO_PROFILE, &agent_info->profile);
+        rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+            agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, &agent_info->max_wave_size);
+        rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+            agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &agent_info->max_queue_size);
+        rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+            agent, HSA_AGENT_INFO_PROFILE, &agent_info->profile);
         agent_info->is_apu = (agent_info->profile == HSA_PROFILE_FULL) ? true : false;
-        hsa_agent_get_info(agent,
-                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
-                           &agent_info->cu_num);
-        hsa_agent_get_info(agent,
-                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU),
-                           &agent_info->waves_per_cu);
-        hsa_agent_get_info(agent,
-                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU),
-                           &agent_info->simds_per_cu);
-        hsa_agent_get_info(agent,
-                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES),
-                           &agent_info->se_num);
-        hsa_agent_get_info(agent,
-                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY),
-                           &agent_info->timestamp_freq);
+        rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+            agent,
+            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
+            &agent_info->cu_num);
+        rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+            agent,
+            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU),
+            &agent_info->waves_per_cu);
+        rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+            agent,
+            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU),
+            &agent_info->simds_per_cu);
+        rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+            agent,
+            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES),
+            &agent_info->se_num);
+        rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+            agent,
+            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY),
+            &agent_info->timestamp_freq);
 
-        if(hsa_agent_get_info(agent,
-                              static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_XCC),
-                              &agent_info->xcc_num) != HSA_STATUS_SUCCESS)
+        if(rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+               agent,
+               static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_XCC),
+               &agent_info->xcc_num) != HSA_STATUS_SUCCESS)
         {
             agent_info->xcc_num = 1;
         };
-        hsa_agent_get_info(
+        rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
             agent,
             static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE),
             &agent_info->shader_arrays_per_se);
-        hsa_agent_get_info(
+        rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
             agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DOMAIN), &agent_info->domain);
-        hsa_agent_get_info(
+        rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
             agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_BDFID), &agent_info->bdf_id);
 
         agent_info->cpu_pool      = {};
         agent_info->kern_arg_pool = {};
-        status = hsa_amd_agent_iterate_memory_pools(agent, FindStandardPool, &agent_info->gpu_pool);
+        status =
+            rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_agent_iterate_memory_pools_fn(
+                agent, FindStandardPool, &agent_info->gpu_pool);
         CHECK_ITER_STATUS("hsa_amd_agent_iterate_memory_pools(gpu pool)", status);
 
         // Set GPU index
@@ -324,7 +440,7 @@ HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent)
 const AgentInfo*
 HsaRsrcFactory::GetAgentInfo(const hsa_agent_t agent)
 {
-    const AgentInfo* agent_info = NULL;
+    const AgentInfo* agent_info = nullptr;
     auto             it         = agent_map_.find(agent.handle);
     if(it != agent_map_.end())
     {
@@ -415,14 +531,14 @@ bool
 HsaRsrcFactory::CreateQueue(const AgentInfo* agent_info, uint32_t num_pkts, hsa_queue_t** queue)
 {
     hsa_status_t status;
-    status = hsa_queue_create(agent_info->dev_id,
-                              num_pkts,
-                              HSA_QUEUE_TYPE_MULTI,
-                              NULL,
-                              NULL,
-                              UINT32_MAX,
-                              UINT32_MAX,
-                              queue);
+    status = rocprofiler::aqlprofile::get_core_table()->hsa_queue_create_fn(agent_info->dev_id,
+                                                                            num_pkts,
+                                                                            HSA_QUEUE_TYPE_MULTI,
+                                                                            nullptr,
+                                                                            nullptr,
+                                                                            UINT32_MAX,
+                                                                            UINT32_MAX,
+                                                                            queue);
     return (status == HSA_STATUS_SUCCESS);
 }
 
@@ -434,7 +550,8 @@ bool
 HsaRsrcFactory::CreateSignal(uint32_t value, hsa_signal_t* signal)
 {
     hsa_status_t status;
-    status = hsa_signal_create(value, 0, NULL, signal);
+    status =
+        rocprofiler::aqlprofile::get_core_table()->hsa_signal_create_fn(value, 0, nullptr, signal);
     return (status == HSA_STATUS_SUCCESS);
 }
 
@@ -447,13 +564,14 @@ uint8_t*
 HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t size)
 {
     hsa_status_t status = HSA_STATUS_ERROR;
-    uint8_t*     buffer = NULL;
+    uint8_t*     buffer = nullptr;
     size                = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-    status              = hsa_amd_memory_pool_allocate(agent_info->gpu_pool,
-                                          size,
-                                          HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
-                                          reinterpret_cast<void**>(&buffer));
-    uint8_t* ptr        = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
+    status = rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_memory_pool_allocate_fn(
+        agent_info->gpu_pool,
+        size,
+        hsa_amd_memory_pool_executable_flag,
+        reinterpret_cast<void**>(&buffer));
+    uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : nullptr;
     return ptr;
 }
 
@@ -466,22 +584,24 @@ uint8_t*
 HsaRsrcFactory::AllocateKernArgMemory(const AgentInfo* agent_info, size_t size)
 {
     hsa_status_t status = HSA_STATUS_ERROR;
-    uint8_t*     buffer = NULL;
+    uint8_t*     buffer = nullptr;
     if(!cpu_agents_.empty())
     {
         size   = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-        status = hsa_amd_memory_pool_allocate(*kern_arg_pool_,
-                                              size,
-                                              HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
-                                              reinterpret_cast<void**>(&buffer));
+        status = rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_memory_pool_allocate_fn(
+            *kern_arg_pool_,
+            size,
+            hsa_amd_memory_pool_executable_flag,
+            reinterpret_cast<void**>(&buffer));
         // Both the CPU and GPU can access the kernel arguments
         if(status == HSA_STATUS_SUCCESS)
         {
             hsa_agent_t ag_list[1] = {agent_info->dev_id};
-            status                 = hsa_amd_agents_allow_access(1, ag_list, NULL, buffer);
+            status = rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_agents_allow_access_fn(
+                1, ag_list, nullptr, buffer);
         }
     }
-    uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
+    uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : nullptr;
     return ptr;
 }
 
@@ -493,22 +613,24 @@ uint8_t*
 HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t size)
 {
     hsa_status_t status = HSA_STATUS_ERROR;
-    uint8_t*     buffer = NULL;
+    uint8_t*     buffer = nullptr;
     size                = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
     if(!cpu_agents_.empty())
     {
-        status = hsa_amd_memory_pool_allocate(*cpu_pool_,
-                                              size,
-                                              HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
-                                              reinterpret_cast<void**>(&buffer));
+        status = rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_memory_pool_allocate_fn(
+            *cpu_pool_,
+            size,
+            hsa_amd_memory_pool_executable_flag,
+            reinterpret_cast<void**>(&buffer));
         // Both the CPU and GPU can access the memory
         if(status == HSA_STATUS_SUCCESS)
         {
             hsa_agent_t ag_list[1] = {agent_info->dev_id};
-            status                 = hsa_amd_agents_allow_access(1, ag_list, NULL, buffer);
+            status = rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_agents_allow_access_fn(
+                1, ag_list, nullptr, buffer);
         }
     }
-    uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
+    uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : nullptr;
     return ptr;
 }
 
@@ -519,16 +641,15 @@ HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t size)
 uint8_t*
 HsaRsrcFactory::AllocateCmdMemory(const AgentInfo* agent_info, size_t size)
 {
-    size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-#ifdef _WIN32
-    uint8_t* ptr = AllocateSysMemory(agent_info, size);
-#else
-    uint8_t* ptr =
-        (agent_info->is_apu && CMD_MEMORY_MMAP)
-            ? reinterpret_cast<uint8_t*>(mmap(
-                  NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_SHARED | MAP_ANONYMOUS, 0, 0))
-            : AllocateSysMemory(agent_info, size);
-#endif
+    size         = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
+    uint8_t* ptr = (agent_info->is_apu && CMD_MEMORY_MMAP)
+                       ? reinterpret_cast<uint8_t*>(mmap(nullptr,
+                                                         size,
+                                                         PROT_READ | PROT_WRITE | PROT_EXEC,
+                                                         MAP_SHARED | MAP_ANONYMOUS,
+                                                         0,
+                                                         0))
+                       : AllocateSysMemory(agent_info, size);
     return ptr;
 }
 
@@ -538,8 +659,9 @@ HsaRsrcFactory::SignalWait(const hsa_signal_t& signal) const
 {
     while(1)
     {
-        const hsa_signal_value_t signal_value = hsa_signal_wait_scacquire(
-            signal, HSA_SIGNAL_CONDITION_LT, 1, timeout_, HSA_WAIT_STATE_BLOCKED);
+        const hsa_signal_value_t signal_value =
+            rocprofiler::aqlprofile::get_core_table()->hsa_signal_wait_scacquire_fn(
+                signal, HSA_SIGNAL_CONDITION_LT, 1, timeout_, HSA_WAIT_STATE_BLOCKED);
         if(signal_value == 0)
         {
             break;
@@ -557,7 +679,8 @@ HsaRsrcFactory::SignalWaitRestore(const hsa_signal_t&       signal,
                                   const hsa_signal_value_t& signal_value) const
 {
     SignalWait(signal);
-    hsa_signal_store_relaxed(const_cast<hsa_signal_t&>(signal), signal_value);
+    rocprofiler::aqlprofile::get_core_table()->hsa_signal_store_relaxed_fn(
+        const_cast<hsa_signal_t&>(signal), signal_value);
 }
 
 // Copy data from GPU to host memory
@@ -568,12 +691,13 @@ HsaRsrcFactory::Memcpy(const hsa_agent_t& agent, void* dst, const void* src, siz
     if(!cpu_agents_.empty())
     {
         hsa_signal_t s = {};
-        status         = hsa_signal_create(1, 0, NULL, &s);
+        status = rocprofiler::aqlprofile::get_core_table()->hsa_signal_create_fn(1, 0, nullptr, &s);
         CHECK_STATUS("hsa_signal_create()", status);
-        status = hsa_amd_memory_async_copy(dst, cpu_agents_[0], src, agent, size, 0, NULL, s);
+        status = rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_memory_async_copy_fn(
+            dst, cpu_agents_[0], src, agent, size, 0, nullptr, s);
         CHECK_STATUS("hsa_amd_memory_async_copy()", status);
         SignalWait(s);
-        status = hsa_signal_destroy(s);
+        status = rocprofiler::aqlprofile::get_core_table()->hsa_signal_destroy_fn(s);
         CHECK_STATUS("hsa_signal_destroy()", status);
     }
     return (status == HSA_STATUS_SUCCESS);
@@ -588,7 +712,7 @@ HsaRsrcFactory::Memcpy(const AgentInfo* agent_info, void* dst, const void* src, 
 bool
 HsaRsrcFactory::FreeMemory(void* ptr)
 {
-    const hsa_status_t status = hsa_memory_free(ptr);
+    const hsa_status_t status = rocprofiler::aqlprofile::get_core_table()->hsa_memory_free_fn(ptr);
     CHECK_STATUS("hsa_memory_free", status);
     return (status == HSA_STATUS_SUCCESS);
 }
@@ -621,38 +745,38 @@ HsaRsrcFactory::LoadAndFinalize(const AgentInfo*         agent_info,
 #endif
     if(file_handle == -1)
     {
-        std::cerr << "Error: failed to load '" << filename << "'" << std::endl;
-        assert(false);
+        ROCP_CI_LOG(FATAL) << "Error: failed to load '" << filename << "'";
         return false;
     }
 
     // Create code object reader
     hsa_code_object_reader_t code_obj_rdr = {0};
-    status = hsa_code_object_reader_create_from_file(file_handle, &code_obj_rdr);
+    status = rocprofiler::aqlprofile::get_core_table()->hsa_code_object_reader_create_from_file_fn(
+        file_handle, &code_obj_rdr);
     if(status != HSA_STATUS_SUCCESS)
     {
-        std::cerr << "Failed to create code object reader '" << filename << "'" << std::endl;
+        ROCP_CI_LOG(FATAL) << "Failed to create code object reader '" << filename << "'";
         return false;
     }
 
     // Create executable.
-    status = hsa_executable_create_alt(
-        HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, NULL, executable);
+    status = rocprofiler::aqlprofile::get_core_table()->hsa_executable_create_alt_fn(
+        HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr, executable);
     CHECK_STATUS("Error in creating executable object", status);
 
     // Load code object.
-    status = hsa_executable_load_agent_code_object(
-        *executable, agent_info->dev_id, code_obj_rdr, NULL, NULL);
+    status = rocprofiler::aqlprofile::get_core_table()->hsa_executable_load_agent_code_object_fn(
+        *executable, agent_info->dev_id, code_obj_rdr, nullptr, nullptr);
     CHECK_STATUS("Error in loading executable object", status);
 
     // Freeze executable.
-    status = hsa_executable_freeze(*executable, "");
+    status = rocprofiler::aqlprofile::get_core_table()->hsa_executable_freeze_fn(*executable, "");
     CHECK_STATUS("Error in freezing executable object", status);
 
     // Get symbol handle.
     hsa_executable_symbol_t kernelSymbol;
-    status = hsa_executable_get_symbol(
-        *executable, NULL, kernel_name, agent_info->dev_id, 0, &kernelSymbol);
+    status = rocprofiler::aqlprofile::get_core_table()->hsa_executable_get_symbol_fn(
+        *executable, nullptr, kernel_name, agent_info->dev_id, 0, &kernelSymbol);
     CHECK_STATUS("Error in looking up kernel symbol", status);
 
 #ifdef _WIN32
@@ -661,7 +785,8 @@ HsaRsrcFactory::LoadAndFinalize(const AgentInfo*         agent_info,
     close(file_handle);
 #endif
 
-    status = hsa_code_object_reader_destroy(code_obj_rdr);
+    status =
+        rocprofiler::aqlprofile::get_core_table()->hsa_code_object_reader_destroy_fn(code_obj_rdr);
     CHECK_STATUS("Error in destroying code object reader", status);
 
     // Update output parameter
@@ -704,9 +829,13 @@ HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet)
     const uint32_t slot_size_b = CMD_SLOT_SIZE_B;
 
     // adevance command queue
-    const uint64_t write_idx = hsa_queue_load_write_index_relaxed(queue);
-    hsa_queue_store_write_index_relaxed(queue, write_idx + 1);
-    while((write_idx - hsa_queue_load_read_index_relaxed(queue)) >= queue->size)
+    const uint64_t write_idx =
+        rocprofiler::aqlprofile::get_core_table()->hsa_queue_load_write_index_relaxed_fn(queue);
+    rocprofiler::aqlprofile::get_core_table()->hsa_queue_store_write_index_relaxed_fn(
+        queue, write_idx + 1);
+    while((write_idx -
+           rocprofiler::aqlprofile::get_core_table()->hsa_queue_load_read_index_relaxed_fn(
+               queue)) >= queue->size)
     {
         std::this_thread::yield();
     }
@@ -725,7 +854,8 @@ HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet)
     header_atomic_ptr->store(slot_data[0], std::memory_order_release);
 
     // ringdoor bell
-    hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
+    rocprofiler::aqlprofile::get_core_table()->hsa_signal_store_relaxed_fn(queue->doorbell_signal,
+                                                                           write_idx);
 
     return write_idx;
 }
@@ -751,6 +881,6 @@ HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes
     return write_idx;
 }
 
-HsaRsrcFactory*             HsaRsrcFactory::instance_ = NULL;
+HsaRsrcFactory*             HsaRsrcFactory::instance_ = nullptr;
 HsaRsrcFactory::mutex_t     HsaRsrcFactory::mutex_;
 HsaRsrcFactory::timestamp_t HsaRsrcFactory::timeout_ns_ = HsaTimer::TIMESTAMP_MAX;

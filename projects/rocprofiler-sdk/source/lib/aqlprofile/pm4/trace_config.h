@@ -22,8 +22,10 @@
 
 #pragma once
 
-#include <unordered_map>
 #include <cstdint>
+#include <cstdlib>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace pm4_builder

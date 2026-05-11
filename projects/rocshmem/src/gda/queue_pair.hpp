@@ -461,7 +461,7 @@ class QueuePair {
 
   static constexpr uint32_t FETCHING_ATOMIC_CNT{1024};
   static_assert(FETCHING_ATOMIC_CNT % WF_SIZE == 0);
-  using FreeListT = FreeList<uint64_t*, HIPAllocator>;
+  using FreeListT = FreeList<uint64_t*>;
   FreeListT* fetching_atomic_freelist{nullptr};
 
   HIPAllocator allocator{};

@@ -7,6 +7,7 @@
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
+#include <cstdint>
 
 #include <memory>
 #include <timemory/utility/types.hpp>
@@ -112,17 +113,17 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
                 category_enum_id<category::rocm_counter_collection>::value),
             track_name.c_str(), _timing.start, event_metadata.c_str(), stack_id,
             parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(),
-            static_cast<uint32_t>(agent.device_type_index),
-            static_cast<uint8_t>(agent.type), track_name.c_str(),
+            static_cast<std::uint32_t>(agent.device_type_index),
+            static_cast<std::uint8_t>(agent.type), track_name.c_str(),
             static_cast<double>(value), std::nullopt });
     }
 }
 
-counter_storage::counter_storage(const client_data* _tool_data, uint64_t _devid,
+counter_storage::counter_storage(const client_data* _tool_data, std::uint64_t _devid,
                                  size_t _idx, std::string_view _name)
 : tool_data{ _tool_data }
 , device_id{ _devid }
-, index{ static_cast<int64_t>(_idx) }
+, index{ static_cast<std::int64_t>(_idx) }
 , metric_name{ _name }
 , metric_description{ get_counter_description(_tool_data, metric_name) }
 {
@@ -186,7 +187,7 @@ counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
         static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value),
         track_name.c_str(), timestamp, "{}", 0, 0, 0, "{}", "{}",
-        static_cast<uint32_t>(device_id), static_cast<uint8_t>(agent_type::GPU),
+        static_cast<std::uint32_t>(device_id), static_cast<std::uint8_t>(agent_type::GPU),
         track_name.c_str(), 0.0, std::nullopt });
 }
 

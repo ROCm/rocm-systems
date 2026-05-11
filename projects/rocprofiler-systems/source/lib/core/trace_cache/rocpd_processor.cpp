@@ -206,7 +206,7 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
         m_data_processor->map_thread_id_to_primary_key(_mas.thread_id);
-    auto agent_primary_key = std::optional<uint64_t>{};
+    auto agent_primary_key = std::optional<std::uint64_t>{};
 
     const auto invalid_context = ROCPROFILER_CONTEXT_NONE;
     if(_mas.agent_id_handle != invalid_context.handle)
@@ -377,6 +377,12 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     insert_scalar(trait::name<category::amd_smi_sdma_usage>::value,
                   info::format_track_name<category::amd_smi_sdma_usage>(),
                   enabled.bits.sdma_usage, m.sdma_usage);
+    insert_scalar(trait::name<category::amd_smi_gfx_clock>::value,
+                  info::format_track_name<category::amd_smi_gfx_clock>(),
+                  enabled.bits.gfx_clock, m.gfx_clock_mhz);
+    insert_scalar(trait::name<category::amd_smi_mem_clock>::value,
+                  info::format_track_name<category::amd_smi_mem_clock>(),
+                  enabled.bits.mem_clock, m.mem_clock_mhz);
 
     auto insert_xcp_metrics = [&](bool is_enabled, const auto& get_array,
                                   const auto& format_name) {
@@ -487,7 +493,7 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
             .base_id;
 
     auto insert_metric = [&](bool enabled, const char* pmc_name, const char* track_name,
-                             uint64_t value) {
+                             std::uint64_t value) {
         if(!enabled) return;
 
         LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}", pmc_name,
@@ -536,7 +542,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample
         double value;
     };
 
-    auto deserialize_freqs = [](const std::vector<uint8_t>& buffer) {
+    auto deserialize_freqs = [](const std::vector<std::uint8_t>& buffer) {
         std::vector<core_freq_sample> result;
         size_t                        offset = 0;
 
@@ -552,7 +558,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample
         return result;
     };
 
-    auto deserialize_loads = [](const std::vector<uint8_t>& buffer) {
+    auto deserialize_loads = [](const std::vector<std::uint8_t>& buffer) {
         std::vector<core_load_sample> result;
         size_t                        offset = 0;
 

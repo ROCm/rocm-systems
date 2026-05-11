@@ -531,13 +531,13 @@ __device__ __forceinline__ Pack loadPack(T* ptr, int ix, int end) {
     for (i=0; i < Size/4; i++) {
       if (i*4/sizeof(T) < 1 || i*4/sizeof(T) < n) part[i] = down[i];
     }
-    uint32_t extra;
+    uint32_t extra = 0;
     if (misalign) extra = down[i];
     #pragma unroll
-    for (i=0; i < Size/4; i++) {
+    for (i=0; i < Size/4 - 1; i++) {
       part[i] = __funnelshift_r(part[i], part[i+1], 8*misalign);
     }
-    if (misalign) part[i] = __funnelshift_r(part[i], extra, 8*misalign);
+    part[Size/4-1] = __funnelshift_r(part[Size/4-1], extra, 8*misalign);
     return ans;
   } else {
     union { Pack ans; BytePack<sizeof(T)> part[Size/sizeof(T)]; };

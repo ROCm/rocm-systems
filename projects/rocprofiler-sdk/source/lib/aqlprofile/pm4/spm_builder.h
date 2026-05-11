@@ -30,9 +30,9 @@
 #include <utility>
 #include <vector>
 
-#include "pm4/cmd_config.h"
-#include "pm4/cmd_builder.h"
-#include "src/core/include/spm_common.hpp"
+#include "lib/aqlprofile/pm4/cmd_config.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
+#include "lib/aqlprofile/core/spm_common.hpp"
 
 namespace pm4_builder
 {

@@ -164,6 +164,13 @@ rdc_status_t RdcStandaloneHandler::rdc_job_get_stats(const char job_id[64],
   rdc_status_t err_status = error_handle(status, reply.status());
   if (err_status != RDC_ST_OK) return err_status;
 
+  if (reply.gpus_size() > RDC_MAX_NUM_GPUS_PER_JOB) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+  if (reply.num_processes() > RDC_MAX_NUM_PROCESSES_STATUS) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
   p_job_info->num_gpus = reply.num_gpus();
   copy_gpu_usage_info(reply.summary(), &(p_job_info->summary));
   for (int i = 0; i < reply.gpus_size(); i++) {
@@ -858,6 +865,9 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_get(rdc_gpu_group_t group_id, uint
 
   auto response = reply.response();
   uint32_t policy_count = response.count();
+  if (policy_count > RDC_MAX_POLICY_SETTINGS) {
+    return RDC_ST_BAD_PARAMETER;
+  }
 
   for (uint32_t i = 0; i < policy_count; ++i) {
     const ::rdc::Policy& policy = response.policies(i);
@@ -1017,6 +1027,10 @@ rdc_status_t RdcStandaloneHandler::rdc_health_check(rdc_gpu_group_t group_id,
   if (err_status != RDC_ST_OK) return err_status;
 
   auto res = reply.response();
+  if (res.incidents_size() > HEALTH_MAX_ERROR_ITEMS) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
   response->overall_health = static_cast<rdc_health_result_t>(res.overall_health());
   response->incidents_count = res.incidents_count();
 
@@ -1061,6 +1075,10 @@ rdc_status_t RdcStandaloneHandler::rdc_device_topology_get(uint32_t gpu_index,
   if (err_status != RDC_ST_OK) return err_status;
 
   ::rdc::Topology Topology = reply.toppology();
+  if (Topology.num_of_gpus() > RDC_MAX_NUM_DEVICES) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
   results->num_of_gpus = Topology.num_of_gpus();
   results->numa_node = Topology.numa_node();
 
@@ -1088,10 +1106,17 @@ rdc_status_t RdcStandaloneHandler::rdc_link_status_get(rdc_link_status_t* result
   if (err_status != RDC_ST_OK) return err_status;
 
   ::rdc::LinkStatus LinkStatus = reply.linkstatus();
+  if (LinkStatus.num_of_gpus() > RDC_MAX_NUM_DEVICES) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
   results->num_of_gpus = LinkStatus.num_of_gpus();
 
   for (uint32_t i = 0; i < LinkStatus.num_of_gpus(); ++i) {
     ::rdc::GpuLinkStatus gpulinkstatus = LinkStatus.gpus(i);
+    if (gpulinkstatus.num_of_links() > RDC_MAX_NUM_OF_LINKS) {
+      return RDC_ST_BAD_PARAMETER;
+    }
     results->gpus[i].gpu_index = gpulinkstatus.gpu_index();
     results->gpus[i].num_of_links = gpulinkstatus.num_of_links();
     results->gpus[i].link_types = static_cast<rdc_topology_link_type_t>(gpulinkstatus.link_types());

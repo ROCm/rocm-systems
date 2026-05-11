@@ -174,7 +174,12 @@ public:
             Dwarf_Off next_offset{};
             size_t    header_size{};
 
-            std::map<Dwarf_Addr, std::string>                       line_addrs{};
+            struct LineEntry
+            {
+                Dwarf_Addr  end_addr;
+                std::string text;
+            };
+            std::map<Dwarf_Addr, LineEntry>                         line_addrs{};
             std::unordered_map<Dwarf_Off, std::unique_ptr<DIEInfo>> diemap{};
 
             while(
@@ -197,53 +202,76 @@ public:
                     continue;
                 }
 
-                for(size_t i = 0; i < line_count; ++i)
+                // Each row in the DWARF line table covers [addr, next_row_addr).
+                // The terminator of a contiguous code sequence is a row with the
+                // end_sequence flag set — its address is one past the last
+                // instruction in the sequence. Using the next row's address
+                // (rather than the next *kept* row's address, or codeobj_size)
+                // ensures that ranges never extend across gaps in DWARF
+                // coverage or past the end of an end_sequence boundary.
+                for(size_t i = 0; i + 1 < line_count; ++i)
                 {
-                    Dwarf_Addr  addr;
-                    int         line_number;
-                    Dwarf_Line* line = dwarf_onesrcline(lines, i);
+                    Dwarf_Addr  addr{};
+                    Dwarf_Addr  end_addr{};
+                    int         line_number{};
+                    bool        end_sequence = false;
+                    Dwarf_Line* line         = dwarf_onesrcline(lines, i);
+                    Dwarf_Line* next_line    = dwarf_onesrcline(lines, i + 1);
 
-                    if(line && dwarf_lineaddr(line, &addr) == 0 &&
-                       dwarf_lineno(line, &line_number) == 0 && line_number != 0)
+                    if(line == nullptr || next_line == nullptr) continue;
+                    if(dwarf_lineaddr(line, &addr) != 0) continue;
+                    if(dwarf_lineaddr(next_line, &end_addr) != 0) continue;
+                    if(end_addr <= addr) continue;
+
+                    // Skip end_sequence rows — they only mark the end boundary
+                    // of the previous row, they aren't a real source location.
+                    if(dwarf_lineendsequence(line, &end_sequence) == 0 && end_sequence) continue;
+
+                    // line_number == 0 is a valid DWARF row meaning "this address
+                    // belongs to this source file but has no specific line"
+                    // (typically compiler-synthesized code, prologue/epilogue,
+                    // or optimizer-merged blocks). addr2line renders these as
+                    // "<file>:?" — keep them with the same convention so they
+                    // are not silently dropped.
+                    if(dwarf_lineno(line, &line_number) != 0) continue;
+
+                    const char* src_cstr = dwarf_linesrc(line, nullptr, nullptr);
+                    if(src_cstr == nullptr) continue;
+
+                    std::string src        = src_cstr;
+                    auto        dwarf_line = src + ':';
+                    if(line_number != 0)
+                        dwarf_line += std::to_string(line_number);
+                    else
+                        dwarf_line += '?';
+
+                    std::vector<std::string> call_stack_info{};
+
+                    auto& die_ptr = diemap[dwarf_dieoffset(&die)];
+                    if(die_ptr == nullptr) die_ptr = std::make_unique<DIEInfo>(&die);
+                    die_ptr->getCallStackRecursive(addr, call_stack_info);
+
+                    size_t capacity =
+                        dwarf_line.size() + Instruction::separator.size() * call_stack_info.size();
+                    for(const auto& call : call_stack_info)
+                        capacity += call.size();
+
+                    dwarf_line.reserve(capacity);
+                    for(const auto& call : call_stack_info)
                     {
-                        std::string src        = dwarf_linesrc(line, nullptr, nullptr);
-                        auto        dwarf_line = src + ':' + std::to_string(line_number);
-
-                        std::vector<std::string> call_stack_info{};
-
-                        auto& die_ptr = diemap[dwarf_dieoffset(&die)];
-                        if(die_ptr == nullptr) die_ptr = std::make_unique<DIEInfo>(&die);
-                        die_ptr->getCallStackRecursive(addr, call_stack_info);
-
-                        size_t capacity = dwarf_line.size() +
-                                          Instruction::separator.size() * call_stack_info.size();
-                        for(const auto& call : call_stack_info)
-                            capacity += call.size();
-
-                        dwarf_line.reserve(capacity);
-                        for(const auto& call : call_stack_info)
-                        {
-                            dwarf_line += Instruction::separator;
-                            dwarf_line += call;
-                        }
-                        line_addrs[addr] = std::move(dwarf_line);
+                        dwarf_line += Instruction::separator;
+                        dwarf_line += call;
                     }
+                    line_addrs[addr] = LineEntry{end_addr, std::move(dwarf_line)};
                 }
                 cu_offset = next_offset;
             }
 
-            auto it = line_addrs.begin();
-            if(it != line_addrs.end())
+            for(auto& [addr, entry] : line_addrs)
             {
-                while(std::next(it) != line_addrs.end())
-                {
-                    uint64_t delta   = std::next(it)->first - it->first;
-                    auto     segment = segment::address_range_t{it->first, delta, 0};
-                    m_line_number_map.emplace(segment, std::move(it->second));
-                    it++;
-                }
-                auto segment = segment::address_range_t{it->first, codeobj_size - it->first, 0};
-                m_line_number_map.emplace(segment, std::move(it->second));
+                if(entry.end_addr <= addr) continue;
+                auto segment = segment::address_range_t{addr, entry.end_addr - addr, 0};
+                m_line_number_map.emplace(segment, std::move(entry.text));
             }
         }
 

@@ -6,15 +6,12 @@ opencode-launched session from spawning another opencode.
 
 Binary resolution order:
     1. constructor kwarg `opencode_path`
-    2. env var PERFXPERT_OPENCODE_PATH
-    3. bundled patched perfxpert opencode binary
-    4. shutil.which("opencode") on PATH
+    2. bundled patched perfxpert opencode binary
 """
 
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from typing import Any, Dict, List, Optional, Union
 
@@ -24,6 +21,7 @@ from perfxpert.providers._exceptions import (
     ProviderError,
     TimeoutError,
 )
+from perfxpert.providers._sanitization import redact_paths, sanitize_messages
 from perfxpert.providers.registry import register
 
 _DEFAULT_TIMEOUT = 180.0
@@ -32,22 +30,16 @@ _DEFAULT_TIMEOUT = 180.0
 def _find_binary(explicit: Optional[str]) -> str:
     if explicit:
         return explicit
-    env = os.environ.get("PERFXPERT_OPENCODE_PATH")
-    if env:
-        return env
     try:
         from perfxpert.cli.opencode_launcher import resolve_opencode_binary
 
         return str(resolve_opencode_binary())
-    except FileNotFoundError:
-        pass
-    found = shutil.which("opencode")
-    if found:
-        return found
-    raise ProviderError(
-        "[opencode] binary not found (reinstall perfxpert so the bundled binary is built, "
-        "set PERFXPERT_OPENCODE_PATH, or install opencode on PATH)"
-    )
+    except FileNotFoundError as exc:
+        raise ProviderError(
+            "[opencode] bundled patched binary not found. Reinstall perfxpert "
+            "so the pinned submodule-built binary is packaged, or use "
+            "`perfxpert-code opencode ...` for an explicit user-owned upstream binary."
+        ) from exc
 
 
 def _flatten_messages(messages: List[Dict[str, Any]], system: str) -> str:
@@ -91,7 +83,7 @@ class OpencodeProvider(Provider):
                 "cannot invoke opencode provider inside an opencode session"
             )
 
-        prompt = _flatten_messages(messages, system)
+        prompt = _flatten_messages(sanitize_messages(messages), redact_paths(system))
         cmd = [self._binary, "run", "--no-color"]
         if model:
             cmd += ["--model", model]
@@ -127,7 +119,7 @@ class OpencodeProvider(Provider):
 register(
     "opencode",
     OpencodeProvider,
-    "opencode CLI (subprocess; recursion-guarded; PERFXPERT_OPENCODE_PATH or PATH lookup)",
+    "bundled patched opencode CLI (subprocess; recursion-guarded)",
 )
 
 
