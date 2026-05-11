@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 import config
 from roofline.run_benchmark import run_roofline_benchmark
-from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
+from utils import amdsmi_interface
 from utils.logger import (
     console_debug,
     console_error,
@@ -225,8 +225,8 @@ class OmniSoC_Base:
                 )
             )
 
-        with amdsmi_ctx():
-            self._mspec.max_mclk = str(get_mem_max_clock())
+        with amdsmi_interface.amdsmi_ctx():
+            self._mspec.max_mclk = str(amdsmi_interface.get_mem_max_clock())
 
         # These are just max values now, because the parsing was broken and this was
         # inconsistent with how we use the clocks elsewhere (all max, all the time)
@@ -257,10 +257,10 @@ class OmniSoC_Base:
         Detects the GPU model using various identifiers from 'amd-smi static'.
         Falls back through multiple methods if the primary method fails.
         """
-        with amdsmi_ctx():
+        with amdsmi_interface.amdsmi_ctx():
             gpu_model = "N/A"
             for model in mi_gpu_specs.get_all_gpu_models():
-                for amdsmi_gpu_model in get_gpu_model():
+                for amdsmi_gpu_model in amdsmi_interface.get_gpu_model():
                     if model.lower() in amdsmi_gpu_model.lower():
                         gpu_model = model
                         break
