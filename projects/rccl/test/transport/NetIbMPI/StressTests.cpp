@@ -1227,5 +1227,77 @@ TEST_F(NetIbMPITest, BidirectionalMultiRank) {
 }
 
 // F2.  LongRunningMultiRank — fan-in 3→1, 1000 iterations, RDMA checkpoints.
+TEST_F(NetIbMPITest, LongRunningMultiRank) {
+    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    std::vector<DirectedConnection> conns;
+    SetupFanIn(0, 0, {1, 2, 3}, conns);
+
+    const size_t sz = kSmallBufferSize;
+    auto buf = makeHostBufferAutoGuard(malloc(sz));
+    ASSERT_NE(buf.get(), nullptr);
+
+    std::vector<void*> mhandles;
+    for (auto& c : conns) {
+        void* comm = nullptr;
+        if (rank == c.senderRank)   comm = c.sendComm;
+        if (rank == c.receiverRank) comm = c.recvComm;
+        void* mh = nullptr;
+        if (comm) {
+            ASSERT_EQ(RegisterMemory(comm, buf.get(), sz, NCCL_PTR_HOST, &mh), ncclSuccess);
+        }
+        mhandles.push_back(mh);
+    }
+    auto mrCleanup = makeScopeGuard([&]() {
+        for (size_t i = 0; i < conns.size(); i++) {
+            if (!mhandles[i]) continue;
+            void* comm = nullptr;
+            if (rank == conns[i].senderRank)   comm = conns[i].sendComm;
+            if (rank == conns[i].receiverRank) comm = conns[i].recvComm;
+            if (comm) DeregisterMemory(comm, mhandles[i]);
+        }
+    });
+
+    RdmaResourceCounts before = CaptureRdmaResources();
+
+    static constexpr int kIters = 1000;
+    for (int iter = 0; iter < kIters; iter++) {
+        for (size_t c = 0; c < conns.size(); c++) {
+            int seed = iter * 10 + conns[c].senderRank;
+            DoDirectedSendRecv(conns[c], buf.get(), buf.get(), sz,
+                               /*tag=*/iter % 1000, mhandles[c], mhandles[c], seed);
+        }
+        if ((iter + 1) % 250 == 0) {
+            MPI_Barrier(MPI_COMM_WORLD);
+            RdmaResourceCounts cp = CaptureRdmaResources();
+            char label[64];
+            snprintf(label, sizeof(label), "iter %d", iter + 1);
+            AssertNoRdmaLeaks(before, cp, label);
+        }
+    }
+
+    // Deregister memory before closing connections (comm must be valid for DeregMr).
+    for (size_t i = 0; i < conns.size(); i++) {
+        if (!mhandles[i]) continue;
+        void* comm = nullptr;
+        if (rank == conns[i].senderRank)   comm = conns[i].sendComm;
+        if (rank == conns[i].receiverRank) comm = conns[i].recvComm;
+        if (comm) DeregisterMemory(comm, mhandles[i]);
+        mhandles[i] = nullptr;
+    }
+    mrCleanup.dismiss();
+
+    for (auto& c : conns) CloseDirectedConnection(c);
+}
+
+// =====================================================================
+//  Group G: Bidirectional (2-rank)
+// =====================================================================
+
+// G1.  BidirectionalSaturation — two opposing connections, full-duplex,
+//      50 iterations.
 
 #endif /* MPI_TESTS_ENABLED */
