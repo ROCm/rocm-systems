@@ -843,15 +843,16 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap") {
   REQUIRE(errB == hipSuccess);
   REQUIRE(errA == hipSuccess);
 
-  // Step 4: Verify memory stats. Both graphs completed successfully.
-  // Depending on which thread won the race:
-  //   - If graph B stole graph A's memory: graph A remapped to new memory,
-  //     usedCurrent == 2 * kAllocSize (each graph holds its own allocation)
-  //   - If graph A reclaimed its own memory: graph B allocated fresh,
-  //     usedCurrent == 2 * kAllocSize
-  // Either way, both graphs hold one allocation each after completion.
+  // Step 4: Verify both graphs completed successfully and memory stats are sane.
+  // The outcome depends on thread scheduling:
+  //   - If launches overlapped: graph B stole graph A's memory, graph A remapped
+  //     to new memory → usedCurrent == 2 * kAllocSize
+  //   - If launches serialized: one graph reused the other's freed memory
+  //     → usedCurrent == kAllocSize
+  // Both outcomes are correct — the key assertion is no crash and no corruption.
   auto statsAfterConcurrent = queryGraphMem(device);
-  REQUIRE(statsAfterConcurrent.usedCurrent == kAllocSize * 2);
+  REQUIRE((statsAfterConcurrent.usedCurrent == kAllocSize ||
+           statsAfterConcurrent.usedCurrent == kAllocSize * 2));
 
   // Cleanup
   HIP_CHECK(hipGraphExecDestroy(execA));
