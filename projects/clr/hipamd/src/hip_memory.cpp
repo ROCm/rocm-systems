@@ -3779,11 +3779,13 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     }
 
     attributes->devicePointer = reinterpret_cast<char*>(devMem->virtualAddress() + offset);
-    constexpr uint32_t kManagedAlloc = (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR);
-    constexpr uint32_t kManagedAllocAlt = (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR);
+    constexpr uint32_t kHipMallocManagedFlags =
+        CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR;
+    constexpr uint32_t kManagedVarFlags =
+        CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR;
     const auto memFlags = memObj->getMemFlags();
-    attributes->isManaged = ((memFlags & kManagedAlloc) == kManagedAlloc) ||
-                            ((memFlags & kManagedAllocAlt) == kManagedAllocAlt);
+    attributes->isManaged = ((memFlags & kHipMallocManagedFlags) == kHipMallocManagedFlags) ||
+                            ((memFlags & kManagedVarFlags) == kManagedVarFlags);
     attributes->allocationFlags = memObj->getUserData().flags;
     attributes->device = memObj->getUserData().deviceId;
     if (attributes->isManaged) {
@@ -3839,8 +3841,10 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(ptr, offset);
   amd::Memory* vaddr_mem_obj = amd::MemObjMap::FindVirtualMemObj(ptr);
-  constexpr uint32_t kManagedAlloc = (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR);
-  constexpr uint32_t kManagedAllocAlt = (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR);
+  constexpr uint32_t kHipMallocManagedFlags =
+      CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR;
+  constexpr uint32_t kManagedVarFlags =
+      CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR;
 
   hipError_t status = hipSuccess;
 
@@ -3958,8 +3962,9 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
     case HIP_POINTER_ATTRIBUTE_IS_MANAGED: {
       if (memObj) {
         const auto memFlags = memObj->getMemFlags();
-        *reinterpret_cast<bool*>(data) = ((memFlags & kManagedAlloc) == kManagedAlloc) ||
-                                         ((memFlags & kManagedAllocAlt) == kManagedAllocAlt);
+        *reinterpret_cast<bool*>(data) =
+            ((memFlags & kHipMallocManagedFlags) == kHipMallocManagedFlags) ||
+            ((memFlags & kManagedVarFlags) == kManagedVarFlags);
       } else {
         *reinterpret_cast<bool*>(data) = false;
         return hipErrorInvalidValue;
@@ -3981,8 +3986,8 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
         if (getMemoryType(memObj) == hipMemoryTypeHost) {
           // host pointer, pinned or registered memory
           *reinterpret_cast<int*>(data) = 0;
-        } else if (((memObj->getMemFlags() & kManagedAlloc) == kManagedAlloc) ||
-                   ((memObj->getMemFlags() & kManagedAllocAlt) == kManagedAllocAlt)) {
+        } else if (((memObj->getMemFlags() & kHipMallocManagedFlags) == kHipMallocManagedFlags) ||
+                   ((memObj->getMemFlags() & kManagedVarFlags) == kManagedVarFlags)) {
           // managed allocation
           *reinterpret_cast<int*>(data) = 0;
         } else if (vaddr_mem_obj) {
