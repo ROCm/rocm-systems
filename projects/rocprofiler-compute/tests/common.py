@@ -6,18 +6,13 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pandas as pd
 
-ROOT = os.path.dirname(os.path.dirname(__file__))
-src_candidate = os.path.join(ROOT, "src")
-SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
-if SRC not in sys.path:
-    sys.path.insert(0, SRC)
+from utils import rocpd_data
 
-from utils import rocpd_data  # noqa: E402  (sys.path adjusted above)
+ROOT = os.path.dirname(os.path.dirname(__file__))
 
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},

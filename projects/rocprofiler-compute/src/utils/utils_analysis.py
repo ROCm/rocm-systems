@@ -27,9 +27,8 @@ def load_rocpd_pmc_df(db_paths: list[str]) -> pd.DataFrame:
 
     Each DB is queried once with ``COUNTERS_COLLECTION_QUERY`` and the
     resulting frames are concatenated. ``Dispatch_ID`` is then renumbered
-    per-DB using ``(PID, original_dispatch_id) -> contiguous int`` so
-    multi-rank rows within one merged-host DB do not collide on the
-    downstream ``process_rocpd_csv`` groupby.
+    per-DB so that multi-rank rows within one merged-host DB do not collide
+    on the downstream ``process_rocpd_csv`` groupby.
     """
     frames: list[pd.DataFrame] = []
     for db_path in db_paths:

@@ -1,22 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Pure rocpd interaction layer.
-
-This module is the only place that talks to rocpd ``.db`` files. It exposes
-single-purpose primitives:
-
-* ``query_*`` — read-only, stream rows from a rocpd db.
-* ``insert_*`` — bulk-write rocpd-shaped rows into a rocpd db.
-* ``merge_pass_dbs`` / ``count_counter_rows`` — db-level operations.
-
-Things that are deliberately NOT here (kept in ``utils_profile.py``):
-
-* CSV reading or writing.
-* Index/ID re-numbering arithmetic.
-* Filesystem layout assumptions beyond a single ``.db`` path.
-"""
-
 import shutil
 import sqlite3
 from collections.abc import Iterable, Iterator
