@@ -27,6 +27,7 @@
 #include "util.hpp"
 #include "log.hpp"
 #include "containers/free_list_impl.hpp"
+#include "sqtt_trace.hpp"
 
 namespace rocshmem {
 
@@ -292,11 +293,15 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t length,
     uintptr_t raddr, uint32_t rkey, uintptr_t laddr, uint32_t lkey,
     uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
   uint32_t num_wqes = 1;
+  sqtt_marker_enter("wf_info+qp");
   if (wf_info.scope == ThreadScope::thread) {
     num_wqes = wf_info.num_pe_group_lanes;
   }
+  sqtt_marker_exit("wf_info+qp");
 
+  sqtt_marker_enter("wqe+lock+cq");
   uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
+  sqtt_marker_exit("wqe+lock+cq");
 
   uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
   struct ionic_v1_wqe *wqe = &ionic_sq_buf[my_sq_pos & sq_mask];
@@ -346,7 +351,9 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t length,
     __HIP_MEMORY_SCOPE_AGENT);
 
   if (ring_db) {
+    sqtt_marker_enter("doorbell");
     commit_sq(wf_info, my_sq_prod, my_sq_pos, num_wqes);
+    sqtt_marker_exit("doorbell");
   }
 }
 

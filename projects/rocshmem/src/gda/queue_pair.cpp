@@ -30,6 +30,7 @@
 #include "constmem.hpp"
 #include "constants.hpp"
 #include "util.hpp"
+#include "sqtt_trace.hpp"
 
 namespace rocshmem {
 
@@ -145,20 +146,28 @@ __device__ void QueuePair::post_wqe_rma(
     int32_t length, uintptr_t raddr, uint32_t rkey,
     uintptr_t laddr, uint32_t lkey,
     uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
+  sqtt_marker_enter("post_wqe_rma");
+  sqtt_marker_enter("dispatch");
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
+    sqtt_marker_exit("dispatch");
     ionic_post_wqe_rma(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
+    sqtt_marker_exit("post_wqe_rma");
     return;
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
+    sqtt_marker_exit("dispatch");
     bnxt_post_wqe_rma(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
+    sqtt_marker_exit("post_wqe_rma");
     return;
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
+    sqtt_marker_exit("dispatch");
     mlx5_post_wqe_rma(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
+    sqtt_marker_exit("post_wqe_rma");
     return;
 #endif
   default:
@@ -241,21 +250,25 @@ __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
 }
 
 __device__ void QueuePair::quiet(ActiveWFInfo &wf_info) {
+  sqtt_marker_enter("quiet");
   if(wf_info.is_pe_group_first) {
       switch (constmem.gda_provider) {
     #if defined(GDA_IONIC)
       case GDAProvider::IONIC:
         ionic_quiet(wf_info);
+        sqtt_marker_exit("quiet");
         return;
     #endif
     #if defined(GDA_BNXT)
       case GDAProvider::BNXT:
           bnxt_quiet();
+        sqtt_marker_exit("quiet");
         return;
     #endif
     #if defined(GDA_MLX5)
       case GDAProvider::MLX5:
           mlx5_quiet();
+        sqtt_marker_exit("quiet");
         return;
     #endif
       default:
@@ -263,6 +276,7 @@ __device__ void QueuePair::quiet(ActiveWFInfo &wf_info) {
         __builtin_unreachable();
       }
   }
+  sqtt_marker_exit("quiet");
 }
 
 __device__ void QueuePair::quiet_single() {

@@ -42,6 +42,7 @@ cmake \
     -DBUILD_EXAMPLES=ON \
     -DBUILD_CTESTS=ON \
     -DPROFILE=OFF \
+    -DSQTT_ENABLED=OFF \
     -DUSE_GDA=ON \
     -DGDA_MLX5=ON \
     -DGDA_BNXT=ON \
