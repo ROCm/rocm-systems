@@ -972,7 +972,7 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
-    assert Path(workload_dir + "/pmc_perf_test.csv").exists()
+    assert Path(workload_dir + "/results_pmc_perf_test.csv").exists()
 
 
 def test_run_prof_success_v3_csv(tmp_path, monkeypatch):

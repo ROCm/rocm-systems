@@ -1381,15 +1381,14 @@ class TestMetricEvaluatorDivisionByZero:
 
     @staticmethod
     def _make_evaluator(columns, sys_vars=None):
-        """Build a MetricEvaluator with the given pmc_perf columns."""
-        pmc_perf_df = pd.DataFrame(columns)
-        raw_pmc_df = {"pmc_perf": pmc_perf_df}
+        """Build a MetricEvaluator with the given counter columns."""
+        raw_pmc_df = pd.DataFrame(columns)
         return MetricEvaluator(raw_pmc_df, sys_vars or {}, {})
 
     @staticmethod
     def _to_eval_str(equation):
         """Transform a YAML-style equation through the full pipeline."""
-        return build_eval_string(equation, "pmc_perf", config={})
+        return build_eval_string(equation)
 
     def test_all_zero_denominator_returns_na(self):
         """Division by all-zero denominator produces inf, caught as N/A."""
