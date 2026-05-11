@@ -23,6 +23,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Resolved Issues
 * Fixed MSCCLPP_ENABLE_CLIP CMake build flag, which was not being properly honored.
+* Fixed static build (`BUILD_SHARED_LIBS=OFF`) failing with `install(EXPORT "rccl-targets" ...)` error when `fmt` is fetched via `FetchContent`. The `fmt-header-only` target is now scoped to the build interface and excluded from RCCL's exported usage requirements.
 
 ## Unreleased - RCCL 2.27.7 for ROCm 7.2.0
 
