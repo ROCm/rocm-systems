@@ -92,8 +92,7 @@ def _write_rocpd_query_to_csv(
                 )
             except Exception as e:
                 console_error(
-                    f"Unexpected error while extracting {csv_path} "
-                    f"from {db_path}: {e}"
+                    f"Unexpected error while extracting {csv_path} from {db_path}: {e}"
                 )
 
 
@@ -278,9 +277,7 @@ def run_prof(
     results_files: list[str] = []
 
     if format_rocprof_output == "rocpd":
-        per_host_db_paths = sorted(
-            glob.glob(f"{workload_dir}/out/{fbase}/*/*.db")
-        )
+        per_host_db_paths = sorted(glob.glob(f"{workload_dir}/out/{fbase}/*/*.db"))
         if (
             get_rocprof_cmd() == "rocprofiler-sdk"
             and options["ROCPROF_COUNTER_COLLECTION"] == "0"
@@ -288,8 +285,7 @@ def run_prof(
             for db_name in per_host_db_paths:
                 pid = Path(db_name).stem.split("_")[0]
                 counter_csv = (
-                    f"{workload_dir}/out/{fbase}/"
-                    f"{pid}_native_counter_collection.csv"
+                    f"{workload_dir}/out/{fbase}/{pid}_native_counter_collection.csv"
                 )
                 _attach_native_counters_to_rocpd(db_name, counter_csv)
                 console_debug(f"Updated rocpd db {db_name} with native tool counters.")
@@ -837,9 +833,7 @@ def process_rocprofv3_output(
                 )
                 return []
 
-        results_files_csv = glob.glob(
-            f"{workload_dir}/out/{fbase}/*/*_converted.csv"
-        )
+        results_files_csv = glob.glob(f"{workload_dir}/out/{fbase}/*/*_converted.csv")
     else:
         return []
 

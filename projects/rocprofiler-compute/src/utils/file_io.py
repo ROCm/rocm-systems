@@ -84,9 +84,7 @@ def load_profiling_config(config_dir: str) -> dict[str, Any]:
         ddir = Path(config_dir)
         if rocpd_data.find_workload_db_paths(ddir):
             cfg["format_rocprof_output"] = "rocpd"
-        elif (ddir / "pmc_perf.csv").exists() or any(
-            ddir.glob("pmc_perf_*.csv")
-        ):
+        elif (ddir / "pmc_perf.csv").exists() or any(ddir.glob("pmc_perf_*.csv")):
             cfg["format_rocprof_output"] = "csv"
     return cfg
 
@@ -316,26 +314,28 @@ def create_df_pmc(
 
         if config_dict.get("format_rocprof_output") == "rocpd":
             db_paths = rocpd_data.find_workload_db_paths(raw_data_dir)
-            if not db_paths:
+            if db_paths:
+                long_df = utils_analysis.load_rocpd_pmc_df(db_paths)
+                if long_df.empty:
+                    return pd.DataFrame()
+                tmp_df = utils_analysis.process_rocpd_csv(long_df)
+                if kernel_verbose >= 0:
+                    kernel_name_shortener(tmp_df, kernel_verbose)
+                if node_name is not None:
+                    tmp_df.insert(0, "Node", node_name)
+                final_df = pd.concat(
+                    [tmp_df],
+                    keys=[schema.PMC_PERF_FILE_PREFIX],
+                    axis=1,
+                    join="inner",
+                    copy=False,
+                )
+                if verbose >= 2:
+                    console_debug(f"pmc_raw_data final_single_df {final_df.info}")
+                return final_df
+
+            if not (Path(raw_data_dir) / "pmc_perf.csv").exists():
                 return pd.DataFrame()
-            long_df = utils_analysis.load_rocpd_pmc_df(db_paths)
-            if long_df.empty:
-                return pd.DataFrame()
-            tmp_df = utils_analysis.process_rocpd_csv(long_df)
-            if kernel_verbose >= 0:
-                kernel_name_shortener(tmp_df, kernel_verbose)
-            if node_name is not None:
-                tmp_df.insert(0, "Node", node_name)
-            final_df = pd.concat(
-                [tmp_df],
-                keys=[schema.PMC_PERF_FILE_PREFIX],
-                axis=1,
-                join="inner",
-                copy=False,
-            )
-            if verbose >= 2:
-                console_debug(f"pmc_raw_data final_single_df {final_df.info}")
-            return final_df
 
         coll_level_map = {}
         for file_name in Path(raw_data_dir).rglob("*.csv"):
