@@ -93,7 +93,8 @@ struct env_config
     {
         if(env_name.empty()) return -1;
         // overwrite < 0: only modify if variable already exists
-        if(overwrite < 0 && ::std::getenv(env_name.c_str()) == nullptr)
+        // Use get_env wrapper which safely reads from environ
+        if(overwrite < 0 && get_env(env_name, "").empty())
             return 0;
         else if(_verbose)
         {

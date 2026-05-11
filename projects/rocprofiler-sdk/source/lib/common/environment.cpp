@@ -34,17 +34,46 @@
 #include <string>
 #include <string_view>
 
+// Declare environ as extern at file scope
+extern "C" {
+extern char** environ;
+}
+
 namespace rocprofiler
 {
 namespace common
 {
 namespace impl
 {
+namespace
+{
+// Safely read environment variable directly from environ array.
+// This avoids issues with bash's custom getenv() implementation which
+// breaks when setenv() is called before bash initializes its internal tables.
+// See: bash exports its own getenv() that uses hash tables, but when
+// libraries call setenv() in constructors, bash's tables are uninitialized.
+const char*
+safe_getenv(const char* name)
+{
+    if(!name || !environ) return nullptr;
+
+    size_t name_len = std::strlen(name);
+    for(char** env = environ; *env; ++env)
+    {
+        if(std::strncmp(*env, name, name_len) == 0 && (*env)[name_len] == '=')
+        {
+            return *env + name_len + 1;
+        }
+    }
+    return nullptr;
+}
+}  // namespace
+
 std::string
 get_env(std::string_view env_id, std::string_view _default)
 {
     if(env_id.empty()) return std::string{_default};
-    char* env_var = ::std::getenv(env_id.data());
+    const char* env_var = safe_getenv(env_id.data());
     if(env_var) return std::string{env_var};
     return std::string{_default};
 }
@@ -59,7 +88,7 @@ bool
 get_env(std::string_view env_id, bool _default)
 {
     if(env_id.empty()) return _default;
-    char* env_var = ::std::getenv(env_id.data());
+    const char* env_var = safe_getenv(env_id.data());
     if(env_var)
     {
         if(std::string_view{env_var}.empty())
@@ -72,11 +101,13 @@ get_env(std::string_view env_id, bool _default)
             return static_cast<bool>(std::stoi(env_var));
         }
 
-        for(size_t i = 0; i < std::string_view{env_var}.length(); ++i)
-            env_var[i] = tolower(env_var[i]);
+        // Create a mutable copy for tolower modification
+        std::string env_var_lower{env_var};
+        for(size_t i = 0; i < env_var_lower.length(); ++i)
+            env_var_lower[i] = tolower(env_var_lower[i]);
 
         for(const auto& itr : {"off", "false", "no", "n", "f", "0"})
-            if(std::string_view{env_var} == itr) return false;
+            if(env_var_lower == itr) return false;
 
         return true;
     }
@@ -95,7 +126,7 @@ get_env(std::string_view env_id,
         "change use of stol/stoul if instantiating for type larger than a 64-bit integer");
 
     if(env_id.empty()) return _default;
-    char* env_var = ::std::getenv(env_id.data());
+    const char* env_var = safe_getenv(env_id.data());
     if(env_var)
     {
         try
