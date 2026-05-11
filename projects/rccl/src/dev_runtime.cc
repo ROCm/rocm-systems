@@ -80,9 +80,13 @@ ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
   }
 
   CUmemAllocationProp memProp = {};
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+  memProp.type = hipMemAllocationTypeUncached;
+#else
   memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
   memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-  memProp.requestedHandleTypes = ncclCuMemHandleType;
+  memProp.requestedHandleType = ncclCuMemHandleType;
   memProp.location.id = comm->cudaDev;
   CUCHECKGOTO(cuMemGetAllocationGranularity(&devr->granularity, &memProp, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), ret, fail_lsaRankList);
 
@@ -106,6 +110,7 @@ fail_lsaRankList:
 }
 
 static void symTeamDestroyAll(struct ncclComm* comm); // Further down
+static void symMemoryDropRef(struct ncclComm* comm, struct ncclDevrMemory* mem); // Further down
 
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
   struct ncclDevrState* devr = &comm->devrState;
@@ -128,13 +133,24 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
         ncclShadowPoolFree(&devr->shadows, tableDev, stream);
         tableDev = next;
       }
-      cudaStreamSynchronize(stream);
-      cudaStreamDestroy(stream);
+      CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+      CUDACHECKIGNORE(cudaStreamDestroy(stream));
     }
   }
-  CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
-  CUCHECKIGNORE(cuMemUnmap(flatAddr, devr->lsaSize*devr->bigSize));
-  CUCHECKIGNORE(cuMemAddressFree(flatAddr, devr->lsaSize*devr->bigSize));
+  // Drain leaked windows so every per-peer slice is unmapped before VA free.
+  // Without this, on HIP cuMemAddressFree over a still-mapped range returns
+  // hipErrorInvalidValue, which then cascades into ibv_dealloc_pd EBUSY at teardown.
+  while (devr->memHead != nullptr) {
+    struct ncclDevrMemory* m = devr->memHead;
+    m->refCount = 1; // force drop on the next call
+    symMemoryDropRef(comm, m);
+  }
+  if (devr->lsaFlatBase != nullptr) {
+    CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
+  // Returns error: invalid argument. Already unmapped by symMemoryDropRef
+  // CUCHECKIGNORE(cuMemUnmap(flatAddr, devr->lsaSize*devr->bigSize));
+    CUCHECKIGNORE(cuMemAddressFree(flatAddr, devr->lsaSize*devr->bigSize));
+  }
   ncclShadowPoolDestruct(&devr->shadows);
   ncclSpaceDestruct(&devr->bigSpace);
   free(devr->lsaRankList);
@@ -186,7 +202,9 @@ static ncclResult_t symMemoryMapLsaTeam(
         CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, (void*)&messages[r].fabricHandle, ncclCuMemHandleType), ret, fail);
       }
     }
-    CUdeviceptr addr = reinterpret_cast<uintptr_t>((char*)devr->lsaFlatBase + r*devr->bigSize + bigOffset);
+    uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+    CUdeviceptr addr = reinterpret_cast<CUdeviceptr>(base + r * devr->bigSize + bigOffset);
+    // CUdeviceptr addr = reinterpret_cast<uintptr_t>((char*)devr->lsaFlatBase + r*devr->bigSize + bigOffset);
     CUCHECKGOTO(cuMemMap(addr, size, 0, impHandle, 0), ret, fail);
     CUCHECKGOTO(cuMemSetAccess(addr, size, &accessDesc, 1), ret, fail);
     if (r != devr->lsaSelf) {
@@ -435,7 +453,9 @@ static void symMemoryDropRef(
       symUnbindTeamMemory(comm, t, mem);
     }
     for (int r = 0; r < devr->lsaSize; r++) {
-      CUdeviceptr addr = reinterpret_cast<uintptr_t>((char*)devr->lsaFlatBase + r*devr->bigSize + mem->bigOffset);
+      uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+      CUdeviceptr addr = reinterpret_cast<CUdeviceptr>(base + r * devr->bigSize + mem->bigOffset);
+      // CUdeviceptr addr = reinterpret_cast<uintptr_t>((char*)devr->lsaFlatBase + r*devr->bigSize + mem->bigOffset);
       CUCHECKIGNORE(cuMemUnmap(addr, mem->size));
     }
     ncclSpaceFree(&devr->bigSpace, mem->bigOffset, mem->size);
@@ -603,7 +623,8 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
 
   // Get underlying cumem handle:
   CUCHECKGOTO(cuMemGetAddressRange(&memAddr, &memSize, reinterpret_cast<CUdeviceptr>(userPtr)), ret, fail_locReg);
-  memOffset = reinterpret_cast<CUdeviceptr>(userPtr) - memAddr;
+  memOffset = reinterpret_cast<uintptr_t>(userPtr) - reinterpret_cast<uintptr_t>(memAddr);
+  // memOffset = reinterpret_cast<CUdeviceptr>(userPtr) - memAddr;
   if (memOffset%NCCL_WIN_REQUIRED_ALIGNMENT != 0) {
     WARN("Window address must be suitably aligned.");
     ret = ncclInvalidArgument;
@@ -628,15 +649,15 @@ ncclResult_t ncclDevrWindowRegisterInGroup(
   // symWindowCreate needs barrier.
   NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, 0xbeef), ret, fail_locReg_memHandle_mem_stream_win);
 
-  cudaStreamDestroy(stream);
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
   return ret;
 
 fail_locReg_memHandle_mem_stream_win:
   symWindowDestroy(comm, *outWinDev, stream);
   *outWinDev = nullptr;
-  cudaStreamSynchronize(stream);
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
 fail_locReg_memHandle_mem_stream:
-  cudaStreamDestroy(stream);
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
   symMemoryDropRef(comm, mem);
 fail_locReg_memHandle:
   if (memHandle != 0x0) { CUCHECKIGNORE(cuMemRelease(memHandle)); }
@@ -820,9 +841,13 @@ ncclResult_t ncclDevrCommCreateInternal(
     outDevComm->resourceWindow_inlined = {};
   } else {
     CUmemAllocationProp memProp = {};
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+    memProp.type = hipMemAllocationTypeUncached;
+#else
     memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
     memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    memProp.requestedHandleTypes = ncclCuMemHandleType;
+    memProp.requestedHandleType = ncclCuMemHandleType;
     // We have to assume that if GIN is possible it might be requested in the future,
     // even on single node.
     memProp.allocFlags.gpuDirectRDMACapable = comm->sharedRes->ginState.ncclGin != nullptr ? 1 : 0;
@@ -888,7 +913,7 @@ fail:
 ////////////////////////////////////////////////////////////////////////////////
 
 NCCL_API(ncclResult_t, ncclCommWindowRegister, ncclComm_t comm, void* ptr, size_t size, ncclWindow_t* win, int winFlags);
-ncclResult_t ncclCommWindowRegister(
+ncclResult_t ncclCommWindowRegister_impl(
     struct ncclComm* comm, void* userPtr, size_t userSize,
     struct ncclWindow_vidmem** outWinDev, int winFlags
   ) {
@@ -917,14 +942,14 @@ ncclResult_t ncclCommWindowRegister(
 exit:
   ncclGroupErrCheck(ret);
   NCCLCHECK(ncclGroupEndInternal());
-  cudaSetDevice(saveDev);
+  CUDACHECKIGNORE(cudaSetDevice(saveDev));
   return ret;
 fail:
   goto exit;
 }
 
 NCCL_API(ncclResult_t, ncclCommWindowDeregister, ncclComm_t comm, ncclWindow_t win);
-ncclResult_t ncclCommWindowDeregister(struct ncclComm* comm, struct ncclWindow_vidmem* winDev) {
+ncclResult_t ncclCommWindowDeregister_impl(struct ncclComm* comm, struct ncclWindow_vidmem* winDev) {
   ncclResult_t ret = ncclSuccess;
   int saveDev;
   cudaStream_t stream;
@@ -940,10 +965,10 @@ ncclResult_t ncclCommWindowDeregister(struct ncclComm* comm, struct ncclWindow_v
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail_dev);
   NCCLCHECKGOTO(symWindowDestroy(comm, winDev, stream), ret, fail_dev_stream);
 fail_dev_stream:
-  cudaStreamSynchronize(stream);
-  cudaStreamDestroy(stream);
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
 fail_dev:
-  cudaSetDevice(saveDev);
+  CUDACHECKIGNORE(cudaSetDevice(saveDev));
 fail:
 exit:
   return ret;
@@ -996,7 +1021,7 @@ ncclResult_t ncclDevCommCreate(
 exit:
   ncclGroupErrCheck(ret);
   NCCLCHECK(ncclGroupEndInternal());
-  cudaSetDevice(saveDev);
+  CUDACHECKIGNORE(cudaSetDevice(saveDev));
   return ret;
 fail:
   free(task);

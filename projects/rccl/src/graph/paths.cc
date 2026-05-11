@@ -344,11 +344,6 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   if (path->type <= p2pLevel) *p2p = 1;
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
-  // NCCL_IGNORE_DISABLED_P2P=2 is used by unit tests that don't want to
-  // validate against NVML at all since they are pretending to be on other hw.
-  bool checkNvml = (ncclParamIgnoreDisabledP2p() != 2 && g1 != g2 &&
-                    (comm == NULL || (info1->hostHash == comm->peerInfo[comm->rank].hostHash &&
-                                      info1->hostHash == info2->hostHash)));
   if (*p2p == 1) {
     if (checkNvml) {
       int indexes[3] = {-1,-1,-1};
@@ -387,6 +382,7 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
     if (read && (gpu1->gpu.cudaCompCap == gpu2->gpu.cudaCompCap) && (gpu1->gpu.cudaCompCap == 80)) *read = 1;
   }
 
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   if (cudaP2p) {
     if (checkNvml) {
       int n1, n2;
@@ -399,6 +395,12 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
       *cudaP2p = (mnnvl || comm == NULL || info1->hostHash == info2->hostHash);
     }
   }
+#else
+  if (cudaP2p) {
+    // On AMD/HIP, assume P2P connectivity based on MNNVL or same host
+    *cudaP2p = (mnnvl || comm == NULL || info1->hostHash == info2->hostHash);
+  }
+#endif
 
   return ncclSuccess;
 }
@@ -889,7 +891,6 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
     NCCLCHECKGOTO(ncclTopoRemoveNode(system, GPU, g), ret, fail);
   }
 
-  system->inter = system->nodes[GPU].count == comm->nRanks ? 0 : 1;
   // trim low speed port on same NIC
   for (int i = 0; i < system->nodes[NET].count; i ++) {
     for (int j = 0; j < system->nodes[NET].count; j ++) {
@@ -946,6 +947,7 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
     for (int n=system->nodes[NET].count-1; n>=0; n--)
       NCCLCHECKGOTO(ncclTopoRemoveNode(system, NET, n), ret, fail);
   }
+  system->inter = system->nodes[GPU].count == comm->nRanks ? 0 : 1;
 exit:
   free(domains);
   if (ids) free(ids);
