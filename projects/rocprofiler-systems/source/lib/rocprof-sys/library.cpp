@@ -24,6 +24,8 @@
 #include "core/node_info.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto_fwd.hpp"
+#include "core/progress/bar.hpp"
+#include "core/progress/callback.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
@@ -1178,7 +1180,20 @@ rocprofsys_finalize_hidden(void)
     {
         auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         _manager.shutdown();
-        _manager.post_process_bulk(_output_registry);
+
+        rocprofsys::progress::bar_options _bar_opts;
+        _bar_opts.verbose = config::get_verbose();
+
+        rocprofsys::progress::tracker _tracker{ [_bar_opts](std::string   _label,
+                                                            std::uint64_t _total) {
+            auto                      _bar = std::make_shared<rocprofsys::progress::bar>(std::move(_label),
+                                                                                         _total, _bar_opts);
+            return rocprofsys::progress::progress_callback{ [_bar](std::uint64_t _delta) {
+                _bar->on_advance(_delta);
+            } };
+        } };
+
+        _manager.post_process_bulk(_output_registry, _tracker);
     }
 
     if(_timemory_manager && _timemory_manager != nullptr)

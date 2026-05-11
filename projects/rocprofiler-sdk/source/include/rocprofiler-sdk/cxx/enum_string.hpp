@@ -1406,22 +1406,27 @@ ROCPROFILER_ENUM_INFO(rocprofiler_code_object_operation_t,
                       ROCPROFILER_CODE_OBJECT_NONE,
                       ROCPROFILER_CODE_OBJECT_LAST,
                       false,
-                      not_operation);
+                      is_operation);
+ROCPROFILER_ENUM_INFO(rocprofiler_hip_stream_operation_t,
+                      ROCPROFILER_HIP_STREAM_NONE,
+                      ROCPROFILER_HIP_STREAM_LAST,
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_memory_copy_operation_t,
                       ROCPROFILER_MEMORY_COPY_NONE,
                       ROCPROFILER_MEMORY_COPY_LAST,
                       false,
-                      not_operation);
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_memory_allocation_operation_t,
                       ROCPROFILER_MEMORY_ALLOCATION_NONE,
                       ROCPROFILER_MEMORY_ALLOCATION_LAST,
                       false,
-                      not_operation);
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_kernel_dispatch_operation_t,
                       ROCPROFILER_KERNEL_DISPATCH_NONE,
                       ROCPROFILER_KERNEL_DISPATCH_LAST,
                       false,
-                      not_operation);
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_pc_sampling_method_t,
                       ROCPROFILER_PC_SAMPLING_METHOD_NONE,
                       ROCPROFILER_PC_SAMPLING_METHOD_LAST,
@@ -1714,6 +1719,13 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_CODE_OBJECT_LOAD);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_CODE_OBJECT_HOST_KERNEL_SYMBOL_REGISTER);
 static_assert(ROCPROFILER_CODE_OBJECT_LAST == 4);
+
+// rocprofiler_hip_stream_operation_t
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_STREAM_NONE);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_STREAM_CREATE);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_STREAM_DESTROY);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_STREAM_SET);
+static_assert(ROCPROFILER_HIP_STREAM_LAST == 4);
 
 // rocprofiler_memory_copy_operation_t
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MEMORY_COPY_NONE);
