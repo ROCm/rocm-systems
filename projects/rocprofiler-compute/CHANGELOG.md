@@ -20,6 +20,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Profile workload output folder name for Strix Halo series (gfx1151) is changed from `strix_halo` to `rdna35_halo`
 
+* Unified accumulator handling across profile and analyze so each `_ACCUM`-suffixed counter is preserved instead of collapsing to `SQ_ACCUM_PREV_HIRES`
+
 ### Removed
 
 * ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
@@ -27,6 +29,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed redundant `if (X != 0) else None` divide-by-zero guards from metric equations across all analysis YAML configurations. Division by zero is already handled by the metric evaluation engine, which returns `"N/A"` for `inf` and `NaN` results.
 
 ### Optimized
+
+* Flattened the analyze-mode PMC dataframe to a single-index frame.
 
 ### Resolved issues
 
