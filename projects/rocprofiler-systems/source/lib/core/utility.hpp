@@ -142,9 +142,8 @@ struct generate
 
 private:
     template <typename Up>
-    static auto invoke(Up&& _v, int,
-                       std::enable_if_t<std::is_invocable<Up>::value, int> = 0)
-        -> decltype(std::forward<Up>(_v)())
+        requires std::invocable<Up>
+    static auto invoke(Up&& _v, int) -> decltype(std::forward<Up>(_v)())
     {
         return std::forward<Up>(_v)();
     }
