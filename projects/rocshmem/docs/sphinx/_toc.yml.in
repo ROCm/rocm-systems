@@ -9,6 +9,8 @@ subtrees:
 
 - caption: Install
   entries:
+  - file: install.rst
+    title: Install rocSHMEM
   - file: build.rst
     title: Build from source
 

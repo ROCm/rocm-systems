@@ -4,11 +4,16 @@
 
 .. _install-rocshmem:
 
----------------------------
-Installing rocSHMEM
----------------------------
+--------------------------
+Build rocSHMEM from source
+--------------------------
 
-This topic describes how to install rocSHMEM.
+To build rocSHMEM as part of the ROCm Core SDK, see `TheRock build instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build rocSHMEM standalone using the following
+instructions.
 
 Requirements
 ------------
@@ -58,19 +63,6 @@ You can activate IPC, RO, and GDA backends in the same rocSHMEM build.
 
   When RO + IPC is active, all atomic operations use the RO backend, even for intra-node communication.
   When GDA + IPC is active, all atomic operations use the GDA backend, even for intra-node communication.
-
-Installing from a package manager
----------------------------------
-
-On Ubuntu, you can install rocSHMEM by running:
-
-.. code-block:: bash
-
-   apt install rocshmem-dev
-
-.. note::
-
-  This installation method requires ROCm 6.4 or later. You must manually build dependencies such as Open MPI and UCX, because the distribution packaged versions don't include full accelerator support. For more information, see :ref:`install-dependencies`.
 
 .. _install-dependencies:
 
