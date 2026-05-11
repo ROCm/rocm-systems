@@ -23,6 +23,7 @@
 #pragma once
 
 #include "disassembly.hpp"
+#include "funcmap.hpp"
 #include "segment.hpp"
 
 #include <dwarf.h>
@@ -39,6 +40,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocprofiler
@@ -282,6 +284,43 @@ public:
             m_symbol_map = disassembly->GetKernelMap();  // Can throw
         } catch(...)
         {}
+
+        try
+        {
+            auto section_bytes =
+                funcmap::extract_elf_section(codeobj_data, codeobj_size, ".sqtt_funcmap");
+            if(section_bytes)
+            {
+                m_funcmap = funcmap::parse_funcmap_section(*section_bytes);
+
+                std::unordered_map<std::string, uint64_t> name_to_vaddr;
+                name_to_vaddr.reserve(m_symbol_map.size());
+                for(const auto& [vaddr, sym] : m_symbol_map)
+                    name_to_vaddr.emplace(sym.name, vaddr);
+
+                for(auto& entry_ptr : m_funcmap.entries)
+                {
+                    if(!entry_ptr) continue;
+                    if(entry_ptr->kind != funcmap::FuncmapEntryKind::Function &&
+                       entry_ptr->kind != funcmap::FuncmapEntryKind::Kernel)
+                        continue;
+
+                    auto it = name_to_vaddr.find(entry_ptr->name);
+                    if(it == name_to_vaddr.end()) continue;
+
+                    auto updated   = std::make_shared<funcmap::FuncmapEntry>(*entry_ptr);
+                    updated->vaddr = it->second;
+                    if(updated->kind != funcmap::FuncmapEntryKind::Kernel)
+                    {
+                        auto bid = m_funcmap.by_id.find(updated->id);
+                        if(bid != m_funcmap.by_id.end() && bid->second == entry_ptr)
+                            bid->second = updated;
+                    }
+                    entry_ptr = std::move(updated);
+                }
+            }
+        } catch(...)
+        {}
     }
     ~CodeobjDecoderComponent() = default;
 
@@ -306,7 +345,10 @@ public:
         return inst;
     }
 
+    const funcmap::Funcmap& getFuncmap() const { return m_funcmap; }
+
     std::map<uint64_t, SymbolInfo>            m_symbol_map{};
+    funcmap::Funcmap                          m_funcmap{};
     std::vector<std::shared_ptr<Instruction>> instructions{};
     std::unique_ptr<DisassemblyInstance>      disassembly{};
 
@@ -385,7 +427,8 @@ public:
         if(!decoder) throw std::exception();
         return decoder->m_symbol_map;
     }
-    const uint64_t load_addr;
+    const funcmap::Funcmap& getFuncmap() const;
+    const uint64_t          load_addr;
 
 private:
     uint64_t load_end{0};
@@ -446,6 +489,10 @@ public:
         {}
         return nullptr;
     }
+
+    funcmap::Funcmap::EntryPtr getMarker(marker_id_t id, uint32_t marker_id) const;
+
+    const funcmap::Funcmap& getFuncmap(marker_id_t id) const;
 
 protected:
     std::unordered_map<marker_id_t, std::shared_ptr<LoadedCodeobjDecoder>> decoders{};
@@ -547,9 +594,88 @@ public:
         }
     }
 
+    std::vector<std::pair<marker_id_t, funcmap::Funcmap::EntryPtr>> findMarkerAny(
+        uint32_t marker_id) const;
+
+    uint32_t getWaveSize() const;
+
 private:
     segment::CodeobjTableTranslator table{};
 };
+
+inline const funcmap::Funcmap&
+LoadedCodeobjDecoder::getFuncmap() const
+{
+    if(!decoder) throw std::exception();
+    return decoder->getFuncmap();
+}
+
+inline funcmap::Funcmap::EntryPtr
+CodeobjMap::getMarker(marker_id_t id, uint32_t marker_id) const
+{
+    auto it = decoders.find(id);
+    if(it == decoders.end()) return nullptr;
+
+    try
+    {
+        return it->second->getFuncmap().find(marker_id);
+    } catch(...)
+    {
+        return nullptr;
+    }
+}
+
+inline const funcmap::Funcmap&
+CodeobjMap::getFuncmap(marker_id_t id) const
+{
+    return decoders.at(id)->getFuncmap();
+}
+
+inline std::vector<std::pair<marker_id_t, funcmap::Funcmap::EntryPtr>>
+CodeobjAddressTranslate::findMarkerAny(uint32_t marker_id) const
+{
+    std::vector<std::pair<marker_id_t, funcmap::Funcmap::EntryPtr>> out;
+    for(const auto& [id, dec] : decoders)
+    {
+        try
+        {
+            if(auto entry = dec->getFuncmap().find(marker_id))
+                out.emplace_back(id, std::move(entry));
+        } catch(...)
+        {}
+    }
+    return out;
+}
+
+inline uint32_t
+CodeobjAddressTranslate::getWaveSize() const
+{
+    uint32_t agreed = 0;
+    for(const auto& [id, dec] : decoders)
+    {
+        uint32_t w = 0;
+        try
+        {
+            w = dec->getFuncmap().wave_size;
+        } catch(...)
+        {
+            continue;
+        }
+
+        if(w == 0) continue;
+        if(agreed == 0)
+        {
+            agreed = w;
+        }
+        else if(agreed != w)
+        {
+            std::cerr << "rocprofiler-sdk: .sqtt_funcmap wave size disagreement (" << agreed
+                      << " vs " << w << " from codeobj id " << id << ")\n";
+            return 0;
+        }
+    }
+    return agreed;
+}
 
 inline DIEInfo::DIEInfo(Dwarf_Die* die)
 {
