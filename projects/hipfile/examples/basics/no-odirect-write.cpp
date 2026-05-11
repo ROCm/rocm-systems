@@ -137,8 +137,7 @@ open_file_no_odirect(const char *path, int flags, mode_t mode, int *fd, hipFileH
 
     hipFileError_t hipfile_err = hipFileHandleRegister(handle, &descr);
     if (hipFileSuccess != hipfile_err.err) {
-        fprintf(stderr, "Could not register %s (%s)\n", path,
-                hipFileGetOpErrorString(hipfile_err.err));
+        fprintf(stderr, "Could not register %s (%s)\n", path, hipFileGetOpErrorString(hipfile_err.err));
         close(*fd);
         return 1;
     }
@@ -171,7 +170,7 @@ main(int argc, char *argv[])
     const size_t payload_size = NOW_SIZE;
     const size_t alloc_size   = align_up(payload_size, BLOCK_ALIGN);
 
-    int             out_fd         = -1;
+    int             out_fd = -1;
     hipFileHandle_t out_handle;
     void           *devbuf         = NULL;
     uint8_t        *cpu_pattern    = NULL;
@@ -193,8 +192,7 @@ main(int argc, char *argv[])
      * Parameters must be set before the driver is opened. */
     hipfile_err = hipFileSetParameterBool(hipFileParamPropertiesAllowCompatMode, true);
     if (hipFileSuccess != hipfile_err.err) {
-        fprintf(stderr, "Could not enable compat mode (%s)\n",
-                HIPFILE_ERRSTR(hipfile_err.err));
+        fprintf(stderr, "Could not enable compat mode (%s)\n", HIPFILE_ERRSTR(hipfile_err.err));
         return EXIT_FAILURE;
     }
 
@@ -215,8 +213,7 @@ main(int argc, char *argv[])
 
     hip_err = hipMalloc(&devbuf, alloc_size);
     if (hipSuccess != hip_err) {
-        fprintf(stderr, "Could not allocate %zu bytes on GPU %d (%d)\n", alloc_size, gpu_id,
-                hip_err);
+        fprintf(stderr, "Could not allocate %zu bytes on GPU %d (%d)\n", alloc_size, gpu_id, hip_err);
         goto free_cpu_pattern;
     }
 
@@ -235,8 +232,8 @@ main(int argc, char *argv[])
     buf_registered = true;
 
     /* 5. open file WITHOUT O_DIRECT + hipFileHandleRegister */
-    if (open_file_no_odirect(out_path, O_WRONLY | O_CREAT | O_TRUNC,
-                             S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd, &out_handle)) {
+    if (open_file_no_odirect(out_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
+                             &out_fd, &out_handle)) {
         goto deregister_buf;
     }
 
@@ -272,14 +269,12 @@ main(int argc, char *argv[])
             goto deregister_buf;
 
         if (hash_pattern != hash_written) {
-            fprintf(stderr,
-                    "Hash mismatch: pattern=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n",
-                    hash_pattern, out_path, hash_written);
+            fprintf(stderr, "Hash mismatch: pattern=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n", hash_pattern,
+                    out_path, hash_written);
             goto deregister_buf;
         }
 
-        printf("OK  %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", out_path, payload_size,
-               hash_pattern);
+        printf("OK  %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", out_path, payload_size, hash_pattern);
     }
 
     exit_status = EXIT_SUCCESS;

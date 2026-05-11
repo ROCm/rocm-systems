@@ -76,10 +76,14 @@ static const char *
 mode_name(mem_mode_t mode)
 {
     switch (mode) {
-        case MEM_DEVICE:  return "device";
-        case MEM_MANAGED: return "managed";
-        case MEM_PINNED:  return "pinned-host";
-        default:          return "unknown";
+        case MEM_DEVICE:
+            return "device";
+        case MEM_MANAGED:
+            return "managed";
+        case MEM_PINNED:
+            return "pinned-host";
+        default:
+            return "unknown";
     }
 }
 
@@ -103,8 +107,7 @@ alloc_buf(mem_mode_t mode, size_t size, void **out_buf)
             return 1;
     }
     if (hipSuccess != hip_err) {
-        fprintf(stderr, "Could not allocate %zu bytes (%s, hip err %d)\n", size, mode_name(mode),
-                hip_err);
+        fprintf(stderr, "Could not allocate %zu bytes (%s, hip err %d)\n", size, mode_name(mode), hip_err);
         return 1;
     }
     return 0;
@@ -228,8 +231,7 @@ open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *ha
 
     hipFileError_t hipfile_err = hipFileHandleRegister(handle, &descr);
     if (hipFileSuccess != hipfile_err.err) {
-        fprintf(stderr, "Could not register %s (%s)\n", path,
-                hipFileGetOpErrorString(hipfile_err.err));
+        fprintf(stderr, "Could not register %s (%s)\n", path, hipFileGetOpErrorString(hipfile_err.err));
         close(*fd);
         return 1;
     }
@@ -293,8 +295,8 @@ main(int argc, char *argv[])
     const size_t payload_size = (file_size < VMR_CAP) ? file_size : VMR_CAP;
     const size_t alloc_size   = align_up(payload_size, block_size);
 
-    int             in_fd       = -1;
-    int             out_fd      = -1;
+    int             in_fd  = -1;
+    int             out_fd = -1;
     hipFileHandle_t in_handle, out_handle;
     void           *buf         = NULL;
     int             exit_status = EXIT_FAILURE;
@@ -327,15 +329,14 @@ main(int argc, char *argv[])
         goto release_buf;
     }
     if ((size_t)nbytes < payload_size) {
-        fprintf(stderr,
-                "Short read on %s: got %zd bytes, expected at least %zu\n",
-                in_path, nbytes, payload_size);
+        fprintf(stderr, "Short read on %s: got %zd bytes, expected at least %zu\n", in_path, nbytes,
+                payload_size);
         goto release_buf;
     }
 
     /* 5. Open + register output file + hipFileWrite + ftruncate */
-    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC,
-                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd, &out_handle)) {
+    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd,
+                  &out_handle)) {
         goto release_buf;
     }
 
@@ -367,14 +368,13 @@ main(int argc, char *argv[])
             goto release_buf;
 
         if (hash_in != hash_out) {
-            fprintf(stderr,
-                    "Hash mismatch (%s mode): %s=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n",
+            fprintf(stderr, "Hash mismatch (%s mode): %s=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n",
                     mode_name(mode), in_path, hash_in, out_path, hash_out);
             goto release_buf;
         }
 
-        printf("OK  [%s] %s -> %s  (%zu bytes, hash 0x%016" PRIx64 ")\n",
-               mode_name(mode), in_path, out_path, payload_size, hash_in);
+        printf("OK  [%s] %s -> %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", mode_name(mode), in_path, out_path,
+               payload_size, hash_in);
     }
 
     exit_status = EXIT_SUCCESS;

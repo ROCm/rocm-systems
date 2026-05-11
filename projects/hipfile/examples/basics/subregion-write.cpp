@@ -121,8 +121,7 @@ hash_file_range(const char *path, off_t offset, size_t size, uint64_t *out_hash)
     close(fd);
 
     if (total != size) {
-        fprintf(stderr, "hash_file_range: short read on %s (%zu of %zu bytes)\n", path, total,
-                size);
+        fprintf(stderr, "hash_file_range: short read on %s (%zu of %zu bytes)\n", path, total, size);
         free(cpu_buf);
         return 1;
     }
@@ -154,8 +153,7 @@ open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *ha
 
     hipFileError_t hipfile_err = hipFileHandleRegister(handle, &descr);
     if (hipFileSuccess != hipfile_err.err) {
-        fprintf(stderr, "Could not register %s (%s)\n", path,
-                hipFileGetOpErrorString(hipfile_err.err));
+        fprintf(stderr, "Could not register %s (%s)\n", path, hipFileGetOpErrorString(hipfile_err.err));
         close(*fd);
         return 1;
     }
@@ -210,25 +208,23 @@ main(int argc, char *argv[])
 
     const size_t sub_offset = SW_SUB_OFFSET;
     if (sub_offset == 0 || (sub_offset & (block_size - 1)) != 0) {
-        fprintf(stderr,
-                "SW_SUB_OFFSET (%zu) must be a non-zero multiple of block size (%zu)\n",
-                sub_offset, block_size);
+        fprintf(stderr, "SW_SUB_OFFSET (%zu) must be a non-zero multiple of block size (%zu)\n", sub_offset,
+                block_size);
         return EXIT_FAILURE;
     }
 
     const size_t payload_size = (file_size < SW_CAP) ? file_size : SW_CAP;
     if (sub_offset >= payload_size) {
-        fprintf(stderr,
-                "SW_SUB_OFFSET (%zu) must be smaller than the consumed payload (%zu bytes)\n",
+        fprintf(stderr, "SW_SUB_OFFSET (%zu) must be smaller than the consumed payload (%zu bytes)\n",
                 sub_offset, payload_size);
         return EXIT_FAILURE;
     }
-    const size_t alloc_size  = align_up(payload_size, block_size);
-    const size_t write_size  = payload_size - sub_offset;
-    const size_t write_xfer  = align_up(write_size, block_size);
+    const size_t alloc_size = align_up(payload_size, block_size);
+    const size_t write_size = payload_size - sub_offset;
+    const size_t write_xfer = align_up(write_size, block_size);
 
-    int             in_fd          = -1;
-    int             out_fd         = -1;
+    int             in_fd  = -1;
+    int             out_fd = -1;
     hipFileHandle_t in_handle, out_handle;
     void           *devbuf         = NULL;
     bool            buf_registered = false;
@@ -251,8 +247,7 @@ main(int argc, char *argv[])
     /* 3. Allocate device buffer + hipFileBufRegister + hipFileRead full file */
     hip_err = hipMalloc(&devbuf, alloc_size);
     if (hipSuccess != hip_err) {
-        fprintf(stderr, "Could not allocate %zu bytes on GPU %d (%d)\n", alloc_size, gpu_id,
-                hip_err);
+        fprintf(stderr, "Could not allocate %zu bytes on GPU %d (%d)\n", alloc_size, gpu_id, hip_err);
         goto close_in;
     }
 
@@ -270,15 +265,14 @@ main(int argc, char *argv[])
         goto deregister_buf;
     }
     if ((size_t)nbytes < payload_size) {
-        fprintf(stderr,
-                "Short read on %s: got %zd bytes, expected at least %zu\n",
-                in_path, nbytes, payload_size);
+        fprintf(stderr, "Short read on %s: got %zd bytes, expected at least %zu\n", in_path, nbytes,
+                payload_size);
         goto deregister_buf;
     }
 
     /* 4. Open + register output file */
-    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC,
-                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd, &out_handle)) {
+    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd,
+                  &out_handle)) {
         goto deregister_buf;
     }
 
@@ -316,14 +310,13 @@ main(int argc, char *argv[])
             goto deregister_buf;
 
         if (hash_in_tail != hash_out) {
-            fprintf(stderr,
-                    "Hash mismatch: %s[%zu:%zu]=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n",
-                    in_path, sub_offset, payload_size, hash_in_tail, out_path, hash_out);
+            fprintf(stderr, "Hash mismatch: %s[%zu:%zu]=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n", in_path,
+                    sub_offset, payload_size, hash_in_tail, out_path, hash_out);
             goto deregister_buf;
         }
 
-        printf("OK  %s[%zu:%zu] -> %s  (%zu bytes, hash 0x%016" PRIx64 ")\n",
-               in_path, sub_offset, payload_size, out_path, write_size, hash_in_tail);
+        printf("OK  %s[%zu:%zu] -> %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", in_path, sub_offset,
+               payload_size, out_path, write_size, hash_in_tail);
     }
 
     exit_status = EXIT_SUCCESS;

@@ -99,7 +99,7 @@ hash_file(const char *path, size_t size, uint64_t *out_hash)
         return 1;
     }
 
-    size_t  total = 0;
+    size_t total = 0;
     while (total < size) {
         ssize_t n = read(fd, cpu_buf + total, size - total);
         if (n < 0) {
@@ -147,8 +147,7 @@ open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *ha
 
     hipFileError_t hipfile_err = hipFileHandleRegister(handle, &descr);
     if (hipFileSuccess != hipfile_err.err) {
-        fprintf(stderr, "Could not register %s (%s)\n", path,
-                hipFileGetOpErrorString(hipfile_err.err));
+        fprintf(stderr, "Could not register %s (%s)\n", path, hipFileGetOpErrorString(hipfile_err.err));
         close(*fd);
         return 1;
     }
@@ -203,9 +202,8 @@ main(int argc, char *argv[])
 
     const size_t chunk_size = IR_CHUNK_SIZE;
     if (chunk_size == 0 || (chunk_size & (block_size - 1)) != 0) {
-        fprintf(stderr,
-                "IR_CHUNK_SIZE (%zu) must be a non-zero multiple of block size (%zu)\n",
-                chunk_size, block_size);
+        fprintf(stderr, "IR_CHUNK_SIZE (%zu) must be a non-zero multiple of block size (%zu)\n", chunk_size,
+                block_size);
         return EXIT_FAILURE;
     }
 
@@ -213,8 +211,8 @@ main(int argc, char *argv[])
     const size_t payload_size = (file_size < IR_CAP) ? file_size : IR_CAP;
     const size_t alloc_size   = align_up(payload_size, block_size);
 
-    int             in_fd       = -1;
-    int             out_fd      = -1;
+    int             in_fd  = -1;
+    int             out_fd = -1;
     hipFileHandle_t in_handle, out_handle;
     void           *devbuf      = NULL;
     int             exit_status = EXIT_FAILURE;
@@ -235,8 +233,7 @@ main(int argc, char *argv[])
     /* 3. Allocate device buffer for the full read */
     hip_err = hipMalloc(&devbuf, alloc_size);
     if (hipSuccess != hip_err) {
-        fprintf(stderr, "Could not allocate %zu bytes on GPU %d (%d)\n", alloc_size, gpu_id,
-                hip_err);
+        fprintf(stderr, "Could not allocate %zu bytes on GPU %d (%d)\n", alloc_size, gpu_id, hip_err);
         goto close_in;
     }
 
@@ -261,16 +258,15 @@ main(int argc, char *argv[])
         }
 
         if (bytes_read < payload_size) {
-            fprintf(stderr,
-                    "Short read on %s: got %zu bytes, expected at least %zu\n",
-                    in_path, bytes_read, payload_size);
+            fprintf(stderr, "Short read on %s: got %zu bytes, expected at least %zu\n", in_path, bytes_read,
+                    payload_size);
             goto free_devbuf;
         }
     }
 
     /* 5. Open + register output file + hipFileWrite in one call */
-    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC,
-                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd, &out_handle)) {
+    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd,
+                  &out_handle)) {
         goto free_devbuf;
     }
 
@@ -303,14 +299,13 @@ main(int argc, char *argv[])
             goto close_in;
 
         if (hash_in != hash_out) {
-            fprintf(stderr,
-                    "Hash mismatch: %s=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n",
-                    in_path, hash_in, out_path, hash_out);
+            fprintf(stderr, "Hash mismatch: %s=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n", in_path, hash_in,
+                    out_path, hash_out);
             goto close_in;
         }
 
-        printf("OK  %s -> %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", in_path, out_path,
-               payload_size, hash_in);
+        printf("OK  %s -> %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", in_path, out_path, payload_size,
+               hash_in);
     }
 
     exit_status = EXIT_SUCCESS;

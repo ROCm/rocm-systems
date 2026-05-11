@@ -73,8 +73,8 @@ check_error_strings(void)
     for (size_t i = 0; i < n; ++i) {
         const char *s = hipFileGetOpErrorString(codes[i]);
         if (s == NULL || s[0] == '\0') {
-            fprintf(stderr, "[FAIL] hipFileGetOpErrorString(%d) returned %s\n",
-                    (int)codes[i], s == NULL ? "NULL" : "\"\"");
+            fprintf(stderr, "[FAIL] hipFileGetOpErrorString(%d) returned %s\n", (int)codes[i],
+                    s == NULL ? "NULL" : "\"\"");
             ++failures;
             continue;
         }
@@ -106,8 +106,7 @@ configure_driver(void)
 
     err = hipFileSetParameterSizeT(hipFileParamPropertiesMaxDevicePinnedMemSizeKB, EAP_PINNED_KB);
     if (hipFileSuccess != err.err) {
-        fprintf(stderr, "Could not set max device pinned mem size (%s)\n",
-                HIPFILE_ERRSTR(err.err));
+        fprintf(stderr, "Could not set max device pinned mem size (%s)\n", HIPFILE_ERRSTR(err.err));
         return 1;
     }
 
@@ -128,28 +127,44 @@ print_properties(const hipFileDriverProps_t *p)
     printf("nvfs.max_direct_io_size     : %" PRIu64 " KiB\n", p->nvfs.max_direct_io_size);
 
     printf("nvfs.driver_status_flags    : 0x%x\n", p->nvfs.driver_status_flags);
-    printf("  Lustre                    : %s\n", yesno(flag_set(p->nvfs.driver_status_flags, hipFileLustreSupported)));
-    printf("  WekaFS                    : %s\n", yesno(flag_set(p->nvfs.driver_status_flags, hipFileWekaFSSupported)));
-    printf("  NFS                       : %s\n", yesno(flag_set(p->nvfs.driver_status_flags, hipFileNFSSupported)));
-    printf("  GPFS                      : %s\n", yesno(flag_set(p->nvfs.driver_status_flags, hipFileGPFSSupported)));
-    printf("  Local NVMe                : %s\n", yesno(flag_set(p->nvfs.driver_status_flags, hipFileNVMeSupported)));
-    printf("  NVMeoF                    : %s\n", yesno(flag_set(p->nvfs.driver_status_flags, hipFileNVMeoFSupported)));
-    printf("  SCSI                      : %s\n", yesno(flag_set(p->nvfs.driver_status_flags, hipFileSCSISupported)));
-    printf("  ScaleFlux CSD             : %s\n", yesno(flag_set(p->nvfs.driver_status_flags, hipFileScaleFluxCSDSupported)));
-    printf("  NVMesh                    : %s\n", yesno(flag_set(p->nvfs.driver_status_flags, hipFileNVMeshSupported)));
-    printf("  BeeGFS                    : %s\n", yesno(flag_set(p->nvfs.driver_status_flags, hipFileBeeGFSSupported)));
-    printf("  NVMeP2P                   : %s\n", yesno(flag_set(p->nvfs.driver_status_flags, hipFileNVMeP2PSupported)));
-    printf("  ScateFS                   : %s\n", yesno(flag_set(p->nvfs.driver_status_flags, hipFileScatefsSupported)));
+    printf("  Lustre                    : %s\n",
+           yesno(flag_set(p->nvfs.driver_status_flags, hipFileLustreSupported)));
+    printf("  WekaFS                    : %s\n",
+           yesno(flag_set(p->nvfs.driver_status_flags, hipFileWekaFSSupported)));
+    printf("  NFS                       : %s\n",
+           yesno(flag_set(p->nvfs.driver_status_flags, hipFileNFSSupported)));
+    printf("  GPFS                      : %s\n",
+           yesno(flag_set(p->nvfs.driver_status_flags, hipFileGPFSSupported)));
+    printf("  Local NVMe                : %s\n",
+           yesno(flag_set(p->nvfs.driver_status_flags, hipFileNVMeSupported)));
+    printf("  NVMeoF                    : %s\n",
+           yesno(flag_set(p->nvfs.driver_status_flags, hipFileNVMeoFSupported)));
+    printf("  SCSI                      : %s\n",
+           yesno(flag_set(p->nvfs.driver_status_flags, hipFileSCSISupported)));
+    printf("  ScaleFlux CSD             : %s\n",
+           yesno(flag_set(p->nvfs.driver_status_flags, hipFileScaleFluxCSDSupported)));
+    printf("  NVMesh                    : %s\n",
+           yesno(flag_set(p->nvfs.driver_status_flags, hipFileNVMeshSupported)));
+    printf("  BeeGFS                    : %s\n",
+           yesno(flag_set(p->nvfs.driver_status_flags, hipFileBeeGFSSupported)));
+    printf("  NVMeP2P                   : %s\n",
+           yesno(flag_set(p->nvfs.driver_status_flags, hipFileNVMeP2PSupported)));
+    printf("  ScateFS                   : %s\n",
+           yesno(flag_set(p->nvfs.driver_status_flags, hipFileScatefsSupported)));
 
     printf("nvfs.driver_control_flags   : 0x%x\n", p->nvfs.driver_control_flags);
-    printf("  poll mode                 : %s\n", yesno(flag_set(p->nvfs.driver_control_flags, hipFileUsePollMode)));
-    printf("  compat mode               : %s\n", yesno(flag_set(p->nvfs.driver_control_flags, hipFileAllowCompatMode)));
+    printf("  poll mode                 : %s\n",
+           yesno(flag_set(p->nvfs.driver_control_flags, hipFileUsePollMode)));
+    printf("  compat mode               : %s\n",
+           yesno(flag_set(p->nvfs.driver_control_flags, hipFileAllowCompatMode)));
 
     printf("feature_flags               : 0x%x\n", p->feature_flags);
-    printf("  dynamic routing           : %s\n", yesno(flag_set(p->feature_flags, hipFileDynRoutingSupported)));
+    printf("  dynamic routing           : %s\n",
+           yesno(flag_set(p->feature_flags, hipFileDynRoutingSupported)));
     printf("  batch IO                  : %s\n", yesno(flag_set(p->feature_flags, hipFileBatchIOSupported)));
     printf("  streams                   : %s\n", yesno(flag_set(p->feature_flags, hipFileStreamsSupported)));
-    printf("  parallel IO               : %s\n", yesno(flag_set(p->feature_flags, hipFileParallelIOSupported)));
+    printf("  parallel IO               : %s\n",
+           yesno(flag_set(p->feature_flags, hipFileParallelIOSupported)));
 
     printf("max_device_cache_size       : %" PRIu64 " KiB\n", p->max_device_cache_size);
     printf("per_buffer_cache_size       : %" PRIu64 " KiB\n", p->per_buffer_cache_size);
@@ -170,27 +185,27 @@ assert_properties(const hipFileDriverProps_t *p)
 
     if (flag_set(p->nvfs.driver_control_flags, hipFileUsePollMode)) {
         printf("[OK]   poll mode enabled in driver_control_flags\n");
-    } else {
-        fprintf(stderr,
-                "[FAIL] poll mode NOT set in driver_control_flags (0x%x)\n",
+    }
+    else {
+        fprintf(stderr, "[FAIL] poll mode NOT set in driver_control_flags (0x%x)\n",
                 p->nvfs.driver_control_flags);
         ++failures;
     }
 
     if (p->max_device_cache_size == (uint64_t)EAP_CACHE_KB) {
         printf("[OK]   max_device_cache_size == %zu KiB\n", (size_t)EAP_CACHE_KB);
-    } else {
-        fprintf(stderr,
-                "[FAIL] max_device_cache_size: got %" PRIu64 " KiB, expected %zu KiB\n",
+    }
+    else {
+        fprintf(stderr, "[FAIL] max_device_cache_size: got %" PRIu64 " KiB, expected %zu KiB\n",
                 p->max_device_cache_size, (size_t)EAP_CACHE_KB);
         ++failures;
     }
 
     if (p->max_device_pinned_mem_size == (uint64_t)EAP_PINNED_KB) {
         printf("[OK]   max_device_pinned_mem_size == %zu KiB\n", (size_t)EAP_PINNED_KB);
-    } else {
-        fprintf(stderr,
-                "[FAIL] max_device_pinned_mem_size: got %" PRIu64 " KiB, expected %zu KiB\n",
+    }
+    else {
+        fprintf(stderr, "[FAIL] max_device_pinned_mem_size: got %" PRIu64 " KiB, expected %zu KiB\n",
                 p->max_device_pinned_mem_size, (size_t)EAP_PINNED_KB);
         ++failures;
     }
@@ -256,7 +271,8 @@ driver_close:
     printf("\n");
     if (exit_status == EXIT_SUCCESS) {
         printf("All checks passed.\n");
-    } else {
+    }
+    else {
         fprintf(stderr, "%d check(s) failed.\n", failures);
     }
     return exit_status;

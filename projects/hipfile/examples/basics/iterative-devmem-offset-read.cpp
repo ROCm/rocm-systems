@@ -151,8 +151,7 @@ open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *ha
 
     hipFileError_t hipfile_err = hipFileHandleRegister(handle, &descr);
     if (hipFileSuccess != hipfile_err.err) {
-        fprintf(stderr, "Could not register %s (%s)\n", path,
-                hipFileGetOpErrorString(hipfile_err.err));
+        fprintf(stderr, "Could not register %s (%s)\n", path, hipFileGetOpErrorString(hipfile_err.err));
         close(*fd);
         return 1;
     }
@@ -207,17 +206,16 @@ main(int argc, char *argv[])
 
     const size_t chunk_size = IDOR_CHUNK_SIZE;
     if (chunk_size == 0 || (chunk_size & (block_size - 1)) != 0) {
-        fprintf(stderr,
-                "IDOR_CHUNK_SIZE (%zu) must be a non-zero multiple of block size (%zu)\n",
-                chunk_size, block_size);
+        fprintf(stderr, "IDOR_CHUNK_SIZE (%zu) must be a non-zero multiple of block size (%zu)\n", chunk_size,
+                block_size);
         return EXIT_FAILURE;
     }
 
     const size_t payload_size = (file_size < IDOR_CAP) ? file_size : IDOR_CAP;
     const size_t alloc_size   = align_up(payload_size, block_size);
 
-    int             in_fd          = -1;
-    int             out_fd         = -1;
+    int             in_fd  = -1;
+    int             out_fd = -1;
     hipFileHandle_t in_handle, out_handle;
     void           *devbuf         = NULL;
     bool            buf_registered = false;
@@ -240,8 +238,7 @@ main(int argc, char *argv[])
     /* 3. Allocate + zero device buffer + hipFileBufRegister */
     hip_err = hipMalloc(&devbuf, alloc_size);
     if (hipSuccess != hip_err) {
-        fprintf(stderr, "Could not allocate %zu bytes on GPU %d (%d)\n", alloc_size, gpu_id,
-                hip_err);
+        fprintf(stderr, "Could not allocate %zu bytes on GPU %d (%d)\n", alloc_size, gpu_id, hip_err);
         goto close_in;
     }
 
@@ -280,16 +277,15 @@ main(int argc, char *argv[])
         }
 
         if (bytes_read < payload_size) {
-            fprintf(stderr,
-                    "Short read on %s: got %zu bytes, expected at least %zu\n",
-                    in_path, bytes_read, payload_size);
+            fprintf(stderr, "Short read on %s: got %zu bytes, expected at least %zu\n", in_path, bytes_read,
+                    payload_size);
             goto deregister_buf;
         }
     }
 
     /* 5. Open + register output file + hipFileWrite */
-    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC,
-                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd, &out_handle)) {
+    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd,
+                  &out_handle)) {
         goto deregister_buf;
     }
 
@@ -322,14 +318,13 @@ main(int argc, char *argv[])
             goto deregister_buf;
 
         if (hash_in != hash_out) {
-            fprintf(stderr,
-                    "Hash mismatch: %s=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n",
-                    in_path, hash_in, out_path, hash_out);
+            fprintf(stderr, "Hash mismatch: %s=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n", in_path, hash_in,
+                    out_path, hash_out);
             goto deregister_buf;
         }
 
-        printf("OK  %s -> %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", in_path, out_path,
-               payload_size, hash_in);
+        printf("OK  %s -> %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", in_path, out_path, payload_size,
+               hash_in);
     }
 
     exit_status = EXIT_SUCCESS;

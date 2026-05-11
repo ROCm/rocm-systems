@@ -145,8 +145,7 @@ open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *ha
 
     hipFileError_t hipfile_err = hipFileHandleRegister(handle, &descr);
     if (hipFileSuccess != hipfile_err.err) {
-        fprintf(stderr, "Could not register %s (%s)\n", path,
-                hipFileGetOpErrorString(hipfile_err.err));
+        fprintf(stderr, "Could not register %s (%s)\n", path, hipFileGetOpErrorString(hipfile_err.err));
         close(*fd);
         return 1;
     }
@@ -181,7 +180,7 @@ main(int argc, char *argv[])
     const size_t payload_size = RV_SIZE;
     const size_t alloc_size   = align_up(payload_size, BLOCK_ALIGN);
 
-    int             fd          = -1;
+    int             fd = -1;
     hipFileHandle_t handle;
     void           *devbuf         = NULL;
     uint8_t        *cpu_pattern    = NULL;
@@ -208,8 +207,7 @@ main(int argc, char *argv[])
 
     hip_err = hipMalloc(&devbuf, alloc_size);
     if (hipSuccess != hip_err) {
-        fprintf(stderr, "Could not allocate %zu bytes on GPU %d (%d)\n", alloc_size, gpu_id,
-                hip_err);
+        fprintf(stderr, "Could not allocate %zu bytes on GPU %d (%d)\n", alloc_size, gpu_id, hip_err);
         goto free_cpu_pattern;
     }
 
@@ -227,8 +225,8 @@ main(int argc, char *argv[])
     buf_registered = true;
 
     /* 3. Phase 1: write CREATED from registered GPU buffer */
-    if (open_file(created_path, O_WRONLY | O_CREAT | O_TRUNC,
-                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &fd, &handle)) {
+    if (open_file(created_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &fd,
+                  &handle)) {
         goto deregister_buf;
     }
 
@@ -277,8 +275,8 @@ main(int argc, char *argv[])
     fd = -1;
 
     /* 5. Phase 3: write the read-back contents to COPIED */
-    if (open_file(copied_path, O_WRONLY | O_CREAT | O_TRUNC,
-                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &fd, &handle)) {
+    if (open_file(copied_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &fd,
+                  &handle)) {
         goto deregister_buf;
     }
 
@@ -314,14 +312,13 @@ main(int argc, char *argv[])
             goto deregister_buf;
 
         if (hash_created != hash_copied) {
-            fprintf(stderr,
-                    "Hash mismatch: %s=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n",
-                    created_path, hash_created, copied_path, hash_copied);
+            fprintf(stderr, "Hash mismatch: %s=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n", created_path,
+                    hash_created, copied_path, hash_copied);
             goto deregister_buf;
         }
 
-        printf("OK  %s == %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", created_path, copied_path,
-               payload_size, hash_created);
+        printf("OK  %s == %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", created_path, copied_path, payload_size,
+               hash_created);
     }
 
     exit_status = EXIT_SUCCESS;

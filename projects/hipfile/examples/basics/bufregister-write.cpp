@@ -129,8 +129,7 @@ open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *ha
 
     hipFileError_t hipfile_err = hipFileHandleRegister(handle, &descr);
     if (hipFileSuccess != hipfile_err.err) {
-        fprintf(stderr, "Could not register %s (%s)\n", path,
-                hipFileGetOpErrorString(hipfile_err.err));
+        fprintf(stderr, "Could not register %s (%s)\n", path, hipFileGetOpErrorString(hipfile_err.err));
         close(*fd);
         return 1;
     }
@@ -158,17 +157,17 @@ main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    const char    *out_path     = argv[1];
-    const int      gpu_id       = (argc == 3) ? atoi(argv[2]) : 0;
-    const size_t   payload_size = BRW_SIZE;
-    const size_t   alloc_size   = align_up(payload_size, BLOCK_ALIGN);
+    const char  *out_path     = argv[1];
+    const int    gpu_id       = (argc == 3) ? atoi(argv[2]) : 0;
+    const size_t payload_size = BRW_SIZE;
+    const size_t alloc_size   = align_up(payload_size, BLOCK_ALIGN);
 
-    int             out_fd      = -1;
+    int             out_fd = -1;
     hipFileHandle_t out_handle;
-    void           *devbuf      = NULL;
-    uint8_t        *cpu_pattern = NULL;
+    void           *devbuf         = NULL;
+    uint8_t        *cpu_pattern    = NULL;
     bool            buf_registered = false;
-    int             exit_status = EXIT_FAILURE;
+    int             exit_status    = EXIT_FAILURE;
     hipError_t      hip_err;
     hipFileError_t  hipfile_err;
     ssize_t         nbytes;
@@ -190,8 +189,7 @@ main(int argc, char *argv[])
 
     hip_err = hipMalloc(&devbuf, alloc_size);
     if (hipSuccess != hip_err) {
-        fprintf(stderr, "Could not allocate %zu bytes on GPU %d (%d)\n", alloc_size, gpu_id,
-                hip_err);
+        fprintf(stderr, "Could not allocate %zu bytes on GPU %d (%d)\n", alloc_size, gpu_id, hip_err);
         goto free_cpu_pattern;
     }
 
@@ -210,8 +208,8 @@ main(int argc, char *argv[])
     buf_registered = true;
 
     /* 4. open file with O_DIRECT + hipFileHandleRegister */
-    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC,
-                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd, &out_handle)) {
+    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd,
+                  &out_handle)) {
         goto deregister_buf;
     }
 
@@ -245,14 +243,12 @@ main(int argc, char *argv[])
             goto deregister_buf;
 
         if (hash_pattern != hash_written) {
-            fprintf(stderr,
-                    "Hash mismatch: pattern=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n",
-                    hash_pattern, out_path, hash_written);
+            fprintf(stderr, "Hash mismatch: pattern=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n", hash_pattern,
+                    out_path, hash_written);
             goto deregister_buf;
         }
 
-        printf("OK  %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", out_path, payload_size,
-               hash_pattern);
+        printf("OK  %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", out_path, payload_size, hash_pattern);
     }
 
     exit_status = EXIT_SUCCESS;
