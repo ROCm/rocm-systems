@@ -280,18 +280,18 @@ static void VectorScalarAddHSA(benchmark::State& state) {
       state.SkipWithError("Failed to allocate payload buffer");
       return;
     }
+
+    // Set args
+    kernargs_vec[i][0] = reinterpret_cast<uint64_t>(inputs[i]);
+    kernargs_vec[i][1] = reinterpret_cast<uint64_t>(outputs[i]);
+    kernargs_vec[i][2] = DATA_SIZE;  // input size
+    kernargs_vec[i][3] = DATA_SIZE;  // output size
   }
 
-  // --- Benchmark loop: dispatch is synchronous ---
+  // --- Benchmark loop ---
   for (auto _ : state) {
     std::uint64_t last_wr_idx = 0;
     for (std::int32_t i = 0; i < num_dispatches; ++i) {
-      // Set args
-      kernargs_vec[i][0] = reinterpret_cast<uint64_t>(inputs[i]);
-      kernargs_vec[i][1] = reinterpret_cast<uint64_t>(outputs[i]);
-      kernargs_vec[i][2] = DATA_SIZE;  // input size
-      kernargs_vec[i][3] = DATA_SIZE;  // output size
-
       // Dispatch HSA packet
       last_wr_idx = dispatch_packet(pdi_buf, insts_buf, insts_size, inputs[i], outputs[i],
                                     kernargs_vec[i], queue);
@@ -315,7 +315,7 @@ static void VectorScalarAddHSA(benchmark::State& state) {
   hsa_shut_down();
 }
 
-static void VectorScalarAddHSAKernargAlloc(benchmark::State& state) {
+static void VectorScalarAddHSAAllocKernargs(benchmark::State& state) {
   // --- Initialize HSA runtime ---
   if (hsa_init() != HSA_STATUS_SUCCESS) {
     state.SkipWithError("hsa_init failed");
@@ -409,7 +409,7 @@ static void VectorScalarAddHSAKernargAlloc(benchmark::State& state) {
   // --- Bump allocator for kernargs ---
   HsaBumpAllocator kernarg_alloc(kernarg_pool, num_dispatches * 4 * sizeof(uint64_t));
 
-  // --- Benchmark loop: dispatch is synchronous ---
+  // --- Benchmark loop ---
   std::vector<uint64_t*> kernargs_vec(num_dispatches, nullptr);
   for (auto _ : state) {
     kernarg_alloc.reset();
@@ -444,7 +444,7 @@ static void VectorScalarAddHSAKernargAlloc(benchmark::State& state) {
 }
 
 BENCHMARK(VectorScalarAddHSA)->Unit(benchmark::kMicrosecond)->RangeMultiplier(2)->Range(1, 32);
-BENCHMARK(VectorScalarAddHSAKernargAlloc)
+BENCHMARK(VectorScalarAddHSAAllocKernargs)
     ->Unit(benchmark::kMicrosecond)
     ->RangeMultiplier(2)
     ->Range(1, 32);
