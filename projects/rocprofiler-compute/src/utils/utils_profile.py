@@ -69,8 +69,8 @@ def _write_rocpd_query_to_csv(
 ) -> None:
     """Stream rows from ``query_fn`` over N rocpd dbs into a single CSV.
 
-    ``query_fn`` must yield a header tuple followed by data rows for 
-    each db. The header from the first non-empty db is written once; 
+    ``query_fn`` must yield a header tuple followed by data rows for
+    each db. The header from the first non-empty db is written once;
     subsequent dbs append data rows only.
     """
     with open(csv_path, "w", newline="") as f:
