@@ -1730,11 +1730,11 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 
   // Create per-launch graph signal pool: pre-allocates GPU-only and IRQ signals,
   // acquires one hw-event per segment, and resets GetLastAcquired() so it only
-  // tracks actual dispatches. All pool method calls are encapsulated in the factory.
-  std::vector<void*> segment_hw_events;
+  // tracks actual dispatches. segment_hw_events_ is a member (Tier 4: reused each launch).
+  segment_hw_events_.clear();
   auto* launch_pool = device->CreateGraphSignalPool(
       graph_signal_count_, graph_irq_signal_count_,
-      static_cast<size_t>(sync_plan_.num_segments), segment_hw_events);
+      static_cast<size_t>(sync_plan_.num_segments), segment_hw_events_);
   if (launch_pool == nullptr) {
     if (out_status != nullptr) *out_status = hipErrorOutOfMemory;
     return nullptr;
@@ -1742,11 +1742,11 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 
   // Apply pre-computed patches — writes HW events directly into flatPacketData
   if (!sync_plan_.patch_list.empty()) {
-    device->ApplyHwEventPatches(sync_plan_.patch_list, segment_hw_events);
+    device->ApplyHwEventPatches(sync_plan_.patch_list, segment_hw_events_);
   }
 
-  // Track stream assignments across levels
-  std::unordered_map<int, hip::Stream*> segment_to_stream;
+  // Track stream assignments across levels (reuse member map — avoids heap alloc each launch)
+  segment_to_stream_.clear();
 
   // Single AccumulateCommand on launch_stream manages graph pool lifetime
   // and serves as the dispatch anchor for all segments across all streams.
@@ -1764,7 +1764,7 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     }
 
     const auto& segments_at_level = level_it->second;
-    AssignStreamsToSegments(segments_at_level, launch_stream, streams, segment_to_stream);
+    AssignStreamsToSegments(segments_at_level, launch_stream, streams, segment_to_stream_);
 
     if (level == 0) {
       // Synchronize internal streams with launch stream's last command if available.
@@ -1775,7 +1775,7 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
         launch_wait_list.push_back(launch_last_cmd);
 
         for (int segment_id : segments_at_level) {
-          hip::Stream* seg_stream = segment_to_stream[segment_id];
+          hip::Stream* seg_stream = segment_to_stream_[segment_id];
           if (seg_stream != launch_stream) {
             auto marker = new amd::Marker(*seg_stream, true, launch_wait_list);
             if (marker != nullptr) {
@@ -1791,7 +1791,7 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     // Dispatch each segment — barriers are in the batch, signals are patched
     for (int segment_id : segments_at_level) {
       const auto& segment = segments_[segment_id];
-      hip::Stream* current_stream = segment_to_stream[segment_id];
+      hip::Stream* current_stream = segment_to_stream_[segment_id];
 
       status = EnqueueSegment(segment, current_stream, graph_accumulate);
 
@@ -1808,12 +1808,14 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
   // Synchronize parallel streams back to the launch stream via leaf HW events
   if (IsLeafNodeSyncRequired()) {
     for (int seg_id : sync_plan_.leaf_segment_ids) {
-      auto it = segment_to_stream.find(seg_id);
-      if (it != segment_to_stream.end() && it->second != launch_stream) {
-        graph_accumulate->addDepHwEvent(segment_hw_events[seg_id]);
+      auto it = segment_to_stream_.find(seg_id);
+      if (it != segment_to_stream_.end() && it->second != launch_stream) {
+        graph_accumulate->addDepHwEvent(segment_hw_events_[seg_id]);
       }
     }
   }
+  // After addDepHwEvent the signals are referenced by graph_accumulate; clear the member.
+  segment_hw_events_.clear();
 
   // Cache GPU-only signal count for future launches (first launch or if count grew)
   size_t used = device->GetGraphSignalPoolUsedCount(launch_pool);
@@ -2009,16 +2011,17 @@ void GraphExec::UpdateStreams(hip::Stream* launch_stream) {
   }
   auto& parallel_streams = parallel_streams_[devId];
 
-  // Collect queue IDs already in use, starting with the launch stream
-  std::unordered_set<uint64_t> used_qids;
-  used_qids.insert(launch_stream->getQueueID());
+  // Collect queue IDs already in use, starting with the launch stream.
+  // Reuse member set to avoid heap allocation on every launch.
+  used_qids_.clear();
+  used_qids_.insert(launch_stream->getQueueID());
 
   for (auto stream : parallel_streams) {
     uint64_t qid = stream->getQueueID();
-    if (used_qids.count(qid) > 0) {
+    if (used_qids_.count(qid) > 0) {
       // Collision: this stream shares a HW queue with the launch stream or another
       // internal stream. Re-acquire a different queue, avoiding all used ones.
-      if (stream->vdev()->ReacquireQueueExcluding(used_qids)) {
+      if (stream->vdev()->ReacquireQueueExcluding(used_qids_)) {
         qid = stream->getQueueID();
         ClPrint(amd::LOG_INFO, amd::LOG_CODE,
                 "[hipGraph] Resolved queue collision: stream reassigned to queueID %lu", qid);
@@ -2027,7 +2030,7 @@ void GraphExec::UpdateStreams(hip::Stream* launch_stream) {
                 "[hipGraph] Could not resolve queue collision for stream (best-effort)");
       }
     }
-    used_qids.insert(qid);
+    used_qids_.insert(qid);
     streams_.push_back(stream);
   }
 }
@@ -2258,11 +2261,20 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
 
   // If the launch stream lost its HW queue due to dynamic queue management,
   // try to re-acquire the same one it used last time.
-  // Then run collision detection to ensure graph-internal streams don't share
-  // a HW queue with the launch stream.
   launch_stream->vdev()->SetPreferredQueue();
   launch_stream->vdev()->AcquireQueueWithPreference();
-  UpdateStreams(launch_stream);
+
+  // Tier 3: Skip UpdateStreams() when the launch stream and its HW queue are unchanged.
+  // streams_dirty_ is set to true at instantiation and whenever the graph is mutated,
+  // so the first launch always runs the full update.
+  uint64_t current_qid = launch_stream->getQueueID();
+  if (streams_dirty_ || cached_launch_stream_ != launch_stream ||
+      cached_launch_qid_ != current_qid) {
+    UpdateStreams(launch_stream);
+    cached_launch_stream_ = launch_stream;
+    cached_launch_qid_ = current_qid;
+    streams_dirty_ = false;
+  }
 
   if (use_segment_scheduling_ && instantiateDeviceId_ == launch_stream->DeviceId()) {
     // If the graph has kernels that does device side allocation,  during packet capture, heap is

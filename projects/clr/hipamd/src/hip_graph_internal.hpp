@@ -1137,6 +1137,18 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
 
   SyncPlan sync_plan_;
 
+  // --- Tier 4: Per-launch container reuse ---
+  // These containers are allocated once and reused on every launch (clear() instead of destroy).
+  std::vector<void*> segment_hw_events_;
+  std::unordered_map<int, hip::Stream*> segment_to_stream_;
+  std::unordered_set<uint64_t> used_qids_;
+
+  // --- Tier 3: Stream assignment cache ---
+  // Skip UpdateStreams() when the launch stream and its HW queue haven't changed.
+  hip::Stream* cached_launch_stream_ = nullptr;
+  uint64_t cached_launch_qid_ = 0;
+  bool streams_dirty_ = true;
+
   void BuildSyncPlan();
 
   //! Cached signal counts for graph signal pool pre-allocation
