@@ -204,5 +204,41 @@ TEST_F(NetIbMPITest, TagZeroReuse) {
 // E6.  AdaptiveRoutingThresholdBoundary — sizes around AR_THRESHOLD (8192).
 //      When AR is enabled and size > threshold, ncclIbMultiSend adds a
 //      0-byte RDMA_WRITE_WITH_IMM work request (net_ib.cc:2396).
+TEST_F(NetIbMPITest, AdaptiveRoutingThresholdBoundary) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    ConnectionPair cp;
+    NetConnectionGuard guard(net_);
+    SetupConnectionWithGuard(0, cp, guard);
+
+    const size_t maxSz = 16384;
+    auto buf = makeHostBufferAutoGuard(malloc(maxSz));
+    ASSERT_NE(buf.get(), nullptr);
+
+    void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
+    void* mh = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf.get(), maxSz, NCCL_PTR_HOST, &mh), ncclSuccess);
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+    // Sizes that straddle the default AR threshold of 8192
+    const size_t sizes[] = {8190, 8191, 8192, 8193, 8194};
+    static constexpr int kRepeats = 10;
+
+    for (size_t sz : sizes) {
+        for (int r = 0; r < kRepeats; r++) {
+            int tag = static_cast<int>(sz) + r;
+            DoSendRecv(cp.sendComm, cp.recvComm,
+                       buf.get(), buf.get(), sz,
+                       tag, mh, mh,
+                       /*patternSeed=*/tag);
+        }
+    }
+}
+
+// E7.  InlineSendBoundary — CTS inline path (NCCL_IB_USE_INLINE=1).
+//      Exercises IBV_SEND_INLINE for the FIFO CTS write.
 
 #endif /* MPI_TESTS_ENABLED */
