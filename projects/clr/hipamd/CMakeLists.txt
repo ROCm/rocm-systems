@@ -100,7 +100,7 @@ list(GET VERSION_LIST 2 HIP_VERSION_PATCH)
 
 set(HIP_VERSION_UNIXDATE 0)
 set(HIP_VERSION_GITDATE 0)
-set(HIP_VERSION_GITHASH "redacted")
+set(HIP_VERSION_GITHASH "0000000")
 
 # FIXME: Two different version strings used.
 # Below we use UNIX commands, not compatible with Windows.
