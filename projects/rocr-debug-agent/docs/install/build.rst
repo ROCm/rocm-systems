@@ -6,16 +6,16 @@
 
 .. _debug-agent-installation:
 
-==============================
-ROCR Debug Agent installation
-==============================
+==================================
+Build ROCr Debug Agent from source
+==================================
 
 This topic provides information required to build and install ROCR Debug Agent (ROCdebug-agent) library.
 
 System requirements
 -------------------
 
-- A system supporting ROCm. See the `supported operating systems <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_.
+- A system supporting ROCm. See the :ref:`supported operating systems <rocm:release-supported-os>`.
 
 - A C++ 17 compiler such as GCC 7 or Clang 5.
 
@@ -68,7 +68,7 @@ An example command line to build and install the ROCdebug-agent library on Linux
 
 To specify the location for the installation, use ``CMAKE_INSTALL_PREFIX``. The default location is ``/usr``.
 
-To specify a list of paths (separated by semicolons) that are used to locate the ``cmake`` modules, use ``CMAKE_MODULE_PATH``. It is used to locate the HIP ``cmake`` modules required to build the tests. The default is location is ``/opt/rocm/hip/cmake``.
+To specify a list of paths (separated by semicolons) that are used to locate the ``cmake`` modules, use ``CMAKE_MODULE_PATH``. It is used to locate the HIP ``cmake`` modules required to build the tests. The default location is ``/opt/rocm/hip/cmake``.
 
 The built ROCdebug-agent library is placed in ``build/librocm-debug-agent.so.2*``.
 

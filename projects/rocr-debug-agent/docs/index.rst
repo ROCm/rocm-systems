@@ -23,7 +23,8 @@ The code is open source and hosted at https://github.com/ROCm/rocr_debug_agent
 
   .. grid-item-card:: Install
 
-    * :ref:`Installation <debug-agent-installation>`
+    * :doc:`Install ROCr Debug Agent <install/installation>`
+    * :doc:`Build from source <install/build>`
 
   .. grid-item-card:: How to
 
