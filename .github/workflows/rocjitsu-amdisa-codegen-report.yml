@@ -1,0 +1,68 @@
+name: rocjitsu amdisa Generated Code Report
+
+'on':
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/rocjitsu-amdisa-codegen-report.yml'
+      - 'shared/machine-readable-isa/isa/**'
+      - 'emulation/rocjitsu/CMakeLists.txt'
+      - 'emulation/rocjitsu/cmake/**'
+      - 'emulation/rocjitsu/lib/python/amdisa/**'
+      - 'emulation/rocjitsu/lib/python/pyproject.toml'
+      - 'emulation/rocjitsu/scripts/amdisa_generated_code_report.py'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    name: Generate amdisa diff report
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install amdisa
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e emulation/rocjitsu/lib/python
+
+      - name: Generate amdisa report
+        run: |
+          base_ref="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base_ref" ]; then
+            base_ref="HEAD~1"
+          fi
+          python emulation/rocjitsu/scripts/amdisa_generated_code_report.py \
+            --base-ref "$base_ref" \
+            --output amdisa-generated-code-report.md \
+            --patch-lines 120
+
+      - name: Publish report summary
+        if: ${{ always() }}
+        run: |
+          if [ -f amdisa-generated-code-report.md ]; then
+            cat amdisa-generated-code-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "amdisa report was not generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report artifact
+        if: ${{ always() && hashFiles('amdisa-generated-code-report.md') != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: amdisa-generated-code-report
+          path: amdisa-generated-code-report.md

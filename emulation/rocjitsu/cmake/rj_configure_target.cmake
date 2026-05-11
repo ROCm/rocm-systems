@@ -58,6 +58,9 @@ function(rj_configure_target target)
             ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include
             ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src
             ${HSA_INCLUDE_DIR})
+        if(DEFINED RJ_AMDGPU_ISA_GENERATED_INCLUDE_DIR)
+            target_include_directories(${target} PRIVATE ${RJ_AMDGPU_ISA_GENERATED_INCLUDE_DIR})
+        endif()
     endif()
     if(ARG_GENERATED)
         target_include_directories(${target} PRIVATE ${GENERATED_DIR})

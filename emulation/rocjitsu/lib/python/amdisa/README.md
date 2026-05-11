@@ -32,20 +32,29 @@ This installs `amdisa` and its dependency (`cgen`) into your active virtualenv.
 All commands are run from the rocjitsu project root:
 
 ```bash
-export MRISA=/path/to/mrisa  # directory containing amdgpu_isa_*.xml files
+export MRISA=../../shared/machine-readable-isa/isa  # directory containing amdgpu_isa_*.xml files
 ```
 
 ### Regenerate ISA decoders/encoders (all 9 ISAs)
 
-Use the convenience script from the rocjitsu project root:
+Use the CMake codegen target from the rocjitsu project root:
 
 ```bash
-bash tmp/gen-amdgpu.sh
+cmake --build build --target rocjitsu_generate_amdgpu_isa
 ```
 
 This regenerates all ISA files (decoders, encoders, instruction classes, shared execute
-templates) for all 9 ISAs into `isa/arch/amdgpu/`. See `tmp/gen-amdgpu.sh` for the
-underlying `python3 -m amdisa --multi --gen-all --gen-shared-execute` invocation.
+templates) for all 9 ISAs into `build/generated/rocjitsu/isa/arch/amdgpu/`.
+The target uses `../../shared/machine-readable-isa/isa` by default; configure with
+`-DRJ_AMDGPU_ISA_DIR=/path/to/isa` to use a different MR ISA checkout.
+
+To review what regeneration changes relative to a base ref, write a Markdown report:
+
+```bash
+python3 scripts/amdisa_generated_code_report.py \
+  --base-ref origin/develop \
+  --output amdisa-generated-code-report.md
+```
 
 ### Regenerate DBT files (legalization tables + encoding translators)
 

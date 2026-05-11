@@ -28,6 +28,8 @@ find_package(Threads REQUIRED)
 set(HSA_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers")
 
 option(RJ_BUILD_GUI "Build the simulation GUI (requires OpenGL)" ON)
+set(RJ_AMDGPU_ISA_DIR "${CMAKE_SOURCE_DIR}/../../shared/machine-readable-isa/isa"
+  CACHE PATH "Directory containing AMDGPU machine-readable ISA XML files")
 
 include(rj_log)
 
@@ -138,6 +140,36 @@ endforeach()
 
 add_custom_target(flatbuffers_schemas DEPENDS ${GENERATED_HEADERS})
 
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+get_filename_component(RJ_AMDGPU_ISA_DIR "${RJ_AMDGPU_ISA_DIR}" ABSOLUTE
+  BASE_DIR "${CMAKE_SOURCE_DIR}")
+set(RJ_AMDGPU_ISA_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated")
+set(RJ_AMDGPU_ISA_OUTPUT_DIR
+  "${RJ_AMDGPU_ISA_GENERATED_INCLUDE_DIR}/rocjitsu/isa/arch/amdgpu")
+
+set(RJ_AMDGPU_ISA_ARCHES
+  cdna1 cdna2 cdna3 cdna4 rdna1 rdna2 rdna3 rdna3_5 rdna4)
+set(RJ_AMDGPU_ISA_XMLS)
+set(RJ_AMDGPU_ISA_MULTI_ARGS)
+foreach(arch IN LISTS RJ_AMDGPU_ISA_ARCHES)
+  set(xml "${RJ_AMDGPU_ISA_DIR}/amdgpu_isa_${arch}.xml")
+  list(APPEND RJ_AMDGPU_ISA_XMLS "${xml}")
+  list(APPEND RJ_AMDGPU_ISA_MULTI_ARGS "${arch}:${xml}")
+endforeach()
+foreach(xml IN LISTS RJ_AMDGPU_ISA_XMLS)
+  if(NOT EXISTS "${xml}")
+    message(FATAL_ERROR
+      "Missing machine-readable ISA XML: ${xml}. "
+      "Set RJ_AMDGPU_ISA_DIR to a directory containing amdgpu_isa_*.xml files.")
+  endif()
+endforeach()
+
+file(GLOB_RECURSE RJ_AMDISA_PYTHON_SOURCES CONFIGURE_DEPENDS
+  "${CMAKE_SOURCE_DIR}/lib/python/amdisa/*.py")
+list(APPEND RJ_AMDISA_PYTHON_SOURCES
+  "${CMAKE_SOURCE_DIR}/lib/python/pyproject.toml")
+
 # GUI dependencies (conditional).
 if(RJ_BUILD_GUI)
     find_package(OpenGL QUIET)
@@ -217,6 +249,48 @@ add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
 add_subdirectory(lib/rocjitsu)
 
+get_property(RJ_AMDGPU_ISA_GENERATED_OUTPUTS GLOBAL PROPERTY RJ_AMDGPU_ISA_GENERATED_OUTPUTS)
+list(APPEND RJ_AMDGPU_ISA_GENERATED_OUTPUTS
+  "${RJ_AMDGPU_ISA_OUTPUT_DIR}/shared/execute_shared.h")
+list(REMOVE_DUPLICATES RJ_AMDGPU_ISA_GENERATED_OUTPUTS)
+
+set(RJ_AMDGPU_ISA_OUTPUT_DIRS "${RJ_AMDGPU_ISA_OUTPUT_DIR}/shared")
+foreach(arch IN LISTS RJ_AMDGPU_ISA_ARCHES)
+  list(APPEND RJ_AMDGPU_ISA_OUTPUT_DIRS "${RJ_AMDGPU_ISA_OUTPUT_DIR}/${arch}")
+endforeach()
+
+set(RJ_AMDGPU_ISA_CODEGEN_STAMP
+  "${CMAKE_BINARY_DIR}/generated/amdisa_amdgpu_isa_codegen.stamp")
+add_custom_command(
+  OUTPUT "${RJ_AMDGPU_ISA_CODEGEN_STAMP}"
+  BYPRODUCTS ${RJ_AMDGPU_ISA_GENERATED_OUTPUTS}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${RJ_AMDGPU_ISA_OUTPUT_DIRS}
+  COMMAND ${CMAKE_COMMAND} -E env
+    "PYTHONPATH=${CMAKE_SOURCE_DIR}/lib/python"
+    ${Python3_EXECUTABLE} -m amdisa
+    --gen-all --gen-shared-execute
+    -o "${RJ_AMDGPU_ISA_OUTPUT_DIR}"
+    --multi ${RJ_AMDGPU_ISA_MULTI_ARGS}
+  COMMAND ${CMAKE_COMMAND} -E touch "${RJ_AMDGPU_ISA_CODEGEN_STAMP}"
+  DEPENDS ${RJ_AMDGPU_ISA_XMLS} ${RJ_AMDISA_PYTHON_SOURCES}
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  COMMENT "Regenerating AMDGPU ISA sources with amdisa"
+  VERBATIM
+  USES_TERMINAL
+)
+add_custom_target(rocjitsu_generate_amdgpu_isa
+  DEPENDS "${RJ_AMDGPU_ISA_CODEGEN_STAMP}")
+
+set(RJ_AMDGPU_ISA_TARGETS
+  rocjitsu_isa_cdna1 rocjitsu_isa_cdna2 rocjitsu_isa_cdna3 rocjitsu_isa_cdna4
+  rocjitsu_isa_rdna1 rocjitsu_isa_rdna2 rocjitsu_isa_rdna3 rocjitsu_isa_rdna3_5
+  rocjitsu_isa_rdna4)
+foreach(target IN LISTS RJ_AMDGPU_ISA_TARGETS)
+  if(TARGET ${target})
+    add_dependencies(${target} rocjitsu_generate_amdgpu_isa)
+  endif()
+endforeach()
+
 # Main shared library - assembles all object libraries.
 add_library(rocjitsu_shared SHARED)
 set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
@@ -236,6 +310,7 @@ target_link_libraries(rocjitsu_shared PRIVATE
 )
 target_include_directories(rocjitsu_shared PRIVATE ${GENERATED_DIR})
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
+add_dependencies(rocjitsu_shared rocjitsu_generate_amdgpu_isa)
 
 # Tools
 if(RJ_BUILD_GUI)
