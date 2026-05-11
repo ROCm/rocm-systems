@@ -4,14 +4,12 @@
 #pragma once
 
 #include <memory>
-#include <type_traits>
-#include <utility>
 
 namespace rocprofsys::pmc::collectors::base
 {
 
 /**
- * @brief Type trait to check if Traits defines all required type aliases.
+ * @brief Concept satisfied when Traits exposes all required nested type aliases.
  *
  * Required types:
  * - metrics_t: The metrics data structure for this device type
@@ -20,50 +18,20 @@ namespace rocprofsys::pmc::collectors::base
  * - device_ptr_t: Smart pointer type for device (typically shared_ptr<device_t>)
  * - container_t: Container type for storing devices (vector or set)
  */
-template <typename Traits, typename = void>
-struct has_required_types : std::false_type
-{};
-
 template <typename Traits>
-struct has_required_types<
-    Traits, std::void_t<typename Traits::metrics_t, typename Traits::enabled_metrics_t,
-                        typename Traits::device_t, typename Traits::device_ptr_t,
-                        typename Traits::container_t>> : std::true_type
-{};
-
-template <typename Traits>
-inline constexpr bool has_required_types_v = has_required_types<Traits>::value;
+concept has_required_types = requires {
+    typename Traits::metrics_t;
+    typename Traits::enabled_metrics_t;
+    typename Traits::device_t;
+    typename Traits::device_ptr_t;
+    typename Traits::container_t;
+};
 
 /**
- * @brief Type trait to check if Traits defines the device_name constant.
+ * @brief Concept satisfied when Traits exposes the device_name constant.
  */
-template <typename Traits, typename = void>
-struct has_device_name : std::false_type
-{};
-
 template <typename Traits>
-struct has_device_name<Traits, std::void_t<decltype(Traits::device_name)>>
-: std::true_type
-{};
-
-template <typename Traits>
-inline constexpr bool has_device_name_v = has_device_name<Traits>::value;
-
-/**
- * @brief Type trait to check if Traits defines enumerate_devices().
- *
- * Expected signature:
- *   template <typename Settings, typename Provider>
- *   static std::vector<device_entry> enumerate_devices(std::shared_ptr<Provider>)
- *
- * Since enumerate_devices is a template function, we cannot use
- * &Traits::enumerate_devices to detect it (the compiler cannot resolve which
- * instantiation to take the address of). Instead, we use SFINAE with dummy types to check
- * if a valid instantiation exists.
- */
-template <typename Traits, typename = void>
-struct has_enumerate_devices : std::false_type
-{};
+concept has_device_name = requires { Traits::device_name; };
 
 namespace detail
 {
@@ -73,15 +41,28 @@ struct dummy_provider
 {};
 }  // namespace detail
 
+/**
+ * @brief Concept satisfied when Traits exposes a callable enumerate_devices template.
+ *
+ * Expected signature:
+ *   template <typename Settings, typename Provider>
+ *   static std::vector<device_entry> enumerate_devices(std::shared_ptr<Provider>)
+ *
+ * enumerate_devices is itself a template, so the concept resolves it against dummy
+ * Settings/Provider types just to confirm a valid instantiation exists.
+ */
 template <typename Traits>
-struct has_enumerate_devices<
-    Traits, std::void_t<decltype(Traits::template enumerate_devices<
-                                 detail::dummy_settings, detail::dummy_provider>(
-                std::declval<std::shared_ptr<detail::dummy_provider>>()))>>
-: std::true_type
-{};
+concept has_enumerate_devices = requires(
+    std::shared_ptr<detail::dummy_provider> provider) {
+    Traits::template enumerate_devices<detail::dummy_settings, detail::dummy_provider>(
+        provider);
+};
 
+/**
+ * @brief Composite concept: Traits is usable as a collector traits parameter.
+ */
 template <typename Traits>
-inline constexpr bool has_enumerate_devices_v = has_enumerate_devices<Traits>::value;
+concept valid_collector_traits = has_required_types<Traits> && has_device_name<Traits> &&
+                                 has_enumerate_devices<Traits>;
 
 }  // namespace rocprofsys::pmc::collectors::base

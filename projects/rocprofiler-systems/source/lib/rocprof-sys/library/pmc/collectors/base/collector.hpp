@@ -26,15 +26,9 @@ namespace rocprofsys::pmc::collectors::base
  * @tparam Config Configuration policy providing settings and output policies
  */
 template <typename Traits, typename DeviceProvider, typename Config>
+    requires valid_collector_traits<Traits>
 struct collector
 {
-    // Validate traits at compile time
-    static_assert(has_required_types_v<Traits>,
-                  "Invalid traits: missing required type aliases");
-    static_assert(has_device_name_v<Traits>, "Traits must define: device_name");
-    static_assert(has_enumerate_devices_v<Traits>,
-                  "Traits must define: enumerate_devices() and device_entry type");
-
     // Type aliases from traits
     using traits_t          = Traits;
     using metrics_t         = typename Traits::metrics_t;
