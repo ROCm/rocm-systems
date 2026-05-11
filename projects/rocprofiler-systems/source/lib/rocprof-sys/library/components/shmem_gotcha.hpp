@@ -9,6 +9,7 @@
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
 
+#include <concepts>
 #include <cstddef>
 #include <cstdlib>
 #include <map>
@@ -16,7 +17,6 @@
 #include <set>
 #include <string>
 #include <string_view>
-#include <type_traits>
 
 // Categories for SHMEM API filtering. Use these names in ROCPROFSYS_SHMEM_PERMIT_LIST
 // and ROCPROFSYS_SHMEM_REJECT_LIST (e.g. "init,sync,rma" or "atomics,memory").
@@ -140,9 +140,18 @@ concept has_shmem_bundle_t = requires { typename Policy::shmem_bundle_t; };
 template <typename Policy>
 concept has_shmem_gotcha_t = requires { typename Policy::shmem_gotcha_t; };
 
+// Required for any audit / category_region usage of the policy.
 template <typename Policy>
 concept valid_shmem_policy =
     has_comm_data<Policy> && has_gotcha_data<Policy> && has_category_region<Policy>;
+
+// Full policy contract: the shmem_gotcha component class itself touches
+// shmem_bundle_t / shmem_gotcha_t in configure / shutdown / start / pause /
+// resume, so the class template requires the configurable variant.
+template <typename Policy>
+concept configurable_shmem_policy =
+    valid_shmem_policy<Policy> && has_shmem_bundle_t<Policy> &&
+    has_shmem_gotcha_t<Policy>;
 
 }  // namespace rocprofsys::component::traits
 
@@ -150,7 +159,7 @@ namespace rocprofsys::component
 {
 
 template <typename SHMEMPolicy>
-    requires traits::valid_shmem_policy<SHMEMPolicy>
+    requires traits::configurable_shmem_policy<SHMEMPolicy>
 struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
 {
     static constexpr size_t gotcha_capacity = 120;
@@ -207,15 +216,10 @@ get_shmem_gotcha()
 }  // namespace detail
 
 template <typename SHMEMPolicy>
-    requires traits::valid_shmem_policy<SHMEMPolicy>
+    requires traits::configurable_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::configure()
 {
-    static_assert(traits::has_shmem_bundle_t<SHMEMPolicy>,
-                  "SHMEMPolicy must have a shmem_bundle_t type");
-    static_assert(traits::has_shmem_gotcha_t<SHMEMPolicy>,
-                  "SHMEMPolicy must have a shmem_gotcha_t type");
-
     using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
 
     using gotcha_data_t = typename SHMEMPolicy::gotcha_data;
@@ -472,7 +476,7 @@ shmem_gotcha<SHMEMPolicy>::configure()
 }
 
 template <typename SHMEMPolicy>
-    requires traits::valid_shmem_policy<SHMEMPolicy>
+    requires traits::configurable_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::shutdown()
 {
@@ -481,7 +485,7 @@ shmem_gotcha<SHMEMPolicy>::shutdown()
 }
 
 template <typename SHMEMPolicy>
-    requires traits::valid_shmem_policy<SHMEMPolicy>
+    requires traits::configurable_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::start()
 {
@@ -498,17 +502,17 @@ shmem_gotcha<SHMEMPolicy>::start()
 }
 
 template <typename SHMEMPolicy>
-    requires traits::valid_shmem_policy<SHMEMPolicy>
+    requires traits::configurable_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::stop()
 {}
 
 template <typename SHMEMPolicy>
-    requires traits::valid_shmem_policy<SHMEMPolicy>
+    requires traits::configurable_shmem_policy<SHMEMPolicy>
 std::mutex shmem_gotcha<SHMEMPolicy>::s_mutex = {};
 
 template <typename SHMEMPolicy>
-    requires traits::valid_shmem_policy<SHMEMPolicy>
+    requires traits::configurable_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::pause()
 {
@@ -518,7 +522,7 @@ shmem_gotcha<SHMEMPolicy>::pause()
 }
 
 template <typename SHMEMPolicy>
-    requires traits::valid_shmem_policy<SHMEMPolicy>
+    requires traits::configurable_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::resume()
 {
@@ -528,7 +532,7 @@ shmem_gotcha<SHMEMPolicy>::resume()
 }
 
 template <typename SHMEMPolicy>
-    requires traits::valid_shmem_policy<SHMEMPolicy>
+    requires traits::configurable_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing)
@@ -537,7 +541,7 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 }
 
 template <typename SHMEMPolicy>
-    requires traits::valid_shmem_policy<SHMEMPolicy>
+    requires traits::configurable_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing, void* ret)
@@ -546,7 +550,7 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 }
 
 template <typename SHMEMPolicy>
-    requires traits::valid_shmem_policy<SHMEMPolicy>
+    requires traits::configurable_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing, int ret)
@@ -555,7 +559,7 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 }
 
 template <typename SHMEMPolicy>
-    requires traits::valid_shmem_policy<SHMEMPolicy>
+    requires traits::configurable_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing, long ret)
