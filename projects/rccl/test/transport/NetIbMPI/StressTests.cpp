@@ -1103,5 +1103,69 @@ TEST_F(NetIbMPITest, AllToAllStress) {
 }
 
 // D3.  MultiQpFanIn — fan-in 3→1 with QPS=4, SPLIT=1.
+TEST_F(NetIbMPITest, MultiQpFanIn) {
+    const char* qps  = getenv("NCCL_IB_QPS_PER_CONNECTION");
+    const char* split = getenv("NCCL_IB_SPLIT_DATA_ON_QPS");
+    if (!qps || atoi(qps) < 2 || !split || strcmp(split, "1") != 0) {
+        GTEST_SKIP() << "Requires NCCL_IB_QPS_PER_CONNECTION>=2, NCCL_IB_SPLIT_DATA_ON_QPS=1";
+    }
+
+    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    std::vector<DirectedConnection> conns;
+    SetupFanIn(0, 0, {1, 2, 3}, conns);
+
+    const size_t sz = 16384;
+    auto buf = makeHostBufferAutoGuard(malloc(sz));
+    ASSERT_NE(buf.get(), nullptr);
+
+    std::vector<void*> mhandles;
+    for (auto& c : conns) {
+        void* comm = nullptr;
+        if (rank == c.senderRank)   comm = c.sendComm;
+        if (rank == c.receiverRank) comm = c.recvComm;
+        void* mh = nullptr;
+        if (comm) {
+            ASSERT_EQ(RegisterMemory(comm, buf.get(), sz, NCCL_PTR_HOST, &mh), ncclSuccess);
+        }
+        mhandles.push_back(mh);
+    }
+    auto mrCleanup = makeScopeGuard([&]() {
+        for (size_t i = 0; i < conns.size(); i++) {
+            if (!mhandles[i]) continue;
+            void* comm = nullptr;
+            if (rank == conns[i].senderRank)   comm = conns[i].sendComm;
+            if (rank == conns[i].receiverRank) comm = conns[i].recvComm;
+            if (comm) DeregisterMemory(comm, mhandles[i]);
+        }
+    });
+
+    static constexpr int kIters = 100;
+    for (int iter = 0; iter < kIters; iter++) {
+        for (size_t c = 0; c < conns.size(); c++) {
+            int seed = iter * 10 + conns[c].senderRank;
+            DoDirectedSendRecv(conns[c], buf.get(), buf.get(), sz,
+                               /*tag=*/iter, mhandles[c], mhandles[c], seed);
+        }
+    }
+
+    // Deregister memory before closing connections (comm must be valid for DeregMr).
+    for (size_t i = 0; i < conns.size(); i++) {
+        if (!mhandles[i]) continue;
+        void* comm = nullptr;
+        if (rank == conns[i].senderRank)   comm = conns[i].sendComm;
+        if (rank == conns[i].receiverRank) comm = conns[i].recvComm;
+        if (comm) DeregisterMemory(comm, mhandles[i]);
+        mhandles[i] = nullptr;
+    }
+    mrCleanup.dismiss();
+
+    for (auto& c : conns) CloseDirectedConnection(c);
+}
+
+// G2.  BidirectionalMultiRank — all pairs bidirectional, 4 ranks, 50 iters.
 
 #endif /* MPI_TESTS_ENABLED */
