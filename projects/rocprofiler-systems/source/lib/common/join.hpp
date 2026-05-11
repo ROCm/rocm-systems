@@ -47,8 +47,9 @@ struct is_string : is_string_impl<std::remove_cv_t<std::decay_t<Tp>>>
 {};
 
 template <typename ArgT>
+    requires(is_string<ArgT>::value)
 auto
-as_string(ArgT&& _v, std::enable_if_t<is_string<ArgT>::value, int> = 0)
+as_string(ArgT&& _v)
 {
     if constexpr(std::is_pointer<std::decay_t<ArgT>>::value)
     {
@@ -62,8 +63,9 @@ as_string(ArgT&& _v, std::enable_if_t<is_string<ArgT>::value, int> = 0)
 }
 
 template <typename ArgT>
+    requires(!is_string<ArgT>::value)
 auto
-as_string(ArgT&& _v, std::enable_if_t<!is_string<ArgT>::value, long> = 0)
+as_string(ArgT&& _v)
 {
     return _v;
 }
