@@ -1360,5 +1360,46 @@ TEST_F(NetIbMPITest, BidirectionalSaturation) {
 
 // F1.  LongRunningEndurance — 10000 transfers on a single connection,
 //      tag cycling, RDMA checkpoints.
+TEST_F(NetIbMPITest, LongRunningEndurance) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    ConnectionPair cp;
+    NetConnectionGuard guard(net_);
+    SetupConnectionWithGuard(0, cp, guard);
+
+    const size_t sz = kSmallBufferSize;
+    auto buf = makeHostBufferAutoGuard(malloc(sz));
+    ASSERT_NE(buf.get(), nullptr);
+
+    void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
+    void* mh = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf.get(), sz, NCCL_PTR_HOST, &mh), ncclSuccess);
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+    RdmaResourceCounts before = CaptureRdmaResources();
+
+    static constexpr int kIters = 10000;
+    for (int i = 0; i < kIters; i++) {
+        DoSendRecv(cp.sendComm, cp.recvComm,
+                   buf.get(), buf.get(), sz,
+                   /*tag=*/i % 1000, mh, mh, i);
+
+        if ((i + 1) % 2500 == 0) {
+            RdmaResourceCounts cp2 = CaptureRdmaResources();
+            char label[64];
+            snprintf(label, sizeof(label), "iter %d", i + 1);
+            AssertNoRdmaLeaks(before, cp2, label);
+        }
+    }
+}
+
+// =====================================================================
+//  Group H: GPU/GDR (2-rank)
+// =====================================================================
+
+// H1.  GpuMemoryTransferStress — 5 alloc/transfer/flush/verify/free cycles.
 
 #endif /* MPI_TESTS_ENABLED */
