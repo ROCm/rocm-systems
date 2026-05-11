@@ -526,5 +526,77 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
 
 // C1.  ConcurrentMultiConnectionStress — 4 connections on same device,
 //      concurrent I/O with independent tag spaces.
+TEST_F(NetIbMPITest, ConcurrentMultiConnectionStress) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    static constexpr int kNumConns = 4;
+    static constexpr int kIters = 10;
+    const size_t sz = kSmallBufferSize;
+
+    struct ConnInfo {
+        ConnectionPair pair;
+        void* buf = nullptr;
+        void* mh  = nullptr;
+    };
+    std::vector<ConnInfo> conns(kNumConns);
+
+    // Setup all connections with unique MPI tags
+    for (int c = 0; c < kNumConns; c++) {
+        if (rank == 0) {
+            ASSERT_EQ(CreateListenComm(0, &conns[c].pair.handle, &conns[c].pair.listenComm), ncclSuccess);
+            MPI_Send(&conns[c].pair.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 1, 500 + c, MPI_COMM_WORLD);
+            for (int a = 0; a < kMaxRetryAttempts && !conns[c].pair.recvComm; a++) {
+                AcceptConnection(conns[c].pair.listenComm, &conns[c].pair.recvComm);
+                if (!conns[c].pair.recvComm) usleep(kPollIntervalUs);
+            }
+            ASSERT_NE(conns[c].pair.recvComm, nullptr);
+        } else {
+            MPI_Recv(&conns[c].pair.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 0, 500 + c, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            for (int a = 0; a < kMaxRetryAttempts && !conns[c].pair.sendComm; a++) {
+                ConnectToRemote(0, &conns[c].pair.handle, &conns[c].pair.sendComm);
+                if (!conns[c].pair.sendComm) usleep(kPollIntervalUs);
+            }
+            ASSERT_NE(conns[c].pair.sendComm, nullptr);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Allocate + register buffer per connection
+        conns[c].buf = malloc(sz);
+        ASSERT_NE(conns[c].buf, nullptr);
+        void* comm = (rank == 0) ? conns[c].pair.recvComm : conns[c].pair.sendComm;
+        ASSERT_EQ(RegisterMemory(comm, conns[c].buf, sz, NCCL_PTR_HOST, &conns[c].mh), ncclSuccess);
+    }
+
+    auto cleanup = makeScopeGuard([&]() {
+        for (auto& ci : conns) {
+            void* comm = (rank == 0) ? ci.pair.recvComm : ci.pair.sendComm;
+            if (ci.mh) DeregisterMemory(comm, ci.mh);
+            free(ci.buf);
+            if (rank == 0) {
+                if (ci.pair.recvComm)   CloseRecvComm(ci.pair.recvComm);
+                if (ci.pair.listenComm) CloseListenComm(ci.pair.listenComm);
+            } else {
+                if (ci.pair.sendComm) CloseSendComm(ci.pair.sendComm);
+            }
+        }
+    });
+
+    // Transfer on all 4 connections per iteration
+    for (int iter = 0; iter < kIters; iter++) {
+        for (int c = 0; c < kNumConns; c++) {
+            int tag  = iter * kNumConns + c;
+            int seed = tag + 1000;
+            DoSendRecv(conns[c].pair.sendComm, conns[c].pair.recvComm,
+                       conns[c].buf, conns[c].buf, sz,
+                       tag, conns[c].mh, conns[c].mh, seed);
+        }
+    }
+}
+
+// C3.  ConnectionChurnUnderLoad — 1000 connect→transfer→close cycles,
+//      with RDMA resource leak detection.
 
 #endif /* MPI_TESTS_ENABLED */
