@@ -5,6 +5,8 @@ set(trace_cache_tests_sources
     test_buffer_storage.cpp
     test_cache_integration.cpp
     test_cacheable.cpp
+    test_discovery.cpp
+    test_enabled_formats.cpp
     test_flush_worker.cpp
     test_kfd_args.cpp
     test_rocpd_xcp_output.cpp
