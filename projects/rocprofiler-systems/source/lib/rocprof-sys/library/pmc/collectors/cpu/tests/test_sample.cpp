@@ -2,9 +2,14 @@
 // SPDX-License-Identifier:  MIT
 
 #include "library/pmc/collectors/cpu/sample.hpp"
+#include "library/pmc/collectors/gpu/sample.hpp"
+#include "library/pmc/collectors/nic/sample.hpp"
+
+#include "core/trace_cache/archive.hpp"
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -100,4 +105,188 @@ TEST_F(cpu_pmc_sample_test, default_constructor)
 {
     cpu_pmc_sample sample;
     EXPECT_EQ(sample.type_identifier, type_identifier_t::cpu_pmc_sample);
+}
+
+namespace
+{
+
+template <typename T>
+void
+expect_wire_parity(const T& original, std::size_t buf_size = 4096)
+{
+    std::vector<std::uint8_t> legacy(buf_size, 0);
+    std::vector<std::uint8_t> custom(buf_size, 0);
+
+    serialize(legacy.data(), original);
+    serialize_at(custom.data(), original);
+
+    const std::size_t legacy_size = get_size(original);
+    const std::size_t custom_size = serialized_size(original);
+    EXPECT_EQ(legacy_size, custom_size);
+    EXPECT_EQ(std::memcmp(legacy.data(), custom.data(), legacy_size), 0);
+}
+
+}  // namespace
+
+TEST_F(cpu_pmc_sample_test, wire_parity_legacy_vs_custom)
+{
+    using namespace rocprofsys::pmc::collectors::cpu;
+
+    enabled_metrics em{};
+    em.value = 0x1FF;
+
+    process_metrics pm{};
+    pm.page_rss         = 1024;
+    pm.virt_mem         = 2048;
+    pm.peak_rss         = 4096;
+    pm.context_switches = 500;
+    pm.page_faults      = 100;
+    pm.user_mode_time   = 1000000;
+    pm.kernel_mode_time = 500000;
+
+    std::vector<std::uint8_t> freqs_data = { 100, 150, 200, 180, 190, 195, 185, 170 };
+    std::vector<std::uint8_t> loads_data = { 10, 20, 30, 40 };
+    cpu_pmc_sample            original(em, 1u, 80000, pm, freqs_data, loads_data);
+    expect_wire_parity(original);
+}
+
+TEST_F(cpu_pmc_sample_test, custom_round_trip)
+{
+    using namespace rocprofsys::pmc::collectors::cpu;
+
+    enabled_metrics em{};
+    em.value = 0x1FF;
+
+    process_metrics pm{};
+    pm.page_rss         = 1024;
+    pm.virt_mem         = 2048;
+    pm.peak_rss         = 4096;
+    pm.context_switches = 500;
+    pm.page_faults      = 100;
+    pm.user_mode_time   = 1000000;
+    pm.kernel_mode_time = 500000;
+
+    std::vector<std::uint8_t> freqs_data = { 100, 150, 200, 180 };
+    std::vector<std::uint8_t> loads_data = { 10, 20, 30, 40 };
+    cpu_pmc_sample            original(em, 7u, 80000, pm, freqs_data, loads_data);
+
+    serialize_at(buffer.data(), original);
+    std::uint8_t* cursor = buffer.data();
+    auto          got    = deserialize_from<cpu_pmc_sample>(cursor);
+
+    EXPECT_EQ(got.enabled_metric.value, original.enabled_metric.value);
+    EXPECT_EQ(got.device_id, original.device_id);
+    EXPECT_EQ(got.timestamp, original.timestamp);
+    EXPECT_EQ(got.process_data.page_rss, original.process_data.page_rss);
+    EXPECT_EQ(got.process_data.kernel_mode_time, original.process_data.kernel_mode_time);
+    EXPECT_EQ(got.freqs, original.freqs);
+    EXPECT_EQ(got.loads, original.loads);
+}
+
+TEST_F(cpu_pmc_sample_test, gpu_pmc_sample_wire_parity_legacy_vs_custom)
+{
+    using namespace rocprofsys::pmc::collectors::gpu;
+
+    enabled_metrics em{};
+    em.value = 0x1FFFF;
+
+    metrics m{};
+    m.average_socket_power      = 100;
+    m.current_socket_power      = 110;
+    m.memory_usage              = 0x1000;
+    m.hotspot_temperature       = 75;
+    m.gfx_activity              = 80;
+    m.umc_activity              = 60;
+    m.sdma_usage                = 30;
+    m.gfx_clock_mhz             = 1500;
+    m.mem_clock_mhz             = 1000;
+    m.xgmi.link.width           = 16;
+    m.xgmi.link.speed           = 8;
+    m.xgmi.data_acc.read[0]     = 0xDEADBEEF;
+    m.xgmi.data_acc.write[2]    = 0xCAFEBABE;
+    m.xcp_stats[0].vcn_busy[0]  = 42;
+    m.xcp_stats[1].jpeg_busy[5] = 99;
+    m.vcn_activity[0]           = 7;
+    m.jpeg_activity[3]          = 11;
+
+    gpu_pmc_sample original(em, 5u, 12345, m);
+    // gpu_pmc_sample is large; bump buffer.
+    expect_wire_parity(original, 8192);
+}
+
+TEST_F(cpu_pmc_sample_test, gpu_pmc_sample_custom_round_trip)
+{
+    using namespace rocprofsys::pmc::collectors::gpu;
+
+    enabled_metrics em{};
+    em.value = 0x1FFFF;
+
+    metrics m{};
+    m.gfx_activity             = 80;
+    m.sdma_usage               = 30;
+    m.xcp_stats[2].vcn_busy[1] = 5;
+    m.xgmi.data_acc.read[3]    = 0xAABBCCDD;
+
+    gpu_pmc_sample original(em, 9u, 7777, m);
+
+    std::vector<std::uint8_t> buf(8192, 0);
+    serialize_at(buf.data(), original);
+    std::uint8_t* cursor = buf.data();
+    auto          got    = deserialize_from<gpu_pmc_sample>(cursor);
+
+    EXPECT_EQ(got.enabled_metric.value, original.enabled_metric.value);
+    EXPECT_EQ(got.device_id, original.device_id);
+    EXPECT_EQ(got.timestamp, original.timestamp);
+    EXPECT_EQ(got.metric_values.gfx_activity, original.metric_values.gfx_activity);
+    EXPECT_EQ(got.metric_values.sdma_usage, original.metric_values.sdma_usage);
+    EXPECT_EQ(got.metric_values.xcp_stats[2].vcn_busy[1],
+              original.metric_values.xcp_stats[2].vcn_busy[1]);
+    EXPECT_EQ(got.metric_values.xgmi.data_acc.read[3],
+              original.metric_values.xgmi.data_acc.read[3]);
+}
+
+TEST_F(cpu_pmc_sample_test, nic_pmc_sample_wire_parity_legacy_vs_custom)
+{
+    using namespace rocprofsys::pmc::collectors::nic;
+
+    enabled_metrics em{};
+    em.value = 0x3F;
+
+    metrics m{};
+    m.rx_rdma_ucast_bytes = 1000;
+    m.tx_rdma_ucast_bytes = 2000;
+    m.rx_rdma_ucast_pkts  = 30;
+    m.tx_rdma_ucast_pkts  = 40;
+    m.rx_rdma_cnp_pkts    = 5;
+    m.tx_rdma_cnp_pkts    = 6;
+
+    sample original(em, 1u, "ib0", 99999, m);
+    expect_wire_parity(original);
+}
+
+TEST_F(cpu_pmc_sample_test, nic_pmc_sample_custom_round_trip)
+{
+    using namespace rocprofsys::pmc::collectors::nic;
+
+    enabled_metrics em{};
+    em.value = 0x3F;
+
+    metrics m{};
+    m.rx_rdma_ucast_bytes = 1000;
+    m.tx_rdma_cnp_pkts    = 6;
+
+    sample original(em, 2u, "rocep1s0", 11111, m);
+
+    serialize_at(buffer.data(), original);
+    std::uint8_t* cursor = buffer.data();
+    auto          got    = deserialize_from<sample>(cursor);
+
+    EXPECT_EQ(got.enabled_metric.value, original.enabled_metric.value);
+    EXPECT_EQ(got.device_id, original.device_id);
+    EXPECT_EQ(got.device_name, original.device_name);
+    EXPECT_EQ(got.timestamp, original.timestamp);
+    EXPECT_EQ(got.metric_values.rx_rdma_ucast_bytes,
+              original.metric_values.rx_rdma_ucast_bytes);
+    EXPECT_EQ(got.metric_values.tx_rdma_cnp_pkts,
+              original.metric_values.tx_rdma_cnp_pkts);
 }

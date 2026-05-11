@@ -43,6 +43,23 @@ struct sample : trace_cache::cacheable_t
     process_metrics           process_data{};
     std::vector<std::uint8_t> freqs;  // serialized cpu_id+freq pairs
     std::vector<std::uint8_t> loads;  // serialized cpu_id+load pairs
+
+    template <class Archive>
+    ROCPROFSYS_INLINE void serialize(Archive& ar)
+    {
+        // The wire format encodes the packed freqs / loads vectors only; the
+        // upstream per_cpu source vector lives only in the live process_metrics
+        // and is not stored on disk. Mirror the legacy field order exactly.
+        auto enabled_value = static_cast<std::uint32_t>(enabled_metric.value);
+        ar(enabled_value, device_id, timestamp, process_data.page_rss,
+           process_data.virt_mem, process_data.peak_rss, process_data.context_switches,
+           process_data.page_faults, process_data.user_mode_time,
+           process_data.kernel_mode_time, freqs, loads);
+        if constexpr(std::is_same_v<Archive, trace_cache::input_archive>)
+        {
+            enabled_metric.value = enabled_value;
+        }
+    }
 };
 
 inline std::vector<std::uint8_t>
@@ -130,5 +147,11 @@ get_size(const pmc::collectors::cpu::sample& item)
 
 /// @brief CPU PMC sample type alias
 using cpu_pmc_sample = pmc::collectors::cpu::sample;
+
+namespace type_traits
+{
+template <>
+inline constexpr bool use_custom<pmc::collectors::cpu::sample> = true;
+}  // namespace type_traits
 
 }  // namespace rocprofsys::trace_cache
