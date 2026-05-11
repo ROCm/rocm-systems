@@ -401,8 +401,8 @@ Changing partition settings has strict requirements:
 - **The GPU must be idle** -- no active workloads may be running on any partition of the
   physical GPU when performing a set operation.
 - **Memory partition changes require a driver reload** to take effect. After successfully
-  calling `amdsmi_set_gpu_memory_partition()` or `amdsmi_set_gpu_memory_partition_mode()`,
-  all GPU processes must be stopped, then run:
+  calling `amdsmi_set_gpu_memory_partition()` or `amdsmi_set_gpu_memory_partition_mode()`, all GPU processes must be stopped,
+  then run:
 
   ```shell
   sudo modprobe -r amdgpu && sudo modprobe amdgpu
@@ -414,9 +414,9 @@ Changing partition settings has strict requirements:
   to the new memory partition configuration at once.
 
 ```{warning}
-Calling `amdsmi_set_gpu_memory_partition()` alone does not apply the change. The driver reload
-step is mandatory. If the reload is skipped, the system continues using the old configuration
-until the next driver load.
+Calling `amdsmi_set_gpu_memory_partition()` or `amdsmi_set_gpu_memory_partition_mode()` alone does not apply the change.
+The driver reload step is mandatory. If the reload is skipped, the system continues using the old
+configuration until the next driver load.
 
 This two-step workflow was introduced in **ROCm 7.0.0**. Prior to that release, calling the
 set function automatically triggered an immediate driver reload. The reload was separated to
@@ -625,8 +625,7 @@ int main() {
 
     // Steps 1-2: Query current settings and available modes (always run first)
     amdsmi_get_gpu_accelerator_partition_profile(gpu, &cur_profile, partition_ids);
-    amdsmi_get_gpu_memory_partition(gpu, cur_mem, sizeof(cur_mem));
-    amdsmi_get_gpu_memory_partition_config(gpu, &mem_config);            // supported NPS modes
+    amdsmi_get_gpu_memory_partition_config(gpu, &mem_config);              // current mode + supported NPS modes
     amdsmi_get_gpu_accelerator_partition_profile_config(gpu, &acc_config); // supported profiles
 
     // Step 3: Set memory partition (use a mode reported as supported in step 2)
@@ -658,24 +657,22 @@ For a complete, self-contained example including enumeration, capability discove
 re-initialization handling, see
 [`example/amd_smi_partition_example.cc`](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_partition_example.cc).
 
-**Compute partition:**
-- `amdsmi_get_gpu_compute_partition()` -- Query the current compute partition setting.
-- `amdsmi_set_gpu_compute_partition()` -- Set a compute partition mode by type.
-
-**Accelerator partition profile:**
+**Bare metal and SR-IOV host:**
 - `amdsmi_get_gpu_accelerator_partition_profile_config()` -- Get all supported accelerator
   partition profiles and their valid profile indexes.
 - `amdsmi_get_gpu_accelerator_partition_profile()` -- Get the current accelerator partition
   profile and partition IDs.
 - `amdsmi_set_gpu_accelerator_partition_profile()` -- Set an accelerator partition by profile
   index (obtained from `amdsmi_get_gpu_accelerator_partition_profile_config()`).
-
-**Memory partition:**
-- `amdsmi_get_gpu_memory_partition()` -- Query the current memory partition mode.
-- `amdsmi_get_gpu_memory_partition_config()` -- Query supported NPS modes and capabilities.
-- `amdsmi_set_gpu_memory_partition()` -- Set memory partition mode by type.
-- `amdsmi_set_gpu_memory_partition_mode()` -- Set memory partition mode (alternative API).
+- `amdsmi_get_gpu_memory_partition_config()` -- Query the current NPS mode and supported NPS modes.
+- `amdsmi_set_gpu_memory_partition_mode()` -- Set the NPS memory partition mode.
 - `amdsmi_gpu_driver_reload()` -- Reload the amdgpu driver to apply memory partition changes.
+
+**Bare metal only:**
+- `amdsmi_get_gpu_compute_partition()` -- Query the current compute partition setting as a string.
+- `amdsmi_set_gpu_compute_partition()` -- Set the compute partition mode by enum.
+- `amdsmi_get_gpu_memory_partition()` -- Query the current memory partition mode as a string.
+- `amdsmi_set_gpu_memory_partition()` -- Set the memory partition mode by enum.
 
 See [Compute Partition Functions](/doxygen/docBin/html/group__tagComputePartition),
 [Memory Partition Functions](/doxygen/docBin/html/group__tagMemoryPartition), and
@@ -684,88 +681,61 @@ for the full API reference.
 ::::
 
 ::::{tab-item} Python
-The Python API mirrors the C API. The general workflow is:
-
-1. Query the current partition settings.
-2. Query available modes **before making any changes**. Only set modes listed as supported.
-3. Set the memory partition mode.
-4. Reload the driver to apply the change. All GPU activity must be stopped first. The reload
-   may reset the accelerator partition to a default mode.
-5. Re-initialize and verify: confirm the new memory partition mode and device count.
-6. Set the accelerator partition by profile index, using only indexes valid for the active
-   memory partition (as seen in step 2).
-7. Verify: confirm the accelerator partition mode and device count.
+The Python API mirrors the C API. For a complete, self-contained example including
+enumeration, capability discovery, and re-initialization handling, see
+[`example/amd_smi_partition_example.py`](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_partition_example.py).
 
 ```{code-block} python
 import amdsmi
 
+# Partition changes alter device topology -- AMD SMI must re-initialize after
+# each change to obtain a valid handle list reflecting the new device count.
+
 amdsmi.amdsmi_init()
+# ... enumerate processor handles ...
 
-try:
-    gpus = amdsmi.amdsmi_get_processor_handles()
+# Steps 1-2: Query current settings and available modes (always run first)
+cur_profile = amdsmi.amdsmi_get_gpu_accelerator_partition_profile(gpu)
+mem_config  = amdsmi.amdsmi_get_gpu_memory_partition_config(gpu)              # current mode + supported NPS modes
+acc_config  = amdsmi.amdsmi_get_gpu_accelerator_partition_profile_config(gpu) # supported profiles
 
-    # Step 1: Query current partition settings
-    cur_profile = amdsmi.amdsmi_get_gpu_accelerator_partition_profile(gpus[0])
-    cur_mem = amdsmi.amdsmi_get_gpu_memory_partition(gpus[0])
-    print(f"Current: accelerator={cur_profile['partition_profile']['profile_type']}, "
-          f"memory={cur_mem}")
+# Step 3: Set memory partition (use a mode reported as supported in step 2)
+amdsmi.amdsmi_set_gpu_memory_partition_mode(gpu, amdsmi.AmdSmiMemoryPartitionType.NPS4)
 
-    # Step 2: Query available modes before making any changes
-    mem_config = amdsmi.amdsmi_get_gpu_memory_partition_config(gpus[0])
-    print(f"Supported memory modes: {mem_config['partition_caps']}")
+# Step 4: Reload the driver -- required to apply the memory partition change.
+# Stop all GPU workloads first. The reload may reset the accelerator partition.
+amdsmi.amdsmi_gpu_driver_reload()
 
-    acc_config = amdsmi.amdsmi_get_gpu_accelerator_partition_profile_config(gpus[0])
-    for profile in acc_config["profiles"]:
-        print(f"Accelerator profile index {profile['profile_index']}: "
-              f"type={profile['profile_type']}, memory_caps={profile['memory_caps']}")
-
-    # Step 3: Set memory partition mode (must be a supported mode from step 2)
-    amdsmi.amdsmi_set_gpu_memory_partition(
-        gpus[0], amdsmi.AmdSmiMemoryPartitionType.NPS1
-    )
-
-    # Step 4: Reload the driver to apply the memory partition change.
-    # All GPU activity must be stopped first.
-    amdsmi.amdsmi_gpu_driver_reload()
-
-finally:
-    amdsmi.amdsmi_shut_down()
-
-# Step 5: Re-initialize and verify
+# Step 5: Re-initialize to pull in the updated topology (new device count/handles)
+amdsmi.amdsmi_shut_down()
 amdsmi.amdsmi_init()
-try:
-    gpus = amdsmi.amdsmi_get_processor_handles()
-    print(f"GPU count after memory partition change: {len(gpus)}")
-    print(f"New memory partition: {amdsmi.amdsmi_get_gpu_memory_partition(gpus[0])}")
+# ... re-enumerate processor handles ...
 
-    # Step 6: Set accelerator partition (use a profile index valid for the active memory
-    # partition, as seen in step 2)
-    amdsmi.amdsmi_set_gpu_accelerator_partition_profile(gpus[0], profile_index=0)
+# Step 6: Set accelerator partition by profile index (must be valid for active NPS mode)
+amdsmi.amdsmi_set_gpu_accelerator_partition_profile(gpu, target_profile_index)
 
-    # Step 7: Verify accelerator partition and device count
-    gpus = amdsmi.amdsmi_get_processor_handles()
-    print(f"GPU count after accelerator partition change: {len(gpus)}")
-    new_profile = amdsmi.amdsmi_get_gpu_accelerator_partition_profile(gpus[0])
-    print(f"New accelerator partition: {new_profile['partition_profile']['profile_type']}")
+# Step 7: Re-initialize again -- accelerator partition changes the logical device count
+amdsmi.amdsmi_shut_down()
+amdsmi.amdsmi_init()
+# ... re-enumerate and verify partition settings and device count ...
 
-finally:
-    amdsmi.amdsmi_shut_down()
+amdsmi.amdsmi_shut_down()
 ```
-
-For a complete working example see
-[`example/amd_smi_partition_example.py`](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_partition_example.py).
 
 See related APIs:
 
-- [`amdsmi_get_gpu_compute_partition()`](/reference/amdsmi-py-api.md#amdsmi_get_gpu_compute_partition)
-- [`amdsmi_set_gpu_compute_partition()`](/reference/amdsmi-py-api.md#amdsmi_set_gpu_compute_partition)
+**Bare metal and SR-IOV host:**
 - [`amdsmi_get_gpu_accelerator_partition_profile_config()`](/reference/amdsmi-py-api.md#amdsmi_get_gpu_accelerator_partition_profile_config)
 - [`amdsmi_get_gpu_accelerator_partition_profile()`](/reference/amdsmi-py-api.md#amdsmi_get_gpu_accelerator_partition_profile)
 - [`amdsmi_set_gpu_accelerator_partition_profile()`](/reference/amdsmi-py-api.md#amdsmi_set_gpu_accelerator_partition_profile)
-- [`amdsmi_get_gpu_memory_partition()`](/reference/amdsmi-py-api.md#amdsmi_get_gpu_memory_partition)
 - [`amdsmi_get_gpu_memory_partition_config()`](/reference/amdsmi-py-api.md#amdsmi_get_gpu_memory_partition_config)
-- [`amdsmi_set_gpu_memory_partition()`](/reference/amdsmi-py-api.md#amdsmi_set_gpu_memory_partition)
 - [`amdsmi_set_gpu_memory_partition_mode()`](/reference/amdsmi-py-api.md#amdsmi_set_gpu_memory_partition_mode)
+
+**Bare metal only:**
+- [`amdsmi_get_gpu_compute_partition()`](/reference/amdsmi-py-api.md#amdsmi_get_gpu_compute_partition)
+- [`amdsmi_set_gpu_compute_partition()`](/reference/amdsmi-py-api.md#amdsmi_set_gpu_compute_partition)
+- [`amdsmi_get_gpu_memory_partition()`](/reference/amdsmi-py-api.md#amdsmi_get_gpu_memory_partition)
+- [`amdsmi_set_gpu_memory_partition()`](/reference/amdsmi-py-api.md#amdsmi_set_gpu_memory_partition)
 ::::
 
 ::::{tab-item} amd-smi CLI
