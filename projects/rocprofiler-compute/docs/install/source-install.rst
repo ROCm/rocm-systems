@@ -3,20 +3,9 @@
    :keywords: Omniperf, ROCm Compute Profiler, ROCm, tool, Instinct, accelerator, AMD,
               install, deploy, client, configuration, modulefiles
 
-**********************************************
-Installing and deploying ROCm Compute Profiler
-**********************************************
-
-* Provides the core application profiling capability.
-* Allows the collection of performance counters, filtering by hardware
-  block, dispatch, kernel, and more.
-* Provides a CLI-based analysis mode.
-* Provides a standalone web interface for importing analysis metrics.
-
-.. _core-install:
-
-Core installation
-=================
+*****************************************
+Install ROCm Compute Profiler from source
+*****************************************
 
 The core ROCm Compute Profiler application requires the following basic software
 dependencies. As of ROCm 6.2, the core ROCm Compute Profiler is included with your ROCm
@@ -96,15 +85,10 @@ follows.
 
 .. _core-install-steps:
 
-Install from the TheRock nightly releases
------------------------------------------
-
-#. For detailed instructions on installing TheRock nightly release artifacts, refer to `TheRock/Release <https://github.com/ROCm/TheRock/blob/main/RELEASES.md>`_.
-
 .. _source-install:
 
-Install from the source
------------------------
+Install from source
+-------------------
 
 #. Sparse clone the repository `<https://github.com/ROCm/rocm-systems>`_ to get the ROCm Compute Profiler source code.
 
@@ -161,19 +145,10 @@ Install from the source
          $ ls $INSTALL_DIR
          modulefiles  {{ config.version }}  python-libs
 
-.. _tarball-install:
-
-Install from the tarball
-------------------------
-
-#. Download the rocprofiler-compute specific tarball for the latest release from `<https://github.com/ROCm/rocm-systems/releases>`_.
-#. Untar the downloaded tarball and navigate to the `rocprofiler-compute` directory.
-#. Follow the installation steps under :ref:`source-install`.
+.. _core-install-modulefiles:
 
 Execution using modulefiles
 ---------------------------
-
-.. _core-install-modulefiles:
 
 The installation process includes the creation of an environment modulefile for
 use with `Lmod <https://lmod.readthedocs.io>`_. On systems that support Lmod,
@@ -229,7 +204,7 @@ configuration.
 .. _core-install-rocprof-var:
 
 Configuring the environment for profiling
------------------------------------------
+=========================================
 
 ROCm Compute Profiler supports two profiling backends, selectable via the ``ROCPROF`` environment variable.
 
