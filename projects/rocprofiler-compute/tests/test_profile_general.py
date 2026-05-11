@@ -2225,7 +2225,7 @@ def test_live_attach_detach_singlepass_launch_stats(
 def test_live_attach_detach_pc_sampling(
     binary_handler_profile_rocprof_compute,
 ):
-    skip_unsupported_pc_sampling_soc(is_stochastic=True)
+    common.skip_unsupported_pc_sampling_soc(is_stochastic=True)
 
     options = ["-b", "21"]
     workload_dir = common.get_output_dir()
