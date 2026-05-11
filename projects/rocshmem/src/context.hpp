@@ -348,6 +348,11 @@ class Context {
                           tuple_t boundary, int pe, uint64_t flags);
 
   template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_get_wave(src_tensor_t src, dst_tensor_t dst,
+                               tuple_t start_coord, tuple_t boundary, int pe,
+                               uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
   __device__ int tile_get_wg(src_tensor_t src, dst_tensor_t dst,
                              tuple_t start_coord, tuple_t boundary, int pe,
                              uint64_t flags);

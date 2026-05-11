@@ -253,6 +253,10 @@ class IPCContext : public Context {
                           tuple_t boundary, int pe, uint64_t flags);
 
   template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  __device__ int tile_get_wave(dst_tensor_t dst, src_tensor_t src, tuple_t start_coord,
+                               tuple_t boundary, int pe, uint64_t flags);
+
+  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
   __device__ int tile_get_wg(dst_tensor_t dst, src_tensor_t src, tuple_t start_coord,
                              tuple_t boundary, int pe, uint64_t flags);
 

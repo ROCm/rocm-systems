@@ -655,9 +655,9 @@ IPC_CONTEXT_PUT_SIGNAL_DEF(_wave)
 
 // RMA Operations
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_put(src_tensor_t src, dst_tensor_t dst,
-                                    tuple_t start_coord, tuple_t boundary,
-                                    int pe, [[maybe_unused]] uint64_t flags) {
+__device__ inline int IPCContext::tile_put(src_tensor_t src, dst_tensor_t dst,
+                                           tuple_t start_coord, tuple_t boundary,
+                                           int pe, [[maybe_unused]] uint64_t flags) {
   // Extract tensor properties at compile time
   using element_t = typename src_tensor_t::element_type;
   constexpr int ndim = src_tensor_t::ndim;
@@ -750,7 +750,7 @@ __device__ int IPCContext::tile_put(src_tensor_t src, dst_tensor_t dst,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_put_wave(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_put_wave(src_tensor_t src, dst_tensor_t dst,
                                          tuple_t start_coord, tuple_t boundary,
                                          int pe, [[maybe_unused]] uint64_t flags) {
   using element_t = typename src_tensor_t::element_type;
@@ -779,13 +779,11 @@ __device__ int IPCContext::tile_put_wave(src_tensor_t src, dst_tensor_t dst,
     // Wave-collective: threads cooperate to transfer tile
     int wave_tid = get_flat_block_id() % WF_SIZE;
 
-    // Fully contiguous case
+    // Fully contiguous case - use wave-collective memcpy
     if (src_stride_1 == 1 && dst_stride_1 == 1 &&
         src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
       size_t total_size = tile_extent_0 * tile_extent_1 * sizeof(element_t);
-      if (wave_tid == 0) {
-        memcpy_lane<MemcpyKind::Put>(dst_base, src_base, total_size);
-      }
+      memcpy_wave<MemcpyKind::Put>(dst_base, src_base, total_size);
     }
     // Row-major with contiguous rows - distribute rows among wave
     else if (src_stride_1 == 1 && dst_stride_1 == 1) {
@@ -827,9 +825,7 @@ __device__ int IPCContext::tile_put_wave(src_tensor_t src, dst_tensor_t dst,
 
     if (src.stride(0) == 1 && dst.stride(0) == 1) {
       size_t total_size = tile_extent * sizeof(element_t);
-      if (wave_tid == 0) {
-        memcpy_lane<MemcpyKind::Put>(dst_ptr, src_ptr, total_size);
-      }
+      memcpy_wave<MemcpyKind::Put>(dst_ptr, src_ptr, total_size);
     } else {
       for (int i = wave_tid; i < tile_extent; i += WF_SIZE) {
         memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst.stride(0),
@@ -843,7 +839,7 @@ __device__ int IPCContext::tile_put_wave(src_tensor_t src, dst_tensor_t dst,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_put_wg(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_put_wg(src_tensor_t src, dst_tensor_t dst,
                                        tuple_t start_coord, tuple_t boundary,
                                        int pe, [[maybe_unused]] uint64_t flags) {
   using element_t = typename src_tensor_t::element_type;
@@ -938,7 +934,7 @@ __device__ int IPCContext::tile_put_wg(src_tensor_t src, dst_tensor_t dst,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_get(dst_tensor_t dst, src_tensor_t src,
+__device__ inline int IPCContext::tile_get(dst_tensor_t dst, src_tensor_t src,
                                     tuple_t start_coord, tuple_t boundary,
                                     int pe, [[maybe_unused]] uint64_t flags) {
   using element_t = typename src_tensor_t::element_type;
@@ -1020,7 +1016,96 @@ __device__ int IPCContext::tile_get(dst_tensor_t dst, src_tensor_t src,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src,
+__device__ inline int IPCContext::tile_get_wave(dst_tensor_t dst, src_tensor_t src,
+                                         tuple_t start_coord, tuple_t boundary,
+                                         int pe, [[maybe_unused]] uint64_t flags) {
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  void* remote_base = shmem_ptr(src.data_handle(), pe);
+  if (!remote_base) {
+    return ROCSHMEM_ERROR;
+  }
+
+  if constexpr (ndim == 2) {
+    const auto src_stride_0 = src.stride(0);
+    const auto src_stride_1 = src.stride(1);
+    const auto dst_stride_0 = dst.stride(0);
+    const auto dst_stride_1 = dst.stride(1);
+    const auto tile_extent_0 = boundary.get(0) - start_coord.get(0);
+    const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
+
+    element_t* src_base = static_cast<element_t*>(remote_base) +
+                          start_coord.get(0) * src_stride_0 +
+                          start_coord.get(1) * src_stride_1;
+    element_t* dst_base = dst.data_handle() +
+                          start_coord.get(0) * dst_stride_0 +
+                          start_coord.get(1) * dst_stride_1;
+
+    // Wave-collective: threads cooperate to transfer tile
+    int wave_tid = get_flat_block_id() % WF_SIZE;
+
+    // Fully contiguous case - use wave-collective memcpy
+    if (src_stride_1 == 1 && dst_stride_1 == 1 &&
+        src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
+      size_t total_size = tile_extent_0 * tile_extent_1 * sizeof(element_t);
+      memcpy_wave<MemcpyKind::Get>(dst_base, src_base, total_size);
+    }
+    // Row-major with contiguous rows - distribute rows among wave
+    else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+      for (int i = wave_tid; i < tile_extent_0; i += WF_SIZE) {
+        element_t* src_row = src_base + i * src_stride_0;
+        element_t* dst_row = dst_base + i * dst_stride_0;
+        size_t row_size = tile_extent_1 * sizeof(element_t);
+        memcpy_lane<MemcpyKind::Get>(dst_row, src_row, row_size);
+      }
+    }
+    // Column-major with contiguous columns - distribute columns among wave
+    else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+      for (int j = wave_tid; j < tile_extent_1; j += WF_SIZE) {
+        element_t* src_col = src_base + j * src_stride_1;
+        element_t* dst_col = dst_base + j * dst_stride_1;
+        size_t col_size = tile_extent_0 * sizeof(element_t);
+        memcpy_lane<MemcpyKind::Get>(dst_col, src_col, col_size);
+      }
+    }
+    // Fallback: Distribute elements among wave threads
+    else {
+      int total_elements = tile_extent_0 * tile_extent_1;
+      for (int idx = wave_tid; idx < total_elements; idx += WF_SIZE) {
+        int i = idx / tile_extent_1;
+        int j = idx % tile_extent_1;
+        element_t* src_elem = src_base + i * src_stride_0 + j * src_stride_1;
+        element_t* dst_elem = dst_base + i * dst_stride_0 + j * dst_stride_1;
+        memcpy_lane<MemcpyKind::Get>(dst_elem, src_elem, sizeof(element_t));
+      }
+    }
+  }
+  else if constexpr (ndim == 1) {
+    const auto tile_extent = boundary.get(0) - start_coord.get(0);
+    element_t* src_ptr = static_cast<element_t*>(remote_base) +
+                         start_coord.get(0) * src.stride(0);
+    element_t* dst_ptr = dst.data_handle() + start_coord.get(0) * dst.stride(0);
+
+    int wave_tid = get_flat_block_id() % WF_SIZE;
+
+    if (src.stride(0) == 1 && dst.stride(0) == 1) {
+      size_t total_size = tile_extent * sizeof(element_t);
+      memcpy_wave<MemcpyKind::Get>(dst_ptr, src_ptr, total_size);
+    } else {
+      for (int i = wave_tid; i < tile_extent; i += WF_SIZE) {
+        memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst.stride(0),
+                                      src_ptr + i * src.stride(0),
+                                      sizeof(element_t));
+      }
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ inline int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src,
                                        tuple_t start_coord, tuple_t boundary,
                                        int pe, [[maybe_unused]] uint64_t flags) {
   using element_t = typename src_tensor_t::element_type;
@@ -1115,21 +1200,21 @@ __device__ int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src,
 
 // Collective Allgather
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_allgather(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_allgather(src_tensor_t src, dst_tensor_t dst,
                                           tuple_t start_coord, tuple_t boundary,
                                           rocshmem_team_t team, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_allgather_wave(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_allgather_wave(src_tensor_t src, dst_tensor_t dst,
                                                tuple_t start_coord, tuple_t boundary,
                                                rocshmem_team_t team, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_allgather_wg(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_allgather_wg(src_tensor_t src, dst_tensor_t dst,
                                              tuple_t start_coord, tuple_t boundary,
                                              rocshmem_team_t team, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
@@ -1137,7 +1222,7 @@ __device__ int IPCContext::tile_allgather_wg(src_tensor_t src, dst_tensor_t dst,
 
 // Collective Broadcast
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_broadcast(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_broadcast(src_tensor_t src, dst_tensor_t dst,
                                           tuple_t start_coord, tuple_t boundary,
                                           int pe_root, rocshmem_team_t team,
                                           uint64_t flags) {
@@ -1145,7 +1230,7 @@ __device__ int IPCContext::tile_broadcast(src_tensor_t src, dst_tensor_t dst,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_broadcast_wave(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_broadcast_wave(src_tensor_t src, dst_tensor_t dst,
                                                tuple_t start_coord, tuple_t boundary,
                                                int pe_root, rocshmem_team_t team,
                                                uint64_t flags) {
@@ -1153,7 +1238,7 @@ __device__ int IPCContext::tile_broadcast_wave(src_tensor_t src, dst_tensor_t ds
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_broadcast_wg(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_broadcast_wg(src_tensor_t src, dst_tensor_t dst,
                                              tuple_t start_coord, tuple_t boundary,
                                              int pe_root, rocshmem_team_t team,
                                              uint64_t flags) {
@@ -1162,28 +1247,28 @@ __device__ int IPCContext::tile_broadcast_wg(src_tensor_t src, dst_tensor_t dst,
 
 // SUM Reductions
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_sum_reduce(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_sum_reduce(src_tensor_t src, dst_tensor_t dst,
                                            tuple_t start_coord, tuple_t boundary,
                                            rocshmem_team_t team, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_sum_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_sum_reduce_wave(src_tensor_t src, dst_tensor_t dst,
                                                 tuple_t start_coord, tuple_t boundary,
                                                 rocshmem_team_t team, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_sum_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_sum_reduce_wg(src_tensor_t src, dst_tensor_t dst,
                                               tuple_t start_coord, tuple_t boundary,
                                               rocshmem_team_t team, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_sum_rooted_reduce(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_sum_rooted_reduce(src_tensor_t src, dst_tensor_t dst,
                                                   tuple_t start_coord, tuple_t boundary,
                                                   int pe_root, rocshmem_team_t team,
                                                   uint64_t flags) {
@@ -1191,7 +1276,7 @@ __device__ int IPCContext::tile_sum_rooted_reduce(src_tensor_t src, dst_tensor_t
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_sum_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_sum_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
                                                        tuple_t start_coord, tuple_t boundary,
                                                        int pe_root, rocshmem_team_t team,
                                                        uint64_t flags) {
@@ -1199,7 +1284,7 @@ __device__ int IPCContext::tile_sum_rooted_reduce_wave(src_tensor_t src, dst_ten
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_sum_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_sum_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
                                                      tuple_t start_coord, tuple_t boundary,
                                                      int pe_root, rocshmem_team_t team,
                                                      uint64_t flags) {
@@ -1208,28 +1293,28 @@ __device__ int IPCContext::tile_sum_rooted_reduce_wg(src_tensor_t src, dst_tenso
 
 // MAX Reductions
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_max_reduce(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_max_reduce(src_tensor_t src, dst_tensor_t dst,
                                            tuple_t start_coord, tuple_t boundary,
                                            rocshmem_team_t team, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_max_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_max_reduce_wave(src_tensor_t src, dst_tensor_t dst,
                                                 tuple_t start_coord, tuple_t boundary,
                                                 rocshmem_team_t team, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_max_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_max_reduce_wg(src_tensor_t src, dst_tensor_t dst,
                                               tuple_t start_coord, tuple_t boundary,
                                               rocshmem_team_t team, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_max_rooted_reduce(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_max_rooted_reduce(src_tensor_t src, dst_tensor_t dst,
                                                   tuple_t start_coord, tuple_t boundary,
                                                   int pe_root, rocshmem_team_t team,
                                                   uint64_t flags) {
@@ -1237,7 +1322,7 @@ __device__ int IPCContext::tile_max_rooted_reduce(src_tensor_t src, dst_tensor_t
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_max_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_max_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
                                                        tuple_t start_coord, tuple_t boundary,
                                                        int pe_root, rocshmem_team_t team,
                                                        uint64_t flags) {
@@ -1245,7 +1330,7 @@ __device__ int IPCContext::tile_max_rooted_reduce_wave(src_tensor_t src, dst_ten
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_max_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_max_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
                                                      tuple_t start_coord, tuple_t boundary,
                                                      int pe_root, rocshmem_team_t team,
                                                      uint64_t flags) {
@@ -1254,28 +1339,28 @@ __device__ int IPCContext::tile_max_rooted_reduce_wg(src_tensor_t src, dst_tenso
 
 // MIN Reductions
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_min_reduce(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_min_reduce(src_tensor_t src, dst_tensor_t dst,
                                            tuple_t start_coord, tuple_t boundary,
                                            rocshmem_team_t team, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_min_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_min_reduce_wave(src_tensor_t src, dst_tensor_t dst,
                                                 tuple_t start_coord, tuple_t boundary,
                                                 rocshmem_team_t team, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_min_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_min_reduce_wg(src_tensor_t src, dst_tensor_t dst,
                                               tuple_t start_coord, tuple_t boundary,
                                               rocshmem_team_t team, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_min_rooted_reduce(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_min_rooted_reduce(src_tensor_t src, dst_tensor_t dst,
                                                   tuple_t start_coord, tuple_t boundary,
                                                   int pe_root, rocshmem_team_t team,
                                                   uint64_t flags) {
@@ -1283,7 +1368,7 @@ __device__ int IPCContext::tile_min_rooted_reduce(src_tensor_t src, dst_tensor_t
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_min_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_min_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
                                                        tuple_t start_coord, tuple_t boundary,
                                                        int pe_root, rocshmem_team_t team,
                                                        uint64_t flags) {
@@ -1291,7 +1376,7 @@ __device__ int IPCContext::tile_min_rooted_reduce_wave(src_tensor_t src, dst_ten
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int IPCContext::tile_min_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int IPCContext::tile_min_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
                                                      tuple_t start_coord, tuple_t boundary,
                                                      int pe_root, rocshmem_team_t team,
                                                      uint64_t flags) {

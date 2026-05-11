@@ -700,6 +700,13 @@ __device__ int Context::tile_get(src_tensor_t src, dst_tensor_t dst,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+__device__ int Context::tile_get_wave(src_tensor_t src, dst_tensor_t dst,
+                                      tuple_t start_coord, tuple_t boundary,
+                                      int pe, uint64_t flags) {
+  DISPATCH_RET(tile_get_wave(src, dst, start_coord, boundary, pe, flags));
+}
+
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
 __device__ int Context::tile_get_wg(src_tensor_t src, dst_tensor_t dst,
                                     tuple_t start_coord, tuple_t boundary,
                                     int pe, uint64_t flags) {

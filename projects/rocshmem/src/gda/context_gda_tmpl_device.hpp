@@ -1083,21 +1083,21 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
 
 // RMA PUT operations
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_put(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int GDAContext::tile_put(src_tensor_t src, dst_tensor_t dst,
                                     tuple_t start_coord, tuple_t boundary,
                                     int pe, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_put_wave(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int GDAContext::tile_put_wave(src_tensor_t src, dst_tensor_t dst,
                                          tuple_t start_coord, tuple_t boundary,
                                          int pe, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_put_wg(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int GDAContext::tile_put_wg(src_tensor_t src, dst_tensor_t dst,
                                        tuple_t start_coord, tuple_t boundary,
                                        int pe, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
@@ -1105,14 +1105,14 @@ __device__ int GDAContext::tile_put_wg(src_tensor_t src, dst_tensor_t dst,
 
 // RMA GET operations
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_get(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int GDAContext::tile_get(src_tensor_t src, dst_tensor_t dst,
                                     tuple_t start_coord, tuple_t boundary,
                                     int pe, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_get_wg(src_tensor_t src, dst_tensor_t dst,
+__device__ inline int GDAContext::tile_get_wg(src_tensor_t src, dst_tensor_t dst,
                                        tuple_t start_coord, tuple_t boundary,
                                        int pe, uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
@@ -1120,7 +1120,7 @@ __device__ int GDAContext::tile_get_wg(src_tensor_t src, dst_tensor_t dst,
 
 // Allgather operations
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_allgather(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_allgather(rocshmem_team_t team,
                                           src_tensor_t src, dst_tensor_t dst,
                                           tuple_t start_coord, tuple_t boundary,
                                           uint64_t flags) {
@@ -1128,7 +1128,7 @@ __device__ int GDAContext::tile_allgather(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_allgather_wave(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_allgather_wave(rocshmem_team_t team,
                                                src_tensor_t src, dst_tensor_t dst,
                                                tuple_t start_coord, tuple_t boundary,
                                                uint64_t flags) {
@@ -1136,7 +1136,7 @@ __device__ int GDAContext::tile_allgather_wave(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_allgather_wg(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_allgather_wg(rocshmem_team_t team,
                                              src_tensor_t src, dst_tensor_t dst,
                                              tuple_t start_coord, tuple_t boundary,
                                              uint64_t flags) {
@@ -1145,7 +1145,7 @@ __device__ int GDAContext::tile_allgather_wg(rocshmem_team_t team,
 
 // Broadcast operations
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_broadcast(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_broadcast(rocshmem_team_t team,
                                           src_tensor_t src, dst_tensor_t dst,
                                           tuple_t start_coord, tuple_t boundary,
                                           uint64_t flags) {
@@ -1153,7 +1153,7 @@ __device__ int GDAContext::tile_broadcast(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_broadcast_wave(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_broadcast_wave(rocshmem_team_t team,
                                                src_tensor_t src, dst_tensor_t dst,
                                                tuple_t start_coord, tuple_t boundary,
                                                uint64_t flags) {
@@ -1161,7 +1161,7 @@ __device__ int GDAContext::tile_broadcast_wave(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_broadcast_wg(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_broadcast_wg(rocshmem_team_t team,
                                              src_tensor_t src, dst_tensor_t dst,
                                              tuple_t start_coord, tuple_t boundary,
                                              uint64_t flags) {
@@ -1170,7 +1170,7 @@ __device__ int GDAContext::tile_broadcast_wg(rocshmem_team_t team,
 
 // SUM Reduction operations
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_sum_reduce(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_sum_reduce(rocshmem_team_t team,
                                            src_tensor_t src, dst_tensor_t dst,
                                            tuple_t start_coord, tuple_t boundary,
                                            int root, uint64_t flags) {
@@ -1178,7 +1178,7 @@ __device__ int GDAContext::tile_sum_reduce(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_sum_reduce_wave(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_sum_reduce_wave(rocshmem_team_t team,
                                                 src_tensor_t src, dst_tensor_t dst,
                                                 tuple_t start_coord, tuple_t boundary,
                                                 int root, uint64_t flags) {
@@ -1186,7 +1186,7 @@ __device__ int GDAContext::tile_sum_reduce_wave(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_sum_reduce_wg(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_sum_reduce_wg(rocshmem_team_t team,
                                               src_tensor_t src, dst_tensor_t dst,
                                               tuple_t start_coord, tuple_t boundary,
                                               int root, uint64_t flags) {
@@ -1195,7 +1195,7 @@ __device__ int GDAContext::tile_sum_reduce_wg(rocshmem_team_t team,
 
 // MAX Reduction operations
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_max_reduce(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_max_reduce(rocshmem_team_t team,
                                            src_tensor_t src, dst_tensor_t dst,
                                            tuple_t start_coord, tuple_t boundary,
                                            int root, uint64_t flags) {
@@ -1203,7 +1203,7 @@ __device__ int GDAContext::tile_max_reduce(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_max_reduce_wave(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_max_reduce_wave(rocshmem_team_t team,
                                                 src_tensor_t src, dst_tensor_t dst,
                                                 tuple_t start_coord, tuple_t boundary,
                                                 int root, uint64_t flags) {
@@ -1211,7 +1211,7 @@ __device__ int GDAContext::tile_max_reduce_wave(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_max_reduce_wg(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_max_reduce_wg(rocshmem_team_t team,
                                               src_tensor_t src, dst_tensor_t dst,
                                               tuple_t start_coord, tuple_t boundary,
                                               int root, uint64_t flags) {
@@ -1220,7 +1220,7 @@ __device__ int GDAContext::tile_max_reduce_wg(rocshmem_team_t team,
 
 // MIN Reduction operations
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_min_reduce(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_min_reduce(rocshmem_team_t team,
                                            src_tensor_t src, dst_tensor_t dst,
                                            tuple_t start_coord, tuple_t boundary,
                                            int root, uint64_t flags) {
@@ -1228,7 +1228,7 @@ __device__ int GDAContext::tile_min_reduce(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_min_reduce_wave(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_min_reduce_wave(rocshmem_team_t team,
                                                 src_tensor_t src, dst_tensor_t dst,
                                                 tuple_t start_coord, tuple_t boundary,
                                                 int root, uint64_t flags) {
@@ -1236,7 +1236,7 @@ __device__ int GDAContext::tile_min_reduce_wave(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_min_reduce_wg(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_min_reduce_wg(rocshmem_team_t team,
                                               src_tensor_t src, dst_tensor_t dst,
                                               tuple_t start_coord, tuple_t boundary,
                                               int root, uint64_t flags) {
@@ -1245,7 +1245,7 @@ __device__ int GDAContext::tile_min_reduce_wg(rocshmem_team_t team,
 
 // Rooted SUM Reduction operations
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_sum_rooted_reduce(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_sum_rooted_reduce(rocshmem_team_t team,
                                                    src_tensor_t src, dst_tensor_t dst,
                                                    tuple_t start_coord, tuple_t boundary,
                                                    int root, uint64_t flags) {
@@ -1253,7 +1253,7 @@ __device__ int GDAContext::tile_sum_rooted_reduce(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_sum_rooted_reduce_wave(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_sum_rooted_reduce_wave(rocshmem_team_t team,
                                                         src_tensor_t src, dst_tensor_t dst,
                                                         tuple_t start_coord, tuple_t boundary,
                                                         int root, uint64_t flags) {
@@ -1261,7 +1261,7 @@ __device__ int GDAContext::tile_sum_rooted_reduce_wave(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_sum_rooted_reduce_wg(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_sum_rooted_reduce_wg(rocshmem_team_t team,
                                                       src_tensor_t src, dst_tensor_t dst,
                                                       tuple_t start_coord, tuple_t boundary,
                                                       int root, uint64_t flags) {
@@ -1270,7 +1270,7 @@ __device__ int GDAContext::tile_sum_rooted_reduce_wg(rocshmem_team_t team,
 
 // Rooted MAX Reduction operations
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_max_rooted_reduce(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_max_rooted_reduce(rocshmem_team_t team,
                                                    src_tensor_t src, dst_tensor_t dst,
                                                    tuple_t start_coord, tuple_t boundary,
                                                    int root, uint64_t flags) {
@@ -1278,7 +1278,7 @@ __device__ int GDAContext::tile_max_rooted_reduce(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_max_rooted_reduce_wave(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_max_rooted_reduce_wave(rocshmem_team_t team,
                                                         src_tensor_t src, dst_tensor_t dst,
                                                         tuple_t start_coord, tuple_t boundary,
                                                         int root, uint64_t flags) {
@@ -1286,7 +1286,7 @@ __device__ int GDAContext::tile_max_rooted_reduce_wave(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_max_rooted_reduce_wg(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_max_rooted_reduce_wg(rocshmem_team_t team,
                                                       src_tensor_t src, dst_tensor_t dst,
                                                       tuple_t start_coord, tuple_t boundary,
                                                       int root, uint64_t flags) {
@@ -1295,7 +1295,7 @@ __device__ int GDAContext::tile_max_rooted_reduce_wg(rocshmem_team_t team,
 
 // Rooted MIN Reduction operations
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_min_rooted_reduce(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_min_rooted_reduce(rocshmem_team_t team,
                                                    src_tensor_t src, dst_tensor_t dst,
                                                    tuple_t start_coord, tuple_t boundary,
                                                    int root, uint64_t flags) {
@@ -1303,7 +1303,7 @@ __device__ int GDAContext::tile_min_rooted_reduce(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_min_rooted_reduce_wave(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_min_rooted_reduce_wave(rocshmem_team_t team,
                                                         src_tensor_t src, dst_tensor_t dst,
                                                         tuple_t start_coord, tuple_t boundary,
                                                         int root, uint64_t flags) {
@@ -1311,7 +1311,7 @@ __device__ int GDAContext::tile_min_rooted_reduce_wave(rocshmem_team_t team,
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ int GDAContext::tile_min_rooted_reduce_wg(rocshmem_team_t team,
+__device__ inline int GDAContext::tile_min_rooted_reduce_wg(rocshmem_team_t team,
                                                       src_tensor_t src, dst_tensor_t dst,
                                                       tuple_t start_coord, tuple_t boundary,
                                                       int root, uint64_t flags) {
