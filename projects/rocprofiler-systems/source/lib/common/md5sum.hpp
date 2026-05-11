@@ -43,8 +43,8 @@ public:
     std::string  hexliteral() const;
     raw_digest_t rawdigest() const { return digest; }
 
-    template <typename Tp,
-              typename Up = std::enable_if_t<std::is_arithmetic<Tp>::value, int>>
+    template <typename Tp>
+        requires std::is_arithmetic_v<Tp>
     md5sum& update(Tp inp);
 
     friend std::ostream& operator<<(std::ostream&, md5sum md5);
@@ -79,19 +79,19 @@ md5sum::md5sum(Tp&& arg, Args&&... args)
     finalize();
 }
 
-template <typename Tp, typename Up>
+template <typename Tp>
+    requires std::is_arithmetic_v<Tp>
 md5sum&
 md5sum::update(Tp inp)
 {
-    static_assert(std::is_arithmetic<Tp>::value, "expected arithmetic type");
     return update(reinterpret_cast<const char*>(&inp), sizeof(Tp));
 }
 
 template <template <typename, typename...> class ContainerT, typename Tp,
           typename... TailT>
+    requires(traits::is_string_literal<Tp>())
 std::string
-compute_md5sum(const ContainerT<Tp, TailT...>& inp,
-               std::enable_if_t<traits::is_string_literal<Tp>(), int>)
+compute_md5sum(const ContainerT<Tp, TailT...>& inp)
 {
     auto _val = md5sum{};
     for(const auto& itr : inp)
