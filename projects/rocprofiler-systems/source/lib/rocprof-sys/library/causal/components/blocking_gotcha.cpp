@@ -123,7 +123,8 @@ blocking_gotcha::shutdown()
 }
 
 template <size_t Idx, typename Ret, typename... Args>
-std::enable_if_t<(Idx <= blocking_gotcha::indexes::maybe_post_block_max_idx), Ret>
+    requires(Idx <= blocking_gotcha::indexes::maybe_post_block_max_idx)
+Ret
 blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
                             Args... _args) const noexcept
 {
