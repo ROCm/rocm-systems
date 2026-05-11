@@ -435,6 +435,31 @@ NCCL_DEVICE_INLINE T nccl_ldg(const T* ptr) {
   return *ptr;
 }
 
+// CUDA __stwt: store with write-through cache hint.
+// HIP equivalent: __builtin_nontemporal_store (bypasses L1, writes through to L2).
+// Provided as overloaded inline functions so upstream nccl_device/ headers
+// (e.g. gin/proxy/gin_proxy.h) can call __stwt(ptr, val) unmodified.
+// __builtin_nontemporal_store does not accept vector types, so vector overloads
+// decompose into scalar stores.
+NCCL_DEVICE_INLINE void __stwt(uint32_t* ptr, uint32_t val) {
+  __builtin_nontemporal_store(val, ptr);
+}
+NCCL_DEVICE_INLINE void __stwt(uint64_t* ptr, uint64_t val) {
+  __builtin_nontemporal_store(val, ptr);
+}
+NCCL_DEVICE_INLINE void __stwt(uint4* ptr, uint4 val) {
+  uint64_t* p64 = reinterpret_cast<uint64_t*>(ptr);
+  uint64_t lo = (uint64_t(val.y) << 32) | uint64_t(val.x);
+  uint64_t hi = (uint64_t(val.w) << 32) | uint64_t(val.z);
+  __builtin_nontemporal_store(lo, p64);
+  __builtin_nontemporal_store(hi, p64 + 1);
+}
+NCCL_DEVICE_INLINE void __stwt(ulonglong2* ptr, ulonglong2 val) {
+  uint64_t* p64 = reinterpret_cast<uint64_t*>(ptr);
+  __builtin_nontemporal_store(val.x, p64);
+  __builtin_nontemporal_store(val.y, p64 + 1);
+}
+
 // 128-bit volatile vector loads/stores for LL protocol.
 //
 // DWORDX4 detection replicated from rccl_ptr.h (hip_compat.h must be
