@@ -26,6 +26,13 @@ template <typename T>
 struct always_false : std::false_type
 {};
 
+// Per-type opt-in for the custom (member-archive) serialiser. Specialise to
+// `true` for a type that defines `template <class Archive> void serialize(Archive&)`
+// and wants buffer_storage / type_registry to dispatch through it instead of
+// the legacy free `serialize`/`deserialize`/`get_size` triple.
+template <typename T>
+inline constexpr bool use_custom = false;
+
 }  // namespace type_traits
 
 template <typename T>

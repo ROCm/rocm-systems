@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/trace_cache/archive.hpp"
 #include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
 
@@ -149,7 +150,15 @@ public:
         using TypeIdentifierEnumUderlayingType =
             std::underlying_type_t<TypeIdentifierEnum>;
 
-        size_t sample_size      = get_size(value);
+        size_t sample_size = 0;
+        if constexpr(type_traits::use_custom<Type>)
+        {
+            sample_size = serialized_size(value);
+        }
+        else
+        {
+            sample_size = get_size(value);
+        }
         size_t bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
 
         // Hold the mutex for the entire reserve-and-write operation so that
@@ -166,7 +175,14 @@ public:
 
         utility::store_value(type_identifier_value, buf, position);
         utility::store_value(sample_size, buf, position);
-        serialize(buf + position, value);
+        if constexpr(type_traits::use_custom<Type>)
+        {
+            serialize_to(buf + position, value);
+        }
+        else
+        {
+            serialize(buf + position, value);
+        }
     }
 
     ROCPROFSYS_INLINE bool is_running() const

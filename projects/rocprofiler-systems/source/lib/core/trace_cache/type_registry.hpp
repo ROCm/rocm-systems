@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include "core/trace_cache/archive.hpp"
 #include "core/trace_cache/cache_type_traits.hpp"
 #include <cstdint>
 
@@ -43,7 +44,14 @@ private:
     inline void register_type()
     {
         deserializers[T::type_identifier] = [](std::uint8_t*& data) -> variant_t {
-            return deserialize<T>(data);
+            if constexpr(type_traits::use_custom<T>)
+            {
+                return deserialize_from<T>(data);
+            }
+            else
+            {
+                return deserialize<T>(data);
+            }
         };
     }
 };
