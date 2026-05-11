@@ -44,6 +44,7 @@ set(EXAMPLE_SOURCES
   rocshmem_broadcast_test.cc
   rocshmem_getmem_test.cc
   rocshmem_put_signal_test.cc
+  rocshmem_user_mem_test.cc
 )
 
 if (MPI_CXX_FOUND)

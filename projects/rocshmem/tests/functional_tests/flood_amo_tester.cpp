@@ -32,7 +32,7 @@ using namespace rocshmem;
  * DEVICE TEST KERNEL
  *****************************************************************************/
 __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
-                           long long int *end_time, uint64_t *s_buf,
+                           long long int *end_time, uint64_t *d_buf,
                            TestType type, ShmemContextType ctx_type, int wf_size,
                            bool *verification_error, int *grid_psync) {
   __shared__ rocshmem_ctx_t ctx;
@@ -72,10 +72,10 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
       switch (type) {
       case FloodWaitAmoTestType:
       case FloodAddTestType:
-        rocshmem_ctx_uint64_atomic_add(ctx, &s_buf[tgt_offset], t_id+1, pe);
+        rocshmem_ctx_uint64_atomic_add(ctx, &d_buf[tgt_offset], t_id+1, pe);
         break;
       case FloodFAddTestType:
-        ret = rocshmem_ctx_uint64_atomic_fetch_add(ctx, &s_buf[tgt_offset], t_id+1, pe);
+        ret = rocshmem_ctx_uint64_atomic_fetch_add(ctx, &d_buf[tgt_offset], t_id+1, pe);
         //TODO check ret? How?
         break;
       default:
@@ -95,8 +95,8 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
     switch (type) {
     case FloodWaitAmoTestType:
       if (is_thread_zero_in_block()) {
-        rocshmem_uint64_wait_until(&s_buf[wg_id], ROCSHMEM_CMP_EQ, expected);
-        uint64_t observed = s_buf[wg_id];
+        rocshmem_uint64_wait_until(&d_buf[wg_id], ROCSHMEM_CMP_EQ, expected);
+        uint64_t observed = d_buf[wg_id];
         // if test detects an atomicity issue in the library, it may
         //   a) deadlock in wait_until,
         //   b) overshoot and trigger this case
@@ -120,9 +120,9 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
         rocshmem_sync_all();
       grid_barrier(&grid_psync[1], num_wg * (i+1));
       if (is_thread_zero_in_block()) {
-        //uint64_t observed = __hip_atomic_load(&s_buf[wg_id], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-        //uint64_t observed = static_cast<volatile uint64_t>(s_buf[wg_id]);
-        uint64_t observed = s_buf[wg_id];
+        //uint64_t observed = __hip_atomic_load(&d_buf[wg_id], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        //uint64_t observed = static_cast<volatile uint64_t>(d_buf[wg_id]);
+        uint64_t observed = d_buf[wg_id];
         if (expected != observed) {
           printf("Data validation error (pe %d, wg %d, iteration %d)\n"
                  "  Expected %ld, got %ld\n",
@@ -165,7 +165,7 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
 FloodAmoTester::FloodAmoTester(TesterArguments args) : Tester(args) {
   int num_pes {rocshmem_n_pes()};
   CHECK_HIP(hipMalloc(&grid_psync, 4 * sizeof(int)));
-  s_buf = (uint64_t*)rocshmem_malloc(sizeof(uint64_t) * args.num_wgs);
+  d_buf = (uint64_t*)alloc_test_buffer(sizeof(uint64_t) * args.num_wgs);
   /**
    * Warn about boundary conditions on num-wgs etc.
    */
@@ -200,12 +200,12 @@ FloodAmoTester::FloodAmoTester(TesterArguments args) : Tester(args) {
 }
 
 FloodAmoTester::~FloodAmoTester() {
-  rocshmem_free(s_buf);
+  free_test_buffer(d_buf);
   CHECK_HIP(hipFree(grid_psync));
 }
 
 void FloodAmoTester::resetBuffers([[maybe_unused]] size_t size) {
-  CHECK_HIP(hipMemset(s_buf, 0, sizeof(uint64_t) * args.num_wgs));
+  CHECK_HIP(hipMemset(d_buf, 0, sizeof(uint64_t) * args.num_wgs));
   CHECK_HIP(hipMemset(grid_psync, 0, 4 * sizeof(int)));
 }
 
@@ -215,7 +215,7 @@ void FloodAmoTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   int num_pes {rocshmem_n_pes()};
 
   hipLaunchKernelGGL(FloodAmoTest, gridSize, blockSize, shared_bytes, stream,
-                     loop, args.skip, start_time, end_time, s_buf,
+                     loop, args.skip, start_time, end_time, d_buf,
                      _type, _shmem_context, wf_size, verification_error, grid_psync);
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x * num_pes;
@@ -231,9 +231,9 @@ void FloodAmoTester::verifyResults([[maybe_unused]] size_t size) {
     std::cerr << "Data validation error (found by device kernel)" << std::endl;
     uint64_t expected = static_cast<uint64_t>(num_loops + args.skip) * num_pes * (args.wg_size * (args.wg_size+1)) / 2;
     for(unsigned int wg = 0; wg < static_cast<unsigned int>(args.num_wgs); wg++) {
-      if (expected != s_buf[wg]) {
+      if (expected != d_buf[wg]) {
         std::cerr << "Data validation error for wg " << wg << std::endl;
-        std::cerr << " Got " << s_buf[wg]
+        std::cerr << " Got " << d_buf[wg]
                   << ", Expected " << expected << std::endl;
       }
     }

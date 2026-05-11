@@ -393,6 +393,12 @@ inline bool isImageSupported() {
   return imageSupport != 0;
 }
 
+inline bool isManagedMemorySupportedOnDevice(int device) {
+  int managed = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, device));
+  return managed != 0;
+}
+
 inline bool isPcieAtomicSupported() {
   int pcieAtomic = 1;
   int device;
@@ -467,7 +473,7 @@ inline bool isKernelArgPrefetchSupported() {
   HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
   std::cout << "Device Id = " << deviceId << " props.major = " << props.major
             << " props.minor = " << props.minor << std::endl;
-  return (props.major == 12 && props.minor == 5) ? true : false;
+  return (props.major == 12 && props.minor >= 5) ? true : false;
 #else
   std::cout << "Only Supported for AMD in Linux" << std::endl;
   return false;
@@ -710,6 +716,16 @@ class BlockingContext {
   if (!HipTest::isImageSupported()) {                                                              \
     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);                         \
     return;                                                                                        \
+  }
+
+// Call at the start of tests that require managed memory support to indicate
+// whether it is supported on the current device.
+#define CHECK_MANAGED_MEMORY_SUPPORT                                           \
+  int current_device_ = 0;                                                     \
+  HIP_CHECK(hipGetDevice(&current_device_));                                   \
+  if (!HipTest::isManagedMemorySupportedOnDevice(current_device_)) {           \
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);    \
+    return;                                                                    \
   }
 
 #define CHECK_PCIE_ATOMIC_SUPPORT                                                                 \

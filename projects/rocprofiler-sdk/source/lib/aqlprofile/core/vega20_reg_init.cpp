@@ -23,9 +23,9 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
-#include "linux/registers/vega20_ip_offset.h"
-#include "util/reg_offsets.h"
-#include "util/soc15_common.h"
+#include "lib/aqlprofile/linux/registers/vega20_ip_offset.h"
+#include "lib/aqlprofile/util/reg_offsets.h"
+#include "lib/aqlprofile/util/soc15_common.h"
 
 const reg_base_offset_table*
 vega20_reg_base_init()

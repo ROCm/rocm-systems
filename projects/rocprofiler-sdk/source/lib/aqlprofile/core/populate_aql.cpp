@@ -26,9 +26,9 @@
 #include <iostream>
 #include <sstream>
 
-#include "core/amd_aql_pm4_ib_packet.h"
-#include "core/aql_profile.hpp"
-#include "pm4/cmd_builder.h"
+#include "lib/aqlprofile/core/amd_aql_pm4_ib_packet.h"
+#include "lib/aqlprofile/core/aql_profile.hpp"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
 
 namespace aql_profile
 {

@@ -344,6 +344,11 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
     case ENOENT:
     case ENOTSUP:
       return RSMI_STATUS_NOT_SUPPORTED;
+    case EROFS:
+      // Sysfs is read-only (e.g. unprivileged container). Distinct from a
+      // kernel-unsupported feature (ENOENT/ENOTSUP -> NOT_SUPPORTED above);
+      // map to PERMISSION so callers can tell the two apart.
+      return RSMI_STATUS_PERMISSION;
     case EBADF:
     case EISDIR:
       return RSMI_STATUS_FILE_ERROR;

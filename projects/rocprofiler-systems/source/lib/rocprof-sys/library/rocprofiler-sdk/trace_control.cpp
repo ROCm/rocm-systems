@@ -49,7 +49,7 @@ trace_control::force_initial_pause()
 }
 
 void
-trace_control::handle_range_start(uint64_t range_id, const char* message)
+trace_control::handle_range_start(std::uint64_t range_id, const char* message)
 {
     if(message == nullptr || m_trace_regions.count(message) == 0)
     {
@@ -61,7 +61,7 @@ trace_control::handle_range_start(uint64_t range_id, const char* message)
         std::scoped_lock const lk{ m_region_mutex };
         was_empty = m_active_range_ids.empty();
         m_active_range_ids.insert(range_id);
-        m_active_region_count.store(static_cast<uint32_t>(m_active_range_ids.size()),
+        m_active_region_count.store(static_cast<std::uint32_t>(m_active_range_ids.size()),
                                     std::memory_order_relaxed);
     }
 
@@ -72,7 +72,7 @@ trace_control::handle_range_start(uint64_t range_id, const char* message)
 }
 
 void
-trace_control::handle_range_stop(uint64_t range_id)
+trace_control::handle_range_stop(std::uint64_t range_id)
 {
     bool now_empty = false;
     {
@@ -82,8 +82,9 @@ trace_control::handle_range_stop(uint64_t range_id)
         {
             m_active_range_ids.erase(it);
             now_empty = m_active_range_ids.empty();
-            m_active_region_count.store(static_cast<uint32_t>(m_active_range_ids.size()),
-                                        std::memory_order_relaxed);
+            m_active_region_count.store(
+                static_cast<std::uint32_t>(m_active_range_ids.size()),
+                std::memory_order_relaxed);
         }
     }
 
