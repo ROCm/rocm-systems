@@ -2,8 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
-ARG ROCKY_MAJOR_VERSION=9
-ARG ROCKY_VERSION=${ROCKY_MAJOR_VERSION}.6
+ARG ROCKY_MAJOR_VERSION=8
+ARG ROCKY_VERSION=${ROCKY_MAJOR_VERSION}.10
 FROM rockylinux/rockylinux:${ROCKY_VERSION}-minimal
 LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 # Brings ROCKY_VERSION in-scope
@@ -21,7 +21,7 @@ ARG ROCM_PKG_REPO_OVERRIDE
 RUN microdnf install -y \
         dnf \
         epel-release && \
-    dnf config-manager --set-enabled crb
+    /usr/bin/crb enable
 
 # Setup AMD/ROCm Repositories (using AMD RHEL repo)
 # Method 1: Using amdgpu_install.rpm - buggy
