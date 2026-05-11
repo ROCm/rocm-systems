@@ -7,6 +7,14 @@
 #
 # -------------------------------------------------------------------------------------- #
 
+# Skip legacy CTest registration when pytest is the active test path.
+if(NOT COMMAND rocprofiler_systems_add_test)
+    rocprofiler_systems_message(
+        WARNING "Skipping legacy unified-memory CTest registration"
+    )
+    return()
+endif()
+
 if(NOT TARGET unified-memory)
     rocprofiler_systems_message(
         WARNING "Unified memory tests disabled: unified-memory target not available"
