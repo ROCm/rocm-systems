@@ -90,5 +90,74 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
 // E2.  SendSizeClamping — sender posts a buffer larger than the receiver's posted size.
 //      Covers the ncclIbIsend L2543 branch: if (size > slots[r].size) size = slots[r].size.
 //      The transfer should complete cleanly; only recv_size bytes are transferred.
+TEST_F(NetIbMPITest, SendSizeClamping) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    ConnectionPair cp;
+    NetConnectionGuard guard(net_);
+    SetupConnectionWithGuard(/*dev=*/0, cp, guard);
+
+    static constexpr size_t kRecvSize = 4096;
+    static constexpr size_t kSendSize = 65536;  // larger than kRecvSize — will be clamped
+    static constexpr int    kTag      = 9900;
+
+    auto sendBuf = makeHostBufferAutoGuard(malloc(kSendSize));
+    auto recvBuf = makeHostBufferAutoGuard(malloc(kRecvSize));
+    ASSERT_NE(sendBuf.get(), nullptr);
+    ASSERT_NE(recvBuf.get(), nullptr);
+
+    void* recvMh = nullptr;
+    void* sendMh = nullptr;
+
+    if (rank == 0) {
+        // Register only kRecvSize — this sets slots[r].size = kRecvSize in the FIFO
+        ASSERT_EQ(RegisterMemory(cp.recvComm, recvBuf.get(), kRecvSize, NCCL_PTR_HOST, &recvMh), ncclSuccess);
+        ASSERT_NE(recvMh, nullptr);
+    } else {
+        // Sender registers larger buffer
+        ASSERT_EQ(RegisterMemory(cp.sendComm, sendBuf.get(), kSendSize, NCCL_PTR_HOST, &sendMh), ncclSuccess);
+        ASSERT_NE(sendMh, nullptr);
+        fillHostBufferWithPattern<uint8_t>(sendBuf.get(), kSendSize, makeBytePattern(42));
+    }
+
+    void* req = nullptr;
+    if (rank == 0) {
+        PostSingleRecv(cp.recvComm, recvBuf.get(), kRecvSize, kTag, recvMh, &req);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == 1) {
+        // Post send with kSendSize > kRecvSize — ncclIbIsend will clamp to kRecvSize
+        PostSendWithRetry(cp.sendComm, sendBuf.get(), kSendSize, kTag, sendMh, &req);
+        ASSERT_NE(req, nullptr);
+    }
+
+    int sizes[1] = {0};
+    ASSERT_EQ(WaitForCompletion(req, sizes, kLargeTransferTimeoutMs), ncclSuccess)
+        << "WaitForCompletion failed on rank " << rank;
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        // Verify: recv reports kRecvSize bytes (clamped), not kSendSize
+        EXPECT_EQ(sizes[0], static_cast<int>(kRecvSize))
+            << "Expected recv size to be clamped to " << kRecvSize;
+        // Verify first kRecvSize bytes match the sender's pattern
+        bool ok = verifyHostBufferData<uint8_t>(recvBuf.get(), kRecvSize, makeBytePattern(42));
+        EXPECT_TRUE(ok) << "Data mismatch in clamped receive";
+    }
+
+    if (rank == 0 && recvMh) DeregisterMemory(cp.recvComm, recvMh);
+    if (rank == 1 && sendMh) DeregisterMemory(cp.sendComm, sendMh);
+}
+
+// E3.  NullCommClose — closes a NULL send/recv comm pointer.
+//      Covers the ncclIbCloseSend/ncclIbCloseRecv null-guard branch
+//      (net_ib.cc:3063 and 3083: if (comm) {...}).
+//      The API must return ncclSuccess without crashing.
 
 #endif /* MPI_TESTS_ENABLED */
