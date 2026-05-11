@@ -1,8 +1,8 @@
-# rocprofsys diagnostic format spec
+# rocprofsys diagnostic format spec (gdb-style compact)
 
-Locked spec for the Phase-1 stacktrace + exception formatter. Derived
-from `error-format-research.md`. Examples below are normative (all
-tests check against them).
+Locked spec for the Phase-1 stacktrace + exception formatter. The format
+mirrors gdb's `bt` output: one line per frame, prefixed with `#N`, with
+function-name column padded to align the `in <file>:<line>` suffix.
 
 ## Header line
 
@@ -10,69 +10,61 @@ tests check against them).
 error: <exception::what()>
 ```
 
-`error:` is bold bright-red when color is on. The whole header is on
-one line. If `what()` contains a newline (the timemory `core/exception.cpp`
-embeds backtrace text in `what()`), strip everything from the first
-newline onward when the trace will be appended separately.
+`error:` is bold bright-red when color is on. The header is single-line.
+If `what()` contains a newline (the timemory `core/exception.cpp` embeds
+backtrace text), strip everything from the first newline onward; the
+trace is rendered separately.
 
 A blank line follows the header before the trace.
 
-## Default frame format
+## Frame line
 
 ```
-  at <demangled function>
-     in <relative path>:<line>
+  #N  <function-name>            in <relative-path>:<line>
 ```
 
-- 2-space outer indent.
-- 5-space continuation indent for the location line so the path nests
-  visually under the function.
-- `at` and `in` keywords match the Rust `color-eyre` style.
-- Function name in cyan when color is on.
-- Path in dim gray, `:line` in yellow.
+- 2-space indent.
+- `#N` frame index, where N starts at 0 (top of stack).
+- Frame-index width auto: 1, 2, or 3 digits, sized to the largest
+  index that will be printed.
+- Two spaces after `#N`.
+- Function name padded with spaces so the `in` keyword aligns across
+  frames, capped at `max_function_width` (default 60).
+- Two spaces, then `in <file>:<line>`.
 
-If line info is not resolved, fall back to:
+Inlined frames render like any other frame plus a trailing `[inlined]`
+tag at end of line. There is never more than one line per frame.
 
-```
-  at <demangled function>
-     in <relative path>
-```
-
-If file is not resolved either, only the `at` line is printed.
-
-If the function name itself is unresolved, render the address:
+If line info is unavailable, the line drops the `:line` suffix:
 
 ```
-  at 0x00007f8c4a3b1c40
-     in <relative path>:<line>
+  #2  <function-name>            in <relative-path>
 ```
 
-## Inlined frames
+If the file is unavailable too, the `in ...` clause is omitted entirely.
 
-When libdw reports an inline-frame chain for a single instruction, each
-inlined frame is rendered as its own entry with a trailing `[inlined]`
-tag in dim gray:
+If the function name is unresolved, the address is rendered as a
+hex literal in its place:
 
 ```
-  at rocprofsys::pmc::collectors::gpu::collector::setup() [inlined]
-     in source/lib/.../collector.hpp:88
+  #3  0x00007f8c4a3b1c40        in <relative-path>:<line>
 ```
 
-Inline-frame ordering: outer-to-inner. So the function the user wrote
-the call in appears above the inlined callee. (Matches what GCC's
-`-rdynamic` + libdw `dwfl_module_addrname` ordering returns.)
+## Long function names
+
+When a single demangled name exceeds `max_function_width` (default 60),
+that frame skips the padding rule. The `in <file>:<line>` follows after
+a single space on the same line, accepting the misalignment. One frame
+per line is preserved.
 
 ## Skipped frames
 
-Skip filters are applied to the demangled function name (substring
-match). When any frames are dropped, append exactly one line at the end:
+Skip filters apply to demangled names (substring match). When any
+frames are dropped, append a single trailer line:
 
 ```
-  ... 4 frames skipped (libc, runtime) ...
+       ... 4 frames skipped (libc, runtime) ...
 ```
-
-The category in parens is a constant string derived from the skip-list
-group; if mixed groups, drop the parens.
 
 ## Truncated frames
 
@@ -80,94 +72,65 @@ When `max_frames_shown` is exceeded, keep the top `max_frames_shown`
 frames and append:
 
 ```
-  ... 12 more ...
+       ... 12 more ...
 ```
 
-(Java style.) The "skipped" line and the "more" line can both appear in
-the same trace if both conditions hit.
+Both trailers can co-exist in the same trace.
 
 ## Module suffix
 
 When `with_module=true` AND the frame's module is not the main exe,
-append `(<module-basename>)` in dim gray to the function line:
+append `(<module-basename>)` in dim gray after the function name (and
+before the `in` clause):
 
 ```
-  at __libc_start_main (libc.so.6)
+  #5  __libc_start_main (libc.so.6)  in /usr/src/...:N
 ```
 
-When the frame is in the main executable, never show the module.
+Frames in the main executable never carry a module suffix.
 
 ## Offset suffix
 
-When `with_offset=true`, append `[+0xNN]` in dim gray to the function
-line, where `NN` is the PC offset within the resolved symbol:
+When `with_offset=true`, append `[+0xNN]` in dim gray after the function
+name:
 
 ```
-  at rocprofsys::pmc::sampler::setup() [+0x1ac]
-     in source/lib/.../sampler.cpp:92
+  #1  rocprofsys::pmc::sampler::setup() [+0x1ac]  in source/.../sampler.cpp:92
 ```
 
-## Source excerpt mode
-
-When `with_source_excerpt=true`, after the location line, show one
-line of context above and below the failing line, with the failing line
-underlined by carets:
-
-```
-  at rocprofsys::pmc::collectors::gpu::parse_metric_value(...)
-     in source/lib/.../parse.cpp:142
-        140 |     auto v = std::stoul(s);
-        141 |     if(v > MAX_METRIC) {
-        142 |         throw std::runtime_error("value out of range");
-            |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        143 |     }
-```
-
-Caret span = full trim()ed length of the failing line. We don't have
-column-precise diagnostics; this is a best effort.
-
-The 8-char left margin holds the line number, right-aligned, then ` | `
-divider. The caret line uses a blank line-number column followed by ` | `
-then the caret string. The caret line is in bold green.
-
-If the file cannot be read (build moved, container, stripped), silently
-skip the excerpt for that frame (do not error out).
-
-## Color choices and rules
+## Color palette
 
 Element                       | Style                | ANSI
 ---                           | ---                  | ---
 `error:`                      | bold bright red      | `\033[1;91m`
+`#N` frame index              | dim gray             | `\033[90m`
 function name                 | cyan                 | `\033[36m`
-`at` / `in` keywords          | dim                  | `\033[2m`
+`in` keyword                  | dim                  | `\033[2m`
 file path                     | dim gray             | `\033[90m`
-`:line` and `:line:col`       | yellow               | `\033[33m`
+`:line`                       | yellow               | `\033[33m`
 `[inlined]`                   | dim gray             | `\033[90m`
 `[+0xNN]`                     | dim gray             | `\033[90m`
 `(module)`                    | dim gray             | `\033[90m`
 `... N skipped ... `          | dim                  | `\033[2m`
 `... N more ...`              | dim                  | `\033[2m`
-caret `^^^^^`                 | bold bright green    | `\033[1;92m`
-literal source line           | none                 | -
-line-number margin / divider  | dim gray             | `\033[90m`
 
-Reset is `\033[0m`. Always emit reset at the end of every styled span;
-never let color leak across lines.
+Reset is `\033[0m`. Every styled span ends with reset; color never
+crosses a frame boundary.
 
 ## Color decision rules
 
 ```
 color = format_options.color
+if color == on:           emit ANSI
+if color == off:          plain
 if color == auto_detect:
-    if env NO_COLOR is set (any value): color = off
-    elif env CLICOLOR_FORCE=1 is set: color = on
-    elif isatty(fd 2): color = on
-    else: color = off
+    if env NO_COLOR is set (any value): off
+    elif env CLICOLOR_FORCE=1 is set:   on
+    elif isatty(fd 2):                  on
+    else:                               off
 ```
 
 `fd 2` is the default because `print_exception()` writes to stderr.
-For programmatic `to_string()` use, callers pass an explicit
-`color_mode::on/off`.
 
 ## Env-var overrides
 
@@ -185,25 +148,22 @@ process and cached.
 
 ```
 format_options{
-  color                = auto_detect,
-  with_module          = true,
-  with_offset          = false,
-  with_file_line       = true,
-  with_inlined         = true,
-  with_source_excerpt  = false,
-  skip_substrings      = default_skip_filters(),
-  max_function_width   = 100,
-  max_frames_shown     = 32,
+  color              = auto_detect,
+  with_module        = true,
+  with_offset        = false,
+  with_file_line     = true,
+  skip_substrings    = default_skip_filters(),
+  max_function_width = 60,
+  max_frames_shown   = 32,
 }
 ```
 
 ## Hard rules (test-locked)
 
-1. The `error: ...` header is on its own line. Never wrapped.
-2. Each frame is exactly 2 lines (3 if inlined and that's added on the
-   same `at` line; never split across more lines in default mode).
-3. With `with_source_excerpt=true`, the excerpt block is at most 5 lines
-   per frame (3 source + 1 caret + at most 1 padding).
+1. The `error: ...` header is on its own line.
+2. Each frame is exactly one line.
+3. Frame indices are contiguous (0, 1, 2, ...) and monotonically
+   increasing in print order.
 4. Skip and truncate trailers each appear at most once per trace.
 5. Color escapes never cross frame boundaries: every styled token is
    `<style><content>\033[0m`.

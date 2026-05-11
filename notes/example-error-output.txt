@@ -1,109 +1,29 @@
-
-==================================================
-[A1] throw-site capture - default (auto color)
-==================================================
-[1;91merror:[0m Failed to parse PMC metric 'bad_metric': value out of range
-
-  [2mat[0m [36m(anonymous namespace)::parse_metric_value(std::__cxx11::basic_string<char, std::char_traits<char>, s...[0m
-     [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:45:1[0m
-  [2mat[0m [36m(anonymous namespace)::collector_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std:...[0m
-     [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:52:1[0m
-  [2mat[0m [36m(anonymous namespace)::sampler_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std::a...[0m
-     [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:59:1[0m
-  [2mat[0m [36m(anonymous namespace)::library_initialize(std::__cxx11::basic_string<char, std::char_traits<char>, s...[0m
-     [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:66:1[0m
-  [2mat[0m [36mmain[0m
-     [2min[0m [90m/usr/include/c++/13/bits/basic_string.h[0m[33m:804:19[0m
-  [2m... 3 frames skipped (libc, runtime) ...[0m
-
-==================================================
-[A2] throw-site capture - color off
-==================================================
+=== gdb-style (default) ===
 error: Failed to parse PMC metric 'bad_metric': value out of range
 
-  at (anonymous namespace)::parse_metric_value(std::__cxx11::basic_string<char, std::char_traits<char>, s...
-     in source/lib/common/diagnostic/tests/demo.cpp:45:1
-  at (anonymous namespace)::collector_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std:...
-     in source/lib/common/diagnostic/tests/demo.cpp:52:1
-  at (anonymous namespace)::sampler_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std::a...
-     in source/lib/common/diagnostic/tests/demo.cpp:59:1
-  at (anonymous namespace)::library_initialize(std::__cxx11::basic_string<char, std::char_traits<char>, s...
-     in source/lib/common/diagnostic/tests/demo.cpp:66:1
-  at main
-     in /usr/include/c++/13/bits/basic_string.h:804:19
-  ... 3 frames skipped (libc, runtime) ...
+  [90m#0[0m  [36m(anonymous namespace)::parse_metric_value(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)[0m  [2min[0m [90mprojects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp[0m[33m:33[0m
+  [90m#1[0m  [36m(anonymous namespace)::collector_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)[0m  [2min[0m [90mprojects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp[0m[33m:40[0m
+  [90m#2[0m  [36m(anonymous namespace)::sampler_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)[0m  [2min[0m [90mprojects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp[0m[33m:47[0m
+  [90m#3[0m  [36m(anonymous namespace)::library_initialize(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)[0m  [2min[0m [90mprojects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp[0m[33m:54[0m
+  [90m#4[0m  [36mmain[0m  [2min[0m [90m/usr/include/c++/13/bits/basic_string.h[0m[33m:804[0m
+       [2m... 3 frames skipped (libc, runtime) ...[0m
 
-==================================================
-[A3] throw-site capture - color on + offsets + modules
-==================================================
+=== gdb-style (NO color) ===
+error: Failed to parse PMC metric 'bad_metric': value out of range
+
+  #0  (anonymous namespace)::parse_metric_value(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)  in projects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp:33
+  #1  (anonymous namespace)::collector_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)  in projects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp:40
+  #2  (anonymous namespace)::sampler_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)  in projects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp:47
+  #3  (anonymous namespace)::library_initialize(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)  in projects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp:54
+  #4  main  in /usr/include/c++/13/bits/basic_string.h:804
+       ... 3 frames skipped (libc, runtime) ...
+
+=== gdb-style (FORCED color) ===
 [1;91merror:[0m Failed to parse PMC metric 'bad_metric': value out of range
 
-  [2mat[0m [36m(anonymous namespace)::parse_metric_value(std::__cxx11::basic_string<char, std::char_traits<char>, s...[0m [90m[+0x24][0m
-     [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:45:1[0m
-  [2mat[0m [36m(anonymous namespace)::collector_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std:...[0m [90m[+0x1d][0m
-     [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:52:1[0m
-  [2mat[0m [36m(anonymous namespace)::sampler_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std::a...[0m [90m[+0x1d][0m
-     [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:59:1[0m
-  [2mat[0m [36m(anonymous namespace)::library_initialize(std::__cxx11::basic_string<char, std::char_traits<char>, s...[0m [90m[+0x1d][0m
-     [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:66:1[0m
-  [2mat[0m [36mmain[0m [90m[+0x6f][0m
-     [2min[0m [90m/usr/include/c++/13/bits/basic_string.h[0m[33m:804:19[0m
-  [2m... 3 frames skipped (libc, runtime) ...[0m
-
-==================================================
-[A4] throw-site capture - color on + source excerpt
-==================================================
-[1;91merror:[0m Failed to parse PMC metric 'bad_metric': value out of range
-
-  [2mat[0m [36m(anonymous namespace)::parse_metric_value(std::__cxx11::basic_string<char, std::char_traits<char>, s...[0m
-     [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:45:1[0m
-[90m           44 | [0m    return stacktrace::capture();
-[90m           45 | [0m}
-[90m              | [0m[1;92m^[0m
-[90m           46 | [0m
-  [2mat[0m [36m(anonymous namespace)::collector_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std:...[0m
-     [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:52:1[0m
-[90m           51 | [0m    return parse_metric_value(s);
-[90m           52 | [0m}
-[90m              | [0m[1;92m^[0m
-[90m           53 | [0m
-  [2mat[0m [36m(anonymous namespace)::sampler_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std::a...[0m
-     [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:59:1[0m
-[90m           58 | [0m    return collector_setup(s);
-[90m           59 | [0m}
-[90m              | [0m[1;92m^[0m
-[90m           60 | [0m
-  [2mat[0m [36m(anonymous namespace)::library_initialize(std::__cxx11::basic_string<char, std::char_traits<char>, s...[0m
-     [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:66:1[0m
-[90m           65 | [0m    return sampler_setup(s);
-[90m           66 | [0m}
-[90m              | [0m[1;92m^[0m
-[90m           67 | [0m
-  [2mat[0m [36mmain[0m
-     [2min[0m [90m/usr/include/c++/13/bits/basic_string.h[0m[33m:804:19[0m
-[90m          803 | [0m      ~basic_string()
-[90m          804 | [0m      { _M_dispose(); }
-[90m              | [0m      [1;92m^^^^^^^^^^^^^^^^^[0m
-[90m          805 | [0m
-  [2m... 3 frames skipped (libc, runtime) ...[0m
-
-==================================================
-[A5] throw-site capture - max_frames_shown=2
-==================================================
-[1;91merror:[0m Failed to parse PMC metric 'bad_metric': value out of range
-
-  [2mat[0m [36m(anonymous namespace)::parse_metric_value(std::__cxx11::basic_string<char, std::char_traits<char>, s...[0m
-     [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:45:1[0m
-  [2mat[0m [36m(anonymous namespace)::collector_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std:...[0m
-     [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:52:1[0m
-  [2m... 3 frames skipped (libc, runtime) ...[0m
-  [2m... 3 more ...[0m
-
-==================================================
-[B1] catch-site capture (format_exception) - color on
-==================================================
-[1;91merror:[0m Failed to parse PMC metric 'bad_metric': value out of range
-
-  [2mat[0m [36mmain[0m
-     [2min[0m [90msource/lib/common/diagnostic/stacktrace.hpp[0m[33m:42:8[0m
-  [2m... 3 frames skipped (libc, runtime) ...[0m
+  [90m#0[0m  [36m(anonymous namespace)::parse_metric_value(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)[0m  [2min[0m [90mprojects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp[0m[33m:33[0m
+  [90m#1[0m  [36m(anonymous namespace)::collector_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)[0m  [2min[0m [90mprojects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp[0m[33m:40[0m
+  [90m#2[0m  [36m(anonymous namespace)::sampler_setup(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)[0m  [2min[0m [90mprojects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp[0m[33m:47[0m
+  [90m#3[0m  [36m(anonymous namespace)::library_initialize(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)[0m  [2min[0m [90mprojects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp[0m[33m:54[0m
+  [90m#4[0m  [36mmain[0m  [2min[0m [90m/usr/include/c++/13/bits/basic_string.h[0m[33m:804[0m
+       [2m... 3 frames skipped (libc, runtime) ...[0m

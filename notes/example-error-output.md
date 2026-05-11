@@ -1,105 +1,67 @@
 # Demo output
 
 Output produced by `build/ci/bin/diagnostic_demo` (run via
-`CLICOLOR_FORCE=1` so the color variants render even off-TTY).
+`CLICOLOR_FORCE=1` so the `auto_detect` variant renders color even
+off-TTY).
 
 The full ANSI-encoded stream is in `example-error-output.txt`. Below
-are clean transcripts.
+are clean transcripts (color escapes stripped).
 
-## PART A - throw-site capture
+The demo captures one trace from a deep call chain
+(`library_initialize -> sampler_setup -> collector_setup ->
+parse_metric_value`) and renders it three ways.
 
-`stacktrace::capture()` is invoked at the deep call site (simulating
-the future custom exception's constructor). The resulting trace contains
-the full call chain at the moment of capture.
+## Section 1 - default (color auto_detect)
 
-### A1 - default options (color + auto-detect)
-
-```
-error: Failed to parse PMC metric 'bad_metric': value out of range
-
-  at (anonymous namespace)::parse_metric_value(...)
-     in source/lib/common/diagnostic/tests/demo.cpp:45:1
-  at (anonymous namespace)::collector_setup(...)
-     in source/lib/common/diagnostic/tests/demo.cpp:52:1
-  at (anonymous namespace)::sampler_setup(...)
-     in source/lib/common/diagnostic/tests/demo.cpp:59:1
-  at (anonymous namespace)::library_initialize(...)
-     in source/lib/common/diagnostic/tests/demo.cpp:66:1
-  at main
-     in /usr/include/c++/13/bits/basic_string.h:804:19
-  ... 3 frames skipped (libc, runtime) ...
-```
-
-Top frame is the throw site (`parse_metric_value`); the deepest call
-appears first per the format spec. 3 libc/runtime frames are filtered.
-
-### A3 - color on + offsets + modules
-
-Adds `[+0xNN]` PC offsets to each function line.
+With `CLICOLOR_FORCE=1` set during the run, auto_detect resolves to ON
+and the trace carries ANSI escapes.
 
 ```
 error: Failed to parse PMC metric 'bad_metric': value out of range
 
-  at (anonymous namespace)::parse_metric_value(...) [+0x21]
-     in source/lib/common/diagnostic/tests/demo.cpp:45:1
-  at (anonymous namespace)::collector_setup(...) [+0x1d]
-     in source/lib/common/diagnostic/tests/demo.cpp:52:1
-  ...
+  #0  (anonymous namespace)::parse_metric_value(...)  in projects/.../demo.cpp:33
+  #1  (anonymous namespace)::collector_setup(...)     in projects/.../demo.cpp:40
+  #2  (anonymous namespace)::sampler_setup(...)       in projects/.../demo.cpp:47
+  #3  (anonymous namespace)::library_initialize(...)  in projects/.../demo.cpp:54
+  #4  main                                            in /usr/include/.../basic_string.h:804
+       ... 3 frames skipped (libc, runtime) ...
 ```
 
-### A4 - color on + source excerpt
+(Demangled `std::__cxx11::basic_string<...>` argument types are elided
+to `(...)` in the transcript above for readability. The real demo
+output shows them in full and exceeds `max_function_width` (60), so the
+`in` clause follows after a single space rather than a padded column -
+the format spec's documented behavior for oversized names.)
 
-Shows the source code of each frame (1 line of context above + below)
-with a caret underline on the failing line:
+## Section 2 - color OFF
 
-```
-  at (anonymous namespace)::parse_metric_value(...)
-     in source/lib/common/diagnostic/tests/demo.cpp:45:1
-            44 |     }
-            45 | }
-               | ^
-            46 |
-```
-
-### A5 - max_frames_shown=2 (truncation)
+Identical content, no ANSI escapes anywhere:
 
 ```
 error: Failed to parse PMC metric 'bad_metric': value out of range
 
-  at (anonymous namespace)::parse_metric_value(...)
-     in source/lib/common/diagnostic/tests/demo.cpp:45:1
-  at (anonymous namespace)::collector_setup(...)
-     in source/lib/common/diagnostic/tests/demo.cpp:52:1
-  ... 3 frames skipped (libc, runtime) ...
-  ... 2 more ...
+  #0  (anonymous namespace)::parse_metric_value(...)  in projects/.../demo.cpp:33
+  #1  (anonymous namespace)::collector_setup(...)     in projects/.../demo.cpp:40
+  #2  (anonymous namespace)::sampler_setup(...)       in projects/.../demo.cpp:47
+  #3  (anonymous namespace)::library_initialize(...)  in projects/.../demo.cpp:54
+  #4  main                                            in /usr/include/.../basic_string.h:804
+       ... 3 frames skipped (libc, runtime) ...
 ```
 
-Both the `skipped` (filter) trailer and the `more` (truncation) trailer
-appear when both apply.
+## Section 3 - color FORCED ON
 
-## PART B - catch-site capture (`format_exception`)
-
-```
-error: Failed to parse PMC metric 'bad_metric': value out of range
-
-  ... 3 frames skipped (libc, runtime) ...
-```
-
-Phase-1 limitation: when capture happens at the catch site, the throw
-site has already unwound from the stack. Only the catcher's frame
-remains and after default filters apply, nothing visible may be left.
-This is why the future custom `rocprofsys::exception` will capture in
-its constructor (PART A's pattern) and carry the trace as a member.
+`color_mode::on` bypasses the TTY check. Same content, ANSI escapes
+restored.
 
 ## Color palette demonstrated
 
 The ANSI-decorated output uses:
 
 - `error:` keyword: bold bright red (`\033[1;91m`)
+- `#N` frame index: dim gray (`\033[90m`)
 - function names: cyan (`\033[36m`)
-- `at` / `in` keywords: dim
+- `in` keyword: dim (`\033[2m`)
 - file paths: dim gray (`\033[90m`)
-- `:line:col`: yellow (`\033[33m`)
-- `[+0xNN]` offset / `(module.so)` suffix / `[inlined]`: dim gray
-- caret `^^^^^` in source-excerpt mode: bold bright green (`\033[1;92m`)
+- `:line`: yellow (`\033[33m`)
+- `(module.so)` suffix / `[+0xNN]` offset / `[inlined]`: dim gray
 - skipped/more trailers: dim
