@@ -246,13 +246,12 @@ static void print_current_partition(uint32_t idx, amdsmi_processor_handle gpu) {
               << "    Num partitions           : N/A\n";
   }
 
-  std::array<char, AMDSMI_MAX_STRING_LENGTH> mem{};
-  if (auto ret =
-          amdsmi_get_gpu_memory_partition(gpu, mem.data(), static_cast<uint32_t>(mem.size()));
+  amdsmi_memory_partition_config_t mem_cfg{};
+  if (auto ret = amdsmi_get_gpu_memory_partition_config(gpu, &mem_cfg);
       ret == AMDSMI_STATUS_SUCCESS) {
-    std::cout << "    Memory partition : " << mem.data() << '\n';
+    std::cout << "    Memory partition : " << mem_partition_type_str(mem_cfg.mp_mode) << '\n';
   } else {
-    std::cout << "    amdsmi_get_gpu_memory_partition: " << status_str(ret) << '\n';
+    std::cout << "    amdsmi_get_gpu_memory_partition_config: " << status_str(ret) << '\n';
   }
 }
 
