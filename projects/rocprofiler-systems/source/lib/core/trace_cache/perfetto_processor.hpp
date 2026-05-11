@@ -75,9 +75,9 @@ private:
     // No synchronization is required for instance-local state below.
     // Note: m_output_registry is shared across threads; it must be internally
     // thread-safe.
-    std::unordered_map<uint32_t, agent_type> m_kfd_node_type_cache;
-    std::map<uint32_t, int64_t>              m_unified_memory_fault_counts;
-    output_file_registry&                    m_output_registry;
+    std::unordered_map<std::uint32_t, agent_type> m_kfd_node_type_cache;
+    std::map<std::uint32_t, std::int64_t>         m_unified_memory_fault_counts;
+    output_file_registry&                         m_output_registry;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

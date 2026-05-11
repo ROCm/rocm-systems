@@ -5,6 +5,7 @@
 #include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "logger/debug.hpp"
+#include <cstdint>
 
 #include <charconv>
 #include <cmath>
@@ -27,21 +28,21 @@ namespace trace_cache
 
 namespace detail
 {
-inline constexpr uint64_t kKiB = 1024ULL;
-inline constexpr uint64_t kMiB = kKiB * 1024;
-inline constexpr uint64_t kGiB = kMiB * 1024;
+inline constexpr std::uint64_t kKiB = 1024ULL;
+inline constexpr std::uint64_t kMiB = kKiB * 1024;
+inline constexpr std::uint64_t kGiB = kMiB * 1024;
 
-inline constexpr uint64_t kNsPerUs  = 1000ULL;
-inline constexpr uint64_t kNsPerMs  = kNsPerUs * 1000;
-inline constexpr uint64_t kNsPerSec = kNsPerMs * 1000;
+inline constexpr std::uint64_t kNsPerUs  = 1000ULL;
+inline constexpr std::uint64_t kNsPerMs  = kNsPerUs * 1000;
+inline constexpr std::uint64_t kNsPerSec = kNsPerMs * 1000;
 
-// Largest double < 2^64; equality would overflow on uint64_t cast (UB,
+// Largest double < 2^64; equality would overflow on std::uint64_t cast (UB,
 // [conv.fpint]). nextafter isn't constexpr until C++23.
 inline const double kMaxSafeUint64 =
-    std::nextafter(static_cast<double>(std::numeric_limits<uint64_t>::max()), 0.0);
+    std::nextafter(static_cast<double>(std::numeric_limits<std::uint64_t>::max()), 0.0);
 
 [[nodiscard]] inline std::string
-format_size(uint64_t bytes)
+format_size(std::uint64_t bytes)
 {
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(4);
@@ -67,14 +68,14 @@ generate_unified_memory_output_path(int pid, const std::string& output_dir,
 }
 
 [[nodiscard]] inline bool
-is_known_agent_type(uint8_t raw_type) noexcept
+is_known_agent_type(std::uint8_t raw_type) noexcept
 {
     using agent_type_underlying = std::underlying_type_t<agent_type>;
     return raw_type <= static_cast<agent_type_underlying>(agent_type::NIC);
 }
 
 [[nodiscard]] inline std::string
-format_time(uint64_t nanoseconds)
+format_time(std::uint64_t nanoseconds)
 {
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(4);
@@ -208,15 +209,15 @@ unified_memory_processor_t::handle_page_migrate(const kfd_sample& sample)
     auto direction              = classify_direction(src_label, dst_label);
 
     // Float-to-int overflow is UB ([conv.fpint]); guard NaN/inf/sign/2^64.
-    uint64_t size_bytes = 0;
+    std::uint64_t size_bytes = 0;
     if(std::isfinite(sample.value) && sample.value > 0.0 &&
        sample.value < detail::kMaxSafeUint64)
-        size_bytes = static_cast<uint64_t>(sample.value);
+        size_bytes = static_cast<std::uint64_t>(sample.value);
 
     // Guard against non-monotonic KFD timestamps to avoid unsigned wrap.
-    uint64_t duration_ns = (sample.end_timestamp >= sample.start_timestamp)
-                               ? sample.end_timestamp - sample.start_timestamp
-                               : 0;
+    std::uint64_t duration_ns = (sample.end_timestamp >= sample.start_timestamp)
+                                    ? sample.end_timestamp - sample.start_timestamp
+                                    : 0;
 
     auto gpu_bucket_id = resolve_gpu_bucket_id(src_label, dst_label, direction);
     if(gpu_bucket_id.has_value())
@@ -260,19 +261,19 @@ unified_memory_processor_t::handle_page_migrate(const kfd_sample& sample)
     ++(m_data.triggers.*(entry->member));
 }
 
-std::optional<std::pair<uint32_t, uint32_t>>
+std::optional<std::pair<std::uint32_t, std::uint32_t>>
 unified_memory_processor_t::parse_node_id_pair(const std::string& src_label,
                                                const std::string& dst_label) const
 {
-    auto parse_one = [](const std::string& s, uint32_t& out) -> bool {
+    auto parse_one = [](const std::string& s, std::uint32_t& out) -> bool {
         const char* first = s.data();
         const char* last  = s.data() + s.size();
         auto        res   = std::from_chars(first, last, out);
         return res.ec == std::errc{} && res.ptr == last;
     };
 
-    uint32_t src_id = 0;
-    uint32_t dst_id = 0;
+    std::uint32_t src_id = 0;
+    std::uint32_t dst_id = 0;
     if(!parse_one(src_label, src_id) || !parse_one(dst_label, dst_id))
     {
         LOG_TRACE("Failed to parse node IDs from labels: src='{}', dst='{}'", src_label,
@@ -282,7 +283,7 @@ unified_memory_processor_t::parse_node_id_pair(const std::string& src_label,
     return std::pair{ src_id, dst_id };
 }
 
-std::optional<uint32_t>
+std::optional<std::uint32_t>
 unified_memory_processor_t::resolve_gpu_bucket_id(const std::string&  src_label,
                                                   const std::string&  dst_label,
                                                   migration_direction direction) const
@@ -291,7 +292,7 @@ unified_memory_processor_t::resolve_gpu_bucket_id(const std::string&  src_label,
     if(!ids.has_value()) return std::nullopt;
 
     const auto [src_node_id, dst_node_id] = *ids;
-    const auto is_gpu_node                = [this](uint32_t node_id) {
+    const auto is_gpu_node                = [this](std::uint32_t node_id) {
         auto it = m_node_type_cache.find(node_id);
         return it != m_node_type_cache.end() && it->second == agent_type::GPU;
     };
@@ -428,7 +429,8 @@ unified_memory_processor_t::write_text_output(std::ostream& out) const
             if(stats.count > 0)
             {
                 out << std::setw(9) << stats.count << "  " << std::setw(8)
-                    << detail::format_size(static_cast<uint64_t>(stats.avg_size_bytes()))
+                    << detail::format_size(
+                           static_cast<std::uint64_t>(stats.avg_size_bytes()))
                     << "  " << std::setw(8) << detail::format_size(stats.min_size_bytes)
                     << "  " << std::setw(8) << detail::format_size(stats.max_size_bytes)
                     << "  " << std::setw(10)

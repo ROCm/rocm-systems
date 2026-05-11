@@ -55,13 +55,13 @@ private:
 
 struct migration_stats
 {
-    uint64_t count            = 0;
-    uint64_t total_size_bytes = 0;
-    uint64_t min_size_bytes   = std::numeric_limits<uint64_t>::max();
-    uint64_t max_size_bytes   = 0;
-    uint64_t total_time_ns    = 0;
+    std::uint64_t count            = 0;
+    std::uint64_t total_size_bytes = 0;
+    std::uint64_t min_size_bytes   = std::numeric_limits<std::uint64_t>::max();
+    std::uint64_t max_size_bytes   = 0;
+    std::uint64_t total_time_ns    = 0;
 
-    void add_migration(uint64_t size_bytes, uint64_t duration_ns) noexcept
+    void add_migration(std::uint64_t size_bytes, std::uint64_t duration_ns) noexcept
     {
         count++;
         total_size_bytes += size_bytes;
@@ -92,13 +92,13 @@ struct device_migration_summary
 
 struct migration_trigger_stats
 {
-    uint64_t gpu_page_fault = 0;
-    uint64_t cpu_page_fault = 0;
-    uint64_t prefetch       = 0;
-    uint64_t ttm_eviction   = 0;
-    uint64_t unknown        = 0;
+    std::uint64_t gpu_page_fault = 0;
+    std::uint64_t cpu_page_fault = 0;
+    std::uint64_t prefetch       = 0;
+    std::uint64_t ttm_eviction   = 0;
+    std::uint64_t unknown        = 0;
 
-    [[nodiscard]] uint64_t total() const noexcept
+    [[nodiscard]] std::uint64_t total() const noexcept
     {
         return gpu_page_fault + cpu_page_fault + prefetch + ttm_eviction + unknown;
     }
@@ -106,9 +106,9 @@ struct migration_trigger_stats
 
 struct unified_memory_data
 {
-    std::map<uint32_t, device_migration_summary> devices;
+    std::map<std::uint32_t, device_migration_summary> devices;
 
-    uint64_t                total_page_faults = 0;
+    std::uint64_t           total_page_faults = 0;
     migration_trigger_stats triggers;
     bool                    xnack_enabled = false;
 };
@@ -117,10 +117,10 @@ namespace detail
 {
 struct trigger_entry
 {
-    const char* kfd_name;  // nullptr marks the sentinel "unknown" row
-    const char* json_key;
-    const char* text_label;
-    uint64_t migration_trigger_stats::*member;
+    const char*   kfd_name;  // nullptr marks the sentinel "unknown" row
+    const char*   json_key;
+    const char*   text_label;
+    std::uint64_t migration_trigger_stats::*member;
 };
 
 inline constexpr std::array<trigger_entry, 5> kTriggerTable = { {
@@ -191,10 +191,10 @@ private:
                                                    const std::string& src_label,
                                                    const std::string& dst_label) const;
 
-    [[nodiscard]] std::optional<std::pair<uint32_t, uint32_t>> parse_node_id_pair(
-        const std::string& src_label, const std::string& dst_label) const;
+    [[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>>
+    parse_node_id_pair(const std::string& src_label, const std::string& dst_label) const;
 
-    [[nodiscard]] std::optional<uint32_t> resolve_gpu_bucket_id(
+    [[nodiscard]] std::optional<std::uint32_t> resolve_gpu_bucket_id(
         const std::string& src_label, const std::string& dst_label,
         migration_direction direction) const;
 
@@ -210,8 +210,8 @@ private:
     std::string                    m_output_dir;
     output_file_sink_view          m_output_sink;
 
-    std::unordered_map<uint32_t, agent_type>  m_node_type_cache;
-    std::unordered_map<uint32_t, std::string> m_gpu_name_cache;
+    std::unordered_map<std::uint32_t, agent_type>  m_node_type_cache;
+    std::unordered_map<std::uint32_t, std::string> m_gpu_name_cache;
 };
 
 }  // namespace trace_cache

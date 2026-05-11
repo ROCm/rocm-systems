@@ -17,7 +17,7 @@ namespace test
 {
 
 [[nodiscard]] inline agent
-make_cpu_agent(uint32_t node_id, std::string name = "AMD CPU")
+make_cpu_agent(std::uint32_t node_id, std::string name = "AMD CPU")
 {
     agent a{};
     a.type      = agent_type::CPU;
@@ -28,7 +28,7 @@ make_cpu_agent(uint32_t node_id, std::string name = "AMD CPU")
 }
 
 [[nodiscard]] inline agent
-make_gpu_agent(uint32_t node_id, std::string name = "gfx950")
+make_gpu_agent(std::uint32_t node_id, std::string name = "gfx950")
 {
     agent a{};
     a.type      = agent_type::GPU;
@@ -52,19 +52,20 @@ make_kfd_page_migrate_sample_raw_args(
     s.args_str        = std::move(args_str);
     s.category        = "rocm_kfd_page_migrate";
     s.device_id       = 0;
-    s.device_type     = static_cast<uint8_t>(agent_type::CPU);
+    s.device_type     = static_cast<std::uint8_t>(agent_type::CPU);
     s.value           = kDefaultMigrateSizeBytes;
     return s;
 }
 
 [[nodiscard]] inline kfd_sample
-make_kfd_page_migrate_sample(uint32_t src_node, uint32_t dst_node, uint64_t size_bytes,
-                             uint64_t duration_ns, uint32_t device_id,
-                             agent_type  device_type  = agent_type::CPU,
-                             std::string trigger_name = "PAGE_MIGRATE_PAGEFAULT_GPU")
+make_kfd_page_migrate_sample(std::uint32_t src_node, std::uint32_t dst_node,
+                             std::uint64_t size_bytes, std::uint64_t duration_ns,
+                             std::uint32_t device_id,
+                             agent_type    device_type  = agent_type::CPU,
+                             std::string   trigger_name = "PAGE_MIGRATE_PAGEFAULT_GPU")
 {
-    auto args = "0;;uint64_t;;start_address;;0x0;;"
-                "1;;uint64_t;;end_address;;0x1000;;"
+    auto args = "0;;std::uint64_t;;start_address;;0x0;;"
+                "1;;std::uint64_t;;end_address;;0x1000;;"
                 "2;;string;;src_agent;;" +
                 std::to_string(src_node) +
                 ";;"
@@ -74,13 +75,13 @@ make_kfd_page_migrate_sample(uint32_t src_node, uint32_t dst_node, uint64_t size
         make_kfd_page_migrate_sample_raw_args(std::move(args), std::move(trigger_name));
     s.end_timestamp = duration_ns;
     s.device_id     = device_id;
-    s.device_type   = static_cast<uint8_t>(device_type);
+    s.device_type   = static_cast<std::uint8_t>(device_type);
     s.value         = static_cast<double>(size_bytes);
     return s;
 }
 
 [[nodiscard]] inline kfd_sample
-make_kfd_page_fault_sample(uint32_t agent_id, bool is_read,
+make_kfd_page_fault_sample(std::uint32_t agent_id, bool is_read,
                            agent_type device_type = agent_type::GPU)
 {
     kfd_sample s;
@@ -91,7 +92,7 @@ make_kfd_page_fault_sample(uint32_t agent_id, bool is_read,
     s.args_str        = "";
     s.category        = "rocm_kfd_page_fault";
     s.device_id       = agent_id;
-    s.device_type     = static_cast<uint8_t>(device_type);
+    s.device_type     = static_cast<std::uint8_t>(device_type);
     s.value           = 0.0;
     return s;
 }

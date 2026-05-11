@@ -53,7 +53,7 @@ annotate_perfetto(::perfetto::EventContext&            ctx,
     }
 }  // close annotate_perfetto
 
-[[nodiscard]] std::optional<std::pair<uint32_t, uint32_t>>
+[[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>>
 parse_kfd_migration_node_pair(const std::string& args_str)
 {
     std::string src_agent;
@@ -77,31 +77,31 @@ parse_kfd_migration_node_pair(const std::string& args_str)
 
     if(src_agent.empty() || dst_agent.empty()) return std::nullopt;
 
-    auto parse_node_id = [](const std::string& value, uint32_t& out) {
+    auto parse_node_id = [](const std::string& value, std::uint32_t& out) {
         const auto* first = value.data();
         const auto* last  = value.data() + value.size();
         auto        res   = std::from_chars(first, last, out);
         return res.ec == std::errc{} && res.ptr == last;
     };
 
-    uint32_t src_node_id = 0;
-    uint32_t dst_node_id = 0;
+    std::uint32_t src_node_id = 0;
+    std::uint32_t dst_node_id = 0;
     if(!parse_node_id(src_agent, src_node_id) || !parse_node_id(dst_agent, dst_node_id))
         return std::nullopt;
 
     return std::pair{ src_node_id, dst_node_id };
 }
 
-[[nodiscard]] std::optional<uint32_t>
+[[nodiscard]] std::optional<std::uint32_t>
 resolve_kfd_migration_gpu_bucket(
-    const std::string&                              args_str,
-    const std::unordered_map<uint32_t, agent_type>& node_type_cache)
+    const std::string&                                   args_str,
+    const std::unordered_map<std::uint32_t, agent_type>& node_type_cache)
 {
     auto ids = parse_kfd_migration_node_pair(args_str);
     if(!ids.has_value()) return std::nullopt;
 
     const auto [src_node_id, dst_node_id] = *ids;
-    const auto find_type = [&](uint32_t node_id) -> std::optional<agent_type> {
+    const auto find_type = [&](std::uint32_t node_id) -> std::optional<agent_type> {
         auto it = node_type_cache.find(node_id);
         if(it == node_type_cache.end()) return std::nullopt;
         return it->second;

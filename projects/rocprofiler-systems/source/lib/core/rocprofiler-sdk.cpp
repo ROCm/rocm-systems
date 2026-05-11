@@ -527,9 +527,9 @@ get_buffered_domains()
 #if(ROCPROFILER_VERSION >= 10000)  // KFD tracing APIs available in headers
     // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with
     // undefined node IDs (0xFFFFFFFF). Guard at runtime to avoid abort().
-    constexpr uint32_t kfd_min_version  = 10202;  // 1.2.2
-    const auto         kfd_version      = get_version();
-    const bool kfd_supported_by_runtime = (kfd_version.formatted >= kfd_min_version);
+    constexpr std::uint32_t kfd_min_version = 10202;  // 1.2.2
+    const auto              kfd_version     = get_version();
+    const bool kfd_supported_by_runtime     = (kfd_version.formatted >= kfd_min_version);
 #endif
 
     for(const auto& itr : _domains)

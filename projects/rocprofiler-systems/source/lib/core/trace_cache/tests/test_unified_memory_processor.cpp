@@ -7,6 +7,7 @@
 #include "common/tests/filesystem.hpp"
 #include "core/trace_cache/unified_memory_processor.hpp"
 #include "unified_memory_test_helpers.hpp"
+#include <cstdint>
 
 #include <nlohmann/json.hpp>
 #include <timemory/settings.hpp>
@@ -77,10 +78,10 @@ struct ScopedUseOutputSuffix
 class UnifiedMemoryProcessorTest : public ::testing::Test
 {
 protected:
-    static constexpr int      kPid  = 12345;
-    static constexpr uint32_t kCpu0 = 0;
-    static constexpr uint32_t kGpu1 = 1;
-    static constexpr uint32_t kGpu2 = 2;
+    static constexpr int           kPid  = 12345;
+    static constexpr std::uint32_t kCpu0 = 0;
+    static constexpr std::uint32_t kGpu1 = 1;
+    static constexpr std::uint32_t kGpu2 = 2;
 
     void SetUp() override
     {
@@ -189,7 +190,7 @@ TEST(MigrationStats, ArithmeticAndSentinels)
     EXPECT_EQ(s.count, 0u);
     EXPECT_EQ(s.total_size_bytes, 0u);
     EXPECT_EQ(s.max_size_bytes, 0u);
-    EXPECT_EQ(s.min_size_bytes, std::numeric_limits<uint64_t>::max());  // sentinel
+    EXPECT_EQ(s.min_size_bytes, std::numeric_limits<std::uint64_t>::max());  // sentinel
     EXPECT_DOUBLE_EQ(s.avg_size_bytes(), 0.0);
     EXPECT_DOUBLE_EQ(s.bandwidth_gbps(), 0.0);  // zero-division guard
 
@@ -273,7 +274,7 @@ TEST_F(UnifiedMemoryProcessorTest,
     bool saw_gpu2 = false;
     for(auto const& dev : j["devices"])
     {
-        auto        device_id = dev["device_id"].get<uint32_t>();
+        auto        device_id = dev["device_id"].get<std::uint32_t>();
         auto const& h2d       = dev["migrations"]["host_to_device"];
 
         if(device_id == kGpu1)
@@ -472,8 +473,9 @@ TEST_F(UnifiedMemoryProcessorTest, FloatSanitizationProducesZeroSize)
         std::numeric_limits<double>::infinity(),
         -std::numeric_limits<double>::infinity(),
         -1.0,
-        0.0,                                                        // > 0 guard
-        static_cast<double>(std::numeric_limits<uint64_t>::max()),  // = 2^64 (UB if cast)
+        0.0,  // > 0 guard
+        static_cast<double>(
+            std::numeric_limits<std::uint64_t>::max()),  // = 2^64 (UB if cast)
     };
 
     for(double v : rejected_values)
@@ -494,7 +496,7 @@ TEST_F(UnifiedMemoryProcessorTest, FloatSanitizationProducesZeroSize)
 
 TEST_F(UnifiedMemoryProcessorTest, FloatJustBelowBoundaryIsAccepted)
 {
-    static constexpr uint64_t kLargestExactDoubleUint =
+    static constexpr std::uint64_t kLargestExactDoubleUint =
         1ULL << std::numeric_limits<double>::digits;
 
     feed_h2d_migrate_with_value(static_cast<double>(kLargestExactDoubleUint));
@@ -508,7 +510,7 @@ TEST_F(UnifiedMemoryProcessorTest, FloatJustBelowBoundaryIsAccepted)
     for(const char* k : { "total_size_bytes", "min_size_bytes", "max_size_bytes" })
     {
         ASSERT_TRUE(h2d[k].is_number_unsigned()) << "key=" << k;
-        EXPECT_EQ(h2d[k].get<uint64_t>(), kLargestExactDoubleUint) << "key=" << k;
+        EXPECT_EQ(h2d[k].get<std::uint64_t>(), kLargestExactDoubleUint) << "key=" << k;
     }
 }
 
@@ -517,8 +519,8 @@ TEST_F(UnifiedMemoryProcessorTest, NodeIdsExceedingUint32AreRejected)
     processor->handle(make_kfd_page_fault_sample(kGpu1, /*read=*/true));
 
     processor->handle(make_kfd_page_migrate_sample_raw_args(
-        "0;;uint64_t;;start_address;;0x0;;"
-        "1;;uint64_t;;end_address;;0x1000;;"
+        "0;;std::uint64_t;;start_address;;0x0;;"
+        "1;;std::uint64_t;;end_address;;0x1000;;"
         "2;;string;;src_agent;;9999999999;;"  // > UINT32_MAX
         "3;;string;;dst_agent;;1;;"));
 
