@@ -8,12 +8,8 @@ subtrees:
 
 - caption: Install
   entries:
-  - file: install/rocDecode-prerequisites.rst
-    title: Prerequisites
-  - file: install/rocDecode-clone-project.rst
-    title: Cloning the project
   - file: install/rocDecode-build-and-install.rst
-    title: Installing from source code
+    title: Build from source
 
 - caption: Conceptual
   entries:
