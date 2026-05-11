@@ -35,19 +35,14 @@ bool RunKernel(int argc, char* argv[], int count = 1) {
   Kernel test_kernel;
   TestAql* test_hsa = new TestHsa(&test_kernel);
   TEST_ASSERT(test_hsa != NULL);
-  if (test_hsa == NULL) return false;
   TestAql* test_aql = new Test(test_hsa);
   TEST_ASSERT(test_aql != NULL);
-  if (test_aql == NULL) {
-    delete test_hsa;
-    return false;
-  }
+  
 
   // Initialization of Hsa Runtime
   ret_val = test_aql->Initialize(argc, argv);
   if (ret_val == false) {
     std::cerr << "Error in the test initialization" << std::endl;
-    // TEST_ASSERT(ret_val);
     delete test_aql;
     return false;
   }

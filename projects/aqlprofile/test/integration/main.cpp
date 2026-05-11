@@ -91,29 +91,26 @@ class HIPWorkload : public IWorkload
 public:
     HIPWorkload(AgentInfo& agent, const std::vector<std::string>& counters)
     {
-        col = std::make_unique<Collection>(agent, counters);
+        collection = std::make_unique<Collection>(agent, counters);
     }
     virtual ~HIPWorkload() {};
     virtual std::string_view name() = 0;
 
-    std::map<std::string, int64_t> collect(Queue& queue)
-    {
-        assert(col);
-        return col->iterate(queue, *this);
-    }
-
     void printcounters(Queue& queue)
     {
+        assert(collection);
+        std::map<std::string, int64_t> entries = collection->iterate(queue, *this);
         std::cout << "Name: " << name() << std::endl;
-        for (auto& [name, v] : collect(queue)) std::cout << " - " << name << ": " << v << std::endl;
+        for (auto& [name, v] : entries) {
+             std::cout << " - " << name << ": " << v << std::endl;
+        }
     }
 
-    std::unique_ptr<Collection> col{nullptr};
+    std::unique_ptr<Collection> collection{nullptr};
     hipMemory src{DATA_SIZE};
     hipMemory dst{DATA_SIZE};
     Stream stream{};
 };
-
 
 __global__ void copy_kernel(float* a, const float* b)
 {
@@ -370,11 +367,6 @@ auto io_counters(std::string_view gfxip)
         counters.push_back("TCC_EA0_RDREQ_DRAM_CREDIT_STALL");
     }
     return counters;
-}
-
-void printcounters(const std::map<std::string, int64_t>& map)
-{
-    for (auto& [name, v] : map) std::cout << " - " << name << ": " << v << std::endl;
 }
 
 int main()

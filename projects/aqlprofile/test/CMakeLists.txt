@@ -33,6 +33,19 @@ find_package(Clang REQUIRED CONFIG
              PATH_SUFFIXES "llvm/lib/cmake/clang")
 
 ## Building test executable
+if(NOT DEFINED AQLPROFILE_TARGET)
+    find_library(
+        AQLPROFILE_TARGET
+        REQUIRED
+        NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile
+        HINTS /opt/rocm ${CMAKE_INSTALL_PREFIX}
+        PATHS /opt/rocm
+        PATH_SUFFIXES lib)
+    enable_testing()
+    include(CTest)
+endif()
+
+
 add_executable ( ${EXE_NAME} ${KERN_SRC} ${CTRL_SRC} ${UTIL_SRC} )
 target_include_directories ( ${EXE_NAME}
   PRIVATE
@@ -48,6 +61,7 @@ target_link_libraries( ${EXE_NAME}
       pthread
       aqlprofile::headers
       hsa-runtime64::hsa-runtime64
+      ${AQLPROFILE_TARGET}
       dl )
 install(TARGETS ${EXE_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME} COMPONENT tests)
 
@@ -71,6 +85,7 @@ list(LENGTH GPU_TARGETS list_count)
 if (${list_count} LESS_EQUAL 1)
   string(REPLACE " " ";" GPU_LIST "${GPU_TARGETS}")
   string(REPLACE "," ";" GPU_LIST "${GPU_TARGETS}")
+  message(STATUS "GPU_TARGETS is ${GPU_TARGETS}")
 else()
   set(GPU_LIST ${GPU_TARGETS})
 endif()

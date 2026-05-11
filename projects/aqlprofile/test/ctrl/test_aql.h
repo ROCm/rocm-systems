@@ -25,8 +25,6 @@
 #define TEST_CTRL_TEST_AQL_H_
 
 #include <hsa/hsa.h>
-#include <hsa/hsa_ven_amd_aqlprofile.h>
-
 #include "util/hsa_rsrc_factory.h"
 
 // Test AQL interface

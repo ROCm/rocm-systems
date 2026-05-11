@@ -35,6 +35,33 @@
 #include "pgen/test_pgen_sqtt.h"
 #include "simple_convolution/simple_convolution.h"
 
+#include <cstdlib>
+#include <cstring>
+
+namespace {
+
+// Minimal host memory callbacks for aqlprofile_pmc_create_packets (see also integration/counter.cpp).
+hsa_status_t new_tests_mem_alloc(void** ptr, uint64_t size,
+                                 aqlprofile_buffer_desc_flags_t /*flags*/, void* /*userdata*/) {
+  *ptr = std::malloc(static_cast<size_t>(size));
+  return *ptr ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+}
+
+void new_tests_mem_dealloc(void* ptr, void* /*userdata*/) { std::free(ptr); }
+
+hsa_status_t new_tests_mem_copy(void* dst, const void* src, size_t size, void* /*userdata*/) {
+  if (size == 0) return HSA_STATUS_SUCCESS;
+  std::memcpy(dst, src, size);
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t new_tests_pmc_data_cb(aqlprofile_pmc_event_t /*event*/, uint64_t /*counter_id*/,
+                                   uint64_t /*counter_value*/, void* /*userdata*/) {
+  return HSA_STATUS_SUCCESS;
+}
+
+}  // namespace
+
 char** pmc_argv(unsigned argc, const hsa_ven_amd_aqlprofile_event_t* events) {
   const int argv_pmc_size = 32;
   static unsigned argc_pmc = 0;
@@ -67,6 +94,7 @@ int main(int argc, char* argv[]) {
   const bool scan_enable = (getenv("AQLPROFILE_SCAN") != NULL);
   const bool trace_enable = (getenv("AQLPROFILE_TRACE") != NULL);
   const bool spm_enable = (getenv("AQLPROFILE_SPM") != NULL);
+  const bool new_tests = (getenv("AQLPROFILE_NEW_TESTS") != NULL);
   int scan_step = 1;
   const char* step_env = getenv("AQLPROFILE_SCAN_STEP");
   if (step_env != NULL) {
@@ -92,6 +120,83 @@ int main(int argc, char* argv[]) {
 
   TestHsa::HsaInstantiate();
   const hsa_ven_amd_aqlprofile_event_t* events_arr;
+
+  if (new_tests) {
+    HsaRsrcFactory* rsrc = TestHsa::HsaInstantiate();
+    const AgentInfo* gpu = nullptr;
+    if (!rsrc || !rsrc->GetGpuAgentInfo(TestHsa::HsaAgentId(), &gpu) || gpu == nullptr) {
+      std::cerr << "AQLPROFILE_NEW_TESTS: GPU agent not available" << std::endl;
+      TestHsa::HsaShutdown();
+      return 1;
+    }
+
+    aqlprofile_agent_info_t agent_info{};
+    agent_info.agent_gfxip = gpu->gfxip;
+    agent_info.xcc_num = gpu->xcc_num;
+    agent_info.se_num = gpu->se_num;
+    agent_info.cu_num = gpu->cu_num;
+    agent_info.shader_arrays_per_se = gpu->shader_arrays_per_se;
+
+    // Skeleton exercises both registration entry points; a full integration typically uses one.
+    aqlprofile_agent_handle_t agent_v0{};
+    if (aqlprofile_register_agent(&agent_v0, &agent_info) != HSA_STATUS_SUCCESS) {
+      std::cerr << "AQLPROFILE_NEW_TESTS: aqlprofile_register_agent failed" << std::endl;
+      TestHsa::HsaShutdown();
+      return 1;
+    }
+
+    aqlprofile_agent_info_v1_t agent_info_v1{};
+    agent_info_v1.agent_gfxip = gpu->gfxip;
+    agent_info_v1.xcc_num = gpu->xcc_num;
+    agent_info_v1.se_num = gpu->se_num;
+    agent_info_v1.cu_num = gpu->cu_num;
+    agent_info_v1.shader_arrays_per_se = gpu->shader_arrays_per_se;
+    agent_info_v1.domain = gpu->domain;
+    agent_info_v1.location_id = gpu->bdf_id;
+
+    aqlprofile_agent_handle_t agent_v1{};
+    if (aqlprofile_register_agent_info(&agent_v1, &agent_info_v1, AQLPROFILE_AGENT_VERSION_V1) !=
+        HSA_STATUS_SUCCESS) {
+      std::cerr << "AQLPROFILE_NEW_TESTS: aqlprofile_register_agent_info failed" << std::endl;
+      TestHsa::HsaShutdown();
+      return 1;
+    }
+
+    aqlprofile_pmc_event_flags_t ev_flags{};
+    ev_flags.raw = 0;
+    aqlprofile_pmc_event_t events_v2[1] = {};
+    events_v2[0].block_index = 0;
+    events_v2[0].event_id = 2;
+    events_v2[0].flags = ev_flags;
+    events_v2[0].block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+
+    aqlprofile_pmc_profile_t profile{};
+    profile.agent = agent_v1;
+    profile.events = events_v2;
+    profile.event_count = 1;
+
+    aqlprofile_handle_t pmc_handle{};
+    aqlprofile_pmc_aql_packets_t packets{};
+    hsa_status_t st = aqlprofile_pmc_create_packets(&pmc_handle, &packets, profile,
+                                                    new_tests_mem_alloc, new_tests_mem_dealloc,
+                                                    new_tests_mem_copy, nullptr);
+    (void)agent_v0;
+
+    if (st == HSA_STATUS_SUCCESS) {
+      packets.start_packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+      packets.stop_packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+      packets.read_packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+      // TODO: enqueue start_packet, kernel dispatch, stop_packet, read_packet on TestHsa::GetQueue()
+      (void)aqlprofile_pmc_iterate_data(pmc_handle, new_tests_pmc_data_cb, nullptr);
+      aqlprofile_pmc_delete_packets(pmc_handle);
+    } else {
+      std::cerr << "AQLPROFILE_NEW_TESTS: aqlprofile_pmc_create_packets failed" << std::endl;
+    }
+
+    //TODO: Identify how to start simple convolution test here.
+    TestHsa::HsaShutdown();
+    return (st == HSA_STATUS_SUCCESS) ? 0 : 1;
+  }
 
   // Run simple convolution test
   if (pmc_enable) {
