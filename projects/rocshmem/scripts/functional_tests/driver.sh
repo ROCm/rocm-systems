@@ -136,6 +136,20 @@ declare -A TEST_NUMBERS=(
   ["fence_putlargesmall"]="100"
   ["fence_fanout"]="101"
   ["fence_putwavenbichunks"]="102"
+  ["tile_put_contiguous"]="103"
+  ["tile_put_rowmajor"]="104"
+  ["tile_put_colmajor"]="105"
+  ["tile_put_arbitrary"]="106"
+  ["tile_put_wave_contiguous"]="107"
+  ["tile_put_wg_contiguous"]="108"
+  ["tile_get_contiguous"]="109"
+  ["tile_get_wg_contiguous"]="110"
+  ["tile_put_1d"]="111"
+  ["tile_get_1d"]="112"
+  ["tile_get_wave_contiguous"]="113"
+  ["tile_get_rowmajor"]="114"
+  ["tile_get_colmajor"]="115"
+  ["tile_get_arbitrary"]="116"
 )
 
 ExecTest() {
