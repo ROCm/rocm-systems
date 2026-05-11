@@ -1299,5 +1299,66 @@ TEST_F(NetIbMPITest, LongRunningMultiRank) {
 
 // G1.  BidirectionalSaturation — two opposing connections, full-duplex,
 //      50 iterations.
+TEST_F(NetIbMPITest, BidirectionalSaturation) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    // Forward: rank 1 → rank 0
+    DirectedConnection fwd;
+    SetupDirectedConnection(0, fwd, /*sender=*/1, /*receiver=*/0, /*mpiTag=*/800);
+
+    // Backward: rank 0 → rank 1
+    DirectedConnection bwd;
+    SetupDirectedConnection(0, bwd, /*sender=*/0, /*receiver=*/1, /*mpiTag=*/801);
+
+    const size_t sz = kSmallBufferSize;
+
+    // Separate buffers per connection — MR handles are not cross-comm portable
+    auto fwdBuf = makeHostBufferAutoGuard(malloc(sz));
+    auto bwdBuf = makeHostBufferAutoGuard(malloc(sz));
+    ASSERT_NE(fwdBuf.get(), nullptr);
+    ASSERT_NE(bwdBuf.get(), nullptr);
+
+    // Register for each connection this rank uses
+    void* fwdMh = nullptr;
+    void* bwdMh = nullptr;
+    {
+        void* fwdComm = (rank == fwd.senderRank) ? fwd.sendComm : fwd.recvComm;
+        void* bwdComm = (rank == bwd.senderRank) ? bwd.sendComm : bwd.recvComm;
+        if (fwdComm) ASSERT_EQ(RegisterMemory(fwdComm, fwdBuf.get(), sz, NCCL_PTR_HOST, &fwdMh), ncclSuccess);
+        if (bwdComm) ASSERT_EQ(RegisterMemory(bwdComm, bwdBuf.get(), sz, NCCL_PTR_HOST, &bwdMh), ncclSuccess);
+    }
+    static constexpr int kIters = 50;
+    for (int iter = 0; iter < kIters; iter++) {
+        // Forward direction
+        DoDirectedSendRecv(fwd, fwdBuf.get(), fwdBuf.get(), sz,
+                           /*tag=*/iter, fwdMh, fwdMh, iter * 2);
+        // Backward direction
+        DoDirectedSendRecv(bwd, bwdBuf.get(), bwdBuf.get(), sz,
+                           /*tag=*/iter, bwdMh, bwdMh, iter * 2 + 1);
+    }
+
+    // Deregister MR before closing connections
+    if (fwdMh) {
+        void* c = (rank == fwd.senderRank) ? fwd.sendComm : fwd.recvComm;
+        DeregisterMemory(c, fwdMh);
+    }
+    if (bwdMh) {
+        void* c = (rank == bwd.senderRank) ? bwd.sendComm : bwd.recvComm;
+        DeregisterMemory(c, bwdMh);
+    }
+
+    CloseDirectedConnection(fwd);
+    CloseDirectedConnection(bwd);
+}
+
+// =====================================================================
+//  Group F: Endurance (2-rank)
+// =====================================================================
+
+// F1.  LongRunningEndurance — 10000 transfers on a single connection,
+//      tag cycling, RDMA checkpoints.
 
 #endif /* MPI_TESTS_ENABLED */
