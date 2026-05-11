@@ -51,8 +51,8 @@ struct blocking_gotcha : comp::base<blocking_gotcha, void>
     static void shutdown();
 
     template <size_t Idx, typename Ret, typename... Args>
-    std::enable_if_t<(Idx <= maybe_post_block_max_idx), Ret> operator()(
-        gotcha_index<Idx>, Ret (*)(Args...), Args...) const noexcept;
+        requires(Idx <= maybe_post_block_max_idx)
+    Ret operator()(gotcha_index<Idx>, Ret (*)(Args...), Args...) const noexcept;
 
     int operator()(gotcha_index<sigwait_idx>, int (*)(const sigset_t*, int*),
                    const sigset_t*, int*) const noexcept;
