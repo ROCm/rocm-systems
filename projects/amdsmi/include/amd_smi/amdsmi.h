@@ -5491,11 +5491,12 @@ amdsmi_status_t amdsmi_get_gpu_ecc_count(amdsmi_processor_handle processor_handl
  *  enabled_mask, this function will write bits to memory pointed to by
  *  @p enabled_blocks. Upon a successful call, @p enabled_blocks can then be
  *  AND'd with elements of the ::amdsmi_gpu_block_t ennumeration to determine if
- *  the corresponding block has ECC enabled. Note that whether a block has ECC
- *  enabled or not in the device is independent of whether there is kernel
- *  support for error counting for that block. Although a block may be enabled,
- *  but there may not be kernel support for reading error counters for that
- *  block.
+ *  the corresponding block has ECC enabled.
+ *
+ *  @note Whether a block has ECC enabled or not in the device is independent
+ *  of whether there is kernel support for error counting for that block.
+ *  Although a block may be enabled, but there may not be kernel support for
+ *  reading error counters for that block.
  *
  *  @param[in] processor_handle a processor handle
  *
