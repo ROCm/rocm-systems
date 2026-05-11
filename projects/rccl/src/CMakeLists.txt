@@ -108,7 +108,7 @@ set(SRC_FILES
   include/mnnvl.h
   include/nccl_common.h
   include/nccl_device.h
-  include/net_device.h
+  include/nccl_device/net_device.h
   include/net.h
   include/net_ib_cast_inspect.h
   include/nvmlwrap.h
@@ -150,7 +150,7 @@ set(SRC_FILES
   include/nccl_device/coop.h
   include/nccl_device/core.h
   include/nccl_device/ll_a2a.h
-  include/nccl_device/mem_barrier.h
+  include/nccl_device/lsa_barrier.h
   include/nccl_device/ptr.h
   include/nccl_device/rccl_ptr.h
   include/nccl_device/utility.h
@@ -160,8 +160,8 @@ set(SRC_FILES
   include/nccl_device/impl/core__types.h
   include/nccl_device/impl/ll_a2a__funcs.h
   include/nccl_device/impl/ll_a2a__types.h
-  include/nccl_device/impl/mem_barrier__funcs.h
-  include/nccl_device/impl/mem_barrier__types.h
+  include/nccl_device/impl/lsa_barrier__funcs.h
+  include/nccl_device/impl/lsa_barrier__types.h
   include/nccl_device/impl/ptr__funcs.h
   include/nccl_device/impl/ptr__types.h
   include/npkit/npkit.h
@@ -254,7 +254,7 @@ set(SRC_FILES
   misc/proxy_trace/proxy_trace.cc
   nccl_device/core.cc
   nccl_device/ll_a2a.cc
-  nccl_device/mem_barrier.cc
+  nccl_device/lsa_barrier.cc
   plugin/net.cc
   plugin/plugin_open.cc
   plugin/profiler.cc

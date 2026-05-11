@@ -25,25 +25,26 @@
 #define NVTX_SID_CommAbort            3 // same schema as NVTX_SID_CommInitRank
 #define NVTX_SID_AllGather            4
 #define NVTX_SID_AllReduce            5
-#define NVTX_SID_AlltoAll             6
-#define NVTX_SID_AlltoAllv            7
-#define NVTX_SID_Broadcast            8
-#define NVTX_SID_Gather               9
-#define NVTX_SID_MSCCL                10
-#define NVTX_SID_ReduceScatter        11
-#define NVTX_SID_Reduce               12
-#define NVTX_SID_Scatter              13
-#define NVTX_SID_Send                 14
-#define NVTX_SID_Recv                 15
-#define NVTX_SID_CommInitRankConfig   16 // same schema as NVTX_SID_CommInitRank
-#define NVTX_SID_CommInitRankScalable 17 // same schema as NVTX_SID_CommInitRank
-#define NVTX_SID_CommSplit            18
-#define NVTX_SID_CommFinalize         19
-#define NVTX_SID_CommShrink           20
+#define NVTX_SID_Broadcast            6
+#define NVTX_SID_ReduceScatter        7
+#define NVTX_SID_Reduce               8
+#define NVTX_SID_Send                 9
+#define NVTX_SID_Recv                 10
+#define NVTX_SID_CommInitRankConfig   11 // same schema as NVTX_SID_CommInitRank
+#define NVTX_SID_CommInitRankScalable 12 // same schema as NVTX_SID_CommInitRank
+#define NVTX_SID_CommSplit            13
+#define NVTX_SID_CommFinalize         14
+#define NVTX_SID_CommShrink           15
+#define NVTX_SID_AlltoAll             16
+#define NVTX_SID_Gather               17
+#define NVTX_SID_Scatter              18
+#define NVTX_SID_CommRevoke           19 // same schema as NVTX_SID_CommInitRank
+#define NVTX_SID_AlltoAllv            20
+#define NVTX_SID_MSCCL                21
 // When adding new schema IDs, DO NOT re-use/overlap with the enum schema ID below!
 
 // Define static schema ID for the reduction operation.
-#define NVTX_PAYLOAD_ENTRY_NCCL_REDOP 21 + NVTX_PAYLOAD_ENTRY_TYPE_SCHEMA_ID_STATIC_START
+#define NVTX_PAYLOAD_ENTRY_NCCL_REDOP 22 + NVTX_PAYLOAD_ENTRY_TYPE_SCHEMA_ID_STATIC_START
 
 extern const nvtxDomainHandle_t ncclNvtxDomainHandle;
 

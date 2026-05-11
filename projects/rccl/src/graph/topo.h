@@ -164,6 +164,7 @@ struct ncclTopoNode {
     }gpu;
     struct {
       int dev; // Plugin dev number
+      uint64_t pciId;
       uint64_t asic;
       int port;
       float bw;
@@ -225,6 +226,7 @@ struct ncclTopoSystem {
   int romeTopoModelIdx;
   /* Preset matchers assume uniform ranks per host; otherwise use generic search in ncclTopoCompute */
   bool skipPresetTopoMatching;
+  int inter;
 };
 
 ncclResult_t ncclTopoGetNode(struct ncclTopoSystem* system, struct ncclTopoNode** node, int type, uint64_t id);
