@@ -17,6 +17,7 @@
 #include "HostBufferHelpers.hpp"
 #include "nccl.h"
 #include "net.h"
+#include "plugin/nccl_net.h"
 #include <vector>
 #include <memory>
 #include <cstring>
@@ -24,6 +25,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <map>
+#include <string>
+#include <dirent.h>
+#include <unistd.h>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -595,6 +604,162 @@ protected:
         }
     }
 };
+
+// ============================================================================
+// CTS hw_counters helpers (for CtsDepthStress and friends)
+//
+// Read per-IB-device InfiniBand hw_counters from
+// /sys/class/infiniband/<dev>/ports/1/hw_counters and compute deltas for
+// CTS-relevant counters (cts_pkts, cts_retx, cts_ack_timeout, ...).
+// ============================================================================
+namespace NetIbCts {
+
+using CounterMap = std::map<std::string, long long>;
+
+inline const std::vector<std::string>& kCtsKeywords() {
+    static const std::vector<std::string> v = {
+        "cts_pkts", "cts_bytes",
+        "cts_retx",          // retransmit = overflow signal
+        "cts_ack_timeout",   // ACK timeout = overflow signal
+        "cts_miss", "cts_cache", "cts_match",
+        "nak", "rdma_ccl",
+    };
+    return v;
+}
+
+inline bool isCtsRelevant(const std::string& name) {
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    for (const auto& kw : kCtsKeywords())
+        if (lower.find(kw) != std::string::npos) return true;
+    return false;
+}
+
+inline CounterMap readHwCounters(const std::string& ibdev) {
+    CounterMap result;
+    const std::string base =
+        "/sys/class/infiniband/" + ibdev + "/ports/1/hw_counters";
+    DIR* dir = opendir(base.c_str());
+    if (!dir) return result;
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != nullptr) {
+        if (ent->d_name[0] == '.') continue;
+        std::ifstream f(base + "/" + ent->d_name);
+        long long val = 0;
+        if (f >> val)
+            result[ibdev + "/" + ent->d_name] = val;
+    }
+    closedir(dir);
+    return result;
+}
+
+inline std::vector<std::string> listIbDevices() {
+    std::vector<std::string> devs;
+    DIR* dir = opendir("/sys/class/infiniband");
+    if (!dir) return devs;
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != nullptr)
+        if (ent->d_name[0] != '.') devs.push_back(ent->d_name);
+    closedir(dir);
+    std::sort(devs.begin(), devs.end());
+    return devs;
+}
+
+inline CounterMap takeSnapshot() {
+    CounterMap snap;
+    for (const auto& dev : listIbDevices()) {
+        auto m = readHwCounters(dev);
+        snap.insert(m.begin(), m.end());
+    }
+    return snap;
+}
+
+inline void printDelta(int rank,
+                       const std::string& fromLabel,
+                       const std::string& toLabel,
+                       const CounterMap& before,
+                       const CounterMap& after) {
+    struct Row { std::string name; long long vb, va, delta; };
+    std::vector<Row> rows;
+    for (const auto& kv : after) {
+        if (!isCtsRelevant(kv.first)) continue;
+        long long vb = 0;
+        auto it = before.find(kv.first);
+        if (it != before.end()) vb = it->second;
+        long long delta = kv.second - vb;
+        if (delta != 0)
+            rows.push_back({kv.first, vb, kv.second, delta});
+    }
+
+    const int wName = 55, wVal = 12, wDelta = 12;
+    std::cout << "\n[Rank " << rank << "] "
+              << fromLabel << " -> " << toLabel << "\n";
+    if (rows.empty()) {
+        std::cout << "  (no CTS-relevant changes)\n" << std::flush;
+        return;
+    }
+    std::cout << "  " << std::left  << std::setw(wName)  << "counter"
+              <<         std::right << std::setw(wVal)   << "before"
+              <<         std::right << std::setw(wVal)   << "after"
+              <<         std::right << std::setw(wDelta) << "delta"
+              << "\n  " << std::string(wName + wVal + wVal + wDelta, '-') << "\n";
+    for (const auto& r : rows)
+        std::cout << "  " << std::left  << std::setw(wName)  << r.name
+                  <<         std::right << std::setw(wVal)   << r.vb
+                  <<         std::right << std::setw(wVal)   << r.va
+                  <<         std::right << std::setw(wDelta) << ("+" + std::to_string(r.delta))
+                  << "\n";
+    std::cout << std::flush;
+}
+
+struct SnapSummary {
+    long long pkts        = 0;
+    long long bytes       = 0;
+    long long retx_pkts   = 0;  // cts_retx_pkts   - overflow signal
+    long long ack_timeout = 0;  // cts_ack_timeout - overflow signal
+};
+
+inline SnapSummary calcSummary(const CounterMap& before, const CounterMap& after) {
+    SnapSummary s;
+    for (const auto& kv : after) {
+        auto it = before.find(kv.first);
+        long long d = kv.second - (it != before.end() ? it->second : 0LL);
+        if (d == 0) continue;
+        const std::string& n = kv.first;
+        if (n.find("cts_retx_pkts")    != std::string::npos) s.retx_pkts   += d;
+        if (n.find("cts_ack_timeout")  != std::string::npos) s.ack_timeout += d;
+        if (n.find("cts_pkts")         != std::string::npos &&
+            n.find("retx")             == std::string::npos) s.pkts        += d;
+        if (n.find("cts_bytes")        != std::string::npos &&
+            n.find("retx")             == std::string::npos) s.bytes       += d;
+    }
+    return s;
+}
+
+inline void printSummary(int rank,
+                         const std::string& label,
+                         int connsDone,
+                         int qpDepth,
+                         const CounterMap& before,
+                         const CounterMap& after) {
+    auto s = calcSummary(before, after);
+    long long bpp = s.pkts > 0 ? s.bytes / s.pkts : 0;
+
+    std::cout << "[Rank " << rank << "]"
+              << "  conns=" << std::setw(4) << connsDone
+              << "  entries=" << std::setw(6) << (connsDone * qpDepth)
+              << "  cts_pkts=" << std::setw(6) << s.pkts
+              << "  bytes/pkt=" << bpp
+              << "  retx=" << s.retx_pkts
+              << "  ack_timeout=" << s.ack_timeout;
+    if (s.retx_pkts > 0 || s.ack_timeout > 0) {
+        std::cout << "  <<< OVERFLOW at ~"
+                  << connsDone * qpDepth << " entries >>>";
+    }
+    std::cout << "  [" << label << "]\n" << std::flush;
+}
+
+}  // namespace NetIbCts
 
 #endif /* MPI_TESTS_ENABLED */
 

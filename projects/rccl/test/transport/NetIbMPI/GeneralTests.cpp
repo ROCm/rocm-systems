@@ -1418,4 +1418,280 @@ TEST_F(NetIbMPITest, MultiRecvShuffled) {
     // connGuard closes comms on scope exit
 }
 
+// CTS Cache Overflow Stress Test
+//
+// Creates N P2P connections with D outstanding recv requests each and
+// monitors per-device InfiniBand hw_counters for CTS retransmits and
+// ACK timeouts. With RCCL_IB_P2P_DISABLE_CTS=0 the AINIC CTS match
+// table overflows around ~256 entries and the test hangs in the drain
+// phase; with RCCL_IB_P2P_DISABLE_CTS=1 the test passes cleanly.
+//
+// Tunables (env vars):
+//   CTS_NUM_CONNS  - number of P2P connections (default 32)
+//   CTS_QP_DEPTH   - outstanding recvs per connection (default 256)
+//   CTS_SNAP_EVERY - sample hw_counters every K connections (default 1)
+TEST_F(NetIbMPITest, CtsDepthStress) {
+    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+                                         MPITestConstants::kNoProcessLimit,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Need at least " << kMinProcessesForMPI << " MPI ranks";
+
+    net_ = &rocmNetIb;
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    const int rank        = MPIEnvironment::world_rank;
+    const int kMaxRetries = 10000000;
+
+    const int numConns  = []{ auto* e = getenv("CTS_NUM_CONNS");  return e ? atoi(e) : 32;  }();
+    const int qpDepth   = []{ auto* e = getenv("CTS_QP_DEPTH");   return e ? atoi(e) : 256; }();
+    const int snapEvery = []{ auto* e = getenv("CTS_SNAP_EVERY"); return e ? atoi(e) : 1;   }();
+    const int totalEntries = numConns * qpDepth;
+    const size_t bufSize   = 4096;
+    const int    baseTag   = 100;
+
+    std::cout << "[Rank " << rank << "] CtsDepthStress:"
+              << "  numConns=" << numConns
+              << "  qpDepth=" << qpDepth
+              << "  totalCtsEntries=" << totalEntries
+              << "  snapEvery=" << snapEvery
+              << "  ndev=" << ndev
+              << "\n" << std::flush;
+
+    struct Conn {
+        void* sendComm   = nullptr;
+        void* recvComm   = nullptr;
+        void* listenComm = nullptr;
+        void* sendMhandle = nullptr;
+        std::vector<void*> recvMhandles;
+        std::vector<void*> recvBufs;
+        std::vector<void*> recvRequests;
+    };
+
+    ncclNet_ctxt_t devCtxt = {};
+
+    using namespace NetIbCts;
+    CounterMap snapInit = takeSnapshot();
+    std::cout << "[Rank " << rank << "] snapshot: Init\n" << std::flush;
+
+    std::vector<Conn> conns(numConns);
+
+    if (rank == 0) {
+        std::vector<ncclNetHandle_t> handles(numConns);
+        std::cout << "[Rank 0] listen() x " << numConns << "...\n" << std::flush;
+        for (int i = 0; i < numConns; i++) {
+            devCtxt.chId = i % 32;
+            ASSERT_EQ(net_->listen(initCtx_, i % ndev, &handles[i],
+                                   &conns[i].listenComm), ncclSuccess)
+                << "listen failed conn=" << i;
+            ASSERT_EQ(rcclRocmNetP2pPolicy(&handles[i], 1), ncclSuccess);
+            MPI_Send(&handles[i], sizeof(ncclNetHandle_t), MPI_BYTE,
+                     1, i, MPI_COMM_WORLD);
+        }
+
+        std::cout << "[Rank 0] accept() x " << numConns << "...\n" << std::flush;
+        for (int i = 0; i < numConns; i++) {
+            devCtxt.chId = i % 32;
+            int retries  = 0;
+            while (!conns[i].recvComm) {
+                net_->accept(conns[i].listenComm, &conns[i].recvComm,
+                             (ncclNetDeviceHandle_t**)&devCtxt);
+                ++retries;
+                if (retries % 1000 == 0) usleep(100);
+                ASSERT_LT(retries, kMaxRetries) << "accept timeout conn=" << i;
+            }
+            conns[i].recvBufs.resize(qpDepth);
+            conns[i].recvMhandles.resize(qpDepth, nullptr);
+            conns[i].recvRequests.resize(qpDepth, nullptr);
+            for (int d = 0; d < qpDepth; d++) {
+                conns[i].recvBufs[d] = malloc(bufSize);
+                ASSERT_NE(conns[i].recvBufs[d], nullptr);
+                ASSERT_EQ(RegisterMemory(conns[i].recvComm,
+                                         conns[i].recvBufs[d], bufSize,
+                                         NCCL_PTR_HOST,
+                                         &conns[i].recvMhandles[d]), ncclSuccess)
+                    << "regMr failed conn=" << i << " depth=" << d;
+            }
+        }
+        std::cout << "[Rank 0] all " << numConns << " connections up\n" << std::flush;
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Posting all recvs fills the CTS match table; sample after each
+        // connection batch so we can spot the overflow as soon as it occurs.
+        CounterMap snapPrev = takeSnapshot();
+        std::cout << "[Rank 0] snapshot: BeforePostRecv\n"
+                  << "[Rank 0] filling " << numConns << " x " << qpDepth
+                  << " = " << totalEntries << " CTS entries...\n" << std::flush;
+
+        bool overflowDetected = false;
+        int  overflowAtConn   = -1;
+
+        for (int i = 0; i < numConns; i++) {
+            for (int d = 0; d < qpDepth; d++) {
+                void*  rb[1]  = {conns[i].recvBufs[d]};
+                size_t rs[1]  = {bufSize};
+                int    rt[1]  = {baseTag + i * qpDepth + d};
+                void*  rh[1]  = {conns[i].recvMhandles[d]};
+                ASSERT_EQ(PostRecv(conns[i].recvComm, 1, rb, rs, rt, rh,
+                                   &conns[i].recvRequests[d]), ncclSuccess)
+                    << "PostRecv failed conn=" << i << " depth=" << d;
+                ASSERT_NE(conns[i].recvRequests[d], nullptr);
+            }
+
+            if ((i + 1) % snapEvery == 0) {
+                CounterMap snapNow = takeSnapshot();
+                printSummary(rank, "filling", i + 1, qpDepth, snapPrev, snapNow);
+                auto s = calcSummary(snapPrev, snapNow);
+                if ((s.retx_pkts > 0 || s.ack_timeout > 0) && !overflowDetected) {
+                    overflowDetected = true;
+                    overflowAtConn   = i + 1;
+                    printDelta(rank, "BeforePostRecv", "OverflowPoint",
+                               snapPrev, snapNow);
+                }
+            }
+        }
+
+        CounterMap snapAfterRecv = takeSnapshot();
+        std::cout << "\n[Rank 0] snapshot: AfterPostRecv\n" << std::flush;
+        printDelta(rank, "BeforePostRecv", "AfterPostRecv", snapPrev, snapAfterRecv);
+        printSummary(rank, "FINAL after all PostRecv", numConns, qpDepth,
+                     snapPrev, snapAfterRecv);
+
+        if (!overflowDetected)
+            std::cout << "[Rank 0] No overflow at " << totalEntries
+                      << " entries. Try CTS_NUM_CONNS=" << numConns * 2 << "\n"
+                      << std::flush;
+        else
+            std::cout << "[Rank 0] Overflow confirmed at conn=" << overflowAtConn
+                      << " (~" << overflowAtConn * qpDepth << " entries)\n"
+                      << std::flush;
+
+        // Both ranks always proceed to drain. If overflow was detected above,
+        // WaitForCompletion will hang here -- that is the expected observable
+        // behavior of the CTS cache overflow.
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        std::cout << "[Rank 0] draining " << numConns << " connections"
+                  << (overflowDetected ? " (OVERFLOW - expect hang)" : "")
+                  << "...\n" << std::flush;
+
+        int totalCompleted = 0;
+        for (int i = 0; i < numConns; i++) {
+            for (int d = 0; d < qpDepth; d++) {
+                int sizes[1] = {0};
+                if (WaitForCompletion(conns[i].recvRequests[d], sizes, 30000)
+                        != ncclSuccess) {
+                    std::cout << "[Rank 0] TIMEOUT conn=" << i
+                              << " depth=" << d
+                              << " total_completed=" << totalCompleted << "\n"
+                              << std::flush;
+                    goto drain_done;
+                }
+                totalCompleted++;
+            }
+            if ((i + 1) % 8 == 0)
+                std::cout << "[Rank 0] drained " << (i+1) << "/" << numConns
+                          << " (" << totalCompleted << " completions)\n"
+                          << std::flush;
+        }
+        drain_done:
+        std::cout << "[Rank 0] " << totalCompleted << "/" << totalEntries
+                  << " completions done\n" << std::flush;
+
+        CounterMap snapAfterBurst = takeSnapshot();
+        std::cout << "[Rank 0] snapshot: AfterBurst\n" << std::flush;
+        printDelta(rank, "AfterPostRecv", "AfterBurst", snapAfterRecv, snapAfterBurst);
+        printSummary(rank, "AfterBurst delta", numConns, qpDepth,
+                     snapAfterRecv, snapAfterBurst);
+        printDelta(rank, "Init", "Full run", snapInit, snapAfterBurst);
+        printSummary(rank, "Full run", numConns, qpDepth, snapInit, snapAfterBurst);
+
+        EXPECT_EQ(totalCompleted, totalEntries);
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        std::cout << "[Rank 0] cleanup...\n" << std::flush;
+        for (int i = 0; i < numConns; i++) {
+            for (int d = 0; d < qpDepth; d++) {
+                if (conns[i].recvMhandles[d])
+                    DeregisterMemory(conns[i].recvComm, conns[i].recvMhandles[d]);
+                if (conns[i].recvBufs[d]) free(conns[i].recvBufs[d]);
+            }
+            if (conns[i].recvComm)   CloseRecvComm(conns[i].recvComm);
+            if (conns[i].listenComm) CloseListenComm(conns[i].listenComm);
+        }
+        std::cout << "[Rank 0] cleanup done\n" << std::flush;
+
+    } else {
+        // Rank 1: sender side
+        void* sendBuf = malloc(bufSize);
+        ASSERT_NE(sendBuf, nullptr);
+        memset(sendBuf, 0xab, bufSize);
+
+        std::cout << "[Rank 1] connect() x " << numConns << "...\n" << std::flush;
+        for (int i = 0; i < numConns; i++) {
+            devCtxt.chId = i % 32;
+            ncclNetHandle_t handle;
+            MPI_Recv(&handle, sizeof(ncclNetHandle_t), MPI_BYTE,
+                     0, i, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            int retries = 0;
+            while (!conns[i].sendComm) {
+                net_->connect(initCtx_, i % ndev, &handle, &conns[i].sendComm,
+                              (ncclNetDeviceHandle_t**)&devCtxt);
+                ++retries;
+                if (retries % 1000 == 0) usleep(100);
+                ASSERT_LT(retries, kMaxRetries) << "connect timeout conn=" << i;
+            }
+            ASSERT_EQ(RegisterMemory(conns[i].sendComm, sendBuf, bufSize,
+                                     NCCL_PTR_HOST, &conns[i].sendMhandle), ncclSuccess)
+                << "regMr failed conn=" << i;
+        }
+        std::cout << "[Rank 1] all " << numConns << " connections up\n" << std::flush;
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        int totalCompleted = 0;
+        for (int i = 0; i < numConns; i++) {
+            std::vector<void*> sendRequests(qpDepth, nullptr);
+            for (int d = 0; d < qpDepth; d++) {
+                int sendTag = baseTag + i * qpDepth + d;
+                PostSendWithRetry(conns[i].sendComm, sendBuf, bufSize,
+                                  sendTag, conns[i].sendMhandle,
+                                  &sendRequests[d]);
+                ASSERT_NE(sendRequests[d], nullptr)
+                    << "null send request conn=" << i << " depth=" << d;
+            }
+            for (int d = 0; d < qpDepth; d++) {
+                int sizes[1] = {0};
+                if (WaitForCompletion(sendRequests[d], sizes, 30000) != ncclSuccess) {
+                    std::cout << "[Rank 1] TIMEOUT conn=" << i
+                              << " depth=" << d
+                              << " total_completed=" << totalCompleted << "\n"
+                              << std::flush;
+                    goto sender_drain_done;
+                }
+                totalCompleted++;
+            }
+        }
+        sender_drain_done:
+        std::cout << "[Rank 1] " << totalCompleted << "/" << totalEntries
+                  << " sends completed\n" << std::flush;
+        EXPECT_EQ(totalCompleted, totalEntries);
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        for (int i = 0; i < numConns; i++) {
+            if (conns[i].sendMhandle)
+                DeregisterMemory(conns[i].sendComm, conns[i].sendMhandle);
+            if (conns[i].sendComm) CloseSendComm(conns[i].sendComm);
+        }
+        free(sendBuf);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
