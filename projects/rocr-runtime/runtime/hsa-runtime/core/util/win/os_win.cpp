@@ -85,10 +85,10 @@ LibHandle LoadLib(std::string filename) {
     if (!GetModuleHandleExA(
             GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
             reinterpret_cast<LPCSTR>(ret), &pinned)) {
-      // Pinning failed, but library is still loaded - continue anyway
+      debug_print("LoadLib(%s) pinning failed: error %lu\n", filename.c_str(), GetLastError());
     }
   }
-  return *(LibHandle*)&ret;
+  return reinterpret_cast<LibHandle>(ret);
 }
 
 void* GetExportAddress(LibHandle lib, std::string export_name) {
