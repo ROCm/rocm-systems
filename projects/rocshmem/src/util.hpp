@@ -499,14 +499,12 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 
 
 // ==============================================================================
-// CORE CHUNKING HELPERS (Fully Separated Put & Get Pipelines)
+// CORE CHUNKING HELPER
 // ==============================================================================
 
-template <int ChunkSize, CachePolicy Policy, int UNROLL>
-__device__ __forceinline__ void copy_chunk_put(uint8_t*& dst_bytes, uint8_t*& src_bytes,
-                                               size_t& size, int tid, int block_size) {
-  // FAST PATH: If the remaining size is smaller than this chunk, skip
-  // everything instantly.
+template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int UNROLL>
+__device__ __forceinline__ void copy_chunk(uint8_t*& dst_bytes, uint8_t*& src_bytes,
+                                           size_t& size, int tid, int block_size) {
   if (size < ChunkSize) return;
 
   int cpy_size = size / ChunkSize;
@@ -514,69 +512,25 @@ __device__ __forceinline__ void copy_chunk_put(uint8_t*& dst_bytes, uint8_t*& sr
   int unroll_limit =
       cpy_size >= (block_size * UNROLL) ? cpy_size - (block_size * UNROLL) : -1;
 
-  using T = typename AsmAccess<ChunkSize, Policy>::type;
+  using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
+  using T = typename Acc::type;
 
-  // 1. Unrolled Main Loop
+  // 1. Unrolled Main Loop: issue all loads first, then all stores
   for (; i <= unroll_limit; i += block_size * UNROLL) {
     T regs[UNROLL];
-
-    // Phase 1: Local reads (C++)
     #pragma unroll
     for (int u = 0; u < UNROLL; ++u) {
-      regs[u] = *reinterpret_cast<T*>(src_bytes + (i + u * block_size) * ChunkSize);
+      regs[u] = Acc::load(src_bytes + (i + u * block_size) * ChunkSize);
     }
-    // Phase 2: Remote writes (ASM)
     #pragma unroll
     for (int u = 0; u < UNROLL; ++u) {
-      AsmAccess<ChunkSize, Policy>::store(dst_bytes + (i + u * block_size) * ChunkSize,
-                                          regs[u]);
+      Acc::store(dst_bytes + (i + u * block_size) * ChunkSize, regs[u]);
     }
   }
 
-  // 2. Sequential Tail Processing
+  // 2. Tail
   for (; i < cpy_size; i += block_size) {
-    T val = *reinterpret_cast<T*>(src_bytes + i * ChunkSize);
-    AsmAccess<ChunkSize, Policy>::store(dst_bytes + i * ChunkSize, val);
-  }
-
-  // 3. Update Pointers & Remaining Size
-  int bytes_processed = cpy_size * ChunkSize;
-  size -= bytes_processed;
-  dst_bytes += bytes_processed;
-  src_bytes += bytes_processed;
-}
-
-template <int ChunkSize, CachePolicy Policy, int UNROLL>
-__device__ __forceinline__ void copy_chunk_get(uint8_t*& dst_bytes, uint8_t*& src_bytes,
-                                               size_t& size, int tid, int block_size) {
-  if (size < ChunkSize) return;
-
-  int cpy_size = size / ChunkSize;
-  int i = tid;
-  int unroll_limit =
-      cpy_size >= (block_size * UNROLL) ? cpy_size - (block_size * UNROLL) : -1;
-
-  using T = typename AsmAccess<ChunkSize, Policy>::type;
-
-  for (; i <= unroll_limit; i += block_size * UNROLL) {
-    T regs[UNROLL];
-
-    // Phase 1: Remote reads (ASM)
-    #pragma unroll
-    for (int u = 0; u < UNROLL; ++u) {
-      regs[u] = AsmAccess<ChunkSize, Policy>::load(src_bytes +
-                                                   (i + u * block_size) * ChunkSize);
-    }
-    // Phase 2: Local writes (C++)
-    #pragma unroll
-    for (int u = 0; u < UNROLL; ++u) {
-      *reinterpret_cast<T*>(dst_bytes + (i + u * block_size) * ChunkSize) = regs[u];
-    }
-  }
-
-  for (; i < cpy_size; i += block_size) {
-    T val = AsmAccess<ChunkSize, Policy>::load(src_bytes + i * ChunkSize);
-    *reinterpret_cast<T*>(dst_bytes + i * ChunkSize) = val;
+    Acc::store(dst_bytes + i * ChunkSize, Acc::load(src_bytes + i * ChunkSize));
   }
 
   int bytes_processed = cpy_size * ChunkSize;
@@ -585,35 +539,31 @@ __device__ __forceinline__ void copy_chunk_get(uint8_t*& dst_bytes, uint8_t*& sr
   src_bytes += bytes_processed;
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put, CachePolicy Policy = CachePolicy::SystemScope,
-          int UNROLL = 8>
+template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 8>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src,
                                                              size_t size) {
   if (size == 0) return;
 
+  constexpr CachePolicy LP = (Kind == MemcpyKind::Put) ? CachePolicy::Standard    : CachePolicy::SystemScope;
+  constexpr CachePolicy SP = (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
+
   uint8_t* dst_bytes = static_cast<uint8_t*>(dst);
   uint8_t* src_bytes = static_cast<uint8_t*>(src);
 
-  if constexpr (Kind == MemcpyKind::Put) {
-    copy_chunk_put<16, Policy, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
-    copy_chunk_put<8,  Policy, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
-    copy_chunk_put<4,  Policy, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
-    copy_chunk_put<2,  Policy, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
-    copy_chunk_put<1,  Policy, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
-  } else {
-    copy_chunk_get<16, Policy, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
-    copy_chunk_get<8,  Policy, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
-    copy_chunk_get<4,  Policy, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
-    copy_chunk_get<2,  Policy, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
-    copy_chunk_get<1,  Policy, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
-  }
+  copy_chunk<16, LP, SP, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
+  copy_chunk<8,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
+  copy_chunk<4,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
+  copy_chunk<2,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
+  copy_chunk<1,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put, CachePolicy Policy = CachePolicy::SystemScope,
-          int UNROLL = 8>
+template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 8>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src,
                                                              size_t size) {
   if (size == 0) return;
+
+  constexpr CachePolicy LP = (Kind == MemcpyKind::Put) ? CachePolicy::Standard    : CachePolicy::SystemScope;
+  constexpr CachePolicy SP = (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   int wave_tid = get_flat_block_id() % WF_SIZE;
   int wave_size{wave_SZ()};
@@ -621,26 +571,20 @@ template <MemcpyKind Kind = MemcpyKind::Put, CachePolicy Policy = CachePolicy::S
   uint8_t* dst_bytes = static_cast<uint8_t*>(dst);
   uint8_t* src_bytes = static_cast<uint8_t*>(src);
 
-  if constexpr (Kind == MemcpyKind::Put) {
-    copy_chunk_put<16, Policy, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
-    copy_chunk_put<8,  Policy, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
-    copy_chunk_put<4,  Policy, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
-    copy_chunk_put<2,  Policy, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
-    copy_chunk_put<1,  Policy, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
-  } else {
-    copy_chunk_get<16, Policy, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
-    copy_chunk_get<8,  Policy, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
-    copy_chunk_get<4,  Policy, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
-    copy_chunk_get<2,  Policy, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
-    copy_chunk_get<1,  Policy, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
-  }
+  copy_chunk<16, LP, SP, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
+  copy_chunk<8,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
+  copy_chunk<4,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
+  copy_chunk<2,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
+  copy_chunk<1,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put, CachePolicy Policy = CachePolicy::SystemScope,
-          int UNROLL = 8>
+template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 8>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src,
                                                            size_t size) {
   if (size == 0) return;
+
+  constexpr CachePolicy LP = (Kind == MemcpyKind::Put) ? CachePolicy::Standard    : CachePolicy::SystemScope;
+  constexpr CachePolicy SP = (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   int thread_id = get_flat_block_id();
   int block_size = get_flat_block_size();
@@ -648,19 +592,11 @@ template <MemcpyKind Kind = MemcpyKind::Put, CachePolicy Policy = CachePolicy::S
   uint8_t* dst_bytes = static_cast<uint8_t*>(dst);
   uint8_t* src_bytes = static_cast<uint8_t*>(src);
 
-  if constexpr (Kind == MemcpyKind::Put) {
-    copy_chunk_put<16, Policy, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
-    copy_chunk_put<8,  Policy, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
-    copy_chunk_put<4,  Policy, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
-    copy_chunk_put<2,  Policy, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
-    copy_chunk_put<1,  Policy, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
-  } else {
-    copy_chunk_get<16, Policy, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
-    copy_chunk_get<8,  Policy, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
-    copy_chunk_get<4,  Policy, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
-    copy_chunk_get<2,  Policy, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
-    copy_chunk_get<1,  Policy, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
-  }
+  copy_chunk<16, LP, SP, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
+  copy_chunk<8,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
+  copy_chunk<4,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
+  copy_chunk<2,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
+  copy_chunk<1,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
 }
 
 int rocm_init();
