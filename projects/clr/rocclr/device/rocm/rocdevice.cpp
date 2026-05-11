@@ -30,7 +30,7 @@
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
-#include "device/rocm/rocurilocator.hpp"
+#include "device/rocm/rgp/rocurilocator.hpp"
 #endif
 #endif
 
@@ -194,6 +194,10 @@ void Device::checkAtomicSupport() {
 
 Device::~Device() {
   WaitForHsaAsyncHandlersIdle();
+#ifdef ROC_GPUOPEN
+  delete capture_mgr_;
+  capture_mgr_ = nullptr;
+#endif
 
   // Release cached map targets
   for (uint i = 0; mapCache_ != nullptr && i < mapCache_->size(); ++i) {
@@ -718,6 +722,25 @@ bool Device::create() {
     hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_INFO);
     Hsa::enable_logging(logMask, outFile);
   }
+
+#ifdef ROC_GPUOPEN
+  // Always create the capture manager if DevDriver Init() succeeds — the RocTraceSession
+  // it owns starts in the Ready state.  IsTracingEnabled() only becomes true later when
+  // a tool connects and calls EnableTracing() over the UberTrace RPC channel.
+  // (PAL guards this with platform_->GetTraceSession()->IsTracingEnabled(), but PAL's
+  //  TraceSession is Platform-scoped and lives across device lifetimes; ours is fresh
+  //  per-device, so the guard would always be false here.)
+  capture_mgr_ = RocUberTraceCaptureMgr::Create(this);
+
+  // Advance DriverControlServer through the late-init and finish stages.
+  // Mirrors PAL's StartLateDeviceInit() / FinishDeviceInit() call sites.
+  // Produces "[DriverControlServer] Driver starting late device initialization"
+  // and "[DriverControlServer] Driver device initialization finished".
+  if (capture_mgr_ != nullptr) {
+    capture_mgr_->StartLateDeviceInit();
+    capture_mgr_->FinishDeviceInit();
+  }
+#endif
 
   return true;
 }

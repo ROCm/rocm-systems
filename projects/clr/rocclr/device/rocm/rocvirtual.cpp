@@ -4074,6 +4074,12 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     global[i] = static_cast<uint32_t>(sizes.global()[i]);
     local[i] = static_cast<uint16_t>(local_size[i]);
   }
+
+  // Notify DevDriver/RGP capture manager before dispatch
+  if (auto* captureMgr = dev().GetCaptureMgr()) {
+    captureMgr->PreDispatch(this, gpuKernel, global[0], global[1], global[2]);
+  }
+
   uint64_t spVA = 0;
   // Check if runtime has to setup hidden arguments
   for (uint32_t i = signature.numParameters(); i < signature.numParametersAll(); ++i) {
@@ -4475,6 +4481,11 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       bool result = blitMgr().copyImageToBuffer(*cpyImage, *buffer, offs, offs, image->getRegion(),
                                                 true, image->getRowPitch(), image->getSlicePitch());
     }
+  }
+
+  // Notify DevDriver/RGP capture manager after dispatch
+  if (auto* captureMgr = dev().GetCaptureMgr()) {
+    captureMgr->PostDispatch(this);
   }
   return true;
 }

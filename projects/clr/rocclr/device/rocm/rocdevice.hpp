@@ -24,6 +24,7 @@
 #include "device/rocm/rocdefs.hpp"
 #include "device/rocm/rocprintf.hpp"
 #include "device/rocm/rocglinterop.hpp"
+#include "device/rocm/rgp/rocgpuopen.hpp"
 
 #include <atomic>
 #include <iostream>
@@ -55,6 +56,7 @@ class Memory;
 class Resource;
 class VirtualDevice;
 class PrintfDbg;
+class ICaptureMgr;
 
 class ProfilingSignal : public amd::ReferenceCountedObject {
  public:
@@ -781,11 +783,16 @@ class Device : public NullDevice {
   //! Code object to kernel info map (used in the crash dump analysis)
   mutable std::map<uint64_t, Kernel&> kernel_map_;
 
+  ICaptureMgr* capture_mgr_ = nullptr;  //!< DevDriver/RGP capture manager (null when disabled)
+
   //! Friend function callbackQueue can access and set device class variables.
   friend void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data);
 
  public:
   std::atomic<uint> numOfVgpus_;  //!< Virtual gpu unique index
+
+  //! Returns the DevDriver/RGP capture manager (nullptr if disabled or not built with support)
+  ICaptureMgr* GetCaptureMgr() const { return capture_mgr_; }
 
   //! Returns the valid SDMA engine bitmask for the given operation type.
   uint32_t GetSdmaValidMask(HwQueueEngine engine_type) const {

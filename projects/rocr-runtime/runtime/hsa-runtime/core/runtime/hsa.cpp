@@ -470,7 +470,7 @@ hsa_status_t hsa_system_get_major_extension_table(uint16_t extension, uint16_t v
 
   if (extension == HSA_EXTENSION_AMD_LOADER) {
     if (version_major != 1) return HSA_STATUS_ERROR;
-    hsa_ven_amd_loader_1_03_pfn_t ext_table;
+    hsa_ven_amd_loader_1_04_pfn_t ext_table;
     ext_table.hsa_ven_amd_loader_query_host_address =
         hsa_ven_amd_loader_query_host_address;
     ext_table.hsa_ven_amd_loader_query_segment_descriptors =
@@ -485,6 +485,10 @@ hsa_status_t hsa_system_get_major_extension_table(uint16_t extension, uint16_t v
         hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size;
     ext_table.hsa_ven_amd_loader_iterate_executables =
         hsa_ven_amd_loader_iterate_executables;
+    ext_table.hsa_ven_amd_loader_loaded_code_object_iterate_loaded_segments =
+        hsa_ven_amd_loader_loaded_code_object_iterate_loaded_segments;
+    ext_table.hsa_ven_amd_loader_loaded_segment_get_info =
+        hsa_ven_amd_loader_loaded_segment_get_info;
 
     memcpy(table, &ext_table, Min(sizeof(ext_table), table_length));
 

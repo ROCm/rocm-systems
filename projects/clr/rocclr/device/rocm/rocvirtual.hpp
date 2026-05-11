@@ -513,7 +513,7 @@ class VirtualGPU : public device::VirtualDevice {
   bool releaseGpuMemoryFence(bool skip_copy_wait = false);
 
   hsa_agent_t gpu_device() const { return gpu_device_; }
-  hsa_queue_t* gpu_queue() { return gpu_queue_; }
+  hsa_queue_t* gpu_queue() const { return gpu_queue_; }
 
   //! Set the active HW queue and keep the metadata preloader in sync.
   void SetGpuQueue(hsa_queue_t* queue, void* metadata_ring_buffer = nullptr);
@@ -620,6 +620,9 @@ class VirtualGPU : public device::VirtualDevice {
   void* getOrCreateHostcallBuffer();
 
  private:
+
+  friend class RocUberTraceCaptureMgr;
+
   //! Dispatches a barrier with blocking HSA signals
   void dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet);
 

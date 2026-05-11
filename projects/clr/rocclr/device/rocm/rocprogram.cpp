@@ -8,6 +8,7 @@
 
 #include "utils/options.hpp"
 #include "rockernel.hpp"
+#include "device/rocm/rgp/rocgpuopen.hpp"
 
 #include <string>
 #include <vector>
@@ -280,10 +281,28 @@ bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
     return false;
   }
 
+  // Register the ELF binary with the capture manager. Pass hsaExecutable_.handle as
+  // gpu_addr so AddElfBinary can query LOAD_BASE (the GPU VA of the loaded code segment),
+  // mirroring PAL's pGpuMemory->Desc().gpuVirtAddr passed through ElfBinaryInfo.
+  // Must be called after executable_freeze() so the loader has resolved all segment VAs.
+  if (!isNull() && (rocDevice().GetCaptureMgr() != nullptr) && !isTrapHandler()) {
+    apiHash_ = rocDevice().GetCaptureMgr()->AddElfBinary(
+        binary, binSize, binary, binSize, hsaExecutable_.handle);
+  }
+
   for (auto& kit : kernels()) {
     Kernel* kernel = static_cast<Kernel*>(kit.second);
     if (!kernel->postLoad()) {
       return false;
+    }
+    // Emit a COLoadEvent per kernel. KernelCodeHandle() is the KD GPU VA from
+    // HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT; ISA VA = KD VA + 256.
+    // base_address comes from the LOAD_BASE stored in pending_elfs_ by AddElfBinary.
+    if (!isNull() && (rocDevice().GetCaptureMgr() != nullptr) && !isTrapHandler()) {
+      rocDevice().GetCaptureMgr()->AddKernelLoadEvent(
+          apiHash_, binary, binSize,
+          kernel->SymbolName().c_str(),
+          kernel->KernelCodeHandle());
     }
   }
   return true;
