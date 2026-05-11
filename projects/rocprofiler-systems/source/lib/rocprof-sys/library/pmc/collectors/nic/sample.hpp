@@ -40,6 +40,23 @@ struct sample : trace_cache::cacheable_t
     std::string     device_name;
     std::uint64_t   timestamp;
     metrics         metric_values;
+
+    template <class Archive>
+    ROCPROFSYS_INLINE void serialize(Archive& ar)
+    {
+        // enabled_metric is a union (enabled_metrics); the legacy code passes
+        // its `value` (uint32) on the wire. Stage through a local so input
+        // archives write back to .value.
+        auto enabled_value = static_cast<std::uint32_t>(enabled_metric.value);
+        ar(enabled_value, device_id, device_name, timestamp,
+           metric_values.rx_rdma_ucast_bytes, metric_values.tx_rdma_ucast_bytes,
+           metric_values.rx_rdma_ucast_pkts, metric_values.tx_rdma_ucast_pkts,
+           metric_values.rx_rdma_cnp_pkts, metric_values.tx_rdma_cnp_pkts);
+        if constexpr(std::is_same_v<Archive, trace_cache::input_archive>)
+        {
+            enabled_metric.value = enabled_value;
+        }
+    }
 };
 
 }  // namespace rocprofsys::pmc::collectors::nic
@@ -51,6 +68,12 @@ namespace trace_cache
 
 /// @brief AINIC PMC sample type alias
 using ainic_pmc_sample = pmc::collectors::nic::sample;
+
+namespace type_traits
+{
+template <>
+inline constexpr bool use_custom<pmc::collectors::nic::sample> = true;
+}  // namespace type_traits
 
 template <>
 inline void
