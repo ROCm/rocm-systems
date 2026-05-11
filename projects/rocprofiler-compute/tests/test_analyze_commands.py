@@ -12,10 +12,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from rocprof_compute_analyze.analysis_cli import cli_analysis
 from utils.metrics.expression import build_eval_string
 from utils.metrics.metric_evaluator import MetricEvaluator
-
-from rocprof_compute_analyze.analysis_cli import cli_analysis
 
 config = {}
 config["cleanup"] = True

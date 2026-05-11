@@ -14,11 +14,11 @@ import pytest
 
 from rocprof_compute_soc.soc_base import (
     CounterFile,
-    flat_counters_in_perfmon_file,
     LimitedSet,
     OmniSoC_Base,
     _rebuild_tcc_channel_file_map,
     _trial_counter_file_with_extra,
+    flat_counters_in_perfmon_file,
 )
 
 # =============================================================================
