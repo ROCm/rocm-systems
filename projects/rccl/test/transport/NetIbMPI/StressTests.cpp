@@ -201,12 +201,16 @@ TEST_F(NetIbMPITest, TagZeroReuse) {
     }
 }
 
-// E6.  AdaptiveRoutingThresholdBoundary — sizes around AR_THRESHOLD (8192).
+// E5.  AdaptiveRoutingThresholdBoundary — sizes around AR_THRESHOLD (8192).
 //      When AR is enabled and size > threshold, ncclIbMultiSend adds a
 //      0-byte RDMA_WRITE_WITH_IMM work request (net_ib.cc:2396).
 TEST_F(NetIbMPITest, AdaptiveRoutingThresholdBoundary) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
+    const char* arEnv = getenv("NCCL_IB_ADAPTIVE_ROUTING");
+    if (!arEnv || atoi(arEnv) == 0) {
+        GTEST_SKIP() << "Set NCCL_IB_ADAPTIVE_ROUTING=1 to run this test";
+    }
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -238,7 +242,7 @@ TEST_F(NetIbMPITest, AdaptiveRoutingThresholdBoundary) {
     }
 }
 
-// E7.  InlineSendBoundary — CTS inline path (NCCL_IB_USE_INLINE=1).
+// E6.  InlineSendBoundary — CTS inline path (NCCL_IB_USE_INLINE=1).
 //      Exercises IBV_SEND_INLINE for the FIFO CTS write.
 TEST_F(NetIbMPITest, InlineSendBoundary) {
     const char* env = getenv("NCCL_IB_USE_INLINE");
@@ -273,7 +277,7 @@ TEST_F(NetIbMPITest, InlineSendBoundary) {
     }
 }
 
-// E8.  MixedSizeBarrage — 25 sizes from 1B to 64MB on a single connection.
+// E7.  MixedSizeBarrage — 25 sizes from 1B to 64MB on a single connection.
 //      Exercises alignment boundaries, AR threshold, inline paths, and
 //      large-MR registration.
 TEST_F(NetIbMPITest, MixedSizeBarrage) {
@@ -1525,7 +1529,7 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
     }
 }
 
-// E5.  SetNetAttrNoOp — calls ncclIbSetNetAttr (the last entry in ncclNet_t).
+// E8.  SetNetAttrNoOp — calls ncclIbSetNetAttr (the last entry in ncclNet_t).
 //      The function is a pure no-op (two (void) casts + return ncclSuccess).
 //      All it needs is a call to reach its body; FNDA shows 0 hits without this test.
 TEST_F(NetIbMPITest, SetNetAttrNoOp) {

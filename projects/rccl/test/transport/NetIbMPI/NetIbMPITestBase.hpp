@@ -648,7 +648,11 @@ protected:
                            const RdmaResourceCounts& after,
                            const char* label = "") {
         int rank = MPIEnvironment::world_rank;
-        if (!before.valid() || !after.valid()) return; // skip silently
+        if (!before.valid() || !after.valid()) {
+            GTEST_LOG_(WARNING) << "RDMA resource counting unavailable on this node; "
+                                << "leak check skipped for: " << label;
+            return;
+        }
         EXPECT_EQ(after.qp, before.qp)
             << label << " QP leak on rank " << rank
             << ": before=" << before.qp << " after=" << after.qp;
