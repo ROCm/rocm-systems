@@ -339,7 +339,7 @@ void GpuPmcBuilder::Start(CmdBuffer* cmd_buffer, const counters_vector& counters
           builder_->BuildWritePConfigRegPacket(cmd_buffer, get_smn_addr(0x661B0 >> 2, 1),
                                                0x04000100);
 
-          if (xcc_number_ > 4) {
+          if (aid_count_ > 2) {
             builder_->BuildWritePConfigRegPacket(cmd_buffer, get_smn_addr(0x4B30 >> 2, 2),
                                                  0x04000100);
             builder_->BuildWritePConfigRegPacket(cmd_buffer, get_smn_addr(0x6330 >> 2, 2),
