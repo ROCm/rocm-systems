@@ -58,7 +58,7 @@ TEST_F(sample_type_test, kernel_dispatch_sample_custom_round_trip)
     const std::size_t bytes = serialized_size(original);
     EXPECT_LE(bytes, buffer.size());
 
-    serialize_to(buffer.data(), original);
+    serialize_at(buffer.data(), original);
 
     std::uint8_t* cursor       = buffer.data();
     auto          deserialized = deserialize_from<kernel_dispatch_sample>(cursor);
@@ -93,7 +93,7 @@ TEST_F(sample_type_test, kernel_dispatch_sample_wire_parity_legacy_vs_custom)
     std::array<std::uint8_t, 4096> custom{};
 
     serialize(legacy.data(), original);
-    serialize_to(custom.data(), original);
+    serialize_at(custom.data(), original);
 
     const std::size_t legacy_size = get_size(original);
     const std::size_t custom_size = serialized_size(original);

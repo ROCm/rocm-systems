@@ -23,6 +23,8 @@
 
 #pragma once
 
+#include "common/defines.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -106,26 +108,30 @@ inline constexpr bool has_member_serialize_v = has_member_serialize<Archive, T>:
 class output_archive
 {
 public:
-    explicit output_archive(std::uint8_t* dst) noexcept
-    : m_cur{ dst }
-    , m_begin{ dst }
+    // m_cur is a reference to a caller-owned pointer. Keeping the cursor in
+    // the caller's frame lets the compiler hold it in a register across the
+    // variadic fold expansion in operator(); without this the per-field
+    // memcpy chain reloads m_cur from memory between every field.
+    ROCPROFSYS_INLINE explicit output_archive(std::uint8_t*& cursor) noexcept
+    : m_cur{ cursor }
+    , m_begin{ cursor }
     {}
 
     template <typename... Ts>
-    output_archive& operator()(const Ts&... vals)
+    ROCPROFSYS_INLINE output_archive& operator()(const Ts&... vals)
     {
         (write_one(vals), ...);
         return *this;
     }
 
-    [[nodiscard]] std::size_t bytes_written() const noexcept
+    [[nodiscard]] ROCPROFSYS_INLINE std::size_t bytes_written() const noexcept
     {
         return static_cast<std::size_t>(m_cur - m_begin);
     }
 
 private:
     template <typename T>
-    void write_one(const T& v)
+    ROCPROFSYS_INLINE void write_one(const T& v)
     {
         using D = std::decay_t<T>;
         if constexpr(treat_as_blob_v<D>)
@@ -197,8 +203,8 @@ private:
         }
     }
 
-    std::uint8_t* m_cur;
-    std::uint8_t* m_begin;
+    std::uint8_t*& m_cur;
+    std::uint8_t*  m_begin;
 };
 
 // ----------------------------------------------------------------- input_archive
@@ -299,17 +305,17 @@ class size_archive
 {
 public:
     template <typename... Ts>
-    size_archive& operator()(const Ts&... vals)
+    ROCPROFSYS_INLINE size_archive& operator()(const Ts&... vals)
     {
         (count_one(vals), ...);
         return *this;
     }
 
-    [[nodiscard]] std::size_t total() const noexcept { return m_total; }
+    [[nodiscard]] ROCPROFSYS_INLINE std::size_t total() const noexcept { return m_total; }
 
 private:
     template <typename T>
-    void count_one(const T& v)
+    ROCPROFSYS_INLINE void count_one(const T& v)
     {
         using D = std::decay_t<T>;
         if constexpr(treat_as_blob_v<D>)
@@ -367,24 +373,40 @@ private:
 // ------------------------------------------------------------------ free helpers
 
 template <typename T>
-inline std::size_t
-serialized_size(const T& v)
+ROCPROFSYS_FLATTEN ROCPROFSYS_INLINE std::size_t
+                                     serialized_size(const T& v)
 {
     size_archive sa;
     sa(v);
     return sa.total();
 }
 
+// Cursor-by-reference entry point. The caller's pointer is advanced past the
+// written bytes. Combined with output_archive's reference-cursor and the
+// flatten attribute below, this keeps the cursor in a register across the
+// whole variadic fold (verified out-of-tree against the bench prototype:
+// matches handrolled within ~1%).
 template <typename T>
-inline void
-serialize_to(std::uint8_t* dst, const T& v)
+ROCPROFSYS_FLATTEN ROCPROFSYS_INLINE void
+serialize_to(std::uint8_t*& cursor, const T& v)
 {
-    output_archive oa{ dst };
+    output_archive oa{ cursor };
+    oa(v);
+}
+
+// Fixed-pointer entry point. Convenience for callers that already own a
+// scratch buffer and do not need the cursor advanced.
+template <typename T>
+ROCPROFSYS_FLATTEN ROCPROFSYS_INLINE void
+serialize_at(std::uint8_t* dst, const T& v)
+{
+    std::uint8_t*  p = dst;
+    output_archive oa{ p };
     oa(v);
 }
 
 template <typename T>
-inline T
+ROCPROFSYS_FLATTEN ROCPROFSYS_INLINE T
 deserialize_from(std::uint8_t*& cursor)
 {
     T             out{};

@@ -177,7 +177,10 @@ public:
         utility::store_value(sample_size, buf, position);
         if constexpr(type_traits::use_custom<Type>)
         {
-            serialize_to(buf + position, value);
+            // serialize_to advances the cursor; we do not need it past the
+            // call so a local lvalue is enough.
+            auto* p = buf + position;
+            serialize_to(p, value);
         }
         else
         {
