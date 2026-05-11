@@ -45,6 +45,8 @@ void threadFunc_dltMemory() {
   HIP_CHECK(hipHostFree(globalPtr));
   setVar = false;
 }
+static int kernelDelayMs() { return isQuickLevel() ? 500 : 5000; }
+
 void destroyPinnedObj(void* ptr) {
   globalPtr = ptr;
   setVar = true;
@@ -59,7 +61,7 @@ void hipUserObjectCreate_int_float_Objects(T* hostArr, T* devArr, void destroyOb
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(devArr, hostArr, sizeof(int), hipMemcpyHostToDevice, stream));
-  KernelFn<<<1, 1, 0, stream>>>(devArr, clockrate, isQuickLevel() ? 500 : 5000);
+  KernelFn<<<1, 1, 0, stream>>>(devArr, clockrate, kernelDelayMs());
   HIP_CHECK(hipMemcpyAsync(hostArr, devArr, sizeof(int), hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   REQUIRE(graph != nullptr);
@@ -164,7 +166,7 @@ HIP_TEST_CASE(Unit_hipGraphUserObj_HostRegister) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  KernelFn<<<1, 1, 0, stream>>>(A_d, clockrate, isQuickLevel() ? 500 : 5000);
+  KernelFn<<<1, 1, 0, stream>>>(A_d, clockrate, kernelDelayMs());
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   REQUIRE(graph != nullptr);
   hipUserObject_t Uobj;
@@ -200,7 +202,7 @@ template <typename T> void hipUserObjectCreate_Struct_Class_Objects(T* Obj_h, T*
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(Obj_d, Obj_h, sizeof(BoxStruct), hipMemcpyHostToDevice, stream));
-  StructClassKernelFn<<<1, 1, 0, stream>>>(Obj_d, clockrate, isQuickLevel() ? 500 : 5000);
+  StructClassKernelFn<<<1, 1, 0, stream>>>(Obj_d, clockrate, kernelDelayMs());
   HIP_CHECK(hipMemcpyAsync(Obj_h, Obj_d, sizeof(BoxStruct), hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   REQUIRE(graph != nullptr);
@@ -295,7 +297,7 @@ HIP_TEST_CASE(Unit_hipGraphUserObj_ClonedGraph) {
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(devArr, hostArr, sizeof(int), hipMemcpyHostToDevice, stream));
-  KernelFn<<<1, 1, 0, stream>>>(devArr, clockrate, isQuickLevel() ? 500 : 5000);
+  KernelFn<<<1, 1, 0, stream>>>(devArr, clockrate, kernelDelayMs());
   HIP_CHECK(hipMemcpyAsync(hostArr, devArr, sizeof(int), hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   REQUIRE(graph != nullptr);
@@ -372,7 +374,7 @@ HIP_TEST_CASE(Unit_hipGraphUserObj_ManualGraph) {
                                     hipMemcpyHostToDevice));
   dependencies.push_back(memcpyNode);
   kNodeParams.func = reinterpret_cast<void*>(ManualGraphKernelFn);
-  int delay = isQuickLevel() ? 500 : 5000;
+  int delay = kernelDelayMs();
   void* kernelArgs[] = {reinterpret_cast<void*>(&devArr), &clockrate, &delay};
   kNodeParams.gridDim = dim3(1);
   kNodeParams.blockDim = dim3(1);
