@@ -90,23 +90,23 @@ check_error_strings(void)
 static int
 configure_driver(void)
 {
-    hipFileError_t err;
+    hipFileError_t hipfile_err;
 
-    err = hipFileSetParameterBool(hipFileParamPropertiesUsePollMode, true);
-    if (hipFileSuccess != err.err) {
-        fprintf(stderr, "Could not enable poll mode (%s)\n", HIPFILE_ERRSTR(err.err));
+    hipfile_err = hipFileSetParameterBool(hipFileParamPropertiesUsePollMode, true);
+    if (hipFileSuccess != hipfile_err.err) {
+        fprintf(stderr, "Could not enable poll mode (%s)\n", hipFileGetOpErrorString(hipfile_err.err));
         return 1;
     }
 
-    err = hipFileSetParameterSizeT(hipFileParamPropertiesMaxDeviceCacheSizeKB, EAP_CACHE_KB);
-    if (hipFileSuccess != err.err) {
-        fprintf(stderr, "Could not set max device cache size (%s)\n", HIPFILE_ERRSTR(err.err));
+    hipfile_err = hipFileSetParameterSizeT(hipFileParamPropertiesMaxDeviceCacheSizeKB, EAP_CACHE_KB);
+    if (hipFileSuccess != hipfile_err.err) {
+        fprintf(stderr, "Could not set max device cache size (%s)\n", hipFileGetOpErrorString(hipfile_err.err));
         return 1;
     }
 
-    err = hipFileSetParameterSizeT(hipFileParamPropertiesMaxDevicePinnedMemSizeKB, EAP_PINNED_KB);
-    if (hipFileSuccess != err.err) {
-        fprintf(stderr, "Could not set max device pinned mem size (%s)\n", HIPFILE_ERRSTR(err.err));
+    hipfile_err = hipFileSetParameterSizeT(hipFileParamPropertiesMaxDevicePinnedMemSizeKB, EAP_PINNED_KB);
+    if (hipFileSuccess != hipfile_err.err) {
+        fprintf(stderr, "Could not set max device pinned mem size (%s)\n", hipFileGetOpErrorString(hipfile_err.err));
         return 1;
     }
 
@@ -219,7 +219,7 @@ main(void)
     int            failures    = 0;
     bool           driver_open = false;
     int            exit_status = EXIT_FAILURE;
-    hipFileError_t err;
+    hipFileError_t hipfile_err;
 
     /* 1. Verify hipFileGetOpErrorString for known error codes */
     failures += check_error_strings();
@@ -234,9 +234,9 @@ main(void)
 
     /* 3. hipFileDriverOpen */
     printf("\n=== Step 3: hipFileDriverOpen ===\n");
-    err = hipFileDriverOpen();
-    if (hipFileSuccess != err.err) {
-        fprintf(stderr, "hipFileDriverOpen failed (%s)\n", HIPFILE_ERRSTR(err.err));
+    hipfile_err = hipFileDriverOpen();
+    if (hipFileSuccess != hipfile_err.err) {
+        fprintf(stderr, "hipFileDriverOpen failed (%s)\n", hipFileGetOpErrorString(hipfile_err.err));
         return EXIT_FAILURE;
     }
     driver_open = true;
@@ -246,9 +246,9 @@ main(void)
     {
         hipFileDriverProps_t props;
         memset(&props, 0, sizeof(props));
-        err = hipFileDriverGetProperties(&props);
-        if (hipFileSuccess != err.err) {
-            fprintf(stderr, "hipFileDriverGetProperties failed (%s)\n", HIPFILE_ERRSTR(err.err));
+        hipfile_err = hipFileDriverGetProperties(&props);
+        if (hipFileSuccess != hipfile_err.err) {
+            fprintf(stderr, "hipFileDriverGetProperties failed (%s)\n", hipFileGetOpErrorString(hipfile_err.err));
             goto driver_close;
         }
         print_properties(&props);
@@ -261,9 +261,9 @@ main(void)
 
 driver_close:
     if (driver_open) {
-        err = hipFileDriverClose();
-        if (hipFileSuccess != err.err) {
-            fprintf(stderr, "hipFileDriverClose failed (%s)\n", HIPFILE_ERRSTR(err.err));
+        hipfile_err = hipFileDriverClose();
+        if (hipFileSuccess != hipfile_err.err) {
+            fprintf(stderr, "hipFileDriverClose failed (%s)\n", hipFileGetOpErrorString(hipfile_err.err));
             exit_status = EXIT_FAILURE;
         }
     }
