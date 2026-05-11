@@ -6,6 +6,7 @@
 #include "common/defines.h"
 
 #include "core/progress/callback.hpp"
+#include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/type_registry.hpp"
 
