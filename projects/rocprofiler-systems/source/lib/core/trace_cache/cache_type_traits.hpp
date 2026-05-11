@@ -3,6 +3,8 @@
 
 #pragma once
 #include "common/span.hpp"
+#include "core/trace_cache/archive.hpp"
+
 #include <array>
 #include <concepts>
 #include <cstddef>
@@ -26,36 +28,33 @@ template <typename T>
 struct always_false : std::false_type
 {};
 
-// Per-type opt-in for the custom (member-archive) serialiser. Specialise to
-// `true` for a type that defines `template <class Archive> void serialize(Archive&)`
-// and wants buffer_storage / type_registry to dispatch through it instead of
-// the legacy free `serialize`/`deserialize`/`get_size` triple.
-template <typename T>
-inline constexpr bool use_custom = false;
-
 }  // namespace type_traits
 
+// Free-function wrappers that dispatch through the member-archive path. They
+// exist so legacy call sites that already write
+// `serialize(buf, value)` / `deserialize<T>(cursor)` / `get_size(value)`
+// continue to compile and work bytewise-identical. The implementation is the
+// archive in archive.hpp; per-type bodies live as
+// `template <class Archive> serialize(Archive&)` members on the type.
 template <typename T>
-void
-serialize(std::uint8_t*, const T&)
+ROCPROFSYS_INLINE void
+serialize(std::uint8_t* buffer, const T& item)
 {
-    static_assert(type_traits::always_false<T>::value, "serialize<T> not specialized");
+    serialize_at(buffer, item);
 }
 
 template <typename T>
-T
-deserialize(std::uint8_t*&)
+ROCPROFSYS_INLINE T
+deserialize(std::uint8_t*& buffer)
 {
-    static_assert(type_traits::always_false<T>::value, "deserialize<T> not specialized");
-    return T{};
+    return deserialize_from<T>(buffer);
 }
 
 template <typename T>
-size_t
-get_size(const T&)
+ROCPROFSYS_INLINE std::size_t
+                  get_size(const T& item)
 {
-    static_assert(type_traits::always_false<T>::value, "get_size(T) not specialized");
-    return 0;
+    return serialized_size(item);
 }
 
 namespace type_traits
@@ -133,17 +132,7 @@ template <typename T>
 inline constexpr bool is_enum_class_v = is_enum_class<T>::value;
 
 template <typename T>
-concept serializable = requires(std::uint8_t* dst, const T& v) { serialize(dst, v); };
-
-template <typename T>
-concept deserializable = requires(std::uint8_t*& src) {
-    { deserialize<T>(src) } -> std::same_as<T>;
-};
-
-template <typename T>
-concept has_get_size = requires(const T& v) {
-    { get_size(v) } -> std::convertible_to<std::size_t>;
-};
+concept archive_serializable = requires(T v, output_archive& oa) { v.serialize(oa); };
 
 template <typename T, typename TypeIdentifierEnum>
 concept has_type_identifier = is_enum_class_v<TypeIdentifierEnum> && requires {
@@ -151,8 +140,7 @@ concept has_type_identifier = is_enum_class_v<TypeIdentifierEnum> && requires {
 };
 
 template <typename T, typename TypeIdentifierEnum>
-concept cacheable = serializable<T> && deserializable<T> && has_get_size<T> &&
-                    has_type_identifier<T, TypeIdentifierEnum>;
+concept cacheable = archive_serializable<T> && has_type_identifier<T, TypeIdentifierEnum>;
 
 template <typename T, typename TypeIdentifierEnum, typename CacheableType>
 concept sample_processor = requires(T t, TypeIdentifierEnum e, const CacheableType& c) {

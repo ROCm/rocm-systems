@@ -107,51 +107,7 @@ serialize_loads(const std::vector<per_cpu_metrics>& cpu_data)
 namespace rocprofsys::trace_cache
 {
 
-template <>
-inline void
-serialize(std::uint8_t* buffer, const pmc::collectors::cpu::sample& item)
-{
-    utility::store_value(buffer, static_cast<std::uint32_t>(item.enabled_metric.value),
-                         item.device_id, item.timestamp, item.process_data.page_rss,
-                         item.process_data.virt_mem, item.process_data.peak_rss,
-                         item.process_data.context_switches,
-                         item.process_data.page_faults, item.process_data.user_mode_time,
-                         item.process_data.kernel_mode_time, item.freqs, item.loads);
-}
-
-template <>
-inline pmc::collectors::cpu::sample
-deserialize(std::uint8_t*& buffer)
-{
-    pmc::collectors::cpu::sample item;
-    utility::parse_value(buffer, item.enabled_metric.value, item.device_id,
-                         item.timestamp, item.process_data.page_rss,
-                         item.process_data.virt_mem, item.process_data.peak_rss,
-                         item.process_data.context_switches,
-                         item.process_data.page_faults, item.process_data.user_mode_time,
-                         item.process_data.kernel_mode_time, item.freqs, item.loads);
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const pmc::collectors::cpu::sample& item)
-{
-    return utility::get_size(
-        static_cast<std::uint32_t>(item.enabled_metric.value), item.device_id,
-        item.timestamp, item.process_data.page_rss, item.process_data.virt_mem,
-        item.process_data.peak_rss, item.process_data.context_switches,
-        item.process_data.page_faults, item.process_data.user_mode_time,
-        item.process_data.kernel_mode_time, item.freqs, item.loads);
-}
-
 /// @brief CPU PMC sample type alias
 using cpu_pmc_sample = pmc::collectors::cpu::sample;
-
-namespace type_traits
-{
-template <>
-inline constexpr bool use_custom<pmc::collectors::cpu::sample> = true;
-}  // namespace type_traits
 
 }  // namespace rocprofsys::trace_cache

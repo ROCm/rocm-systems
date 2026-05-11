@@ -84,23 +84,6 @@ TEST_F(sample_type_test, kernel_dispatch_sample_custom_round_trip)
     EXPECT_EQ(deserialized.stream_handle, original.stream_handle);
 }
 
-TEST_F(sample_type_test, kernel_dispatch_sample_wire_parity_legacy_vs_custom)
-{
-    kernel_dispatch_sample original(1000, 2000, 42, 100, 200, 300, 400, 500, 600, 1024,
-                                    2048, 64, 32, 16, 256, 128, 64, 0xABCD);
-
-    std::array<std::uint8_t, 4096> legacy{};
-    std::array<std::uint8_t, 4096> custom{};
-
-    serialize(legacy.data(), original);
-    serialize_at(custom.data(), original);
-
-    const std::size_t legacy_size = get_size(original);
-    const std::size_t custom_size = serialized_size(original);
-    EXPECT_EQ(legacy_size, custom_size);
-    EXPECT_EQ(std::memcmp(legacy.data(), custom.data(), legacy_size), 0);
-}
-
 TEST_F(sample_type_test, kernel_dispatch_sample_get_size)
 {
     kernel_dispatch_sample sample(1000, 2000, 42, 100, 200, 300, 400, 500, 600, 1024,
@@ -707,40 +690,12 @@ TEST_F(sample_type_test, kfd_sample_get_size)
 }
 
 // -----------------------------------------------------------------
-// Wire-parity + round-trip tests for the 8 sample_type.hpp types
-// migrated to the archive serializer in Slice B. Each pair asserts
-// (a) serialize_at == legacy serialize byte-for-byte and
-// (b) deserialize_from recovers the value across the same buffer.
-// These tests are scheduled for deletion in Phase 4 once the legacy
-// path is removed; the round-trip tests stay.
+// Round-trip tests for the 8 sample_type.hpp types covered by the
+// archive serializer. Each test serializes a populated value via
+// serialize_at and reads it back via deserialize_from to verify
+// data preservation. The transitional wire-parity tests against the
+// legacy free-function path were dropped together with that path.
 // -----------------------------------------------------------------
-
-namespace
-{
-
-template <typename T>
-void
-expect_wire_parity(const T& original, std::size_t buf_size = 4096)
-{
-    std::vector<std::uint8_t> legacy(buf_size, 0);
-    std::vector<std::uint8_t> custom(buf_size, 0);
-
-    serialize(legacy.data(), original);
-    serialize_at(custom.data(), original);
-
-    const std::size_t legacy_size = get_size(original);
-    const std::size_t custom_size = serialized_size(original);
-    EXPECT_EQ(legacy_size, custom_size);
-    EXPECT_EQ(std::memcmp(legacy.data(), custom.data(), legacy_size), 0);
-}
-
-}  // namespace
-
-TEST_F(sample_type_test, scratch_memory_sample_wire_parity_legacy_vs_custom)
-{
-    scratch_memory_sample s(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0xCAFE);
-    expect_wire_parity(s);
-}
 
 TEST_F(sample_type_test, scratch_memory_sample_custom_round_trip)
 {
@@ -756,13 +711,6 @@ TEST_F(sample_type_test, scratch_memory_sample_custom_round_trip)
     EXPECT_EQ(got.stream_handle, original.stream_handle);
 }
 
-TEST_F(sample_type_test, memory_copy_sample_wire_parity_legacy_vs_custom)
-{
-    memory_copy_sample s(5000, 6000, 123, 200, 201, 1, 2, 4096, 700, 800, 0x1000, 0x2000,
-                         0xDEAD);
-    expect_wire_parity(s);
-}
-
 TEST_F(sample_type_test, memory_copy_sample_custom_round_trip)
 {
     memory_copy_sample original(5000, 6000, 123, 200, 201, 1, 2, 4096, 700, 800, 0x1000,
@@ -776,12 +724,6 @@ TEST_F(sample_type_test, memory_copy_sample_custom_round_trip)
     EXPECT_EQ(got.stream_handle, original.stream_handle);
 }
 
-TEST_F(sample_type_test, memory_allocate_sample_wire_parity_legacy_vs_custom)
-{
-    memory_allocate_sample s(7000, 8000, 456, 300, 1, 2, 8192, 900, 1000, 0x3000, 0xBEEF);
-    expect_wire_parity(s);
-}
-
 TEST_F(sample_type_test, memory_allocate_sample_custom_round_trip)
 {
     memory_allocate_sample original(7000, 8000, 456, 300, 1, 2, 8192, 900, 1000, 0x3000,
@@ -792,12 +734,6 @@ TEST_F(sample_type_test, memory_allocate_sample_custom_round_trip)
     EXPECT_EQ(got.address_value, original.address_value);
     EXPECT_EQ(got.allocation_size, original.allocation_size);
     EXPECT_EQ(got.stream_handle, original.stream_handle);
-}
-
-TEST_F(sample_type_test, region_sample_wire_parity_legacy_vs_custom)
-{
-    region_sample s(42, "name", 100, 200, 1000, 2000, "stack", "args", "cat");
-    expect_wire_parity(s);
 }
 
 TEST_F(sample_type_test, region_sample_custom_round_trip)
@@ -814,12 +750,6 @@ TEST_F(sample_type_test, region_sample_custom_round_trip)
     EXPECT_EQ(got.category, original.category);
 }
 
-TEST_F(sample_type_test, in_time_sample_wire_parity_legacy_vs_custom)
-{
-    in_time_sample s(1, "track", 1234, "meta", 10, 20, 30, "stack", "line");
-    expect_wire_parity(s);
-}
-
 TEST_F(sample_type_test, in_time_sample_custom_round_trip)
 {
     in_time_sample original(1, "track", 1234, "meta", 10, 20, 30, "stack", "line");
@@ -830,20 +760,6 @@ TEST_F(sample_type_test, in_time_sample_custom_round_trip)
     EXPECT_EQ(got.event_metadata, original.event_metadata);
     EXPECT_EQ(got.stack_id, original.stack_id);
     EXPECT_EQ(got.line_info, original.line_info);
-}
-
-TEST_F(sample_type_test, pmc_event_with_sample_wire_parity_legacy_vs_custom)
-{
-    pmc_event_with_sample s(1, "track", 1234, "meta", 10, 20, 30, "stack", "line", 5, 1,
-                            "pmc", 3.14, std::optional<std::int64_t>{ 999 });
-    expect_wire_parity(s);
-}
-
-TEST_F(sample_type_test, pmc_event_with_sample_wire_parity_nullopt)
-{
-    pmc_event_with_sample s(1, "track", 1234, "meta", 10, 20, 30, "stack", "line", 5, 1,
-                            "pmc", 3.14, std::nullopt);
-    expect_wire_parity(s);
 }
 
 TEST_F(sample_type_test, pmc_event_with_sample_custom_round_trip)
@@ -859,13 +775,6 @@ TEST_F(sample_type_test, pmc_event_with_sample_custom_round_trip)
     EXPECT_EQ(got.track_name, original.track_name);
 }
 
-TEST_F(sample_type_test, backtrace_region_sample_wire_parity_legacy_vs_custom)
-{
-    backtrace_region_sample s(1, 42, "track", "name", 100, 200, "cat", "stack", "line",
-                              "ext");
-    expect_wire_parity(s);
-}
-
 TEST_F(sample_type_test, backtrace_region_sample_custom_round_trip)
 {
     backtrace_region_sample original(1, 42, "track", "name", 100, 200, "cat", "stack",
@@ -876,20 +785,6 @@ TEST_F(sample_type_test, backtrace_region_sample_custom_round_trip)
     EXPECT_EQ(got.track_name, original.track_name);
     EXPECT_EQ(got.name, original.name);
     EXPECT_EQ(got.extdata, original.extdata);
-}
-
-TEST_F(sample_type_test, kfd_sample_wire_parity_legacy_vs_custom)
-{
-    kfd_sample s(42, "kfd_event", 1000, 2000, "args", "cat", "track", "meta", 5, 1, "pmc",
-                 3.14, std::optional<std::int64_t>{ 1234 });
-    expect_wire_parity(s);
-}
-
-TEST_F(sample_type_test, kfd_sample_wire_parity_nullopt)
-{
-    kfd_sample s(42, "kfd_event", 1000, 2000, "args", "cat", "track", "meta", 5, 1, "pmc",
-                 3.14, std::nullopt);
-    expect_wire_parity(s);
 }
 
 TEST_F(sample_type_test, kfd_sample_custom_round_trip)

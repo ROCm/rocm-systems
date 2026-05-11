@@ -150,16 +150,8 @@ public:
         using TypeIdentifierEnumUderlayingType =
             std::underlying_type_t<TypeIdentifierEnum>;
 
-        size_t sample_size = 0;
-        if constexpr(type_traits::use_custom<Type>)
-        {
-            sample_size = serialized_size(value);
-        }
-        else
-        {
-            sample_size = get_size(value);
-        }
-        size_t bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
+        const size_t sample_size      = serialized_size(value);
+        const size_t bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
 
         // Hold the mutex for the entire reserve-and-write operation so that
         // the flush worker thread never reads a buffer region whose write is
@@ -175,17 +167,10 @@ public:
 
         utility::store_value(type_identifier_value, buf, position);
         utility::store_value(sample_size, buf, position);
-        if constexpr(type_traits::use_custom<Type>)
-        {
-            // serialize_to advances the cursor; we do not need it past the
-            // call so a local lvalue is enough.
-            auto* p = buf + position;
-            serialize_to(p, value);
-        }
-        else
-        {
-            serialize(buf + position, value);
-        }
+        // serialize_to advances the cursor; we do not need it past the call
+        // so a local lvalue is enough.
+        auto* p = buf + position;
+        serialize_to(p, value);
     }
 
     ROCPROFSYS_INLINE bool is_running() const

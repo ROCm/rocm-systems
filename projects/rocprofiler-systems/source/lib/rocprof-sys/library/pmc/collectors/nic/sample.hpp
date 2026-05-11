@@ -69,51 +69,5 @@ namespace trace_cache
 /// @brief AINIC PMC sample type alias
 using ainic_pmc_sample = pmc::collectors::nic::sample;
 
-namespace type_traits
-{
-template <>
-inline constexpr bool use_custom<pmc::collectors::nic::sample> = true;
-}  // namespace type_traits
-
-template <>
-inline void
-serialize(std::uint8_t* buffer, const pmc::collectors::nic::sample& item)
-{
-    utility::store_value(
-        buffer, static_cast<std::uint32_t>(item.enabled_metric.value), item.device_id,
-        std::string_view(item.device_name), item.timestamp,
-        item.metric_values.rx_rdma_ucast_bytes, item.metric_values.tx_rdma_ucast_bytes,
-        item.metric_values.rx_rdma_ucast_pkts, item.metric_values.tx_rdma_ucast_pkts,
-        item.metric_values.rx_rdma_cnp_pkts, item.metric_values.tx_rdma_cnp_pkts);
-}
-
-template <>
-inline pmc::collectors::nic::sample
-deserialize(std::uint8_t*& buffer)
-{
-    pmc::collectors::nic::sample item;
-    std::string_view             device_name_view;
-    utility::parse_value(
-        buffer, item.enabled_metric.value, item.device_id, device_name_view,
-        item.timestamp, item.metric_values.rx_rdma_ucast_bytes,
-        item.metric_values.tx_rdma_ucast_bytes, item.metric_values.rx_rdma_ucast_pkts,
-        item.metric_values.tx_rdma_ucast_pkts, item.metric_values.rx_rdma_cnp_pkts,
-        item.metric_values.tx_rdma_cnp_pkts);
-    item.device_name = std::string(device_name_view);
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const pmc::collectors::nic::sample& item)
-{
-    return utility::get_size(
-        item.enabled_metric.value, item.device_id, std::string_view(item.device_name),
-        item.timestamp, item.metric_values.rx_rdma_ucast_bytes,
-        item.metric_values.tx_rdma_ucast_bytes, item.metric_values.rx_rdma_ucast_pkts,
-        item.metric_values.tx_rdma_ucast_pkts, item.metric_values.rx_rdma_cnp_pkts,
-        item.metric_values.tx_rdma_cnp_pkts);
-}
-
 }  // namespace trace_cache
 }  // namespace rocprofsys

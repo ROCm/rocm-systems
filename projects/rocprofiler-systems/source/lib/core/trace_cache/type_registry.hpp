@@ -44,14 +44,7 @@ private:
     inline void register_type()
     {
         deserializers[T::type_identifier] = [](std::uint8_t*& data) -> variant_t {
-            if constexpr(type_traits::use_custom<T>)
-            {
-                return deserialize_from<T>(data);
-            }
-            else
-            {
-                return deserialize<T>(data);
-            }
+            return deserialize_from<T>(data);
         };
     }
 };

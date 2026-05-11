@@ -69,73 +69,7 @@ struct sample : trace_cache::cacheable_t
 namespace rocprofsys::trace_cache
 {
 
-template <>
-inline void
-serialize(std::uint8_t* buffer, const pmc::collectors::gpu::sample& item)
-{
-    utility::store_value(
-        buffer, static_cast<std::uint32_t>(item.enabled_metric.value), item.device_id,
-        item.timestamp, item.metric_values.average_socket_power,
-        item.metric_values.current_socket_power, item.metric_values.memory_usage,
-        item.metric_values.hotspot_temperature, item.metric_values.edge_temperature,
-        item.metric_values.gfx_activity, item.metric_values.umc_activity,
-        item.metric_values.mm_activity, item.metric_values.xcp_stats,
-        item.metric_values.vcn_activity, item.metric_values.jpeg_activity,
-        item.metric_values.xgmi.link.width, item.metric_values.xgmi.link.speed,
-        item.metric_values.xgmi.data_acc.read, item.metric_values.xgmi.data_acc.write,
-        item.metric_values.pcie.link.width, item.metric_values.pcie.link.speed,
-        item.metric_values.pcie.bandwidth.acc, item.metric_values.pcie.bandwidth.inst,
-        item.metric_values.sdma_usage, item.metric_values.gfx_clock_mhz,
-        item.metric_values.mem_clock_mhz);
-}
-
-template <>
-inline pmc::collectors::gpu::sample
-deserialize(std::uint8_t*& buffer)
-{
-    pmc::collectors::gpu::sample item;
-    utility::parse_value(
-        buffer, item.enabled_metric.value, item.device_id, item.timestamp,
-        item.metric_values.average_socket_power, item.metric_values.current_socket_power,
-        item.metric_values.memory_usage, item.metric_values.hotspot_temperature,
-        item.metric_values.edge_temperature, item.metric_values.gfx_activity,
-        item.metric_values.umc_activity, item.metric_values.mm_activity,
-        item.metric_values.xcp_stats, item.metric_values.vcn_activity,
-        item.metric_values.jpeg_activity, item.metric_values.xgmi.link.width,
-        item.metric_values.xgmi.link.speed, item.metric_values.xgmi.data_acc.read,
-        item.metric_values.xgmi.data_acc.write, item.metric_values.pcie.link.width,
-        item.metric_values.pcie.link.speed, item.metric_values.pcie.bandwidth.acc,
-        item.metric_values.pcie.bandwidth.inst, item.metric_values.sdma_usage,
-        item.metric_values.gfx_clock_mhz, item.metric_values.mem_clock_mhz);
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const pmc::collectors::gpu::sample& item)
-{
-    return utility::get_size(
-        item.enabled_metric.value, item.device_id, item.timestamp,
-        item.metric_values.average_socket_power, item.metric_values.current_socket_power,
-        item.metric_values.memory_usage, item.metric_values.hotspot_temperature,
-        item.metric_values.edge_temperature, item.metric_values.gfx_activity,
-        item.metric_values.umc_activity, item.metric_values.mm_activity,
-        item.metric_values.xcp_stats, item.metric_values.vcn_activity,
-        item.metric_values.jpeg_activity, item.metric_values.xgmi.link.width,
-        item.metric_values.xgmi.link.speed, item.metric_values.xgmi.data_acc.read,
-        item.metric_values.xgmi.data_acc.write, item.metric_values.pcie.link.width,
-        item.metric_values.pcie.link.speed, item.metric_values.pcie.bandwidth.acc,
-        item.metric_values.pcie.bandwidth.inst, item.metric_values.sdma_usage,
-        item.metric_values.gfx_clock_mhz, item.metric_values.mem_clock_mhz);
-}
-
 /// @brief GPU PMC sample type alias
 using gpu_pmc_sample = pmc::collectors::gpu::sample;
-
-namespace type_traits
-{
-template <>
-inline constexpr bool use_custom<pmc::collectors::gpu::sample> = true;
-}  // namespace type_traits
 
 }  // namespace rocprofsys::trace_cache

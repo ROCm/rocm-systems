@@ -89,11 +89,8 @@ struct kernel_dispatch_sample : cacheable_t
     std::uint32_t grid_size_z;
     size_t        stream_handle;
 
-    // Field order MUST match the legacy free serialize() below; the
-    // archive-based path is bytewise wire-compatible with the handrolled
-    // path so flipping use_custom<kernel_dispatch_sample> does not change
-    // the on-disk format. stream_handle is widened to uint64 for portability,
-    // matching the legacy static_cast.
+    // stream_handle is widened to uint64 for portability across 32 / 64-bit
+    // builds; this matches the static_cast in the original wire format.
     //
     // ROCPROFSYS_INLINE expands to `[[gnu::always_inline]] inline`. Combined
     // with ROCPROFSYS_FLATTEN on the serialize_to/serialized_size entry
@@ -114,55 +111,6 @@ struct kernel_dispatch_sample : cacheable_t
         }
     }
 };
-
-namespace type_traits
-{
-template <>
-inline constexpr bool use_custom<kernel_dispatch_sample> = true;
-}  // namespace type_traits
-
-template <>
-inline void
-serialize(std::uint8_t* buffer, const kernel_dispatch_sample& item)
-{
-    utility::store_value(
-        buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
-        item.agent_id_handle, item.kernel_id, item.dispatch_id, item.queue_id_handle,
-        item.correlation_id_internal, item.correlation_id_ancestor,
-        item.private_segment_size, item.group_segment_size, item.workgroup_size_x,
-        item.workgroup_size_y, item.workgroup_size_z, item.grid_size_x, item.grid_size_y,
-        item.grid_size_z, static_cast<std::uint64_t>(item.stream_handle));
-}
-
-template <>
-inline kernel_dispatch_sample
-deserialize(std::uint8_t*& buffer)
-{
-    kernel_dispatch_sample item;
-    std::uint64_t          stream_handle;
-    utility::parse_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
-                         item.agent_id_handle, item.kernel_id, item.dispatch_id,
-                         item.queue_id_handle, item.correlation_id_internal,
-                         item.correlation_id_ancestor, item.private_segment_size,
-                         item.group_segment_size, item.workgroup_size_x,
-                         item.workgroup_size_y, item.workgroup_size_z, item.grid_size_x,
-                         item.grid_size_y, item.grid_size_z, stream_handle);
-    item.stream_handle = stream_handle;
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const kernel_dispatch_sample& item)
-{
-    return utility::get_size(
-        item.start_timestamp, item.end_timestamp, item.thread_id, item.agent_id_handle,
-        item.kernel_id, item.dispatch_id, item.queue_id_handle,
-        item.correlation_id_internal, item.correlation_id_ancestor,
-        item.private_segment_size, item.group_segment_size, item.workgroup_size_x,
-        item.workgroup_size_y, item.workgroup_size_z, item.grid_size_x, item.grid_size_y,
-        item.grid_size_z, static_cast<std::uint64_t>(item.stream_handle));
-}
 
 struct scratch_memory_sample : cacheable_t
 {
@@ -217,49 +165,6 @@ struct scratch_memory_sample : cacheable_t
         }
     }
 };
-
-namespace type_traits
-{
-template <>
-inline constexpr bool use_custom<scratch_memory_sample> = true;
-}  // namespace type_traits
-
-template <>
-inline void
-serialize(std::uint8_t* buffer, const scratch_memory_sample& item)
-{
-    utility::store_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
-                         item.agent_id_handle, item.queue_id_handle, item.kind,
-                         item.operation, item.flags, item.allocation_size,
-                         item.correlation_id_internal, item.correlation_id_ancestor,
-                         static_cast<std::uint64_t>(item.stream_handle));
-}
-
-template <>
-inline scratch_memory_sample
-deserialize(std::uint8_t*& buffer)
-{
-    scratch_memory_sample item;
-    std::uint64_t         stream_handle;
-    utility::parse_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
-                         item.agent_id_handle, item.queue_id_handle, item.kind,
-                         item.operation, item.flags, item.allocation_size,
-                         item.correlation_id_internal, item.correlation_id_ancestor,
-                         stream_handle);
-    item.stream_handle = stream_handle;
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const scratch_memory_sample& item)
-{
-    return utility::get_size(item.start_timestamp, item.end_timestamp, item.thread_id,
-                             item.agent_id_handle, item.queue_id_handle, item.kind,
-                             item.operation, item.flags, item.allocation_size,
-                             item.correlation_id_internal, item.correlation_id_ancestor,
-                             static_cast<std::uint64_t>(item.stream_handle));
-}
 
 struct memory_copy_sample : cacheable_t
 {
@@ -318,51 +223,6 @@ struct memory_copy_sample : cacheable_t
     }
 };
 
-namespace type_traits
-{
-template <>
-inline constexpr bool use_custom<memory_copy_sample> = true;
-}  // namespace type_traits
-
-template <>
-inline void
-serialize(std::uint8_t* buffer, const memory_copy_sample& item)
-{
-    utility::store_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
-                         item.dst_agent_id_handle, item.src_agent_id_handle, item.kind,
-                         item.operation, item.bytes, item.correlation_id_internal,
-                         item.correlation_id_ancestor, item.dst_address_value,
-                         item.src_address_value,
-                         static_cast<std::uint64_t>(item.stream_handle));
-}
-
-template <>
-inline memory_copy_sample
-deserialize(std::uint8_t*& buffer)
-{
-    memory_copy_sample item;
-    std::uint64_t      stream_handle;
-    utility::parse_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
-                         item.dst_agent_id_handle, item.src_agent_id_handle, item.kind,
-                         item.operation, item.bytes, item.correlation_id_internal,
-                         item.correlation_id_ancestor, item.dst_address_value,
-                         item.src_address_value, stream_handle);
-    item.stream_handle = stream_handle;
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const memory_copy_sample& item)
-{
-    return utility::get_size(item.start_timestamp, item.end_timestamp, item.thread_id,
-                             item.dst_agent_id_handle, item.src_agent_id_handle,
-                             item.kind, item.operation, item.bytes,
-                             item.correlation_id_internal, item.correlation_id_ancestor,
-                             item.dst_address_value, item.src_address_value,
-                             static_cast<std::uint64_t>(item.stream_handle));
-}
-
 struct memory_allocate_sample : cacheable_t
 {
     static constexpr type_identifier_t type_identifier = type_identifier_t::memory_alloc;
@@ -414,48 +274,6 @@ struct memory_allocate_sample : cacheable_t
     }
 };
 
-namespace type_traits
-{
-template <>
-inline constexpr bool use_custom<memory_allocate_sample> = true;
-}  // namespace type_traits
-
-template <>
-inline void
-serialize(std::uint8_t* buffer, const memory_allocate_sample& item)
-{
-    utility::store_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
-                         item.agent_id_handle, item.kind, item.operation,
-                         item.allocation_size, item.correlation_id_internal,
-                         item.correlation_id_ancestor, item.address_value,
-                         static_cast<std::uint64_t>(item.stream_handle));
-}
-
-template <>
-inline memory_allocate_sample
-deserialize(std::uint8_t*& buffer)
-{
-    memory_allocate_sample item;
-    std::uint64_t          stream_handle;
-    utility::parse_value(buffer, item.start_timestamp, item.end_timestamp, item.thread_id,
-                         item.agent_id_handle, item.kind, item.operation,
-                         item.allocation_size, item.correlation_id_internal,
-                         item.correlation_id_ancestor, item.address_value, stream_handle);
-    item.stream_handle = stream_handle;
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const memory_allocate_sample& item)
-{
-    return utility::get_size(item.start_timestamp, item.end_timestamp, item.thread_id,
-                             item.agent_id_handle, item.kind, item.operation,
-                             item.allocation_size, item.correlation_id_internal,
-                             item.correlation_id_ancestor, item.address_value,
-                             static_cast<std::uint64_t>(item.stream_handle));
-}
-
 struct region_sample : cacheable_t
 {
     static constexpr type_identifier_t type_identifier = type_identifier_t::region;
@@ -494,51 +312,6 @@ struct region_sample : cacheable_t
            start_timestamp, end_timestamp, call_stack, args_str, category);
     }
 };
-
-namespace type_traits
-{
-template <>
-inline constexpr bool use_custom<region_sample> = true;
-}  // namespace type_traits
-
-template <>
-inline void
-serialize(std::uint8_t* buffer, const region_sample& item)
-{
-    utility::store_value(
-        buffer, item.thread_id, std::string_view(item.name), item.correlation_id_internal,
-        item.correlation_id_ancestor, item.start_timestamp, item.end_timestamp,
-        std::string_view(item.call_stack), std::string_view(item.args_str),
-        std::string_view(item.category));
-}
-
-template <>
-inline region_sample
-deserialize(std::uint8_t*& buffer)
-{
-    region_sample    item;
-    std::string_view name_view, call_stack_view, args_str_view, category_view;
-    utility::parse_value(buffer, item.thread_id, name_view, item.correlation_id_internal,
-                         item.correlation_id_ancestor, item.start_timestamp,
-                         item.end_timestamp, call_stack_view, args_str_view,
-                         category_view);
-    item.name       = std::string(name_view);
-    item.call_stack = std::string(call_stack_view);
-    item.args_str   = std::string(args_str_view);
-    item.category   = std::string(category_view);
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const region_sample& item)
-{
-    return utility::get_size(
-        item.thread_id, std::string_view(item.name), item.correlation_id_internal,
-        item.correlation_id_ancestor, item.start_timestamp, item.end_timestamp,
-        std::string_view(item.call_stack), std::string_view(item.args_str),
-        std::string_view(item.category));
-}
 
 struct in_time_sample : cacheable_t
 {
@@ -592,62 +365,6 @@ struct in_time_sample : cacheable_t
         }
     }
 };
-
-namespace type_traits
-{
-template <>
-inline constexpr bool use_custom<in_time_sample> = true;
-}  // namespace type_traits
-
-template <>
-inline void
-serialize(std::uint8_t* buffer, const in_time_sample& item)
-{
-    utility::store_value(
-        buffer, item.category_enum_id, std::string_view(item.track_name),
-        static_cast<std::uint64_t>(item.timestamp_ns),
-        std::string_view(item.event_metadata), static_cast<std::uint64_t>(item.stack_id),
-        static_cast<std::uint64_t>(item.parent_stack_id),
-        static_cast<std::uint64_t>(item.correlation_id),
-        std::string_view(item.call_stack), std::string_view(item.line_info));
-}
-
-template <>
-inline in_time_sample
-deserialize(std::uint8_t*& buffer)
-{
-    in_time_sample   item;
-    size_t           category_enum_id;
-    std::string_view track_name_view, event_metadata_view, call_stack_view,
-        line_info_view;
-    std::uint64_t timestamp_ns, stack_id, parent_stack_id, correlation_id;
-    utility::parse_value(buffer, category_enum_id, track_name_view, timestamp_ns,
-                         event_metadata_view, stack_id, parent_stack_id, correlation_id,
-                         call_stack_view, line_info_view);
-    item.category_enum_id = category_enum_id;
-    item.track_name       = std::string(track_name_view);
-    item.timestamp_ns     = timestamp_ns;
-    item.event_metadata   = std::string(event_metadata_view);
-    item.stack_id         = stack_id;
-    item.parent_stack_id  = parent_stack_id;
-    item.correlation_id   = correlation_id;
-    item.call_stack       = std::string(call_stack_view);
-    item.line_info        = std::string(line_info_view);
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const in_time_sample& item)
-{
-    return utility::get_size(
-        item.category_enum_id, std::string_view(item.track_name),
-        static_cast<std::uint64_t>(item.timestamp_ns),
-        std::string_view(item.event_metadata), static_cast<std::uint64_t>(item.stack_id),
-        static_cast<std::uint64_t>(item.parent_stack_id),
-        static_cast<std::uint64_t>(item.correlation_id),
-        std::string_view(item.call_stack), std::string_view(item.line_info));
-}
 
 struct pmc_event_with_sample : in_time_sample
 {
@@ -703,69 +420,6 @@ struct pmc_event_with_sample : in_time_sample
     }
 };
 
-namespace type_traits
-{
-template <>
-inline constexpr bool use_custom<pmc_event_with_sample> = true;
-}  // namespace type_traits
-
-template <>
-inline void
-serialize(std::uint8_t* buffer, const pmc_event_with_sample& item)
-{
-    utility::store_value(
-        buffer, item.category_enum_id, std::string_view(item.track_name),
-        static_cast<std::uint64_t>(item.timestamp_ns),
-        std::string_view(item.event_metadata), static_cast<std::uint64_t>(item.stack_id),
-        static_cast<std::uint64_t>(item.parent_stack_id),
-        static_cast<std::uint64_t>(item.correlation_id),
-        std::string_view(item.call_stack), std::string_view(item.line_info),
-        item.device_id, item.device_type, std::string_view(item.pmc_info_name),
-        item.value, item.system_tid);
-}
-
-template <>
-inline pmc_event_with_sample
-deserialize(std::uint8_t*& buffer)
-{
-    pmc_event_with_sample item;
-    size_t                category_enum_id;
-    std::string_view      track_name_view, event_metadata_view, call_stack_view,
-        line_info_view, pmc_info_name_view;
-    std::uint64_t timestamp_ns, stack_id, parent_stack_id, correlation_id;
-    utility::parse_value(buffer, category_enum_id, track_name_view, timestamp_ns,
-                         event_metadata_view, stack_id, parent_stack_id, correlation_id,
-                         call_stack_view, line_info_view, item.device_id,
-                         item.device_type, pmc_info_name_view, item.value,
-                         item.system_tid);
-    item.category_enum_id = category_enum_id;
-    item.track_name       = std::string(track_name_view);
-    item.timestamp_ns     = timestamp_ns;
-    item.event_metadata   = std::string(event_metadata_view);
-    item.stack_id         = stack_id;
-    item.parent_stack_id  = parent_stack_id;
-    item.correlation_id   = correlation_id;
-    item.call_stack       = std::string(call_stack_view);
-    item.line_info        = std::string(line_info_view);
-    item.pmc_info_name    = std::string(pmc_info_name_view);
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const pmc_event_with_sample& item)
-{
-    return utility::get_size(
-        item.category_enum_id, std::string_view(item.track_name),
-        static_cast<std::uint64_t>(item.timestamp_ns),
-        std::string_view(item.event_metadata), static_cast<std::uint64_t>(item.stack_id),
-        static_cast<std::uint64_t>(item.parent_stack_id),
-        static_cast<std::uint64_t>(item.correlation_id),
-        std::string_view(item.call_stack), std::string_view(item.line_info),
-        item.device_id, item.device_type, std::string_view(item.pmc_info_name),
-        item.value, item.system_tid);
-}
-
 struct backtrace_region_sample : cacheable_t
 {
     static constexpr type_identifier_t type_identifier =
@@ -807,53 +461,6 @@ struct backtrace_region_sample : cacheable_t
            call_stack, line_info, extdata);
     }
 };
-
-namespace type_traits
-{
-template <>
-inline constexpr bool use_custom<backtrace_region_sample> = true;
-}  // namespace type_traits
-
-template <>
-inline void
-serialize(std::uint8_t* buffer, const backtrace_region_sample& item)
-{
-    utility::store_value(
-        buffer, item.type, item.thread_id, std::string_view(item.track_name),
-        std::string_view(item.name), item.start_timestamp, item.end_timestamp,
-        std::string_view(item.category), std::string_view(item.call_stack),
-        std::string_view(item.line_info), std::string_view(item.extdata));
-}
-
-template <>
-inline backtrace_region_sample
-deserialize(std::uint8_t*& buffer)
-{
-    backtrace_region_sample item;
-    std::string_view        track_name_view, name_view, category_view, call_stack_view,
-        line_info_view, extdata_view;
-    utility::parse_value(buffer, item.type, item.thread_id, track_name_view, name_view,
-                         item.start_timestamp, item.end_timestamp, category_view,
-                         call_stack_view, line_info_view, extdata_view);
-    item.track_name = std::string(track_name_view);
-    item.name       = std::string(name_view);
-    item.category   = std::string(category_view);
-    item.call_stack = std::string(call_stack_view);
-    item.line_info  = std::string(line_info_view);
-    item.extdata    = std::string(extdata_view);
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const backtrace_region_sample& item)
-{
-    return utility::get_size(
-        item.type, item.thread_id, std::string_view(item.track_name),
-        std::string_view(item.name), item.start_timestamp, item.end_timestamp,
-        std::string_view(item.category), std::string_view(item.call_stack),
-        std::string_view(item.line_info), std::string_view(item.extdata));
-}
 
 struct kfd_sample : cacheable_t
 {
@@ -903,57 +510,6 @@ struct kfd_sample : cacheable_t
            system_tid);
     }
 };
-
-namespace type_traits
-{
-template <>
-inline constexpr bool use_custom<kfd_sample> = true;
-}  // namespace type_traits
-
-template <>
-inline void
-serialize(std::uint8_t* buffer, const kfd_sample& item)
-{
-    utility::store_value(
-        buffer, item.thread_id, std::string_view(item.name), item.start_timestamp,
-        item.end_timestamp, std::string_view(item.args_str),
-        std::string_view(item.category), std::string_view(item.track_name),
-        std::string_view(item.event_metadata), item.device_id, item.device_type,
-        std::string_view(item.pmc_info_name), item.value, item.system_tid);
-}
-
-template <>
-inline kfd_sample
-deserialize(std::uint8_t*& buffer)
-{
-    kfd_sample       item;
-    std::string_view name_view, args_str_view, category_view, track_name_view,
-        event_metadata_view, pmc_info_name_view;
-    utility::parse_value(buffer, item.thread_id, name_view, item.start_timestamp,
-                         item.end_timestamp, args_str_view, category_view,
-                         track_name_view, event_metadata_view, item.device_id,
-                         item.device_type, pmc_info_name_view, item.value,
-                         item.system_tid);
-    item.name           = std::string(name_view);
-    item.args_str       = std::string(args_str_view);
-    item.category       = std::string(category_view);
-    item.track_name     = std::string(track_name_view);
-    item.event_metadata = std::string(event_metadata_view);
-    item.pmc_info_name  = std::string(pmc_info_name_view);
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const kfd_sample& item)
-{
-    return utility::get_size(
-        item.thread_id, std::string_view(item.name), item.start_timestamp,
-        item.end_timestamp, std::string_view(item.args_str),
-        std::string_view(item.category), std::string_view(item.track_name),
-        std::string_view(item.event_metadata), item.device_id, item.device_type,
-        std::string_view(item.pmc_info_name), item.value, item.system_tid);
-}
 
 }  // namespace trace_cache
 }  // namespace rocprofsys
