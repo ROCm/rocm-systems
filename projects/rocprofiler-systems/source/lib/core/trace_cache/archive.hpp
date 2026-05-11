@@ -25,6 +25,7 @@
 
 #include "common/defines.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -66,6 +67,17 @@ struct is_std_optional<std::optional<U>> : std::true_type
 
 template <typename T>
 inline constexpr bool is_std_optional_v = is_std_optional<T>::value;
+
+template <typename T>
+struct is_std_array : std::false_type
+{};
+
+template <typename U, std::size_t N>
+struct is_std_array<std::array<U, N>> : std::true_type
+{};
+
+template <typename T>
+inline constexpr bool is_std_array_v = is_std_array<T>::value;
 
 template <typename T>
 inline constexpr bool is_std_string_v = std::is_same_v<std::decay_t<T>, std::string>;
@@ -182,6 +194,27 @@ private:
                 write_one(*v);
             }
         }
+        else if constexpr(archive_detail::is_std_array_v<D>)
+        {
+            // std::array has no length prefix on the wire. Fixed-size at the
+            // type level; for trivially copyable elements memcpy the whole
+            // array (matches legacy `memcpy(&value, sizeof(D))`). For class
+            // elements with a member serialize, recurse field-by-field.
+            using elem_t = typename D::value_type;
+            if constexpr(std::is_trivially_copyable_v<elem_t> &&
+                         !has_member_serialize_v<output_archive, elem_t>)
+            {
+                std::memcpy(m_cur, v.data(), sizeof(D));
+                m_cur += sizeof(D);
+            }
+            else
+            {
+                for(const auto& e : v)
+                {
+                    write_one(e);
+                }
+            }
+        }
         else if constexpr(std::is_class_v<D> && has_member_serialize_v<output_archive, D>)
         {
             // Field-by-field. Must take precedence over the trivially_copyable
@@ -278,6 +311,23 @@ private:
                 out.reset();
             }
         }
+        else if constexpr(archive_detail::is_std_array_v<D>)
+        {
+            using elem_t = typename D::value_type;
+            if constexpr(std::is_trivially_copyable_v<elem_t> &&
+                         !has_member_serialize_v<input_archive, elem_t>)
+            {
+                std::memcpy(out.data(), m_cur, sizeof(D));
+                m_cur += sizeof(D);
+            }
+            else
+            {
+                for(auto& e : out)
+                {
+                    read_one(e);
+                }
+            }
+        }
         else if constexpr(std::is_class_v<D> && has_member_serialize_v<input_archive, D>)
         {
             out.serialize(*this);
@@ -348,6 +398,22 @@ private:
             if(v.has_value())
             {
                 count_one(*v);
+            }
+        }
+        else if constexpr(archive_detail::is_std_array_v<D>)
+        {
+            using elem_t = typename D::value_type;
+            if constexpr(std::is_trivially_copyable_v<elem_t> &&
+                         !has_member_serialize_v<size_archive, elem_t>)
+            {
+                m_total += sizeof(D);
+            }
+            else
+            {
+                for(const auto& e : v)
+                {
+                    count_one(e);
+                }
             }
         }
         else if constexpr(std::is_class_v<D> && has_member_serialize_v<size_archive, D>)
