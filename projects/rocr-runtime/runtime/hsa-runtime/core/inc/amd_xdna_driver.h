@@ -124,6 +124,10 @@ public:
 
   /// @brief Destroy the Kernel Mode Queue (KMQ) metadata.
   ///
+  /// @note This function will also destroy the hardware context associated with the KMQ. Even if
+  /// that fails, the metadata is still considered destroyed and the function will return the error
+  /// from destroying the hardware context.
+  ///
   /// @param[in] queue_metadata KMQ metadata to be destroyed
   hsa_status_t DestroyKernelModeQueue(void* queue_metadata) const;
 

@@ -355,6 +355,7 @@ static hsa_status_t CreateHwCtx(int fd, uint32_t num_core_tiles, KmqMetadata* km
   auto* xdna_config_cu_param =
       static_cast<amdxdna_hwctx_param_config_cu*>(malloc(config_cu_param_size));
   if (xdna_config_cu_param == nullptr) {
+    DestroyHwCtx(fd, create_hwctx_args.handle);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   MAKE_SCOPE_GUARD([xdna_config_cu_param] { free(xdna_config_cu_param); });
