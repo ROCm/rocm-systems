@@ -84,6 +84,18 @@ namespace rocr {
       hsa_executable_t executable,
       void *data),
     void *data);
+
+  hsa_status_t hsa_ven_amd_loader_loaded_code_object_iterate_loaded_segments(
+    hsa_loaded_code_object_t loaded_code_object,
+    hsa_status_t (*callback)(
+      hsa_ven_amd_loader_loaded_segment_t loaded_segment,
+      void *data),
+    void *data);
+
+  hsa_status_t hsa_ven_amd_loader_loaded_segment_get_info(
+    hsa_ven_amd_loader_loaded_segment_t loaded_segment,
+    hsa_ven_amd_loader_loaded_segment_info_t attribute,
+    void *value);
 }  // namespace rocr
 
 #endif

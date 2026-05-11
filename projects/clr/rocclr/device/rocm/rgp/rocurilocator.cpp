@@ -6,7 +6,7 @@
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
-#include "rocurilocator.hpp"
+#include "device/rocm/rgp/rocurilocator.hpp"
 #include <sstream>
 
 namespace amd::roc {

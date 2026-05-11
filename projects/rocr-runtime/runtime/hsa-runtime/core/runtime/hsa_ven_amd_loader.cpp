@@ -54,6 +54,7 @@ using namespace core;
 using loader::CodeObjectReaderImpl;
 using loader::Executable;
 using loader::LoadedCodeObject;
+using loader::LoadedSegment;
 using loader::Loader;
 
 namespace AMD {
@@ -298,6 +299,81 @@ hsa_ven_amd_loader_iterate_executables(
     }
 
     return GetLoader()->IterateExecutables(callback, data);
+  } catch(...) { return AMD::handleException(); }
+}
+
+// Trampoline data used to bridge the internal amd_loaded_segment_t callback
+// signature to the public hsa_ven_amd_loader_loaded_segment_t callback.
+namespace {
+
+struct SegmentIterCtx {
+  hsa_status_t (*pub_callback)(hsa_ven_amd_loader_loaded_segment_t, void *);
+  void *pub_data;
+};
+
+hsa_status_t SegmentIterTrampoline(amd_loaded_segment_t seg, void *data) {
+  auto *ctx = static_cast<SegmentIterCtx *>(data);
+  hsa_ven_amd_loader_loaded_segment_t pub_seg = {seg.handle};
+  return ctx->pub_callback(pub_seg, ctx->pub_data);
+}
+
+} // namespace
+
+hsa_status_t hsa_ven_amd_loader_loaded_code_object_iterate_loaded_segments(
+    hsa_loaded_code_object_t loaded_code_object,
+    hsa_status_t (*callback)(
+      hsa_ven_amd_loader_loaded_segment_t loaded_segment,
+      void *data),
+    void *data) {
+  try {
+    if (!Runtime::runtime_singleton_->IsOpen()) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+    if (nullptr == callback) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    const LoadedCodeObject *lcobj = LoadedCodeObject::Object(loaded_code_object);
+    if (!lcobj) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
+
+    SegmentIterCtx ctx{callback, data};
+    return const_cast<LoadedCodeObject *>(lcobj)->IterateLoadedSegments(
+        SegmentIterTrampoline, &ctx);
+  } catch(...) { return AMD::handleException(); }
+}
+
+hsa_status_t hsa_ven_amd_loader_loaded_segment_get_info(
+    hsa_ven_amd_loader_loaded_segment_t loaded_segment,
+    hsa_ven_amd_loader_loaded_segment_info_t attribute,
+    void *value) {
+  try {
+    if (!Runtime::runtime_singleton_->IsOpen()) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+    if (nullptr == value) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    // The public hsa_ven_amd_loader_loaded_segment_t handle is identical to
+    // the internal amd_loaded_segment_t handle — both are raw pointer-as-uint64.
+    amd_loaded_segment_t internal_seg = {loaded_segment.handle};
+    LoadedSegment *seg = LoadedSegment::Object(internal_seg);
+    if (!seg) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    // Map public attribute enum values directly to the internal enum.
+    // The values are kept identical so a static_cast is sufficient.
+    amd_loaded_segment_info_t internal_attr =
+        static_cast<amd_loaded_segment_info_t>(attribute);
+
+    if (!seg->GetInfo(internal_attr, value)) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    return HSA_STATUS_SUCCESS;
   } catch(...) { return AMD::handleException(); }
 }
 
