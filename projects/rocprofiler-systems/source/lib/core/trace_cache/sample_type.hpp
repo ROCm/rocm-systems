@@ -94,8 +94,14 @@ struct kernel_dispatch_sample : cacheable_t
     // path so flipping use_custom<kernel_dispatch_sample> does not change
     // the on-disk format. stream_handle is widened to uint64 for portability,
     // matching the legacy static_cast.
+    //
+    // ROCPROFSYS_INLINE expands to `[[gnu::always_inline]] inline`. Combined
+    // with ROCPROFSYS_FLATTEN on the serialize_to/serialized_size entry
+    // points this collapses the per-field memcpy chain into the caller's
+    // frame. Without it GCC keeps this template instantiation as an
+    // out-of-line call and reloads the cursor between fields.
     template <class Archive>
-    void serialize(Archive& ar)
+    ROCPROFSYS_INLINE void serialize(Archive& ar)
     {
         auto stream_handle_u64 = static_cast<std::uint64_t>(stream_handle);
         ar(start_timestamp, end_timestamp, thread_id, agent_id_handle, kernel_id,
