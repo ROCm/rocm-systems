@@ -142,20 +142,12 @@ SET(AQLPROFILE_PM4_FACTORY_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx9_architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx10_architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx11_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx115x_architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx12_architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../ip_offset_table_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../parse_ip_discovery.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../navi_reg_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../vega20_reg_init.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx12_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx1250_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx11_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx115x_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx10_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx940_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx908_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx90a_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx9_factory.cpp
     ${LIB_DIR}/util/hsa_rsrc_factory.cpp
     ${LIB_DIR}/pm4/gfx9_primitives_provider.cpp
     ${LIB_DIR}/pm4/gfx10_primitives_provider.cpp
@@ -228,21 +220,13 @@ SET(AQLPROFILE_V2_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx9_architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx10_architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx11_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx115x_architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx12_architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../ip_offset_table_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../parse_ip_discovery.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../navi_reg_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../vega20_reg_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../spm_data.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx12_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx1250_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx11_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx115x_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx10_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx940_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx908_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx90a_factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx9_factory.cpp
     ${LIB_DIR}/util/hsa_rsrc_factory.cpp
     ${LIB_DIR}/pm4/gfx9_primitives_provider.cpp
     ${LIB_DIR}/pm4/gfx10_primitives_provider.cpp

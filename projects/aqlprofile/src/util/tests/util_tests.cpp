@@ -4,9 +4,23 @@
 #include <gtest/gtest.h>
 #include "util/hsa_rsrc_factory.h"
 
+// Returns true if the HSA runtime can be initialized (i.e., GPU driver is present).
+static bool HsaAvailable() {
+    hsa_status_t status = hsa_init();
+    if (status == HSA_STATUS_SUCCESS) {
+        hsa_shut_down();
+        return true;
+    }
+    return false;
+}
+
 // Test fixture for HsaRsrcFactory
 class HsaRsrcFactoryTest : public ::testing::Test {
 protected:
+    static void SetUpTestSuite() {
+        if (!HsaAvailable())
+            GTEST_SKIP() << "HSA runtime unavailable (no GPU/KFD driver), skipping";
+    }
     void TearDown() override {
         HsaRsrcFactory::Destroy();
     }

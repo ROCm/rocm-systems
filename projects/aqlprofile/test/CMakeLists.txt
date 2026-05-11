@@ -98,6 +98,8 @@ install(FILES ${TEST_DIR}/run_install.sh RENAME run_tests.sh
 #add_subdirectory(parser)
 
 add_test(NAME legacy-tests COMMAND "${TEST_BINARY_DIR}/run.sh")
+set_tests_properties(legacy-tests PROPERTIES
+    SKIP_REGULAR_EXPRESSION "hsaKmtOpenKFD|Cannot load librocdxg")
 
 option(AQLPROFILE_BUILD_INTEGRATION_TESTS "Build integration tests" ON)
 

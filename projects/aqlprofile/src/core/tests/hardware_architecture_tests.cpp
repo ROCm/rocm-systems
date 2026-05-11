@@ -193,6 +193,7 @@ TEST(HardwareArchitectureTest, GetBytesNeededForBlock_MultiXCC) {
    public:
     MultiXCCArch() {
       auto& cfg = const_cast<HardwareConfig&>(GetConfig());
+      cfg.se_count = 16;  // 4 SEs per XCC * 4 XCCs
       cfg.xcc_count = 4;
     }
   };
