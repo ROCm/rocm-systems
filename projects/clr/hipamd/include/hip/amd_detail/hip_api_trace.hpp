@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 27
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 28
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1101,6 +1101,10 @@ typedef hipError_t (*t_hipLibraryGetKernel)(hipKernel_t* pKernel, hipLibrary_t l
                                             const char* name);
 typedef hipError_t (*t_hipLibraryGetKernelCount)(unsigned int *count,
                                                  hipLibrary_t library);
+typedef hipError_t (*t_hipLibraryGetGlobal)(void** dptr, size_t* bytes,
+                                            hipLibrary_t library, const char* name);
+typedef hipError_t (*t_hipLibraryGetManaged)(void** dptr, size_t* bytes,
+                                             hipLibrary_t library, const char* name);
 typedef hipError_t (*t_hipLibraryEnumerateKernels)(hipKernel_t* kernels, unsigned int numKernels,
                                                    hipLibrary_t library);
 typedef hipError_t (*t_hipKernelGetLibrary)(hipLibrary_t* library, hipKernel_t kernel);
@@ -1744,8 +1748,12 @@ struct HipDispatchTable {
   t_hipOccupancyMaxPotentialClusterSize hipOccupancyMaxPotentialClusterSize_fn;
   t_hipOccupancyMaxActiveClusters hipOccupancyMaxActiveClusters_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 28
+  t_hipLibraryGetGlobal hipLibraryGetGlobal_fn;
+  t_hipLibraryGetManaged hipLibraryGetManaged_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 29
 
   // ******************************************************************************************* //
   //

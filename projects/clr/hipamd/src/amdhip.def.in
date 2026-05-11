@@ -519,6 +519,8 @@ hipLibraryLoadFromFile
 hipLibraryUnload
 hipLibraryGetKernel
 hipLibraryGetKernelCount
+hipLibraryGetGlobal
+hipLibraryGetManaged
 hipStreamCopyAttributes
 hipLibraryEnumerateKernels
 hipKernelGetLibrary
