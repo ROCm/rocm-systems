@@ -438,6 +438,22 @@ PUBLIC_API hsa_status_t aqlprofile_register_agent_info(aqlprofile_agent_handle_t
   return HSA_STATUS_SUCCESS;
 }
 
+PUBLIC_API hsa_status_t aqlprofile_get_agent_info(aqlprofile_agent_handle_t agent,
+                                                  aqlprofile_agent_info_v1_t* info_out) {
+  if (info_out == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  const AgentInfo* info = aql_profile::GetAgentInfo(agent);
+  if (info == nullptr) return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  info_out->agent_gfxip = info->gfxip;
+  info_out->xcc_num = info->xcc_num;
+  info_out->se_num = info->se_num;
+  info_out->cu_num = info->cu_num;
+  info_out->shader_arrays_per_se = info->shader_arrays_per_se;
+  info_out->domain = info->domain;
+  info_out->location_id = info->bdf_id;
+  return HSA_STATUS_SUCCESS;
+}
+
 // Check if event is valid for the specific GPU
 PUBLIC_API hsa_status_t aqlprofile_validate_pmc_event(aqlprofile_agent_handle_t agent,
                                                       const aqlprofile_pmc_event_t* event,

@@ -560,4 +560,43 @@ int AqlProfileV2ApiTest::callback_call_count_ = 0;
 int AqlProfileV2ApiTest::last_callback_id_ = -1;
 std::string AqlProfileV2ApiTest::last_callback_name_ = "";
 
+// Test aqlprofile_get_agent_info: happy path roundtrip
+TEST_F(AqlProfileV2ApiTest, GetAgentInfoRoundtrip) {
+    aqlprofile_agent_handle_t handle{};
+    hsa_status_t status = aqlprofile_register_agent_info(
+        &handle, &test_agent_info_v1_, AQLPROFILE_AGENT_VERSION_V1);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    aqlprofile_agent_info_v1_t out{};
+    status = aqlprofile_get_agent_info(handle, &out);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    EXPECT_STREQ(out.agent_gfxip, test_agent_info_v1_.agent_gfxip);
+    EXPECT_EQ(out.xcc_num, test_agent_info_v1_.xcc_num);
+    EXPECT_EQ(out.se_num, test_agent_info_v1_.se_num);
+    EXPECT_EQ(out.cu_num, test_agent_info_v1_.cu_num);
+    EXPECT_EQ(out.shader_arrays_per_se, test_agent_info_v1_.shader_arrays_per_se);
+    EXPECT_EQ(out.domain, test_agent_info_v1_.domain);
+    EXPECT_EQ(out.location_id, test_agent_info_v1_.location_id);
+}
+
+// Test aqlprofile_get_agent_info: null info_out returns INVALID_ARGUMENT
+TEST_F(AqlProfileV2ApiTest, GetAgentInfoNullOutReturnsError) {
+    aqlprofile_agent_handle_t handle{};
+    aqlprofile_register_agent_info(&handle, &test_agent_info_v1_, AQLPROFILE_AGENT_VERSION_V1);
+
+    hsa_status_t status = aqlprofile_get_agent_info(handle, nullptr);
+    EXPECT_EQ(status, HSA_STATUS_ERROR_INVALID_ARGUMENT);
+}
+
+// Test aqlprofile_get_agent_info: invalid handle returns INVALID_AGENT
+TEST_F(AqlProfileV2ApiTest, GetAgentInfoInvalidHandleReturnsError) {
+    aqlprofile_agent_handle_t invalid_handle{};
+    invalid_handle.handle = 0xDEADBEEFDEADBEEF;
+
+    aqlprofile_agent_info_v1_t out{};
+    hsa_status_t status = aqlprofile_get_agent_info(invalid_handle, &out);
+    EXPECT_EQ(status, HSA_STATUS_ERROR_INVALID_AGENT);
+}
+
 } // namespace aql_profile_v2_tests

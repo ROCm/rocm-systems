@@ -261,6 +261,18 @@ hsa_status_t aqlprofile_register_agent(aqlprofile_agent_handle_t* agent_id,
 hsa_status_t aqlprofile_register_agent_info(aqlprofile_agent_handle_t* agent_id,
                                             const void* agent_info,
                                             aqlprofile_agent_version_t version);
+
+/**
+ * @brief Retrieves the agent info for a previously registered agent handle.
+ * @param[in]  agent    Handle returned by aqlprofile_register_agent / aqlprofile_register_agent_info
+ * @param[out] info_out Caller-allocated struct to be filled with agent topology data.
+ * @retval HSA_STATUS_SUCCESS if the handle is valid and info_out was filled.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if info_out is NULL.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT if the handle is not recognised.
+ */
+hsa_status_t aqlprofile_get_agent_info(aqlprofile_agent_handle_t agent,
+                                       aqlprofile_agent_info_v1_t* info_out);
+
 /**
  * @brief AQLprofile struct containing information for perfmon events
  */
