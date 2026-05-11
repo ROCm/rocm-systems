@@ -174,7 +174,14 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
     assert(pprior != nullptr);
     auto* state_prior = reinterpret_cast<ompt_task_save_state*>(pprior->ptr);
     if(state_prior == nullptr)
+    {
+        /* If early_fulfill is dispatched after task_complete,
+         * state_prior will be nullptr because task_complete deleted it.
+         * Return immediately to avoid failing on a valid trailing callback.
+         */
+        if(prior_task_status == ompt_task_early_fulfill) return;
         ROCP_FATAL << "state_prior == nullptr prior_task_status: " << prior_task_status << ".";
+    }
 
     auto* state_next   = pnext ? reinterpret_cast<ompt_task_save_state*>(pnext->ptr) : nullptr;
     auto* prior_corrid = context::get_latest_correlation_id();
