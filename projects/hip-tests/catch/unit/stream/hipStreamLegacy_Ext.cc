@@ -9,7 +9,10 @@
 #include <utils.hh>
 #include <hip_test_process.hh>
 
-static int getN() { return isQuickLevel() ? (64 * 1024 / sizeof(int)) : 2 * 1024 * 1024; }
+static int getN() {
+  static const int val = isQuickLevel() ? (64 * 1024 / sizeof(int)) : 2 * 1024 * 1024;
+  return val;
+}
 static size_t getNBytes() { return getN() * sizeof(int); }
 
 /**

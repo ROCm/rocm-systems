@@ -26,7 +26,10 @@ This testcase verifies following scenarios
 #endif
 
 
-static auto NUM_ELM() { return isQuickLevel() ? 128 * 1024 : 4 * 1024 * 1024; }
+static auto NUM_ELM() {
+  static const auto val = isQuickLevel() ? 128 * 1024 : 4 * 1024 * 1024;
+  return val;
+}
 static unsigned blocksPerCU{6};  // to hide latency
 static unsigned threadsPerBlock{256};
 

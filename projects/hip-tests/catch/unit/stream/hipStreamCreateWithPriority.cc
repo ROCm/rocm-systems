@@ -17,8 +17,14 @@
 #include <vector>
 #include "streamCommon.hh"  // NOLINT
 
-static size_t MEMCPYSIZE1() { return isQuickLevel() ? (100 * 1024) : (64 * 1024 * 1024); }
-static size_t MEMCPYSIZE2() { return isQuickLevel() ? (100 * 1024) : (1024 * 1024); }
+static size_t MEMCPYSIZE1() {
+  static const size_t val = isQuickLevel() ? (100 * 1024) : (64 * 1024 * 1024);
+  return val;
+}
+static size_t MEMCPYSIZE2() {
+  static const size_t val = isQuickLevel() ? (100 * 1024) : (1024 * 1024);
+  return val;
+}
 constexpr size_t NUMITERS = 2;
 constexpr size_t GRIDSIZE = 4096;
 constexpr size_t BLOCKSIZE = 256;

@@ -16,7 +16,10 @@ This testfile verifies the following scenarios of all hipMemcpy API
 3. Null check scenario
 */
 
-static auto NUM_ELM() { return isQuickLevel() ? 1024 : 1024 * 1024; }
+static auto NUM_ELM() {
+  static const auto val = isQuickLevel() ? 1024 : 1024 * 1024;
+  return val;
+}
 
 
 /*This testcase verifies the negative scenarios of hipMemcpy APIs

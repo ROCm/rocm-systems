@@ -125,7 +125,7 @@ Or use Catch2 tag filters:
 
 ### Writing level-aware tests with `isQuickLevel()`
 
-Tests that are slow in emulation environments can use `isQuickLevel()` to reduce their workload at `level_0` while preserving full coverage at higher levels. This function returns `true` when `HIP_TEST_LEVEL=level_0` is set.
+Tests that are slow in emulation environments can use `isQuickLevel()` to reduce their workload at `level_0` while preserving full coverage at higher levels. This function returns `true` when the active test level is `level_0` (set via `HIP_TEST_LEVEL` environment variable or `[level_0]` Catch2 tag filter).
 
 ```cpp
 #include <hip_test_common.hh>

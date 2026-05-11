@@ -18,7 +18,10 @@
 #include "mempool_common.hh"
 #include <hip_test_process.hh>
 
-static int DATA_SIZE() { return isQuickLevel() ? 128 * 1024 : 1024 * 1024; }
+static int DATA_SIZE() {
+  static const int val = isQuickLevel() ? 128 * 1024 : 1024 * 1024;
+  return val;
+}
 static size_t byte_size() { return DATA_SIZE() * sizeof(int); }
 
 /**
