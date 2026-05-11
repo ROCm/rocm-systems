@@ -805,7 +805,7 @@ static hipError_t hipExtLaunchKernelLayer(const void* function_address, dim3 num
   _rec->gpu.block_x = dimBlocks.x; _rec->gpu.block_y = dimBlocks.y; _rec->gpu.block_z = dimBlocks.z;
   if (args) {
     hipFunction_t hfunc = nullptr;
-    if (ihipGetFuncBySymbol(&hfunc, function_address) == hipSuccess)
+    if (hip::ihipGetFuncBySymbol(&hfunc, function_address) == hipSuccess)
       HipCaptureKernelArgsExt(&_rec->gpu, hfunc, args);
   }
   auto _r = g_next.hipExtLaunchKernel_fn(function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream, startEvent, stopEvent, flags);
@@ -1535,7 +1535,7 @@ static void CaptureGraphExecNodes(hipGraphExec_t exec, hipGraph_t graph) {
         knode->GetParams(&kp);
         if (!kp.func) continue;
         hipFunction_t hfunc = nullptr;
-        if (ihipGetFuncBySymbol(&hfunc, kp.func) != hipSuccess || !hfunc) {
+        if (hip::ihipGetFuncBySymbol(&hfunc, kp.func) != hipSuccess || !hfunc) {
           // Stream-captured graphs store a hipFunction_t (not a host symbol pointer) in kp.func.
           // ihipGetFuncBySymbol fails for these — fall back to casting directly, mirroring
           // GraphKernelNode::getFunc().
@@ -2086,7 +2086,7 @@ static hipError_t hipLaunchCooperativeKernelLayer(const void* f, dim3 gridDim, d
   _rec->gpu.block_x = blockDimX.x; _rec->gpu.block_y = blockDimX.y; _rec->gpu.block_z = blockDimX.z;
   if (kernelParams) {
     hipFunction_t hfunc = nullptr;
-    if (ihipGetFuncBySymbol(&hfunc, f) == hipSuccess)
+    if (hip::ihipGetFuncBySymbol(&hfunc, f) == hipSuccess)
       HipCaptureKernelArgsExt(&_rec->gpu, hfunc, kernelParams);
   }
   auto _r = g_next.hipLaunchCooperativeKernel_fn(f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream);
@@ -2122,7 +2122,7 @@ static hipError_t hipLaunchKernelLayer(const void* function_address, dim3 numBlo
   _rec->gpu.block_x = dimBlocks.x; _rec->gpu.block_y = dimBlocks.y; _rec->gpu.block_z = dimBlocks.z;
   if (args) {
     hipFunction_t hfunc = nullptr;
-    if (ihipGetFuncBySymbol(&hfunc, function_address) == hipSuccess)
+    if (hip::ihipGetFuncBySymbol(&hfunc, function_address) == hipSuccess)
       HipCaptureKernelArgsExt(&_rec->gpu, hfunc, args);
   }
   auto _r = g_next.hipLaunchKernel_fn(function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
