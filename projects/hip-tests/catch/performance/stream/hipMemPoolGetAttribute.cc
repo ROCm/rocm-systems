@@ -56,7 +56,8 @@ static void RunBenchmark(const hipMemPoolAttr attribute) {
  */
 HIP_TEST_CASE(Performance_hipMemPoolGetAttribute) {
   if (!AreMemPoolsSupported(0)) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    return;
   }
   hipMemPoolAttr attribute =
       GENERATE(hipMemPoolAttrReleaseThreshold, hipMemPoolReuseFollowEventDependencies,

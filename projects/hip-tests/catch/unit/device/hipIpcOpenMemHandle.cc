@@ -202,7 +202,8 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc) {
 HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc_Child) {
   const char* hex = std::getenv("HIP_IPC_HANDLE");
   if (hex == nullptr || hex[0] == '\0') {
-    HIP_SKIP_TEST("This test must be launched by parent multiprocess test.");
+    HipTest::HIP_SKIP_TEST("This test must be launched by parent multiprocess test.");
+    return;
   }
 
   hipIpcMemHandle_t handle = hexToIpcHandle(hex);

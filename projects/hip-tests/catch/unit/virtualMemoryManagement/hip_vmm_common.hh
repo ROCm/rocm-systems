@@ -25,7 +25,8 @@
     hipDeviceAttribute_t attr = hipDeviceAttributeVirtualMemoryManagementSupported;                \
     HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
     if (value == 0) {                                                                              \
-      HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);                                         \
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);                     \
+      return;                                                                                      \
     }                                                                                              \
   }
 
@@ -35,7 +36,8 @@
     hipDeviceAttribute_t attr = hipDeviceAttributeDmaBufSupported;                                 \
     HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
     if (value == 0) {                                                                              \
-      HIP_SKIP_TEST("DMA-BUF is not supported for this test on this device.");                     \
+      HipTest::HIP_SKIP_TEST("DMA-BUF is not supported for this test on this device.");                  \
+      return;                                                                                      \
     }                                                                                              \
   }
 #ifdef __linux__

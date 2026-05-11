@@ -32,7 +32,8 @@ HIP_TEST_CASE(Unit_Printf_flags_Sanity_Positive) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    return;
   }
   std::string reference =
       std::string(R"here(00000042

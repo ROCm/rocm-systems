@@ -462,12 +462,14 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc) {
   hipMemAllocationHandleType handleType;
 #if HT_WIN
   if (!(handleTypesSupported & hipMemHandleTypeWin32)) {
-    HIP_SKIP_TEST("Win32 handle type not supported. Skipping Test..");
+    HipTest::HIP_SKIP_TEST("Win32 handle type not supported. Skipping Test..");
+    return;
   }
   handleType = hipMemHandleTypeWin32;
 #else
   if (!(handleTypesSupported & hipMemHandleTypePosixFileDescriptor)) {
-    HIP_SKIP_TEST("POSIX FD handle type not supported. Skipping Test..");
+    HipTest::HIP_SKIP_TEST("POSIX FD handle type not supported. Skipping Test..");
+    return;
   }
   handleType = hipMemHandleTypePosixFileDescriptor;
 #endif
@@ -562,7 +564,8 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc) {
 HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc_child) {
   unsigned long parentPid = getParentProcessId();
   if (parentPid == 0) {
-    HIP_SKIP_TEST("Not launched by parent test. Skipping..");
+    HipTest::HIP_SKIP_TEST("Not launched by parent test. Skipping..");
+    return;
   }
   char shmName[64];
 #if HT_WIN
@@ -573,10 +576,10 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc_child) {
 
   SharedMemory shm;
   if (shm.open(shmName, sizeof(mempoolIpcShmStruct)) != 0) {
-    HIP_SKIP_TEST(
-        "Parent shared memory not found. "
-        "This test should only be invoked by "
-        "Unit_hipMemPoolExportToShareableHandle_multiproc. Skipping..");
+    HipTest::HIP_SKIP_TEST("Parent shared memory not found. "
+                            "This test should only be invoked by "
+                            "Unit_hipMemPoolExportToShareableHandle_multiproc. Skipping..");
+    return;
   }
   auto *shmData = shm.as<mempoolIpcShmStruct>();
 
