@@ -161,8 +161,8 @@ public:
         rocprofiler_thread_trace_decoder_event_type_t type, int64_t time, uint8_t me, uint8_t pipe, uint32_t payload
     )
     {
-        rocprof_trace_decoder_event_t event{};
-        event.size = sizeof(rocprof_trace_decoder_event_t);
+        rocprofiler_thread_trace_decoder_event_t event{};
+        event.size = sizeof(rocprofiler_thread_trace_decoder_event_t);
         event.time = time;
         event.type = type;
         event.me_id = me;
@@ -170,6 +170,12 @@ public:
         event.reserved = 0;
         event.payload = payload;
         callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &event, 1, cbdata);
+    };
+    void sendDispatch(CSRegisterHandler& csregister, int64_t time, uint8_t me, uint8_t pipe)
+    {
+        auto event = csregister.PopulateDispatch(time, me, pipe);
+
+        callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH, &event, 1, cbdata);
     };
 
 private:

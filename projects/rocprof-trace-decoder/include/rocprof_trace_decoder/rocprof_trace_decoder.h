@@ -298,7 +298,8 @@ rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick_scan(
     const void* data,
     uint64_t data_size,
     rocprof_trace_decoder_trace_callback_t trace_callback,
-    void* userdata
+    void* userdata,
+    int flags
 );
 
 #ifdef __cplusplus

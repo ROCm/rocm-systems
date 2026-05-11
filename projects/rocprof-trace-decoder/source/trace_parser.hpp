@@ -44,10 +44,15 @@ inline bool bValid(pcinfo_t pc) { return pc.code_object_id != 0 || pc.address !=
 enum sqtt_token_reg_t
 {
     COMPUTE_DISPATCH_INITIATOR = 0x0,
+    COMPUTE_NUM_THREAD_X = 0x7,
+    COMPUTE_NUM_THREAD_Y,
+    COMPUTE_NUM_THREAD_Z,
     COMPUTE_PGM_LO = 0xC,
-    COMPUTE_PGM_HI = 0xD,
+    COMPUTE_PGM_HI,
+    COMPUTE_DISPATCH_PKT_LO,
+    COMPUTE_DISPATCH_PKT_HI,
     COMPUTE_PGM_RSRC1 = 0x12,
-    COMPUTE_PGM_RSRC2 = 0x13,
+    COMPUTE_PGM_RSRC2,
     COMPUTE_PGM_RSRC3 = 0x2D,
     COMPUTE_NOWHERE = 0x7F
 };
@@ -56,7 +61,7 @@ enum sqtt_event_type_t
 {
     EVENT_CACHE_FLUSH_WR = 0x4,
     EVENT_CACHE_FLUSH = 0x6,
-    EVENT_CACHE_CS_PARTIAL_FLUSH = 0x7,
+    EVENT_CS_PARTIAL_FLUSH = 0x7,
     EVENT_CACHE_FLUSH_INV_WR = 0x14,
     EVENT_CACHE_FLUSH_INV = 0x16,
     EVENT_BOTTOM_OF_PIPE_WR = 0x28,
@@ -308,6 +313,15 @@ public:
     PipeArray64 current_codeobj_size{};
     PipeArray64 current_codeobj_addr{};
     PipeArray64 current_codeobj_id{};
+    PipeArray64 dispatch_pkt_addr{};
+
+    uint32_t num_thread_x{0};
+    uint32_t num_thread_y{0};
+    uint32_t num_thread_z{0};
+    uint32_t rsrc1{0};
+    uint32_t rsrc2{0};
+    uint32_t rsrc3{0};
+    uint32_t dispatch_initiator{0};
 
     std::vector<att_decoder_realtime_t> realtime{};
 
@@ -316,6 +330,23 @@ public:
 
     bool bIsROCMFormat = false;
     int userdata_state{};
+
+    // Single event returned by UpdateRegNoCS. At most one of these is produced
+    // per register write; the caller dispatches on `kind` to surface
+    // CODE_OBJECT_LOAD / CODE_OBJECT_UNLOAD events or to react to a
+    // counter-frequency change (which used to be the bool return).
+    struct RegUpdateEvent
+    {
+        enum Kind
+        {
+            NONE,
+            CODEOBJ_LOAD,
+            CODEOBJ_UNLOAD,
+            COUNTER_FREQUENCY_CHANGED,
+        };
+        Kind kind = NONE;
+        uint64_t id = 0; // code object id for CODEOBJ_LOAD / CODEOBJ_UNLOAD
+    };
 
     template <typename TokenType> uint32_t get_regaddr(const TokenType& token) { return token.regaddr; }
 
@@ -363,8 +394,6 @@ public:
     static constexpr size_t USERDATA_ADDR_2 = 0xC342;
     static constexpr size_t USERDATA_ADDR_3 = 0xC343;
 
-    bool IsPgmLo(size_t addr) { return addr == COMPUTE_PGM_LO; }
-    bool IsPgmHi(size_t addr) { return addr == COMPUTE_PGM_HI; }
     bool IsUserdata(size_t addr) { return addr >= USERDATA_ADDR_0 && addr <= USERDATA_ADDR_3; }
     bool IsUserdata0(size_t addr) { return addr == USERDATA_ADDR_0; }
     bool IsUserdata1(size_t addr) { return addr == USERDATA_ADDR_1; }
@@ -374,33 +403,47 @@ public:
 
     template <typename TokenType> void UpdateRegCS(const TokenType& token)
     {
-        if (IsPgmLo(token.regaddr))
-            wave_start_addr.setlo(token);
-        else if (IsPgmHi(token.regaddr))
-            wave_start_addr.sethi(token);
+        switch (token.regaddr)
+        {
+            case COMPUTE_PGM_LO: wave_start_addr.setlo(token); break;
+            case COMPUTE_PGM_HI: wave_start_addr.sethi(token); break;
+            case COMPUTE_NUM_THREAD_X: num_thread_x = token.regdata; break;
+            case COMPUTE_NUM_THREAD_Y: num_thread_y = token.regdata; break;
+            case COMPUTE_NUM_THREAD_Z: num_thread_z = token.regdata; break;
+            case COMPUTE_PGM_RSRC1: rsrc1 = token.regdata; break;
+            case COMPUTE_PGM_RSRC2: rsrc2 = token.regdata; break;
+            case COMPUTE_PGM_RSRC3: rsrc3 = token.regdata; break;
+            case COMPUTE_DISPATCH_PKT_LO: dispatch_pkt_addr.setlo(token); break;
+            case COMPUTE_DISPATCH_PKT_HI: dispatch_pkt_addr.sethi(token); break;
+            case COMPUTE_DISPATCH_INITIATOR: dispatch_initiator = token.regdata; break;
+            default: break;
+        };
     }
 
-    template <typename TokenType> bool UpdateRegNoCS(const TokenType& token)
+    template <typename TokenType> RegUpdateEvent UpdateRegNoCS(const TokenType& token)
     {
         auto WAIT_FOR_HEADER = ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_LAST;
 
-        if (!IsUserdata2(token.regaddr)) return false;
+        if (!IsUserdata2(token.regaddr)) return {};
 
         if (!bIsROCMFormat && isUserdataHeader(token))
         {
             userdata_state = ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_LAST;
             bIsROCMFormat = true;
-            return false;
+            return {};
         }
 
-        if (!bIsROCMFormat) return false;
+        if (!bIsROCMFormat) return {};
 
         if (userdata_state == WAIT_FOR_HEADER)
         {
             auto statechange = isUserdataState(token);
             if (statechange.first) userdata_state = UserdataF(token).type;
-            return statechange.second;
+            if (statechange.second) return {RegUpdateEvent::COUNTER_FREQUENCY_CHANGED, 0};
+            return {};
         }
+
+        RegUpdateEvent event{};
 
         switch (userdata_state)
         {
@@ -419,6 +462,7 @@ public:
                     address_range_t arange = {base_addr, current_codeobj_size.at_reg(token), id};
                     table.insert(arange);
                     if (header.bFromStart) table_from_start.insert(arange);
+                    event = {RegUpdateEvent::CODEOBJ_LOAD, id};
                 }
                 else if (header.isUnload && it != active_codeobj_id.end())
                 {
@@ -426,6 +470,7 @@ public:
                     {
                         table.remove(active_codeobj_id.at(id));
                         active_codeobj_id.erase(id);
+                        event = {RegUpdateEvent::CODEOBJ_UNLOAD, id};
                     }
                     catch (...)
                     {}
@@ -443,13 +488,47 @@ public:
 
         userdata_state = WAIT_FOR_HEADER;
 
-        return false;
+        return event;
     }
 
     template <typename TokenType> pcinfo_t get_wave_start(const TokenType& token)
     {
         constexpr uint64_t BITMASK = (1ul << 48) - 1;
         return ToPcV2(table, (wave_start_addr.at_reg(token) << 8) & BITMASK);
+    }
+
+    rocprofiler_thread_trace_decoder_dispatch_t PopulateDispatch(int time, int me, int pipe, int tt_version = 0)
+    {
+        rocprofiler_thread_trace_decoder_dispatch_t event{};
+        event.size = sizeof(rocprofiler_thread_trace_decoder_dispatch_t);
+        event.time = time;
+        event.me_id = me;
+        event.pipe_id = pipe;
+        event.entry_point = ToPcV2(table, wave_start_addr.at(me).at(pipe) << 8);
+        event.thread_dim_x = num_thread_x;
+        event.thread_dim_y = num_thread_y;
+        event.thread_dim_z = num_thread_z;
+        event.lds_size = ((rsrc2 >> 15) & 0x1FF) * 512;
+
+        event.sgprs = 128;
+        event.vgprs = (rsrc1 & 0x3F) * 8 + 8;
+        event.user_sgprs = (rsrc2 >> 1) & 0x1F;
+
+        if (tt_version == 0) event.sgprs = ((rsrc1 >> 7) & 0x7) * 16 + 16;
+
+        if (tt_version >= 5)
+        {
+            event.vgprs *= 2;
+            event.lds_size *= 2;
+        }
+
+        event.flags = ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_NONE;
+        if ((rsrc1 >> 10) & 1) event.flags |= ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_SCALAR_CACHE_INVALIDATE;
+        if ((rsrc1 >> 11) & 1) event.flags |= ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_VECTOR_CACHE_INVALIDATE;
+        if ((rsrc1 >> 14) & 1) event.flags |= ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_IS_CTX_RESTORE;
+        if (rsrc2 & 1) event.flags |= ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_SCRATCH_ENABLED;
+
+        return event;
     }
 
     pcinfo_t get_wave_start_delayed(uint64_t addr) { return ToPcV2(table_from_start, addr); }
