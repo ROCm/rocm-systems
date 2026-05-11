@@ -38,6 +38,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -1466,5 +1467,26 @@ uint64_t bdfid_from_domain(uint64_t bdfid, uint64_t domain) {
   (bdfid) &= 0xFFFFFFFF;                 // keep bottom 32 bits of pci_id
   bdfid |= (domain & 0xFFFFFFFF) << 32;  // Add domain to top of pci_id
   return bdfid;
+}
+
+// Use nanosleep in a loop so that signals (e.g. SIGCHLD) do not
+// shorten the sleep and cause the full duration to be skipped.
+void sleep_interruptible(const struct timespec& duration) {
+  struct timespec remaining = duration;
+  while (remaining.tv_sec > 0 || remaining.tv_nsec > 0) {
+    struct timespec interval = remaining;
+    if (nanosleep(&interval, &remaining) == 0) {
+      break;
+    }
+    // EINTR: a signal interrupted the sleep; remaining has time left, retry.
+    // Any other error (e.g. EINVAL) is unrecoverable — stop to avoid looping forever.
+    if (errno != EINTR) {
+      break;
+    }
+  }
+}
+
+void sleep_interruptible(uint32_t seconds) {
+  sleep_interruptible({static_cast<time_t>(seconds), 0});
 }
 }  // namespace amd::smi

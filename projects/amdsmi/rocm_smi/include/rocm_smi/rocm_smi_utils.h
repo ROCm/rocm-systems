@@ -632,6 +632,12 @@ inline ostream_joiner<std::decay_t<DelimiterType>, CharType, TraitsType> make_os
 }
 
 uint64_t bdfid_from_domain(uint64_t bdfid, uint64_t domain);
+
+// Sleep for the given number of whole seconds, retrying on signal interruption
+// (EINTR) so the full duration is always served.
+void sleep_interruptible(uint32_t seconds);
+// Sleep for the given timespec duration, retrying on EINTR.
+void sleep_interruptible(const struct timespec& duration);
 }  // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_

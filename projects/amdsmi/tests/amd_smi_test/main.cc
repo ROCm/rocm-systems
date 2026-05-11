@@ -24,6 +24,7 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "functional/api_support_read.h"
 #include "functional/computepartition_read_write.h"
+#include "functional/cross_process_serialization.h"
 #include "functional/err_cnt_read.h"
 #include "functional/evt_notif_read_write.h"
 #include "functional/fan_read.h"
@@ -41,6 +42,7 @@
 #include "functional/memory_read_write.h"
 #include "functional/memorypartition_read_write.h"
 #include "functional/metrics_counter_read.h"
+#include "functional/mutual_exclusion.h"
 #include "functional/overdrive_read.h"
 #include "functional/overdrive_read_write.h"
 #include "functional/pci_read_write.h"
@@ -108,100 +110,121 @@ static void RunGenericTest(TestBase* test) {
 //  // from the standard pattern implemented there.
 //  RunGenericTest(&<test_obj>);
 // }
+
 TEST(amdsmitstReadOnly, TestVersionRead) {
   TestVersionRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, FanRead) {
   TestFanRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, FanReadWrite) {
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestFanReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TempRead) {
   TestTempRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, VoltRead) {
   TestVoltRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestVoltCurvRead) {
   TestVoltCurvRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestPerfLevelRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestPerfLevelRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestPerfLevelReadWrite) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPerfLevelReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestOverdriveRead) {
   TestOverdriveRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestOverdriveReadWrite) {
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestOverdriveReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestFrequenciesRead) {
   TestFrequenciesRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestFrequenciesReadWrite) {
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestFrequenciesReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestPciReadWrite) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPciReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestSysInfoRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestSysInfoRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestGPUBusyRead) {
   TestGPUBusyRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestPowerRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestPowerRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestPowerReadWrite) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPowerReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestPowerCapReadWrite) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPowerCapReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestErrCntRead) {
   TestErrCntRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestMemUtilRead) {
   TestMemUtilRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestIdInfoRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestIdInfoRead tst;
@@ -212,14 +235,17 @@ TEST(amdsmitstReadWrite, TestPerfCntrReadWrite) {
   TestPerfCntrReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestProcInfoRead) {
   TestProcInfoRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestHWTopologyRead) {
   TestHWTopologyRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestGpuMetricsRead) {
   TestGpuMetricsRead tst;
   RunGenericTest(&tst);
@@ -228,40 +254,51 @@ TEST(amdsmitstReadOnly, TestGpuPartitionMetricsRead) {
   TestGpuPartitionMetricsRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestMetricsCounterRead) {
   TestMetricsCounterRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestPerfDeterminism) {
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPerfDeterminism tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestXGMIReadWrite) {
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestXGMIReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestMemPageInfoRead) {
   TestMemPageInfoRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestAPISupportRead) {
   TestAPISupportRead tst;
   RunGenericTest(&tst);
 }
 
-/*
 TEST(amdsmitstReadOnly, TestMutualExclusion) {
   TestMutualExclusion tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();
   tst.SetUp();
-  PRINT_VERBOSITY();
   tst.Run();
   RunCustomTestEpilog(&tst);
 }
-*/
+
+TEST(amdsmitstReadOnly, TestCrossProcessSerialization) {
+  TestCrossProcessSerialization tst;
+  SetFlags(&tst);
+  tst.DisplayTestInfo();
+  tst.SetUp();
+  tst.Run();
+  RunCustomTestEpilog(&tst);
+}
 
 TEST(amdsmitstReadWrite, TestComputePartitionReadWrite) {
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
