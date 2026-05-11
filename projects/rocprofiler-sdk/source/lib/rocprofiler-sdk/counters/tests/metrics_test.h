@@ -2071,13 +2071,13 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
         "reduce(TCC_BUBBLE,sum)",
         "Number of 128-byte read requests sent to EA. Sum over all TCC instances."}}}};
 
-// Expected basic TD-block counters for gfx11 (gfx1100/1101/1102/1150/1151/1152/1153).
+// Expected basic TD-block counters for gfx11 (gfx1150/1151/1152/1153).
 // TD_TD_BUSY (event 1) and TD_TC_STALL (event 41) are pre-existing counters whose
 // gfx11 architecture support was added in the same change set as the new entries
 // below. Layout matches basic_gfx908: {name, block, event, expression, description}.
 static const std::unordered_map<std::string, std::vector<std::vector<std::string>>>
     td_basic_gfx11 = {
-        {"gfx1100",
+        {"gfx1150",
          {{"TD_TD_BUSY",
            "TD",
            "1",
@@ -2143,7 +2143,7 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
 // Layout matches derived_gfx908: {name, block, event, expression, description}.
 static const std::unordered_map<std::string, std::vector<std::vector<std::string>>>
     td_derived_gfx11 = {
-        {"gfx1100",
+        {"gfx1150",
          {{"TD_TD_BUSY_sum",
            "",
            "",

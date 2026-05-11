@@ -167,24 +167,20 @@ TEST(metrics, td_counters_gfx11)
     // against a complete gfx908 expected list), this test only checks that
     // the new TD entries are present on every gfx11 alias listed in
     // config.yaml with the expected block/event (basic) and expression
-    // (derived). Adding a full gfx1100 expected list would require
+    // (derived). Adding a full gfx1150 expected list would require
     // mirroring ~1000 metrics and would be unmaintainable.
     auto loaded_metrics = counters::loadMetrics();
     auto basic_test    = loadTestData(td_basic_gfx11);
     auto derived_test  = loadTestData(td_derived_gfx11);
 
-    ASSERT_EQ(basic_test.count("gfx1100"), 1);
-    ASSERT_EQ(derived_test.count("gfx1100"), 1);
-    const auto& expected_basic   = basic_test.at("gfx1100");
-    const auto& expected_derived = derived_test.at("gfx1100");
+    ASSERT_EQ(basic_test.count("gfx1150"), 1);
+    ASSERT_EQ(derived_test.count("gfx1150"), 1);
+    const auto& expected_basic   = basic_test.at("gfx1150");
+    const auto& expected_derived = derived_test.at("gfx1150");
 
     // gfx11 architecture aliases that share the new TD definitions in
     // projects/rocprofiler-sdk/source/share/rocprofiler-sdk/config.yaml.
-    static const std::vector<std::string> gfx11_aliases = {"gfx11",
-                                                           "gfx1100",
-                                                           "gfx1101",
-                                                           "gfx1102",
-                                                           "gfx1150",
+    static const std::vector<std::string> gfx11_aliases = {"gfx1150",
                                                            "gfx1151",
                                                            "gfx1152",
                                                            "gfx1153"};

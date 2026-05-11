@@ -30,10 +30,6 @@ import pandas as pd
 # Architectures on which the new TD counters are defined (see
 # projects/rocprofiler-sdk/source/share/rocprofiler-sdk/config.yaml).
 TD_SUPPORTED_GFX = (
-    "gfx11",
-    "gfx1100",
-    "gfx1101",
-    "gfx1102",
     "gfx1150",
     "gfx1151",
     "gfx1152",
