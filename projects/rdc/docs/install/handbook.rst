@@ -4,14 +4,13 @@
 
 .. _rdc-handbook:
 
-***************************************************
-Building and testing RDC
-***************************************************
+******************
+Build and test RDC
+******************
 
 RDC is open source and available under the MIT License. This section is helpful for open source developers. Third-party integrators may also find this information useful.
 
-
-Build and Install RDC
+Build and install RDC
 =====================
 
 To build and install, clone the RDC source code from GitHub and use CMake.
@@ -27,7 +26,7 @@ To build and install, clone the RDC source code from GitHub and use CMake.
     $ make install
 
 
-Build Documentation
+Build documentation
 -------------------
 
 You can generate PDF documentation after a successful build. The reference manual, refman.pdf, appears in the latex directory.
@@ -39,7 +38,7 @@ You can generate PDF documentation after a successful build. The reference manua
     $ make
 
 
-Build Unit Tests for RDC Tool
+Build unit tests for RDC tool
 -----------------------------
 
 .. code-block:: shell
@@ -65,5 +64,3 @@ Test
 
     # In another console run the RDC command-line
     $ LD_LIBRARY_PATH=$PWD/rdc_libs/  ./rdci/rdci discovery -l -u
-
-
