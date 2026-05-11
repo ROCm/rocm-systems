@@ -80,7 +80,7 @@ hsa_status_t AgentInfo::get_agent_handle_cb(hsa_agent_t agent, void* userdata)
     info->add_event(sq, "SQ_BUSY_CYCLES", 1, 3);
     info->add_event(sq, "SQ_INSTS_VALU", 1, (info->gfxip.find("gfx1")==0) ? 62 : 26);
     
-    info->add_event(ta, "TA_BUSY", 16, (info->gfxip.find("gfx94") != 0 || info->gfxip.find("gfx95") != 0) ? 13 : 15);
+    info->add_event(ta, "TA_BUSY", 16, (info->gfxip.find("gfx94") == 0 || info->gfxip.find("gfx95") == 0) ? 15 : 13);
 
     if (info->gfxip.find("gfx1") == 0)
     {
@@ -142,20 +142,14 @@ hsa_status_t AgentInfo::get_agent_handle_cb(hsa_agent_t agent, void* userdata)
         info->add_event(tcp, "TCP_CACHE_MISS_TG2", 10, 63);
         info->add_event(tcp, "TCP_CACHE_MISS_TG3", 10, 64);
     }
-    else if (info->gfxip.find("gfx90a") == 0)
+    else if (info->gfxip.find("gfx9") == 0)
     {
+        // GFX9 family (gfx900/902/906/908/90a): TCP event IDs are the same
         info->add_event(tcp, "TCP_READ", 16, 30);
         info->add_event(tcp, "TCP_WRITE", 16, 32);
     }
-    else if (info->gfxip.find("gfx900") == 0)
-    {
-        info->add_event(tcp, "TCP_READ", 16, 30);
-        info->add_event(tcp, "TCP_WRITE", 16, 32);
-    }
-    else
-    {
-        assert(false);
-    }
+    // GFX10/11/12 (RDNA): GL2C counters already added above for gfx1* prefix;
+    // no additional TCP/TCC counters needed for non-MI RDNA families.
 
     gpu_agents.push_back(info);
     return HSA_STATUS_SUCCESS;
