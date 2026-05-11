@@ -35,6 +35,33 @@ struct sample : trace_cache::cacheable_t
     std::uint32_t   device_id = 0;
     std::uint64_t   timestamp = 0;
     metrics         metric_values{};
+
+    template <class Archive>
+    ROCPROFSYS_INLINE void serialize(Archive& ar)
+    {
+        // Field order MUST match the legacy serialize free function exactly.
+        // xcp_stats is a std::array<xcp_metrics, 8> and is written as raw
+        // bytes (sizeof(std::array<xcp_metrics, 8>)) by the legacy path -
+        // matched here via archive's std::array branch (memcpy whole when the
+        // element is trivially copyable). vcn_activity / jpeg_activity /
+        // xgmi.data_acc.read / write are similarly handled.
+        auto enabled_value = static_cast<std::uint32_t>(enabled_metric.value);
+        ar(enabled_value, device_id, timestamp, metric_values.average_socket_power,
+           metric_values.current_socket_power, metric_values.memory_usage,
+           metric_values.hotspot_temperature, metric_values.edge_temperature,
+           metric_values.gfx_activity, metric_values.umc_activity,
+           metric_values.mm_activity, metric_values.xcp_stats, metric_values.vcn_activity,
+           metric_values.jpeg_activity, metric_values.xgmi.link.width,
+           metric_values.xgmi.link.speed, metric_values.xgmi.data_acc.read,
+           metric_values.xgmi.data_acc.write, metric_values.pcie.link.width,
+           metric_values.pcie.link.speed, metric_values.pcie.bandwidth.acc,
+           metric_values.pcie.bandwidth.inst, metric_values.sdma_usage,
+           metric_values.gfx_clock_mhz, metric_values.mem_clock_mhz);
+        if constexpr(std::is_same_v<Archive, trace_cache::input_archive>)
+        {
+            enabled_metric.value = enabled_value;
+        }
+    }
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu
@@ -104,5 +131,11 @@ get_size(const pmc::collectors::gpu::sample& item)
 
 /// @brief GPU PMC sample type alias
 using gpu_pmc_sample = pmc::collectors::gpu::sample;
+
+namespace type_traits
+{
+template <>
+inline constexpr bool use_custom<pmc::collectors::gpu::sample> = true;
+}  // namespace type_traits
 
 }  // namespace rocprofsys::trace_cache
