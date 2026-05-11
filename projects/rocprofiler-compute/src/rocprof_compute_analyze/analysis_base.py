@@ -616,35 +616,15 @@ class OmniAnalyze_Base:
 
             if format_rocprof == "rocpd":
                 db_paths = rocpd_data.find_workload_db_paths(directory)
-                if db_paths:
-                    console_debug(
-                        f"Using rocpd .db files for {directory} "
-                        f"({len(db_paths)} db(s) found)"
-                    )
-                    self.join_prof(directory)
-                    return
-
-                # When the .db is missing but those intermediates are present,
-                # fall back to them with a deprecation warning.
-                legacy_csv_present = (
-                    (directory / "pmc_perf.csv").exists()
-                    or any(directory.glob("pmc_perf_*.csv"))
-                    or any(directory.glob("results_*.csv"))
-                )
-                if not legacy_csv_present:
+                if not db_paths:
                     console_error(
                         f"No rocpd profiling data found in {directory}.\n"
                         f"Expected: <workload>/<fbase>.db\n"
                         f"Please run 'rocprof-compute profile' first."
                     )
                     return
-                console_warning(
-                    f"rocpd profile in {directory} has no .db files; "
-                    f"falling back to intermediate CSV. Reading the "
-                    f"rocpd intermediate CSV is deprecated and will be "
-                    f"removed in a future release; please re-profile "
-                    f"on the latest ROCm to produce rocpd .db output."
-                )
+                self.join_prof(directory)
+                return
 
             pmc_perf = directory / "pmc_perf.csv"
             pmc_perf_files = list(directory.glob("pmc_perf_*.csv"))
