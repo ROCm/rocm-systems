@@ -681,9 +681,7 @@ __device__ inline int IPCContext::tile_put(src_tensor_t src, dst_tensor_t dst,
     const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
 
     // Calculate base pointers for the tile
-    element_t* src_base = src.data_handle() +
-                          start_coord.get(0) * src_stride_0 +
-                          start_coord.get(1) * src_stride_1;
+    element_t* src_base = src.data_handle();
     element_t* dst_base = static_cast<element_t*>(remote_base) +
                           start_coord.get(0) * dst_stride_0 +
                           start_coord.get(1) * dst_stride_1;
@@ -729,7 +727,7 @@ __device__ inline int IPCContext::tile_put(src_tensor_t src, dst_tensor_t dst,
   // For 1D tensors
   else if constexpr (ndim == 1) {
     const auto tile_extent = boundary.get(0) - start_coord.get(0);
-    element_t* src_ptr = src.data_handle() + start_coord.get(0) * src.stride(0);
+    element_t* src_ptr = src.data_handle();
     element_t* dst_ptr = static_cast<element_t*>(remote_base) +
                          start_coord.get(0) * dst.stride(0);
 
@@ -769,9 +767,7 @@ __device__ inline int IPCContext::tile_put_wave(src_tensor_t src, dst_tensor_t d
     const auto tile_extent_0 = boundary.get(0) - start_coord.get(0);
     const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
 
-    element_t* src_base = src.data_handle() +
-                          start_coord.get(0) * src_stride_0 +
-                          start_coord.get(1) * src_stride_1;
+    element_t* src_base = src.data_handle();
     element_t* dst_base = static_cast<element_t*>(remote_base) +
                           start_coord.get(0) * dst_stride_0 +
                           start_coord.get(1) * dst_stride_1;
@@ -817,7 +813,7 @@ __device__ inline int IPCContext::tile_put_wave(src_tensor_t src, dst_tensor_t d
   }
   else if constexpr (ndim == 1) {
     const auto tile_extent = boundary.get(0) - start_coord.get(0);
-    element_t* src_ptr = src.data_handle() + start_coord.get(0) * src.stride(0);
+    element_t* src_ptr = src.data_handle();
     element_t* dst_ptr = static_cast<element_t*>(remote_base) +
                          start_coord.get(0) * dst.stride(0);
 
@@ -858,9 +854,7 @@ __device__ inline int IPCContext::tile_put_wg(src_tensor_t src, dst_tensor_t dst
     const auto tile_extent_0 = boundary.get(0) - start_coord.get(0);
     const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
 
-    element_t* src_base = src.data_handle() +
-                          start_coord.get(0) * src_stride_0 +
-                          start_coord.get(1) * src_stride_1;
+    element_t* src_base = src.data_handle();
     element_t* dst_base = static_cast<element_t*>(remote_base) +
                           start_coord.get(0) * dst_stride_0 +
                           start_coord.get(1) * dst_stride_1;
@@ -909,7 +903,7 @@ __device__ inline int IPCContext::tile_put_wg(src_tensor_t src, dst_tensor_t dst
   }
   else if constexpr (ndim == 1) {
     const auto tile_extent = boundary.get(0) - start_coord.get(0);
-    element_t* src_ptr = src.data_handle() + start_coord.get(0) * src.stride(0);
+    element_t* src_ptr = src.data_handle();
     element_t* dst_ptr = static_cast<element_t*>(remote_base) +
                          start_coord.get(0) * dst.stride(0);
 
@@ -956,9 +950,7 @@ __device__ inline int IPCContext::tile_get(dst_tensor_t dst, src_tensor_t src,
     element_t* src_base = static_cast<element_t*>(remote_base) +
                           start_coord.get(0) * src_stride_0 +
                           start_coord.get(1) * src_stride_1;
-    element_t* dst_base = dst.data_handle() +
-                          start_coord.get(0) * dst_stride_0 +
-                          start_coord.get(1) * dst_stride_1;
+    element_t* dst_base = dst.data_handle();
 
     // Fully contiguous
     if (src_stride_1 == 1 && dst_stride_1 == 1 &&
@@ -999,7 +991,7 @@ __device__ inline int IPCContext::tile_get(dst_tensor_t dst, src_tensor_t src,
     const auto tile_extent = boundary.get(0) - start_coord.get(0);
     element_t* src_ptr = static_cast<element_t*>(remote_base) +
                          start_coord.get(0) * src.stride(0);
-    element_t* dst_ptr = dst.data_handle() + start_coord.get(0) * dst.stride(0);
+    element_t* dst_ptr = dst.data_handle();
 
     if (src.stride(0) == 1 && dst.stride(0) == 1) {
       memcpy_lane<MemcpyKind::Get>(dst_ptr, src_ptr, tile_extent * sizeof(element_t));
@@ -1038,9 +1030,7 @@ __device__ inline int IPCContext::tile_get_wave(dst_tensor_t dst, src_tensor_t s
     element_t* src_base = static_cast<element_t*>(remote_base) +
                           start_coord.get(0) * src_stride_0 +
                           start_coord.get(1) * src_stride_1;
-    element_t* dst_base = dst.data_handle() +
-                          start_coord.get(0) * dst_stride_0 +
-                          start_coord.get(1) * dst_stride_1;
+    element_t* dst_base = dst.data_handle();
 
     // Wave-collective: threads cooperate to transfer tile
     int wave_tid = get_flat_block_id() % WF_SIZE;
@@ -1085,7 +1075,7 @@ __device__ inline int IPCContext::tile_get_wave(dst_tensor_t dst, src_tensor_t s
     const auto tile_extent = boundary.get(0) - start_coord.get(0);
     element_t* src_ptr = static_cast<element_t*>(remote_base) +
                          start_coord.get(0) * src.stride(0);
-    element_t* dst_ptr = dst.data_handle() + start_coord.get(0) * dst.stride(0);
+    element_t* dst_ptr = dst.data_handle();
 
     int wave_tid = get_flat_block_id() % WF_SIZE;
 
@@ -1127,9 +1117,7 @@ __device__ inline int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src
     element_t* src_base = static_cast<element_t*>(remote_base) +
                           start_coord.get(0) * src_stride_0 +
                           start_coord.get(1) * src_stride_1;
-    element_t* dst_base = dst.data_handle() +
-                          start_coord.get(0) * dst_stride_0 +
-                          start_coord.get(1) * dst_stride_1;
+    element_t* dst_base = dst.data_handle();
 
     int thread_id = get_flat_block_id();
     int block_size = get_flat_block_size();
@@ -1176,7 +1164,7 @@ __device__ inline int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src
     const auto tile_extent = boundary.get(0) - start_coord.get(0);
     element_t* src_ptr = static_cast<element_t*>(remote_base) +
                          start_coord.get(0) * src.stride(0);
-    element_t* dst_ptr = dst.data_handle() + start_coord.get(0) * dst.stride(0);
+    element_t* dst_ptr = dst.data_handle();
 
     int thread_id = get_flat_block_id();
     int block_size = get_flat_block_size();
