@@ -25,6 +25,7 @@
 #define RCCL_GATHER_SCATTER 1
 #define RCCL_ALLTOALLV 1
 #define RCCL_ALLREDUCE_WITH_BIAS 1
+#define RCCL_SUSPEND_RESUME 1
 
 #ifdef __cplusplus
 extern "C" {
@@ -372,13 +373,6 @@ ncclResult_t  ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError);
 /*! @cond       include_hidden */
 ncclResult_t pncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError);
 /*! @endcond */
-
-typedef enum {
-  ncclStatGpuMemSuspend      = 0,  // Allocated GPU memory that can be suspended (bytes)
-  ncclStatGpuMemSuspended    = 1,   // GPU memory suspended? (0=active, 1=suspended)
-  ncclStatGpuMemPersist      = 2,  // Allocated GPU memory that cannot be suspended (bytes)
-  ncclStatGpuMemTotal        = 3  // Total allocated GPU memory tracked by NCCL (bytes)
-} ncclCommMemStat_t;
 /*! @} */
 
 /*! @defgroup   rccl_api_comminfo Communicator Information
@@ -429,6 +423,53 @@ ncclResult_t pncclCommRegister(const ncclComm_t comm, void* buff, size_t size, v
 ncclResult_t  ncclCommDeregister(const ncclComm_t comm, void* handle);
 /*! @cond       include_hidden */
 ncclResult_t pncclCommDeregister(const ncclComm_t comm, void* handle);
+/*! @endcond */
+
+/* Communicator suspend flags */
+#define NCCL_SUSPEND_MEM 0x01 // Suspend memory (release dynamic allocations)
+
+/*
+ * ncclCommSuspend
+ *
+ * Suspend communicator operations to free resources.
+ * The communicator cannot be used while suspended.
+ *
+ * flags: NCCL_SUSPEND_MEM - Release dynamic GPU memory allocations
+ */
+ncclResult_t  ncclCommSuspend(ncclComm_t comm, int flags);
+/*! @cond       include_hidden */
+ncclResult_t pncclCommSuspend(ncclComm_t comm, int flags);
+/*! @endcond */
+
+/*
+ * ncclCommResume
+ *
+ * Resume all previously suspended communicator resources.
+ */
+ncclResult_t  ncclCommResume(ncclComm_t comm);
+/*! @cond       include_hidden */
+ncclResult_t pncclCommResume(ncclComm_t comm);
+/*! @endcond */
+
+/* Communicator memory statistics */
+typedef enum {
+  ncclStatGpuMemSuspend      = 0,  // Allocated GPU memory that can be suspended (bytes)
+  ncclStatGpuMemSuspended    = 1,  // GPU memory suspended? (0=active, 1=suspended)
+  ncclStatGpuMemPersist      = 2,  // Allocated GPU memory that cannot be suspended (bytes)
+  ncclStatGpuMemTotal        = 3   // Total allocated GPU memory tracked by NCCL (bytes)
+} ncclCommMemStat_t;
+
+/*
+ * ncclCommMemStats
+ *
+ * Query communicator memory statistics.
+ *
+ * stat: One of ncclCommMemStat_t values
+ * value: Output pointer to receive the memory statistic value
+ */
+ncclResult_t  ncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
+/*! @cond       include_hidden */
+ncclResult_t pncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
 /*! @endcond */
 
 /* Register memory window  */
