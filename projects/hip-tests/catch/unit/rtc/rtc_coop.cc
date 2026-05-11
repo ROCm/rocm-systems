@@ -140,9 +140,11 @@ void runReduce(hiprtcProgram& prog) {
       mask <<= ((laneId % wavefrontSize) / tileSize) * tileSize;
 
       if (tileSize <= wavefrontSize) {
+        T expectedByLane[64];
         T expected;
+
         Op<T> op;
-        expected = calculateExpected(input.host_ptr(), op, mask, AggregationType::Reduce);
+        expected = calculateExpected(expectedByLane, input.host_ptr(), op, mask, AggregationType::Reduce);
         REQUIRE(output.host_ptr()[numTile * wavefrontSize + laneId] == expected);
       }
     }
