@@ -598,5 +598,115 @@ TEST_F(NetIbMPITest, ConcurrentMultiConnectionStress) {
 
 // C3.  ConnectionChurnUnderLoad — 1000 connect→transfer→close cycles,
 //      with RDMA resource leak detection.
+TEST_F(NetIbMPITest, ConnectionChurnUnderLoad) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    static constexpr int kIters = 1000;
+    const size_t sz = 1024;
+
+    auto buf = makeHostBufferAutoGuard(malloc(sz));
+    ASSERT_NE(buf.get(), nullptr);
+
+    // Run one warmup connection+close before capturing the baseline.
+    // The mlx5 driver lazily allocates internal CQs (e.g. for async-event
+    // bookkeeping) the first time a user-space CQ is created under a given
+    // ibv_context.  Those driver-internal objects survive until ibv_close_device
+    // and therefore show up as a stable "+N" in rdma resource show after the
+    // first connection.  By warming up first we let those objects settle so that
+    // the baseline reflects steady-state, not pre-first-connection state.
+    {
+        static constexpr int kWarmupTag = 599;
+        ConnectionPair wcp;
+        if (rank == 0) {
+            ASSERT_EQ(CreateListenComm(0, &wcp.handle, &wcp.listenComm), ncclSuccess);
+            MPI_Send(&wcp.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 1, kWarmupTag, MPI_COMM_WORLD);
+            for (int a = 0; a < kMaxRetryAttempts && !wcp.recvComm; a++) {
+                AcceptConnection(wcp.listenComm, &wcp.recvComm);
+                if (!wcp.recvComm) usleep(kPollIntervalUs);
+            }
+            ASSERT_NE(wcp.recvComm, nullptr) << "Warmup accept failed";
+        } else {
+            MPI_Recv(&wcp.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 0, kWarmupTag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            for (int a = 0; a < kMaxRetryAttempts && !wcp.sendComm; a++) {
+                ConnectToRemote(0, &wcp.handle, &wcp.sendComm);
+                if (!wcp.sendComm) usleep(kPollIntervalUs);
+            }
+            ASSERT_NE(wcp.sendComm, nullptr) << "Warmup connect failed";
+        }
+        void* wcomm = (rank == 0) ? wcp.recvComm : wcp.sendComm;
+        void* wmh   = nullptr;
+        ASSERT_EQ(RegisterMemory(wcomm, buf.get(), sz, NCCL_PTR_HOST, &wmh), ncclSuccess);
+        DoSendRecv(wcp.sendComm, wcp.recvComm, buf.get(), buf.get(), sz, kWarmupTag, wmh, wmh, /*seed=*/0);
+        ASSERT_EQ(DeregisterMemory(wcomm, wmh), ncclSuccess);
+        if (rank == 0) {
+            ASSERT_EQ(CloseRecvComm(wcp.recvComm), ncclSuccess);
+            ASSERT_EQ(CloseListenComm(wcp.listenComm), ncclSuccess);
+        } else {
+            ASSERT_EQ(CloseSendComm(wcp.sendComm), ncclSuccess);
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    RdmaResourceCounts before = CaptureRdmaResources();
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    for (int iter = 0; iter < kIters; iter++) {
+        // Setup connection
+        ConnectionPair cp;
+        if (rank == 0) {
+            ASSERT_EQ(CreateListenComm(0, &cp.handle, &cp.listenComm), ncclSuccess);
+            MPI_Send(&cp.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 1, 600 + (iter % 1000), MPI_COMM_WORLD);
+            for (int a = 0; a < kMaxRetryAttempts && !cp.recvComm; a++) {
+                AcceptConnection(cp.listenComm, &cp.recvComm);
+                if (!cp.recvComm) usleep(kPollIntervalUs);
+            }
+            ASSERT_NE(cp.recvComm, nullptr) << "Accept failed at iter " << iter;
+        } else {
+            MPI_Recv(&cp.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 0, 600 + (iter % 1000), MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            for (int a = 0; a < kMaxRetryAttempts && !cp.sendComm; a++) {
+                ConnectToRemote(0, &cp.handle, &cp.sendComm);
+                if (!cp.sendComm) usleep(kPollIntervalUs);
+            }
+            ASSERT_NE(cp.sendComm, nullptr) << "Connect failed at iter " << iter;
+        }
+
+        // Register, transfer, verify
+        void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
+        void* mh = nullptr;
+        ASSERT_EQ(RegisterMemory(comm, buf.get(), sz, NCCL_PTR_HOST, &mh), ncclSuccess);
+
+        DoSendRecv(cp.sendComm, cp.recvComm,
+                   buf.get(), buf.get(), sz,
+                   /*tag=*/iter % 1000, mh, mh, iter);
+
+        ASSERT_EQ(DeregisterMemory(comm, mh), ncclSuccess);
+
+        // Close
+        if (rank == 0) {
+            ASSERT_EQ(CloseRecvComm(cp.recvComm), ncclSuccess);
+            ASSERT_EQ(CloseListenComm(cp.listenComm), ncclSuccess);
+        } else {
+            ASSERT_EQ(CloseSendComm(cp.sendComm), ncclSuccess);
+        }
+
+        // RDMA checkpoint at midpoint
+        if (iter == 499) {
+            MPI_Barrier(MPI_COMM_WORLD);
+            RdmaResourceCounts mid = CaptureRdmaResources();
+            AssertNoRdmaLeaks(before, mid, "midpoint");
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    RdmaResourceCounts after = CaptureRdmaResources();
+    AssertNoRdmaLeaks(before, after, "final");
+}
+
+// C2.  ConnectionBatchCreateDestroy — create 10 connections, transfer on
+//      all, close all, repeat 100 times (1000 lifecycles total).
+//      RDMA checkpoints at batches 25, 50, 75, 100.
 
 #endif /* MPI_TESTS_ENABLED */
