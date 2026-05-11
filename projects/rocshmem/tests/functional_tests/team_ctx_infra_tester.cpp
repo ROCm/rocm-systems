@@ -261,7 +261,8 @@ void TeamCtxInfraTester::preLaunchKernel() {
     _expected_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_SHARED);
     _expected_n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_SHARED);
   } else if (_splitType == ROCSHMEM_TEST_TEAM_SUBSET_PARENT) {
-    // First create a subset parent team (odd-numbered PEs only)
+    // First create a subset parent team via parity-based partition:
+    // even PEs create team {0,2,4,...}, odd PEs create team {1,3,5,...}
     int start_pe = (my_pe % 2) == 0 ? 0 : 1;
     int num_pes = n_pes / 2;
     if (((n_pes % 2) != 0) && ((my_pe % 2) == 0))
@@ -275,7 +276,7 @@ void TeamCtxInfraTester::preLaunchKernel() {
       abort();
     }
 
-    // Now split this subset team into two halves
+    // Now split this subset parent team into two halves
     int subset_n_pes = rocshmem_team_n_pes(subset_parent_team);
     int subset_my_pe = rocshmem_team_my_pe(subset_parent_team);
     int mid_pe = subset_n_pes / 2;
