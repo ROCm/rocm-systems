@@ -61,6 +61,7 @@ namespace AMD {
 /// @details The user-mode driver for AMD AIE that provides APIs for the ROCr core to allocate
 /// memory, manage DMA buffers, allocate queues, and more.
 class XdnaDriver final : public core::Driver {
+ public:
   /// @brief BO handle information.
   struct BOHandle {
     /// Mapped address.

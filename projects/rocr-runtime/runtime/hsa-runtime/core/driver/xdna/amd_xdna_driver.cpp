@@ -291,11 +291,26 @@ class PDICache {
   constexpr uint32_t operator[](size_type index) const { return entries[index]; }
 };
 
+/// @brief Command BO pool for reusing command buffer objects across dispatches.
+struct CmdBOPool {
+  static constexpr uint32_t kEntryByteSize = 4096;
+  std::vector<XdnaDriver::BOHandle> entries = {};
+  size_t next = 0;
+
+  XdnaDriver::BOHandle& AcquireCmdBO() {
+    auto idx = next & (entries.size() - 1);
+    assert(entries[idx].IsValid());
+    ++next;
+    return entries[idx];
+  }
+};
+
 /// @brief Metadata for a Kernel Mode Queue (KMQ).
 struct KmqMetadata {
   uint32_t hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
   uint32_t syncobj_handle = 0;
   PDICache pdi_cache;
+  CmdBOPool cmd_bo_pool;
 };
 
 /**
@@ -776,6 +791,18 @@ hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, void** queue_m
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
+
+  const size_t pooled_cmd_bo_count = 2 * queue_size;
+  kmq_metadata->cmd_bo_pool.entries.reserve(pooled_cmd_bo_count);
+  for (size_t i = 0; i < pooled_cmd_bo_count; ++i) {
+    BOHandle bo_handle;
+    err = CreateCmdBO(CmdBOPool::kEntryByteSize, bo_handle);
+    if (err != HSA_STATUS_SUCCESS) {
+      return err;
+    }
+    kmq_metadata->cmd_bo_pool.entries.push_back(std::move(bo_handle));
+  }
+
   *queue_metadata = kmq_metadata.release();
   return HSA_STATUS_SUCCESS;
 }
@@ -789,6 +816,11 @@ hsa_status_t XdnaDriver::DestroyKernelModeQueue(void* queue_metadata) const {
   // Create a unique_ptr to ensure cleanup.
   std::unique_ptr<KmqMetadata> kmq_metadata;
   kmq_metadata.reset(static_cast<KmqMetadata*>(queue_metadata));
+
+  // Destroy command BO pool entries.
+  for (auto& bo : kmq_metadata->cmd_bo_pool.entries) {
+    DestroyBOHandle(bo);
+  }
 
   // Destroy hardware context associated with the queue.
   hsa_status_t err = DestroyHwCtx(fd_, kmq_metadata->hw_ctx_handle);
@@ -1061,12 +1093,6 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
   // Commands to be submitted.
   std::vector<BOHandle> cmd_bo_handles;
   cmd_bo_handles.reserve(num_pkts);
-  // Unmap and close the command BOs in case of an error.
-  MAKE_NAMED_SCOPE_GUARD(cmd_bo_handles_guard, [&] {
-    for (auto& bo_handle : cmd_bo_handles) {
-      DestroyBOHandle(bo_handle);
-    }
-  });
 
   // Flag to reconfigure the hardware context because of a new PDI.
   bool reconfigure_queue = false;
@@ -1125,12 +1151,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
                                  2 * pkt->num_kernargs);  // arguments (address lo/hi)
     const uint32_t cmd_data_bytesize = cmd_dwords * sizeof(uint32_t);
     const uint32_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + cmd_data_bytesize;
-    BOHandle cmd_bo_handle;
-    hsa_status_t err = CreateCmdBO(cmd_bytesize, cmd_bo_handle);
-    if (err != HSA_STATUS_SUCCESS) {
-      assert(false && "Failed to create command BO.");
-      return err;
-    }
+    auto& cmd_bo_handle = kmq_metadata->cmd_bo_pool.AcquireCmdBO();
     cmd_bo_handles.push_back(cmd_bo_handle);
 
     auto* cmd = static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr);
@@ -1210,13 +1231,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     const size_t cmd_chain_data_bytesize = cmd_bo_handles.size() * sizeof(uint64_t);
     const size_t cmd_data_bytesize = sizeof(ert_cmd_chain_data) + cmd_chain_data_bytesize;
     const size_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + cmd_data_bytesize;
-    BOHandle cmd_bo_handle;
-    hsa_status_t status = CreateCmdBO(cmd_bytesize, cmd_bo_handle);
-    if (status != HSA_STATUS_SUCCESS) {
-      assert(false && "Failed to create command chain BO.");
-      return status;
-    }
-    MAKE_NAMED_SCOPE_GUARD(cmd_bo_handle_guard, [&] { DestroyBOHandle(cmd_bo_handle); });
+    auto& cmd_bo_handle = kmq_metadata->cmd_bo_pool.AcquireCmdBO();
 
     auto* cmd = static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr);
     memset(cmd, 0, cmd_bytesize);
@@ -1231,7 +1246,8 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
 
     // Execute all commands in the command chain.
     uint64_t seq = 0;
-    status = SubmitCommand(fd_, cmd_bo_handle.handle, bo_handles, kmq_metadata->hw_ctx_handle, seq);
+    hsa_status_t status =
+        SubmitCommand(fd_, cmd_bo_handle.handle, bo_handles, kmq_metadata->hw_ctx_handle, seq);
     if (status != HSA_STATUS_SUCCESS) {
       assert(false && "Failed to submit command chain.");
       return status;
@@ -1259,8 +1275,6 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
       sig->SubRelease(1);
     }
   }
-
-  // Guards will unmap and close cmd BOs and cmd_chain BO.
 
   return HSA_STATUS_SUCCESS;
 }
