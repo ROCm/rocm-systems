@@ -964,7 +964,9 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hadd(const __hip_bfloat16 a, const 
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hadd_rn(const __hip_bfloat16 a,
                                                      const __hip_bfloat16 b) {
 #if defined(__HIP_BF16_NATIVE_TYPE__)
+#if defined (__clang__)
 #pragma clang fp contract(off)
+#endif
   return (__bf16)a + (__bf16)b;
 #else
   return __hip_bfloat16(static_cast<float>(a) + static_cast<float>(b));
@@ -990,7 +992,9 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hsub(const __hip_bfloat16 a, const 
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hsub_rn(const __hip_bfloat16 a,
                                                      const __hip_bfloat16 b) {
 #if defined(__HIP_BF16_NATIVE_TYPE__)
+#if defined (__clang__)
 #pragma clang fp contract(off)
+#endif
   return (__bf16)a - (__bf16)b;
 #else
   return __hip_bfloat16(static_cast<float>(a) - static_cast<float>(b));
@@ -1040,7 +1044,9 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmul(const __hip_bfloat16 a, const 
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmul_rn(const __hip_bfloat16 a,
                                                      const __hip_bfloat16 b) {
 #if defined(__HIP_BF16_NATIVE_TYPE__)
+#if defined(__clang__)
 #pragma clang fp contract(off)
+#endif
   return (__bf16)a * (__bf16)b;
 #else
   return __hip_bfloat16(static_cast<float>(a) * static_cast<float>(b));
@@ -1108,7 +1114,9 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hadd2(const __hip_bfloat162 a,
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hadd2_rn(const __hip_bfloat162 a,
                                                        const __hip_bfloat162 b) {
 #if defined(__HIP_BF16_NATIVE_TYPE__)
+#if defined(__clang__)
 #pragma clang fp contract(off)
+#endif
   return __hip_bfloat162{__bf16_2(a) + __bf16_2(b)};
 #else
   return __hip_bfloat162{__hadd(a.x, b.x), __hadd(a.y, b.y)};
@@ -1147,7 +1155,9 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hmul2(const __hip_bfloat162 a,
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hmul2_rn(const __hip_bfloat162 a,
                                                        const __hip_bfloat162 b) {
 #if defined(__HIP_BF16_NATIVE_TYPE__)
+#if defined(__clang__)
 #pragma clang fp contract(off)
+#endif
   return __hip_bfloat162{__bf16_2(a) * __bf16_2(b)};
 #else
   return __hip_bfloat162{__hmul(a.x, b.x), __hmul(a.y, b.y)};
@@ -1182,7 +1192,9 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hsub2(const __hip_bfloat162 a,
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hsub2_rn(const __hip_bfloat162 a,
                                                        const __hip_bfloat162 b) {
 #if defined(__HIP_BF16_NATIVE_TYPE__)
+#if defined(__clang__)
 #pragma clang fp contract(off)
+#endif
   return __hip_bfloat162{__bf16_2(a) - __bf16_2(b)};
 #else
   return __hip_bfloat162{__hsub(a.x, b.x), __hsub(a.y, b.y)};
