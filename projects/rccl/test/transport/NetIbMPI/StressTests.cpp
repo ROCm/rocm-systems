@@ -708,5 +708,130 @@ TEST_F(NetIbMPITest, ConnectionChurnUnderLoad) {
 // C2.  ConnectionBatchCreateDestroy — create 10 connections, transfer on
 //      all, close all, repeat 100 times (1000 lifecycles total).
 //      RDMA checkpoints at batches 25, 50, 75, 100.
+TEST_F(NetIbMPITest, ConnectionBatchCreateDestroy) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    static constexpr int kBatches  = 100;
+    static constexpr int kPerBatch = 10;
+    const size_t sz = 512;
+
+    auto buf = makeHostBufferAutoGuard(malloc(sz));
+    ASSERT_NE(buf.get(), nullptr);
+
+    // Warmup: one connect+transfer+close to let the driver settle its
+    // internal CQs before we capture the baseline (same reason as in
+    // ConnectionChurnUnderLoad — see comment there).
+    {
+        static constexpr int kWarmupTag = 699;
+        ConnectionPair wcp;
+        if (rank == 0) {
+            ASSERT_EQ(CreateListenComm(0, &wcp.handle, &wcp.listenComm), ncclSuccess);
+            MPI_Send(&wcp.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 1, kWarmupTag, MPI_COMM_WORLD);
+            for (int a = 0; a < kMaxRetryAttempts && !wcp.recvComm; a++) {
+                AcceptConnection(wcp.listenComm, &wcp.recvComm);
+                if (!wcp.recvComm) usleep(kPollIntervalUs);
+            }
+            ASSERT_NE(wcp.recvComm, nullptr) << "Warmup accept failed";
+        } else {
+            MPI_Recv(&wcp.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 0, kWarmupTag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            for (int a = 0; a < kMaxRetryAttempts && !wcp.sendComm; a++) {
+                ConnectToRemote(0, &wcp.handle, &wcp.sendComm);
+                if (!wcp.sendComm) usleep(kPollIntervalUs);
+            }
+            ASSERT_NE(wcp.sendComm, nullptr) << "Warmup connect failed";
+        }
+        void* wcomm = (rank == 0) ? wcp.recvComm : wcp.sendComm;
+        void* wmh   = nullptr;
+        ASSERT_EQ(RegisterMemory(wcomm, buf.get(), sz, NCCL_PTR_HOST, &wmh), ncclSuccess);
+        DoSendRecv(wcp.sendComm, wcp.recvComm, buf.get(), buf.get(), sz, kWarmupTag, wmh, wmh, /*seed=*/0);
+        ASSERT_EQ(DeregisterMemory(wcomm, wmh), ncclSuccess);
+        if (rank == 0) {
+            ASSERT_EQ(CloseRecvComm(wcp.recvComm), ncclSuccess);
+            ASSERT_EQ(CloseListenComm(wcp.listenComm), ncclSuccess);
+        } else {
+            ASSERT_EQ(CloseSendComm(wcp.sendComm), ncclSuccess);
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    RdmaResourceCounts before = CaptureRdmaResources();
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    for (int batch = 0; batch < kBatches; batch++) {
+        // Create kPerBatch connections
+        struct BatchConn {
+            ConnectionPair cp;
+            void* mh = nullptr;
+        };
+        std::vector<BatchConn> conns(kPerBatch);
+
+        for (int c = 0; c < kPerBatch; c++) {
+            int mpiTag = 700 + batch * kPerBatch + c;
+            if (rank == 0) {
+                ASSERT_EQ(CreateListenComm(0, &conns[c].cp.handle, &conns[c].cp.listenComm), ncclSuccess);
+                MPI_Send(&conns[c].cp.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 1, mpiTag, MPI_COMM_WORLD);
+                for (int a = 0; a < kMaxRetryAttempts && !conns[c].cp.recvComm; a++) {
+                    AcceptConnection(conns[c].cp.listenComm, &conns[c].cp.recvComm);
+                    if (!conns[c].cp.recvComm) usleep(kPollIntervalUs);
+                }
+                ASSERT_NE(conns[c].cp.recvComm, nullptr);
+            } else {
+                MPI_Recv(&conns[c].cp.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 0, mpiTag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                for (int a = 0; a < kMaxRetryAttempts && !conns[c].cp.sendComm; a++) {
+                    ConnectToRemote(0, &conns[c].cp.handle, &conns[c].cp.sendComm);
+                    if (!conns[c].cp.sendComm) usleep(kPollIntervalUs);
+                }
+                ASSERT_NE(conns[c].cp.sendComm, nullptr);
+            }
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            void* comm = (rank == 0) ? conns[c].cp.recvComm : conns[c].cp.sendComm;
+            ASSERT_EQ(RegisterMemory(comm, buf.get(), sz, NCCL_PTR_HOST, &conns[c].mh), ncclSuccess);
+        }
+
+        // Transfer on each connection
+        for (int c = 0; c < kPerBatch; c++) {
+            int seed = batch * kPerBatch + c;
+            DoSendRecv(conns[c].cp.sendComm, conns[c].cp.recvComm,
+                       buf.get(), buf.get(), sz,
+                       /*tag=*/c, conns[c].mh, conns[c].mh, seed);
+        }
+
+        // Close all in this batch
+        for (int c = 0; c < kPerBatch; c++) {
+            void* comm = (rank == 0) ? conns[c].cp.recvComm : conns[c].cp.sendComm;
+            ASSERT_EQ(DeregisterMemory(comm, conns[c].mh), ncclSuccess);
+            if (rank == 0) {
+                ASSERT_EQ(CloseRecvComm(conns[c].cp.recvComm), ncclSuccess);
+                ASSERT_EQ(CloseListenComm(conns[c].cp.listenComm), ncclSuccess);
+            } else {
+                ASSERT_EQ(CloseSendComm(conns[c].cp.sendComm), ncclSuccess);
+            }
+        }
+
+        // RDMA checkpoints
+        if ((batch + 1) % 25 == 0) {
+            MPI_Barrier(MPI_COMM_WORLD);
+            RdmaResourceCounts cp = CaptureRdmaResources();
+            char label[64];
+            snprintf(label, sizeof(label), "batch %d", batch + 1);
+            AssertNoRdmaLeaks(before, cp, label);
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    RdmaResourceCounts after = CaptureRdmaResources();
+    AssertNoRdmaLeaks(before, after, "final");
+}
+
+// =====================================================================
+//  Group D: Multi-QP outside CAST (2-rank)
+// =====================================================================
+
+// D1.  MultiQpSplitDataStress — QPS=8, SPLIT=1, alignment boundary sizes.
+//      Exercises the split logic at net_ib.cc:2436-2441.
 
 #endif /* MPI_TESTS_ENABLED */
