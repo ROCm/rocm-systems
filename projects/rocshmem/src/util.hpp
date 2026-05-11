@@ -400,108 +400,6 @@ constexpr bool is_blocking(MemcpyKind k) {
   return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
 }
 
-
-/*
-template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
-  uint8_t* dst_bytes{static_cast<uint8_t*>(dst)};
-  uint8_t* src_bytes{static_cast<uint8_t*>(src)};
-
-  for (size_t i = 16; i >= 1; i >>= 1) {
-    while (size >= i) {
-      if constexpr (is_put(Kind)) {
-        put_asm(src_bytes, dst_bytes, i);
-      } else {
-        get_asm(src_bytes, dst_bytes, i);
-      }
-      src_bytes += i;
-      dst_bytes += i;
-      size -= i;
-    }
-  }
-}
-
-template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
-  int wave_tid = get_flat_block_id() % WF_SIZE;
-  int wave_size{wave_SZ()};
-
-  int cpy_size{};
-  uint8_t* dst_bytes{nullptr};
-  uint8_t* dst_def{nullptr};
-  uint8_t* src_bytes{nullptr};
-  uint8_t* src_def{nullptr};
-
-  dst_def = reinterpret_cast<uint8_t*>(dst);
-  src_def = reinterpret_cast<uint8_t*>(src);
-  dst_bytes = dst_def;
-  src_bytes = src_def;
-
-  for (int j = 16; j >= 1; j >>= 1) {
-    cpy_size = size / j;
-    for (int i = wave_tid; i < cpy_size; i += wave_size) {
-      dst_bytes = dst_def;
-      src_bytes = src_def;
-
-      src_bytes += i * j;
-      dst_bytes += i * j;
-
-      if constexpr (is_put(Kind)) {
-        put_asm(src_bytes, dst_bytes, j);
-      } else {
-        get_asm(src_bytes, dst_bytes, j);
-      }
-    }
-    size -= cpy_size * j;
-    dst_def += cpy_size * j;
-    src_def += cpy_size * j;
-  }
-}
-
-template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
-  int thread_id{get_flat_block_id()};
-  int block_size{get_flat_block_size()};
-
-  int cpy_size{};
-  uint8_t* dst_bytes{nullptr};
-  uint8_t* dst_def{nullptr};
-  uint8_t* src_bytes{nullptr};
-  uint8_t* src_def{nullptr};
-
-  dst_def = reinterpret_cast<uint8_t*>(dst);
-  src_def = reinterpret_cast<uint8_t*>(src);
-  dst_bytes = dst_def;
-  src_bytes = src_def;
-
-  
-  for (int j = 16; j >= 1; j >>= 1) {
-    cpy_size = size / j;
-    for (int i = thread_id; i < cpy_size; i += block_size) {
-      dst_bytes = dst_def;
-      src_bytes = src_def;
-
-      src_bytes += i * j;
-      dst_bytes += i * j;
-
-      if constexpr (Kind == MemcpyKind::Put) {
-        put_asm(src_bytes, dst_bytes, j);
-      } else {
-        get_asm(src_bytes, dst_bytes, j);
-      }
-    }
-    size -= cpy_size * j;
-    dst_def += cpy_size * j;
-    src_def += cpy_size * j;
-  }
-}
-*/
-
-
-// ==============================================================================
-// CORE CHUNKING HELPER
-// ==============================================================================
-
 template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int UNROLL>
 __device__ __forceinline__ void copy_chunk(uint8_t*& dst_bytes, uint8_t*& src_bytes,
                                            size_t& size, int tid, int block_size) {
@@ -515,7 +413,7 @@ __device__ __forceinline__ void copy_chunk(uint8_t*& dst_bytes, uint8_t*& src_by
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
   using T = typename Acc::type;
 
-  // 1. Unrolled Main Loop: issue all loads first, then all stores
+  // issue all loads first, then all stores
   for (; i <= unroll_limit; i += block_size * UNROLL) {
     T regs[UNROLL];
     #pragma unroll
@@ -535,13 +433,9 @@ __device__ __forceinline__ void copy_chunk(uint8_t*& dst_bytes, uint8_t*& src_by
   // 2. Tail
   for (; i < cpy_size; i += block_size) {
     T val = Acc::load(src_bytes + i * ChunkSize);
-    
-    // 2. Wait for this specific load to finish if we bypassed the compiler's tracker
     if constexpr (LoadPolicy != CachePolicy::Standard) {
-      pipeline_wait_on_loads(0); 
+      pipeline_wait_on_loads(0);
     }
-    
-    // 3. Issue the store
     Acc::store(dst_bytes + i * ChunkSize, val);
   }
 
@@ -551,13 +445,15 @@ __device__ __forceinline__ void copy_chunk(uint8_t*& dst_bytes, uint8_t*& src_by
   src_bytes += bytes_processed;
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 8>
+template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 16>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src,
                                                              size_t size) {
   if (size == 0) return;
 
-  constexpr CachePolicy LP = (Kind == MemcpyKind::Put) ? CachePolicy::Standard    : CachePolicy::SystemScope;
-  constexpr CachePolicy SP = (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
+  constexpr CachePolicy LP =
+      (Kind == MemcpyKind::Put) ? CachePolicy::Standard : CachePolicy::SystemScope;
+  constexpr CachePolicy SP =
+      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   uint8_t* dst_bytes = static_cast<uint8_t*>(dst);
   uint8_t* src_bytes = static_cast<uint8_t*>(src);
@@ -569,13 +465,15 @@ template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 8>
   copy_chunk<1,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 8>
+template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 16>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src,
                                                              size_t size) {
   if (size == 0) return;
 
-  constexpr CachePolicy LP = (Kind == MemcpyKind::Put) ? CachePolicy::Standard    : CachePolicy::SystemScope;
-  constexpr CachePolicy SP = (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
+  constexpr CachePolicy LP =
+      (Kind == MemcpyKind::Put) ? CachePolicy::Standard : CachePolicy::SystemScope;
+  constexpr CachePolicy SP =
+      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   int wave_tid = get_flat_block_id() % WF_SIZE;
   int wave_size{wave_SZ()};
@@ -590,13 +488,15 @@ template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 8>
   copy_chunk<1,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 8>
+template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 16>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src,
                                                            size_t size) {
   if (size == 0) return;
 
-  constexpr CachePolicy LP = (Kind == MemcpyKind::Put) ? CachePolicy::Standard    : CachePolicy::SystemScope;
-  constexpr CachePolicy SP = (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
+  constexpr CachePolicy LP =
+      (Kind == MemcpyKind::Put) ? CachePolicy::Standard : CachePolicy::SystemScope;
+  constexpr CachePolicy SP =
+      (Kind == MemcpyKind::Put) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
   int thread_id = get_flat_block_id();
   int block_size = get_flat_block_size();
