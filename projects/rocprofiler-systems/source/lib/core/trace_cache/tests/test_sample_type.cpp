@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "core/trace_cache/cereal_buffer_archive.hpp"
 #include "core/trace_cache/sample_type.hpp"
 
 #include <array>
@@ -651,4 +652,42 @@ TEST_F(sample_type_test, kfd_sample_get_size)
     auto          deserialized = deserialize<kfd_sample>(buffer_ptr);
     EXPECT_EQ(deserialized.name, original.name);
     EXPECT_EQ(deserialized.category, original.category);
+}
+
+TEST_F(sample_type_test, kernel_dispatch_sample_cereal_round_trip)
+{
+    static_assert(use_cereal<kernel_dispatch_sample>,
+                  "kernel_dispatch_sample must opt in to the cereal path");
+
+    kernel_dispatch_sample original(1000, 2000, 42, 100, 200, 300, 400, 500, 600, 1024,
+                                    2048, 64, 32, 16, 256, 128, 64, 0xABCD);
+
+    const auto size = cereal_serialized_size(original);
+    EXPECT_GT(size, 0u);
+    EXPECT_LE(size, buffer.size());
+
+    cereal_serialize_to(buffer.data(), buffer.size(), original);
+
+    std::uint8_t* cursor       = buffer.data();
+    auto          deserialized = cereal_deserialize_from<kernel_dispatch_sample>(cursor);
+
+    EXPECT_EQ(static_cast<std::size_t>(cursor - buffer.data()), size);
+    EXPECT_EQ(deserialized.start_timestamp, original.start_timestamp);
+    EXPECT_EQ(deserialized.end_timestamp, original.end_timestamp);
+    EXPECT_EQ(deserialized.thread_id, original.thread_id);
+    EXPECT_EQ(deserialized.agent_id_handle, original.agent_id_handle);
+    EXPECT_EQ(deserialized.kernel_id, original.kernel_id);
+    EXPECT_EQ(deserialized.dispatch_id, original.dispatch_id);
+    EXPECT_EQ(deserialized.queue_id_handle, original.queue_id_handle);
+    EXPECT_EQ(deserialized.correlation_id_internal, original.correlation_id_internal);
+    EXPECT_EQ(deserialized.correlation_id_ancestor, original.correlation_id_ancestor);
+    EXPECT_EQ(deserialized.private_segment_size, original.private_segment_size);
+    EXPECT_EQ(deserialized.group_segment_size, original.group_segment_size);
+    EXPECT_EQ(deserialized.workgroup_size_x, original.workgroup_size_x);
+    EXPECT_EQ(deserialized.workgroup_size_y, original.workgroup_size_y);
+    EXPECT_EQ(deserialized.workgroup_size_z, original.workgroup_size_z);
+    EXPECT_EQ(deserialized.grid_size_x, original.grid_size_x);
+    EXPECT_EQ(deserialized.grid_size_y, original.grid_size_y);
+    EXPECT_EQ(deserialized.grid_size_z, original.grid_size_z);
+    EXPECT_EQ(deserialized.stream_handle, original.stream_handle);
 }

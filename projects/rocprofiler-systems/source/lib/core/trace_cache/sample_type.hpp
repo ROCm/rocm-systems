@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
 
 #include <cstdint>
@@ -130,6 +131,23 @@ get_size(const kernel_dispatch_sample& item)
         item.workgroup_size_y, item.workgroup_size_z, item.grid_size_x, item.grid_size_y,
         item.grid_size_z, static_cast<std::uint64_t>(item.stream_handle));
 }
+
+template <class Archive>
+void
+serialize(Archive& ar, kernel_dispatch_sample& item)
+{
+    auto stream_handle_u64 = static_cast<std::uint64_t>(item.stream_handle);
+    ar(item.start_timestamp, item.end_timestamp, item.thread_id, item.agent_id_handle,
+       item.kernel_id, item.dispatch_id, item.queue_id_handle,
+       item.correlation_id_internal, item.correlation_id_ancestor,
+       item.private_segment_size, item.group_segment_size, item.workgroup_size_x,
+       item.workgroup_size_y, item.workgroup_size_z, item.grid_size_x, item.grid_size_y,
+       item.grid_size_z, stream_handle_u64);
+    item.stream_handle = static_cast<size_t>(stream_handle_u64);
+}
+
+template <>
+inline constexpr bool use_cereal<kernel_dispatch_sample> = true;
 
 struct scratch_memory_sample : cacheable_t
 {
