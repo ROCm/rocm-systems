@@ -92,8 +92,10 @@ LibHandle LoadLib(std::string filename);
 /// @return: void*.
 void* GetExportAddress(LibHandle lib, std::string export_name);
 
-/// @brief: Unloads the dynamic library.
-/// @param: lib(Input), library handle which will be unloaded.
+/// @brief: Closes the dynamic library handle. Note: With RTLD_NODELETE on Linux
+/// or module pinning on Windows, this decrements the reference count but may not
+/// actually unmap the library from memory.
+/// @param: lib(Input), library handle to close.
 bool CloseLib(LibHandle lib);
 
 /// @brief: Lists loaded tool libraries that contain

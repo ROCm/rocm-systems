@@ -269,15 +269,15 @@ LibHandle LoadLib(std::string filename) {
   // This prevents crashes when the library has circular dependencies:
   // if libA loads libB, and libB links against libA, then dlclose(libB)
   // could unmap libA while libA's code is still executing.
-  // With RTLD_NODELETE, dlclose still decrements refcount and runs
-  // destructors, but the code pages remain mapped until process exit.
+  // With RTLD_NODELETE, dlclose decrements the refcount but does not
+  // unmap the code pages or run destructors - those happen at process exit.
   int dlopen_flags = RTLD_LAZY;
 #ifdef RTLD_NODELETE
   dlopen_flags |= RTLD_NODELETE;
 #endif
   void* ret = dlopen(filename.c_str(), dlopen_flags);
   if (ret == nullptr) debug_print("LoadLib(%s) failed: %s\n", filename.c_str(), dlerror());
-  return *(LibHandle*)&ret;
+  return ret;
 }
 
 void* GetExportAddress(LibHandle lib, std::string export_name) {
