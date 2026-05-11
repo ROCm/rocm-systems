@@ -709,6 +709,7 @@ TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Decrement_Default", "", uint32_t, u
   HIP_CHECK(hipHostFree(mem));
 }
 
+#if HT_AMD // stream decrement/increment are not supported on CUDA
 template <typename TestType>
 void testIncrementDecrementMultiStreamMultiDevice(uint32_t operationFlag) {
   if (!streamWaitValueSupported()) {
@@ -787,6 +788,7 @@ void testIncrementDecrementMultiStreamMultiDevice(uint32_t operationFlag) {
 
   HIP_CHECK(hipHostFree(mem));
 }
+#endif
 
 TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Increment_MultiStream_MultiDevice", "", uint32_t,
                    uint64_t) {

@@ -367,6 +367,7 @@ typedef enum cudaResourceViewFormat hipResourceViewFormat;
 #define hipHostMallocWriteCombined cudaHostAllocWriteCombined
 #define hipHostMallocCoherent 0x0
 #define hipHostMallocNonCoherent 0x0
+#define hipMallocSignalMemory 0x0
 
 #define hipHostAllocDefault cudaHostAllocDefault
 #define hipHostAllocPortable cudaHostAllocPortable
