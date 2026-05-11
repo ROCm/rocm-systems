@@ -1167,5 +1167,65 @@ TEST_F(NetIbMPITest, MultiQpFanIn) {
 }
 
 // G2.  BidirectionalMultiRank — all pairs bidirectional, 4 ranks, 50 iters.
+TEST_F(NetIbMPITest, BidirectionalMultiRank) {
+    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    int nranks = MPIEnvironment::world_size;
+    AssertInitAndGetDevices(nullptr);
+
+    // All-to-all gives us both directions for every pair
+    std::vector<DirectedConnection> conns;
+    SetupAllToAll(0, nranks, conns);
+
+    const size_t sz = kSmallBufferSize;
+    auto buf = makeHostBufferAutoGuard(malloc(sz));
+    ASSERT_NE(buf.get(), nullptr);
+
+    std::vector<void*> mhandles;
+    for (auto& c : conns) {
+        void* comm = nullptr;
+        if (rank == c.senderRank)   comm = c.sendComm;
+        if (rank == c.receiverRank) comm = c.recvComm;
+        void* mh = nullptr;
+        if (comm) {
+            ASSERT_EQ(RegisterMemory(comm, buf.get(), sz, NCCL_PTR_HOST, &mh), ncclSuccess);
+        }
+        mhandles.push_back(mh);
+    }
+    auto mrCleanup = makeScopeGuard([&]() {
+        for (size_t i = 0; i < conns.size(); i++) {
+            if (!mhandles[i]) continue;
+            void* comm = nullptr;
+            if (rank == conns[i].senderRank)   comm = conns[i].sendComm;
+            if (rank == conns[i].receiverRank) comm = conns[i].recvComm;
+            if (comm) DeregisterMemory(comm, mhandles[i]);
+        }
+    });
+
+    static constexpr int kIters = 50;
+    for (int iter = 0; iter < kIters; iter++) {
+        for (size_t c = 0; c < conns.size(); c++) {
+            int seed = iter * 100 + conns[c].senderRank * 10 + conns[c].receiverRank;
+            DoDirectedSendRecv(conns[c], buf.get(), buf.get(), sz,
+                               /*tag=*/iter, mhandles[c], mhandles[c], seed);
+        }
+    }
+
+    // Deregister memory before closing connections (comm must be valid for DeregMr).
+    for (size_t i = 0; i < conns.size(); i++) {
+        if (!mhandles[i]) continue;
+        void* comm = nullptr;
+        if (rank == conns[i].senderRank)   comm = conns[i].sendComm;
+        if (rank == conns[i].receiverRank) comm = conns[i].recvComm;
+        if (comm) DeregisterMemory(comm, mhandles[i]);
+        mhandles[i] = nullptr;
+    }
+    mrCleanup.dismiss();
+
+    for (auto& c : conns) CloseDirectedConnection(c);
+}
+
+// F2.  LongRunningMultiRank — fan-in 3→1, 1000 iterations, RDMA checkpoints.
 
 #endif /* MPI_TESTS_ENABLED */
