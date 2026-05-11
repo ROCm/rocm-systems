@@ -657,36 +657,460 @@ IPC_CONTEXT_PUT_SIGNAL_DEF(_wave)
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
 __device__ int IPCContext::tile_put(src_tensor_t src, dst_tensor_t dst,
                                     tuple_t start_coord, tuple_t boundary,
-                                    int pe, uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+                                    int pe, [[maybe_unused]] uint64_t flags) {
+  // Extract tensor properties at compile time
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  // Get remote pointer using shmem_ptr
+  void* remote_base = shmem_ptr(dst.data_handle(), pe);
+  if (!remote_base) {
+    return ROCSHMEM_ERROR;
+  }
+
+  // For 2D tensors (most common case for tiles)
+  if constexpr (ndim == 2) {
+    // Get strides (compile-time if possible)
+    const auto src_stride_0 = src.stride(0);
+    const auto src_stride_1 = src.stride(1);
+    const auto dst_stride_0 = dst.stride(0);
+    const auto dst_stride_1 = dst.stride(1);
+
+    // Get tile dimensions from start_coord and boundary
+    const auto tile_extent_0 = boundary.get(0) - start_coord.get(0);
+    const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
+
+    // Calculate base pointers for the tile
+    element_t* src_base = src.data_handle() +
+                          start_coord.get(0) * src_stride_0 +
+                          start_coord.get(1) * src_stride_1;
+    element_t* dst_base = static_cast<element_t*>(remote_base) +
+                          start_coord.get(0) * dst_stride_0 +
+                          start_coord.get(1) * dst_stride_1;
+
+    // Optimization: Check if tile is contiguous (all elements adjacent)
+    if (src_stride_1 == 1 && dst_stride_1 == 1 &&
+        src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
+      // Fully contiguous - single bulk transfer
+      size_t total_size = tile_extent_0 * tile_extent_1 * sizeof(element_t);
+      memcpy_lane<MemcpyKind::Put>(dst_base, src_base, total_size);
+    }
+    // Optimization: Row-major with contiguous rows
+    else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+      // Transfer row by row
+      for (int i = 0; i < tile_extent_0; i++) {
+        element_t* src_row = src_base + i * src_stride_0;
+        element_t* dst_row = dst_base + i * dst_stride_0;
+        size_t row_size = tile_extent_1 * sizeof(element_t);
+        memcpy_lane<MemcpyKind::Put>(dst_row, src_row, row_size);
+      }
+    }
+    // Optimization: Column-major with contiguous columns
+    else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+      // Transfer column by column
+      for (int j = 0; j < tile_extent_1; j++) {
+        element_t* src_col = src_base + j * src_stride_1;
+        element_t* dst_col = dst_base + j * dst_stride_1;
+        size_t col_size = tile_extent_0 * sizeof(element_t);
+        memcpy_lane<MemcpyKind::Put>(dst_col, src_col, col_size);
+      }
+    }
+    // Fallback: Element-by-element transfer
+    else {
+      for (int i = 0; i < tile_extent_0; i++) {
+        for (int j = 0; j < tile_extent_1; j++) {
+          element_t* src_elem = src_base + i * src_stride_0 + j * src_stride_1;
+          element_t* dst_elem = dst_base + i * dst_stride_0 + j * dst_stride_1;
+          memcpy_lane<MemcpyKind::Put>(dst_elem, src_elem, sizeof(element_t));
+        }
+      }
+    }
+  }
+  // For 1D tensors
+  else if constexpr (ndim == 1) {
+    const auto tile_extent = boundary.get(0) - start_coord.get(0);
+    element_t* src_ptr = src.data_handle() + start_coord.get(0) * src.stride(0);
+    element_t* dst_ptr = static_cast<element_t*>(remote_base) +
+                         start_coord.get(0) * dst.stride(0);
+
+    if (src.stride(0) == 1 && dst.stride(0) == 1) {
+      // Contiguous transfer
+      memcpy_lane<MemcpyKind::Put>(dst_ptr, src_ptr, tile_extent * sizeof(element_t));
+    } else {
+      // Strided transfer
+      for (int i = 0; i < tile_extent; i++) {
+        memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst.stride(0),
+                                      src_ptr + i * src.stride(0),
+                                      sizeof(element_t));
+      }
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
 __device__ int IPCContext::tile_put_wave(src_tensor_t src, dst_tensor_t dst,
                                          tuple_t start_coord, tuple_t boundary,
-                                         int pe, uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+                                         int pe, [[maybe_unused]] uint64_t flags) {
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  void* remote_base = shmem_ptr(dst.data_handle(), pe);
+  if (!remote_base) {
+    return ROCSHMEM_ERROR;
+  }
+
+  if constexpr (ndim == 2) {
+    const auto src_stride_0 = src.stride(0);
+    const auto src_stride_1 = src.stride(1);
+    const auto dst_stride_0 = dst.stride(0);
+    const auto dst_stride_1 = dst.stride(1);
+    const auto tile_extent_0 = boundary.get(0) - start_coord.get(0);
+    const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
+
+    element_t* src_base = src.data_handle() +
+                          start_coord.get(0) * src_stride_0 +
+                          start_coord.get(1) * src_stride_1;
+    element_t* dst_base = static_cast<element_t*>(remote_base) +
+                          start_coord.get(0) * dst_stride_0 +
+                          start_coord.get(1) * dst_stride_1;
+
+    // Wave-collective: threads cooperate to transfer tile
+    int wave_tid = get_flat_block_id() % WF_SIZE;
+
+    // Fully contiguous case
+    if (src_stride_1 == 1 && dst_stride_1 == 1 &&
+        src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
+      size_t total_size = tile_extent_0 * tile_extent_1 * sizeof(element_t);
+      if (wave_tid == 0) {
+        memcpy_lane<MemcpyKind::Put>(dst_base, src_base, total_size);
+      }
+    }
+    // Row-major with contiguous rows - distribute rows among wave
+    else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+      for (int i = wave_tid; i < tile_extent_0; i += WF_SIZE) {
+        element_t* src_row = src_base + i * src_stride_0;
+        element_t* dst_row = dst_base + i * dst_stride_0;
+        size_t row_size = tile_extent_1 * sizeof(element_t);
+        memcpy_lane<MemcpyKind::Put>(dst_row, src_row, row_size);
+      }
+    }
+    // Column-major with contiguous columns - distribute columns among wave
+    else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+      for (int j = wave_tid; j < tile_extent_1; j += WF_SIZE) {
+        element_t* src_col = src_base + j * src_stride_1;
+        element_t* dst_col = dst_base + j * dst_stride_1;
+        size_t col_size = tile_extent_0 * sizeof(element_t);
+        memcpy_lane<MemcpyKind::Put>(dst_col, src_col, col_size);
+      }
+    }
+    // Fallback: Distribute elements among wave threads
+    else {
+      int total_elements = tile_extent_0 * tile_extent_1;
+      for (int idx = wave_tid; idx < total_elements; idx += WF_SIZE) {
+        int i = idx / tile_extent_1;
+        int j = idx % tile_extent_1;
+        element_t* src_elem = src_base + i * src_stride_0 + j * src_stride_1;
+        element_t* dst_elem = dst_base + i * dst_stride_0 + j * dst_stride_1;
+        memcpy_lane<MemcpyKind::Put>(dst_elem, src_elem, sizeof(element_t));
+      }
+    }
+  }
+  else if constexpr (ndim == 1) {
+    const auto tile_extent = boundary.get(0) - start_coord.get(0);
+    element_t* src_ptr = src.data_handle() + start_coord.get(0) * src.stride(0);
+    element_t* dst_ptr = static_cast<element_t*>(remote_base) +
+                         start_coord.get(0) * dst.stride(0);
+
+    int wave_tid = get_flat_block_id() % WF_SIZE;
+
+    if (src.stride(0) == 1 && dst.stride(0) == 1) {
+      size_t total_size = tile_extent * sizeof(element_t);
+      if (wave_tid == 0) {
+        memcpy_lane<MemcpyKind::Put>(dst_ptr, src_ptr, total_size);
+      }
+    } else {
+      for (int i = wave_tid; i < tile_extent; i += WF_SIZE) {
+        memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst.stride(0),
+                                      src_ptr + i * src.stride(0),
+                                      sizeof(element_t));
+      }
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
 __device__ int IPCContext::tile_put_wg(src_tensor_t src, dst_tensor_t dst,
                                        tuple_t start_coord, tuple_t boundary,
-                                       int pe, uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+                                       int pe, [[maybe_unused]] uint64_t flags) {
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  void* remote_base = shmem_ptr(dst.data_handle(), pe);
+  if (!remote_base) {
+    return ROCSHMEM_ERROR;
+  }
+
+  if constexpr (ndim == 2) {
+    const auto src_stride_0 = src.stride(0);
+    const auto src_stride_1 = src.stride(1);
+    const auto dst_stride_0 = dst.stride(0);
+    const auto dst_stride_1 = dst.stride(1);
+    const auto tile_extent_0 = boundary.get(0) - start_coord.get(0);
+    const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
+
+    element_t* src_base = src.data_handle() +
+                          start_coord.get(0) * src_stride_0 +
+                          start_coord.get(1) * src_stride_1;
+    element_t* dst_base = static_cast<element_t*>(remote_base) +
+                          start_coord.get(0) * dst_stride_0 +
+                          start_coord.get(1) * dst_stride_1;
+
+    // Workgroup-collective: all threads in block cooperate
+    int thread_id = get_flat_block_id();
+    int block_size = get_flat_block_size();
+
+    // Fully contiguous case
+    if (src_stride_1 == 1 && dst_stride_1 == 1 &&
+        src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
+      size_t total_size = tile_extent_0 * tile_extent_1 * sizeof(element_t);
+      if (thread_id == 0) {
+        memcpy_lane<MemcpyKind::Put>(dst_base, src_base, total_size);
+      }
+    }
+    // Row-major with contiguous rows - distribute rows among workgroup
+    else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+      for (int i = thread_id; i < tile_extent_0; i += block_size) {
+        element_t* src_row = src_base + i * src_stride_0;
+        element_t* dst_row = dst_base + i * dst_stride_0;
+        size_t row_size = tile_extent_1 * sizeof(element_t);
+        memcpy_lane<MemcpyKind::Put>(dst_row, src_row, row_size);
+      }
+    }
+    // Column-major with contiguous columns - distribute columns among workgroup
+    else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+      for (int j = thread_id; j < tile_extent_1; j += block_size) {
+        element_t* src_col = src_base + j * src_stride_1;
+        element_t* dst_col = dst_base + j * dst_stride_1;
+        size_t col_size = tile_extent_0 * sizeof(element_t);
+        memcpy_lane<MemcpyKind::Put>(dst_col, src_col, col_size);
+      }
+    }
+    // Fallback: Distribute elements among workgroup threads
+    else {
+      int total_elements = tile_extent_0 * tile_extent_1;
+      for (int idx = thread_id; idx < total_elements; idx += block_size) {
+        int i = idx / tile_extent_1;
+        int j = idx % tile_extent_1;
+        element_t* src_elem = src_base + i * src_stride_0 + j * src_stride_1;
+        element_t* dst_elem = dst_base + i * dst_stride_0 + j * dst_stride_1;
+        memcpy_lane<MemcpyKind::Put>(dst_elem, src_elem, sizeof(element_t));
+      }
+    }
+  }
+  else if constexpr (ndim == 1) {
+    const auto tile_extent = boundary.get(0) - start_coord.get(0);
+    element_t* src_ptr = src.data_handle() + start_coord.get(0) * src.stride(0);
+    element_t* dst_ptr = static_cast<element_t*>(remote_base) +
+                         start_coord.get(0) * dst.stride(0);
+
+    int thread_id = get_flat_block_id();
+    int block_size = get_flat_block_size();
+
+    if (src.stride(0) == 1 && dst.stride(0) == 1) {
+      size_t total_size = tile_extent * sizeof(element_t);
+      if (thread_id == 0) {
+        memcpy_lane<MemcpyKind::Put>(dst_ptr, src_ptr, total_size);
+      }
+    } else {
+      for (int i = thread_id; i < tile_extent; i += block_size) {
+        memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst.stride(0),
+                                      src_ptr + i * src.stride(0),
+                                      sizeof(element_t));
+      }
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
 __device__ int IPCContext::tile_get(dst_tensor_t dst, src_tensor_t src,
                                     tuple_t start_coord, tuple_t boundary,
-                                    int pe, uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+                                    int pe, [[maybe_unused]] uint64_t flags) {
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  void* remote_base = shmem_ptr(src.data_handle(), pe);
+  if (!remote_base) {
+    return ROCSHMEM_ERROR;
+  }
+
+  if constexpr (ndim == 2) {
+    const auto src_stride_0 = src.stride(0);
+    const auto src_stride_1 = src.stride(1);
+    const auto dst_stride_0 = dst.stride(0);
+    const auto dst_stride_1 = dst.stride(1);
+    const auto tile_extent_0 = boundary.get(0) - start_coord.get(0);
+    const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
+
+    element_t* src_base = static_cast<element_t*>(remote_base) +
+                          start_coord.get(0) * src_stride_0 +
+                          start_coord.get(1) * src_stride_1;
+    element_t* dst_base = dst.data_handle() +
+                          start_coord.get(0) * dst_stride_0 +
+                          start_coord.get(1) * dst_stride_1;
+
+    // Fully contiguous
+    if (src_stride_1 == 1 && dst_stride_1 == 1 &&
+        src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
+      size_t total_size = tile_extent_0 * tile_extent_1 * sizeof(element_t);
+      memcpy_lane<MemcpyKind::Get>(dst_base, src_base, total_size);
+    }
+    // Row-major with contiguous rows
+    else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+      for (int i = 0; i < tile_extent_0; i++) {
+        element_t* src_row = src_base + i * src_stride_0;
+        element_t* dst_row = dst_base + i * dst_stride_0;
+        size_t row_size = tile_extent_1 * sizeof(element_t);
+        memcpy_lane<MemcpyKind::Get>(dst_row, src_row, row_size);
+      }
+    }
+    // Column-major with contiguous columns
+    else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+      for (int j = 0; j < tile_extent_1; j++) {
+        element_t* src_col = src_base + j * src_stride_1;
+        element_t* dst_col = dst_base + j * dst_stride_1;
+        size_t col_size = tile_extent_0 * sizeof(element_t);
+        memcpy_lane<MemcpyKind::Get>(dst_col, src_col, col_size);
+      }
+    }
+    // Fallback: Element-by-element
+    else {
+      for (int i = 0; i < tile_extent_0; i++) {
+        for (int j = 0; j < tile_extent_1; j++) {
+          element_t* src_elem = src_base + i * src_stride_0 + j * src_stride_1;
+          element_t* dst_elem = dst_base + i * dst_stride_0 + j * dst_stride_1;
+          memcpy_lane<MemcpyKind::Get>(dst_elem, src_elem, sizeof(element_t));
+        }
+      }
+    }
+  }
+  else if constexpr (ndim == 1) {
+    const auto tile_extent = boundary.get(0) - start_coord.get(0);
+    element_t* src_ptr = static_cast<element_t*>(remote_base) +
+                         start_coord.get(0) * src.stride(0);
+    element_t* dst_ptr = dst.data_handle() + start_coord.get(0) * dst.stride(0);
+
+    if (src.stride(0) == 1 && dst.stride(0) == 1) {
+      memcpy_lane<MemcpyKind::Get>(dst_ptr, src_ptr, tile_extent * sizeof(element_t));
+    } else {
+      for (int i = 0; i < tile_extent; i++) {
+        memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst.stride(0),
+                                      src_ptr + i * src.stride(0),
+                                      sizeof(element_t));
+      }
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
 __device__ int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src,
                                        tuple_t start_coord, tuple_t boundary,
-                                       int pe, uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
+                                       int pe, [[maybe_unused]] uint64_t flags) {
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  void* remote_base = shmem_ptr(src.data_handle(), pe);
+  if (!remote_base) {
+    return ROCSHMEM_ERROR;
+  }
+
+  if constexpr (ndim == 2) {
+    const auto src_stride_0 = src.stride(0);
+    const auto src_stride_1 = src.stride(1);
+    const auto dst_stride_0 = dst.stride(0);
+    const auto dst_stride_1 = dst.stride(1);
+    const auto tile_extent_0 = boundary.get(0) - start_coord.get(0);
+    const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
+
+    element_t* src_base = static_cast<element_t*>(remote_base) +
+                          start_coord.get(0) * src_stride_0 +
+                          start_coord.get(1) * src_stride_1;
+    element_t* dst_base = dst.data_handle() +
+                          start_coord.get(0) * dst_stride_0 +
+                          start_coord.get(1) * dst_stride_1;
+
+    int thread_id = get_flat_block_id();
+    int block_size = get_flat_block_size();
+
+    // Fully contiguous
+    if (src_stride_1 == 1 && dst_stride_1 == 1 &&
+        src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
+      size_t total_size = tile_extent_0 * tile_extent_1 * sizeof(element_t);
+      if (thread_id == 0) {
+        memcpy_lane<MemcpyKind::Get>(dst_base, src_base, total_size);
+      }
+    }
+    // Row-major with contiguous rows - distribute among workgroup
+    else if (src_stride_1 == 1 && dst_stride_1 == 1) {
+      for (int i = thread_id; i < tile_extent_0; i += block_size) {
+        element_t* src_row = src_base + i * src_stride_0;
+        element_t* dst_row = dst_base + i * dst_stride_0;
+        size_t row_size = tile_extent_1 * sizeof(element_t);
+        memcpy_lane<MemcpyKind::Get>(dst_row, src_row, row_size);
+      }
+    }
+    // Column-major with contiguous columns - distribute among workgroup
+    else if (src_stride_0 == 1 && dst_stride_0 == 1) {
+      for (int j = thread_id; j < tile_extent_1; j += block_size) {
+        element_t* src_col = src_base + j * src_stride_1;
+        element_t* dst_col = dst_base + j * dst_stride_1;
+        size_t col_size = tile_extent_0 * sizeof(element_t);
+        memcpy_lane<MemcpyKind::Get>(dst_col, src_col, col_size);
+      }
+    }
+    // Fallback: Distribute elements among workgroup
+    else {
+      int total_elements = tile_extent_0 * tile_extent_1;
+      for (int idx = thread_id; idx < total_elements; idx += block_size) {
+        int i = idx / tile_extent_1;
+        int j = idx % tile_extent_1;
+        element_t* src_elem = src_base + i * src_stride_0 + j * src_stride_1;
+        element_t* dst_elem = dst_base + i * dst_stride_0 + j * dst_stride_1;
+        memcpy_lane<MemcpyKind::Get>(dst_elem, src_elem, sizeof(element_t));
+      }
+    }
+  }
+  else if constexpr (ndim == 1) {
+    const auto tile_extent = boundary.get(0) - start_coord.get(0);
+    element_t* src_ptr = static_cast<element_t*>(remote_base) +
+                         start_coord.get(0) * src.stride(0);
+    element_t* dst_ptr = dst.data_handle() + start_coord.get(0) * dst.stride(0);
+
+    int thread_id = get_flat_block_id();
+    int block_size = get_flat_block_size();
+
+    if (src.stride(0) == 1 && dst.stride(0) == 1) {
+      size_t total_size = tile_extent * sizeof(element_t);
+      if (thread_id == 0) {
+        memcpy_lane<MemcpyKind::Get>(dst_ptr, src_ptr, total_size);
+      }
+    } else {
+      for (int i = thread_id; i < tile_extent; i += block_size) {
+        memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst.stride(0),
+                                      src_ptr + i * src.stride(0),
+                                      sizeof(element_t));
+      }
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
 }
 
 // Collective Allgather
