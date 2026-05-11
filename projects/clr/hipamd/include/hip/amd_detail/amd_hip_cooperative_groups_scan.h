@@ -11,9 +11,6 @@
 #include <type_traits>
 #endif
 
-extern "C" __device__ __attribute__((const)) int __ockl_wfscan_add_i32(int x, bool inclusive);
-
-
 namespace cooperative_groups {
 namespace impl {
   // these functions allow to make use of C++ function overloads, instead of having to code
@@ -22,7 +19,7 @@ namespace impl {
   extern "C" __device__ __attribute__((const)) TYPE __ockl_wfscan_ ## OP ## _ ## TYPE_ALIAS(TYPE, bool);\
 \
     template <bool Inclusive>\
-    __device__ inline TYPE scan_ ## OP(TYPE val)\
+    __CG_QUALIFIER__ TYPE scan_ ## OP(TYPE val)\
     {\
       return __ockl_wfscan_ ## OP ## _ ## TYPE_ALIAS(val, Inclusive);\
     }
@@ -45,7 +42,9 @@ namespace impl {
   GENERATE_SCAN_FUNC(xor, i32, int);
   GENERATE_SCAN_FUNC(xor, u32, unsigned int);
 
-#ifdef HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
+  // extra types. Unlike cg::reduce() which depends on reduce_*_sync() functions being defined with
+  // HIP_ENABLE_EXTRA_WARP_SYNC_TYPES to be able to use the ockl intrinsics, for scan we always
+  // define them here
   GENERATE_SCAN_FUNC(add, i64, long long);
   GENERATE_SCAN_FUNC(add, u64, unsigned long long);
   GENERATE_SCAN_FUNC(add, f32, float);
@@ -69,37 +68,87 @@ namespace impl {
 
   GENERATE_SCAN_FUNC(xor, i64, long long);
   GENERATE_SCAN_FUNC(xor, u64, unsigned long long);
-#endif
+
+  // TODO g-h-c fp16
+
+  // TODO g-h-c all the arithmetic type have the same type support
+  // so divide this in:
+  // - has_arithmetic_scan
+  // - has_boolean_scan
+  // Add:
+  // - is_arithmetic
+  // - is_boolean
+  // - a generic has_scan
+  // the generated code will depend whether HIP_ENABLE_EXTRA_WARP_SYNC_TYPES is defined or not
+
+  // TODO g-h-c make sure it works correctly fp16, including using ockl intrinsics if applicable
 
   // not all types could be used with wfscan (e.g. user defined types), this predicate
   // indicates whether that is the case
   template <typename T, typename = void>
-  struct has_scan_add : __hip_internal::false_type {
+  struct has_arithmetic_scan : __hip_internal::false_type {
   };
 
+  // all the arithmetic operations accept the same types, so we just based it on the overload being
+  // present for scan_add
   template <typename T>
-  struct has_scan_add<T,
+  struct has_arithmetic_scan<T,
                  __hip_internal::void_t<decltype(scan_add<false>(T {}))>
     > : __hip_internal::true_type {
   };
 
   template <typename T, typename = void>
-  struct has_scan_min : __hip_internal::false_type {
+  struct has_boolean_scan : __hip_internal::false_type {
   };
 
+  // all the arithmetic operations accept the same types, so we just based it on the overload being
+  // present for scan_and
   template <typename T>
-  struct has_scan_min<T,
-                 __hip_internal::void_t<decltype(scan_min<false>(T {}))>
+  struct has_boolean_scan<T,
+                 __hip_internal::void_t<decltype(scan_and<false>(T {}))>
     > : __hip_internal::true_type {
   };
+
+  // given cooperative_groups template parameter, calls the right impl::scan function (that would contain __ockl_wfscan_*)
+  // and that is overloaded by type
+  template <class TyVal, class Op, bool Inclusive>
+  __CG_QUALIFIER__ TyVal call_scan(const TyVal&& val)
+  {
+    using Val = typename __hip_internal::remove_cvref<TyVal>::type;
+
+    if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value) {
+      return impl::scan_add<Inclusive>(val);
+    } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::less<Val>>::value) {
+      return impl::scan_min<Inclusive>(val);
+    } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::greater<Val>>::value) {
+      return impl::scan_max<Inclusive>(val);
+    } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_and<Val>>::value) {
+      return impl::scan_and<Inclusive>(val);
+    } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_or<Val>>::value) {
+      return impl::scan_or<Inclusive>(val);
+    } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_xor<Val>>::value) {
+      return impl::scan_xor<Inclusive>(val);
+    }
+  }
+
+  template <class T>
+  __CG_QUALIFIER__ constexpr bool isPrimitiveType() {
+    return __hip_internal::is_same<T, int>::value ||
+    __hip_internal::is_same<T, unsigned int>::value ||
+    __hip_internal::is_same<T, long long>::value ||
+    __hip_internal::is_same<T, unsigned long long>::value ||
+    __hip_internal::is_same<T, float>::value ||
+    __hip_internal::is_same<T, double>::value;
+  }
+  // TODO g-h-c half
 }
 
 template <typename TyGroup, typename TyVal, typename TyFn>
 __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& op) -> decltype(op(val, val)) {
   using Op = typename __hip_internal::remove_cvref<TyFn>::type;
   using Val = typename __hip_internal::remove_cvref<TyVal>::type;
-  // TODO g-h-c we might want to change this definition
-  static constexpr bool isPrimitiveType = impl::has_scan_add<Val>::value;
+
+  constexpr bool isPrimitiveType = impl::isPrimitiveType<Val>();
   using permuteType = typename __hip_internal::conditional<isPrimitiveType && (sizeof(Val) == 4 || sizeof(Val) == 2), Val, unsigned int>::type;
 
   // the number of backward permutes will be: size(Val) / 4 rounded up
@@ -148,23 +197,18 @@ __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& o
     // for tiled_groups we know at compile time that whether we can call the ockl intrinsics or
     // not; if the block tile is actually the whole warp
     if (impl::tiledGroupSize<TyGroup>::value == warpSize) {
-      if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value &&
-                    impl::has_scan_add<Val>::value) {
-        return impl::scan_add<true>(val);
-      } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::less<Val>>::value &&
-                    impl::has_scan_min<Val>::value) {
-        return impl::scan_min<true>(val);
+      if constexpr (impl::isArithmeticFunc<Val, TyFn >::value && impl::has_arithmetic_scan<Val, Op>::value ||
+                    impl::isBooleanFunc<Val, TyFn >::value && impl::has_boolean_scan<Val, Op>::value) {
+        return impl::call_scan<Val, Op, true>(val);
       }
     }
-  } else if constexpr (__hip_internal::is_same<TyGroup, cooperative_groups::coalesced_group>::value) {
-    // for the coalesced_group case we do need to check at runtime
+  } else if constexpr (impl::isCoalescedGroup<TyGroup>::value) {
+    // for the coalesced_group case we do need to check at runtime, adding a slight overhead on
+    // this branch
     if (maskNumBits == warpSize) {
-      if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value &&
-                    impl::has_scan_add<Val>::value) {
-        return impl::scan_add<true>(val);
-      } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::less<Val>>::value &&
-                    impl::has_scan_min<Val>::value) {
-        return impl::scan_min<true>(val);
+       if constexpr (impl::isArithmeticFunc<Val, TyFn >::value && impl::has_arithmetic_scan<Val, Op>::value ||
+                     impl::isBooleanFunc<Val, TyFn >::value && impl::has_boolean_scan<Val, Op>::value) {
+        return impl::call_scan<Val, Op, true>(val);
       }
     }
   }

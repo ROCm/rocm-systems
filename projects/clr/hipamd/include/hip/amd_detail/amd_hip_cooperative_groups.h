@@ -1364,6 +1364,42 @@ struct bit_or {
     return lhs | rhs;
   }
 };
+
+namespace impl {
+template <class T, class Op>
+struct isArithmeticFunc : __hip_internal::false_type {
+};
+
+template <class T>
+struct isArithmeticFunc<T, cooperative_groups::plus<T>> : __hip_internal::true_type {
+};
+
+template <class T>
+struct isArithmeticFunc<T, cooperative_groups::less<T>> : __hip_internal::true_type {
+};
+
+template <class T>
+struct isArithmeticFunc<T, cooperative_groups::greater<T>> : __hip_internal::true_type {
+};
+
+template <class T, class Op>
+struct isBooleanFunc : __hip_internal::false_type {
+};
+
+template <class T>
+struct isBooleanFunc<T, cooperative_groups::bit_and<T>> : __hip_internal::true_type {
+};
+
+template <class T>
+struct isBooleanFunc<T, cooperative_groups::bit_or<T>> : __hip_internal::true_type {
+};
+
+template <class T>
+struct isBooleanFunc<T, cooperative_groups::bit_xor<T>> : __hip_internal::true_type {
+};
+
+
+}  // namespace impl
 #endif
 
 /**
