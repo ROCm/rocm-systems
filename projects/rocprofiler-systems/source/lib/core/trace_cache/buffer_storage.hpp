@@ -136,6 +136,7 @@ public:
     }
 
     template <typename Type>
+        requires type_traits::cacheable<Type, TypeIdentifierEnum>
     auto store(const Type& value)
     {
         if(m_worker == nullptr || !is_running())
@@ -143,8 +144,6 @@ public:
             throw std::runtime_error(
                 "Trying to use buffered storage while it is not running");
         }
-
-        type_traits::check_type<Type, TypeIdentifierEnum>();
 
         using TypeIdentifierEnumUderlayingType =
             std::underlying_type_t<TypeIdentifierEnum>;
