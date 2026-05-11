@@ -524,13 +524,25 @@ __device__ __forceinline__ void copy_chunk(uint8_t*& dst_bytes, uint8_t*& src_by
     }
     #pragma unroll
     for (int u = 0; u < UNROLL; ++u) {
+      // Manually insert waitcnts for custom assembly load policies
+      if constexpr (LoadPolicy != CachePolicy::Standard) {
+        pipeline_wait_on_loads(UNROLL - 1 - u);
+      }
       Acc::store(dst_bytes + (i + u * block_size) * ChunkSize, regs[u]);
     }
   }
 
   // 2. Tail
   for (; i < cpy_size; i += block_size) {
-    Acc::store(dst_bytes + i * ChunkSize, Acc::load(src_bytes + i * ChunkSize));
+    T val = Acc::load(src_bytes + i * ChunkSize);
+    
+    // 2. Wait for this specific load to finish if we bypassed the compiler's tracker
+    if constexpr (LoadPolicy != CachePolicy::Standard) {
+      pipeline_wait_on_loads(0); 
+    }
+    
+    // 3. Issue the store
+    Acc::store(dst_bytes + i * ChunkSize, val);
   }
 
   int bytes_processed = cpy_size * ChunkSize;

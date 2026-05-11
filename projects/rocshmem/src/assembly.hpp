@@ -1306,11 +1306,11 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
   }
 };
 
-__device__ __forceinline__ void vmcnt_wait() {
-#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1100__)
-  asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
-#elif defined(__gfx1201__)
-  asm volatile("s_wait_loadcnt 0x0" ::: "memory");
+__device__ __forceinline__ void pipeline_wait_on_loads(int waits) {
+#if defined(__gfx1201__)
+  asm volatile("s_wait_loadcnt %0" :: "n"(waits) : "memory");
+#else
+  asm volatile("s_waitcnt vmcnt(%0)" :: "n"(waits) : "memory");
 #endif
 }
 
