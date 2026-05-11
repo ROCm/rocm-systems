@@ -40,7 +40,7 @@
 #include <fmt/ranges.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
-#include <drm/amdgpu_drm.h>
+#include <libdrm/amdgpu_drm.h>
 #include <libdrm/amdgpu.h>
 #include <xf86drm.h>
 

@@ -31,6 +31,7 @@
 #include <utility>
 #include <vector>
 
+#include "lib/aqlprofile/aqlprofile.hpp"  // brings in AQLPROFILE_DRM_CU_BITMAP_NUM_* via the gated aql_profile_v2.h
 #include "lib/aqlprofile/def/gpu_block_info.h"
 #include "lib/aqlprofile/pm4/cmd_config.h"
 #include "lib/aqlprofile/util/hsa_rsrc_factory.h"
@@ -141,11 +142,16 @@ private:
     uint32_t xcc_number_;
     Builder  builder;
 
-    // WGP harvesting support (GFX11+): per-SA active WGP physical indices
-    static constexpr uint32_t kMaxSA       = 8;
-    static constexpr uint32_t kMaxWgpPerSa = 16;
-    uint32_t                  active_wgp_count_[kMaxSA]{};
-    uint32_t                  active_wgp_indices_[kMaxSA][kMaxWgpPerSa]{};
+    // WGP harvesting support (GFX11+): per-(SE, SA) active WGP physical indices.
+    //
+    // Sized in the constructor from the chip's actual se_number_ x sarrays_per_se
+    // so we never overrun on parts that exceed the DRM cu_bitmap[4][4] window
+    // (e.g. Navi31: 6 SE x 2 SA = 12 SAs; MI200: 8 SE x 1 SA = 8 SAs;
+    // MI400-class: 16 SE x 2 SA = 32 SAs).
+    //
+    // Outer: per-SE. Middle: per-SA. Inner: active (non-harvested) WGP indices
+    // for that SA, in increasing order. The count is just inner.size().
+    std::vector<std::vector<std::vector<uint32_t>>> active_wgp_indices_;
 
     void DebugTrace(uint32_t value)
     {
@@ -244,44 +250,64 @@ public:
         this->wgp_per_sa = (agent_info->cu_num / 2 + sarrays_per_se * se_number_ - 1) /
                            (se_number_ * sarrays_per_se);
 
-        // Build per-SA active WGP index tables from the CU bitmap.
+        // Size the per-(SE, SA) WGP index tables to the actual chip topology.
+        // This fits Navi31 (6 x 2), MI200 (8 x 1), MI400-class (16 x 2), etc.,
+        // none of which fit in a hardcoded kMaxSA bound.
+        active_wgp_indices_.assign(
+            se_number_,
+            std::vector<std::vector<uint32_t>>(sarrays_per_se));
+
+        // Build per-(SE, SA) active WGP index tables.
         //
-        // When the bitmap is available (GFX11+ via DRM), the highest set bit
-        // gives the maximum WGP coordinate to consider, and intermediate
+        // When the DRM cu_bitmap is available (V2 registration on GFX11+ parts
+        // with (se, sa) inside the kernel ABI window of [NUM_SE][NUM_SA_PER_SE]),
+        // the highest set bit gives the max WGP coordinate to consider, and
         // harvested WGPs (no CU bits set in their pair-window) are skipped
-        // automatically. This avoids the aliased reads previously produced on
+        // automatically. That avoids the aliased reads previously produced on
         // GFX11+ parts with WGP harvesting.
         //
-        // When the bitmap is unavailable (cu_bm == 0: V1 agents, pre-GFX11
-        // parts), synthesize a fully-active bitmap covering wgp_per_sa
-        // contiguous WGPs (two CU bits per WGP). That collapses the
-        // fallback path into the same loop and preserves pre-fix sequential
-        // iteration for those agents.
+        // For any (se, sa) where the bitmap is unavailable (V0/V1 agents,
+        // pre-GFX11 parts, or coordinates outside the DRM ABI window such as
+        // Navi31's SE >= 4), synthesize a fully-active bitmap of wgp_per_sa
+        // contiguous WGPs (two CU bits per WGP). That collapses the fallback
+        // path into the same loop and preserves pre-fix sequential iteration.
+        //
+        // The (se < NUM_SE && sa < NUM_SA_PER_SE) guard on the element read is
+        // a hard correctness requirement: aqlprofile_agent_info_v2_t::cu_bitmap
+        // is a C uint32_t[NUM_SE][NUM_SA_PER_SE] (kernel-ABI-fixed at [4][4]),
+        // so reading agent_info->cu_bitmap[se][sa] for out-of-window indices
+        // would be UB on the C array, not a guaranteed zero.
+        constexpr uint32_t kMaxWgpPerSa = 16;
+        const uint32_t     drm_se_lim   = AQLPROFILE_DRM_CU_BITMAP_NUM_SE;
+        const uint32_t     drm_sa_lim   = AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE;
         for(uint32_t se = 0; se < se_number_; ++se)
         {
             for(uint32_t sa = 0; sa < sarrays_per_se; ++sa)
             {
-                const uint32_t sa_idx     = se * sarrays_per_se + sa;
-                active_wgp_count_[sa_idx] = 0;
+                auto& indices = active_wgp_indices_.at(se).at(sa);
 
-                uint32_t cu_bm = agent_info->cu_bitmap[se][sa];
+                uint32_t cu_bm = (se < drm_se_lim && sa < drm_sa_lim)
+                                     ? agent_info->cu_bitmap[se][sa]
+                                     : 0u;
                 if(cu_bm == 0)
                 {
-                    // (1u << 32) is UB; clamp to all-ones when wgp_per_sa
-                    // covers the full 32-bit bitmap (16 WGPs * 2 CU bits).
-                    cu_bm = (wgp_per_sa >= kMaxWgpPerSa) ? ~0u
-                                                        : ((1u << (wgp_per_sa * 2u)) - 1u);
+                    // No bitmap for this SA. Guard wgp_per_sa==0 here so the
+                    // synthesized cu_bm is always non-zero by construction and
+                    // we never hand 0 to __builtin_clz below (which is UB).
+                    // (1u << 32) is also UB; clamp when wgp_per_sa covers the
+                    // full 32-bit window (16 WGPs * 2 CU bits).
+                    if(wgp_per_sa == 0) continue;
+                    cu_bm = (wgp_per_sa >= kMaxWgpPerSa)
+                                ? ~0u
+                                : ((1u << (wgp_per_sa * 2u)) - 1u);
                 }
-                if(cu_bm == 0) continue;
 
                 const uint32_t max_cu_bit = 31u - __builtin_clz(cu_bm);
                 const uint32_t max_wgp    = max_cu_bit / 2u;
-                for(uint32_t wgp = 0; wgp <= max_wgp && wgp < kMaxWgpPerSa; ++wgp)
+                indices.reserve(max_wgp + 1);
+                for(uint32_t wgp = 0; wgp <= max_wgp; ++wgp)
                 {
-                    if(cu_bm & (3u << (wgp * 2)))
-                    {
-                        active_wgp_indices_[sa_idx][active_wgp_count_[sa_idx]++] = wgp;
-                    }
+                    if(cu_bm & (3u << (wgp * 2))) indices.push_back(wgp);
                 }
             }
         }
@@ -769,11 +795,12 @@ public:
 
                         if(bIsWGPcounter11)
                         {
-                            // Use harvesting-aware WGP index table for this SE/SA
-                            const uint32_t sa_idx = se_index * sarrays_per_se + sarray;
-                            for(uint32_t i = 0; i < active_wgp_count_[sa_idx]; ++i)
+                            // Use harvesting-aware WGP index table for this (SE, SA).
+                            // .at() gives bounds-checked access against the dynamic
+                            // [se_number_][sarrays_per_se] storage.
+                            const auto& indices = active_wgp_indices_.at(se_index).at(sarray);
+                            for(uint32_t wgp : indices)
                             {
-                                const uint32_t wgp = active_wgp_indices_[sa_idx][i];
                                 grbm_value =
                                     Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, wgp);
                                 SetGrbmGfxIndex(cmd_buffer, grbm_value);

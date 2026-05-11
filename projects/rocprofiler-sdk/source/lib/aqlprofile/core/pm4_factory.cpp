@@ -29,15 +29,28 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <cstring>
-#include <drm/amdgpu_drm.h>
+#include <libdrm/amdgpu_drm.h>
 
 namespace aql_profile
 {
 namespace
 {
 // DRM fallback: query physical CU topology from the kernel driver when the
-// caller uses V0/V1 registration (which lacks cu_bitmap).  The preferred path
-// is V2 registration with cu_bitmap supplied by the caller.
+// caller uses V0/V1 registration (which lacks cu_bitmap). The preferred path
+// is V2 registration with cu_bitmap supplied by the caller (see
+// rocprofiler-sdk/agent.cpp::try_register_agent_v2), which bypasses this
+// fallback entirely.
+//
+// Heuristic match: we iterate render nodes /dev/dri/renderD128..renderD191
+// and pick the first one whose (cu_active_number, num_shader_engines,
+// num_shader_arrays_per_engine) matches this AgentInfo. That is unambiguous
+// on single-GPU systems and on multi-GPU systems with distinct SKUs. It is
+// AMBIGUOUS on the pathological multi-GPU case of two identical SKUs whose
+// only difference is the per-die harvest mask -- there the first matching
+// render node wins, and one agent may receive the other GPU's bitmap. The
+// worst-case effect is incorrect harvest-aware WGP iteration on one agent;
+// there is no memory-safety impact. Prefer V2 registration end-to-end to
+// avoid this entirely.
 void
 populate_cu_bitmap_from_drm(AgentInfo& agent_info)
 {

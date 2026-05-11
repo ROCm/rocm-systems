@@ -234,6 +234,20 @@ typedef struct
 } aqlprofile_agent_info_v1_t;
 
 /**
+ * Dimensions of the per-(SE, SA) CU bitmap as defined by the DRM amdgpu kernel
+ * uAPI struct drm_amdgpu_info_device.cu_bitmap. These are fixed by the kernel
+ * ABI and are the same on every platform (mainline Linux, ROCm DKMS, distro
+ * kernels), so this struct cannot widen them from userspace. For chips with
+ * se_num > AQLPROFILE_DRM_CU_BITMAP_NUM_SE or shader_arrays_per_se >
+ * AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE (e.g. Navi31's 6 SE), the kernel
+ * only populates the first slice of the bitmap; consumers iterating beyond
+ * that slice MUST bounds-check before indexing and fall back to a sequential
+ * (non-harvest-aware) WGP iteration for the remaining SE/SA coordinates.
+ */
+#define AQLPROFILE_DRM_CU_BITMAP_NUM_SE        4
+#define AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE 4
+
+/**
  * @brief Extended agent info with physical CU topology for WGP harvesting support.
  *
  * cu_bitmap allows aqlprofile to iterate only over active (non-harvested) WGP
@@ -241,7 +255,9 @@ typedef struct
  * sufficient: the highest set bit determines the maximum WGP coordinate to
  * iterate, and harvested WGPs (no CU bits set in their pair-window) are
  * skipped automatically. Values are obtainable from the DRM driver
- * (AMDGPU_INFO_DEV_INFO).
+ * (AMDGPU_INFO_DEV_INFO). Dimensions mirror the kernel uAPI; see the
+ * AQLPROFILE_DRM_CU_BITMAP_NUM_* documentation above for the implication
+ * for chips with more than 4 SEs.
  */
 typedef struct
 {
@@ -252,7 +268,9 @@ typedef struct
     uint32_t    shader_arrays_per_se; /**< Shader Arrays per SE */
     uint32_t    domain;               /**< PCI domain */
     uint32_t    location_id;          /**< BDF (Bus/Device/Function) */
-    uint32_t    cu_bitmap[4][4];      /**< Per-SE/SA active CU bitmap (matches DRM ABI). */
+    uint32_t    cu_bitmap[AQLPROFILE_DRM_CU_BITMAP_NUM_SE]
+                         [AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE];
+    /**< Per-SE/SA active CU bitmap; shape mirrors drm_amdgpu_info_device.cu_bitmap. */
 } aqlprofile_agent_info_v2_t;
 
 /**
