@@ -13,7 +13,7 @@ if(ROCPROFSYS_BUILD_SPDLOG)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         REPO_URL https://github.com/gabime/spdlog.git
         TEST_FILE CMakeLists.txt
-        REPO_BRANCH "v1.16.0"
+        REPO_BRANCH "v1.17.0"
     )
 
     FetchContent_Declare(spdlog SOURCE_DIR ${PROJECT_SOURCE_DIR}/external/spdlog)
