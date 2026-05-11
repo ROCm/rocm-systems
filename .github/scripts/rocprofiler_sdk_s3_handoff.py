@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
-"""Upload and download rocprofiler-sdk CI handoff artifacts from S3.
+"""S3 handoff helper for rocprofiler-sdk CI build artifacts.
 
-This is intentionally small and independent of TheRock's full artifact layout:
-rocprofiler-sdk is passing build-tree tarballs between build and test jobs, not
-publishing component artifacts. Uploads use boto3 credentials from the runner;
-downloads use the bucket's public HTTPS endpoint so GPU test jobs do not need
-AWS credentials or boto3 installed.
+The rocprofiler-sdk workflows use this script to pass short-lived build-tree
+tarballs from CPU build jobs to GPU test jobs.
+
+Upload commands use boto3 with the runner's AWS credentials. Download commands
+use the bucket's public HTTPS endpoint, so GPU test jobs can fetch artifacts
+without AWS credentials or boto3.
 """
 
 import argparse
