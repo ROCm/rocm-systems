@@ -203,7 +203,26 @@ struct scratch_memory_sample : cacheable_t
     std::uint64_t correlation_id_internal;
     std::uint64_t correlation_id_ancestor;
     size_t        stream_handle;
+
+    template <class Archive>
+    ROCPROFSYS_INLINE void serialize(Archive& ar)
+    {
+        auto stream_handle_u64 = static_cast<std::uint64_t>(stream_handle);
+        ar(start_timestamp, end_timestamp, thread_id, agent_id_handle, queue_id_handle,
+           kind, operation, flags, allocation_size, correlation_id_internal,
+           correlation_id_ancestor, stream_handle_u64);
+        if constexpr(std::is_same_v<Archive, input_archive>)
+        {
+            stream_handle = static_cast<std::size_t>(stream_handle_u64);
+        }
+    }
 };
+
+namespace type_traits
+{
+template <>
+inline constexpr bool use_custom<scratch_memory_sample> = true;
+}  // namespace type_traits
 
 template <>
 inline void
@@ -283,7 +302,27 @@ struct memory_copy_sample : cacheable_t
     std::uint64_t dst_address_value;
     std::uint64_t src_address_value;
     size_t        stream_handle;
+
+    template <class Archive>
+    ROCPROFSYS_INLINE void serialize(Archive& ar)
+    {
+        auto stream_handle_u64 = static_cast<std::uint64_t>(stream_handle);
+        ar(start_timestamp, end_timestamp, thread_id, dst_agent_id_handle,
+           src_agent_id_handle, kind, operation, bytes, correlation_id_internal,
+           correlation_id_ancestor, dst_address_value, src_address_value,
+           stream_handle_u64);
+        if constexpr(std::is_same_v<Archive, input_archive>)
+        {
+            stream_handle = static_cast<std::size_t>(stream_handle_u64);
+        }
+    }
 };
+
+namespace type_traits
+{
+template <>
+inline constexpr bool use_custom<memory_copy_sample> = true;
+}  // namespace type_traits
 
 template <>
 inline void
@@ -360,7 +399,26 @@ struct memory_allocate_sample : cacheable_t
     std::uint64_t correlation_id_ancestor;
     std::uint64_t address_value;
     size_t        stream_handle;
+
+    template <class Archive>
+    ROCPROFSYS_INLINE void serialize(Archive& ar)
+    {
+        auto stream_handle_u64 = static_cast<std::uint64_t>(stream_handle);
+        ar(start_timestamp, end_timestamp, thread_id, agent_id_handle, kind, operation,
+           allocation_size, correlation_id_internal, correlation_id_ancestor,
+           address_value, stream_handle_u64);
+        if constexpr(std::is_same_v<Archive, input_archive>)
+        {
+            stream_handle = static_cast<std::size_t>(stream_handle_u64);
+        }
+    }
 };
+
+namespace type_traits
+{
+template <>
+inline constexpr bool use_custom<memory_allocate_sample> = true;
+}  // namespace type_traits
 
 template <>
 inline void
@@ -428,7 +486,20 @@ struct region_sample : cacheable_t
     std::string   call_stack;
     std::string   args_str;
     std::string   category;
+
+    template <class Archive>
+    ROCPROFSYS_INLINE void serialize(Archive& ar)
+    {
+        ar(thread_id, name, correlation_id_internal, correlation_id_ancestor,
+           start_timestamp, end_timestamp, call_stack, args_str, category);
+    }
 };
+
+namespace type_traits
+{
+template <>
+inline constexpr bool use_custom<region_sample> = true;
+}  // namespace type_traits
 
 template <>
 inline void
@@ -499,7 +570,34 @@ struct in_time_sample : cacheable_t
     size_t      correlation_id;
     std::string call_stack;
     std::string line_info;
+
+    template <class Archive>
+    ROCPROFSYS_INLINE void serialize(Archive& ar)
+    {
+        // category_enum_id is left as size_t to match legacy free serialize
+        // (not widened); other size_t members are widened to uint64 for wire
+        // portability, mirroring the static_cast in the legacy path.
+        auto timestamp_ns_u64    = static_cast<std::uint64_t>(timestamp_ns);
+        auto stack_id_u64        = static_cast<std::uint64_t>(stack_id);
+        auto parent_stack_id_u64 = static_cast<std::uint64_t>(parent_stack_id);
+        auto correlation_id_u64  = static_cast<std::uint64_t>(correlation_id);
+        ar(category_enum_id, track_name, timestamp_ns_u64, event_metadata, stack_id_u64,
+           parent_stack_id_u64, correlation_id_u64, call_stack, line_info);
+        if constexpr(std::is_same_v<Archive, input_archive>)
+        {
+            timestamp_ns    = static_cast<std::size_t>(timestamp_ns_u64);
+            stack_id        = static_cast<std::size_t>(stack_id_u64);
+            parent_stack_id = static_cast<std::size_t>(parent_stack_id_u64);
+            correlation_id  = static_cast<std::size_t>(correlation_id_u64);
+        }
+    }
 };
+
+namespace type_traits
+{
+template <>
+inline constexpr bool use_custom<in_time_sample> = true;
+}  // namespace type_traits
 
 template <>
 inline void
@@ -579,7 +677,37 @@ struct pmc_event_with_sample : in_time_sample
     std::string                 pmc_info_name;
     double                      value;
     std::optional<std::int64_t> system_tid;
+
+    template <class Archive>
+    ROCPROFSYS_INLINE void serialize(Archive& ar)
+    {
+        // Match legacy: parent fields field-by-field, then derived fields. Do
+        // not delegate to the parent serialize<Archive> because that detection
+        // would still match here on the derived type and would also re-emit
+        // the parent fields exactly as needed - but explicit listing keeps
+        // the wire layout obvious next to the legacy free function.
+        auto timestamp_ns_u64    = static_cast<std::uint64_t>(timestamp_ns);
+        auto stack_id_u64        = static_cast<std::uint64_t>(stack_id);
+        auto parent_stack_id_u64 = static_cast<std::uint64_t>(parent_stack_id);
+        auto correlation_id_u64  = static_cast<std::uint64_t>(correlation_id);
+        ar(category_enum_id, track_name, timestamp_ns_u64, event_metadata, stack_id_u64,
+           parent_stack_id_u64, correlation_id_u64, call_stack, line_info, device_id,
+           device_type, pmc_info_name, value, system_tid);
+        if constexpr(std::is_same_v<Archive, input_archive>)
+        {
+            timestamp_ns    = static_cast<std::size_t>(timestamp_ns_u64);
+            stack_id        = static_cast<std::size_t>(stack_id_u64);
+            parent_stack_id = static_cast<std::size_t>(parent_stack_id_u64);
+            correlation_id  = static_cast<std::size_t>(correlation_id_u64);
+        }
+    }
 };
+
+namespace type_traits
+{
+template <>
+inline constexpr bool use_custom<pmc_event_with_sample> = true;
+}  // namespace type_traits
 
 template <>
 inline void
@@ -671,7 +799,20 @@ struct backtrace_region_sample : cacheable_t
     std::string   call_stack;
     std::string   line_info;
     std::string   extdata;
+
+    template <class Archive>
+    ROCPROFSYS_INLINE void serialize(Archive& ar)
+    {
+        ar(type, thread_id, track_name, name, start_timestamp, end_timestamp, category,
+           call_stack, line_info, extdata);
+    }
 };
+
+namespace type_traits
+{
+template <>
+inline constexpr bool use_custom<backtrace_region_sample> = true;
+}  // namespace type_traits
 
 template <>
 inline void
@@ -753,7 +894,21 @@ struct kfd_sample : cacheable_t
     std::string                 pmc_info_name;
     double                      value;
     std::optional<std::int64_t> system_tid;
+
+    template <class Archive>
+    ROCPROFSYS_INLINE void serialize(Archive& ar)
+    {
+        ar(thread_id, name, start_timestamp, end_timestamp, args_str, category,
+           track_name, event_metadata, device_id, device_type, pmc_info_name, value,
+           system_tid);
+    }
 };
+
+namespace type_traits
+{
+template <>
+inline constexpr bool use_custom<kfd_sample> = true;
+}  // namespace type_traits
 
 template <>
 inline void
