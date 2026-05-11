@@ -32,6 +32,7 @@ jobs:
       matrix:
         supported_platforms:
           - rocky
+          - rocky8
           - suse
           - ubuntu
         rocm_versions:
