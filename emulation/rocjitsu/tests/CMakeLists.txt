@@ -76,7 +76,9 @@ if(RJ_TESTS_VENV_PROGRAM_DIRS)
     list(APPEND RJ_TESTS_RUNTIME_ENV "PATH=${RJ_TESTS_PATH}")
 endif()
 if(RJ_TESTS_VENV_LIBRARY_DIRS)
-    list(JOIN RJ_TESTS_VENV_LIBRARY_DIRS ":" RJ_TESTS_LD_LIBRARY_PATH)
+    set(RJ_TESTS_RUNTIME_LIBRARY_DIRS ${RJ_TESTS_VENV_LIBRARY_DIRS})
+    list(FILTER RJ_TESTS_RUNTIME_LIBRARY_DIRS EXCLUDE REGEX "/_rocm_sdk_libraries_")
+    list(JOIN RJ_TESTS_RUNTIME_LIBRARY_DIRS ":" RJ_TESTS_LD_LIBRARY_PATH)
     if(DEFINED ENV{LD_LIBRARY_PATH} AND NOT "$ENV{LD_LIBRARY_PATH}" STREQUAL "")
         string(APPEND RJ_TESTS_LD_LIBRARY_PATH ":$ENV{LD_LIBRARY_PATH}")
     endif()
@@ -322,7 +324,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
                 -isystem ${GTEST_INC}
                 -isystem ${ROCBLAS_INCLUDE_DIR}
                 -L${GTEST_LIB_DIR} -L${ROCBLAS_LIB_DIR} -lgtest -lpthread -lrocblas
-                -Wl,-rpath,${GTEST_LIB_DIR}
+                -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${ROCBLAS_LIB_DIR}
                 -o ${GEMM_BIN} ${GEMM_SRC}
             DEPENDS ${GEMM_SRC} GTest::gtest
             COMMENT "Building hip_gemm_test with hipcc + rocblas"
@@ -351,24 +353,30 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
 
         # CDNA3 test cases (same binary, CDNA3 KMD config).
         set(RJ_CDNA3_ENV
+            ${RJ_TESTS_RUNTIME_ENV}
             "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
             "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna3_kmd.json"
             "RJ_SCHEMA=${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs"
             "HSA_ENABLE_SDMA=1"
         )
-        foreach(TC IN ITEMS
-            Tiny_2x2x3 Square_16x16 Square_32x32 Rect_7x11x13)
-            add_test(NAME "RocblasGemmCdna3.${TC}"
-                COMMAND ${GEMM_BIN} --gtest_filter=RocblasGemmTest.${TC})
-            set_tests_properties("RocblasGemmCdna3.${TC}" PROPERTIES
-                ENVIRONMENT "${RJ_CDNA3_ENV}" TIMEOUT 120)
-        endforeach()
-        foreach(I RANGE 0 2)
-            add_test(NAME "RocblasGemmCdna3.Fuzz_Iter${I}"
-                COMMAND ${GEMM_BIN} --gtest_filter=RocblasGemmFuzz.Iter${I})
-            set_tests_properties("RocblasGemmCdna3.Fuzz_Iter${I}" PROPERTIES
-                ENVIRONMENT "${RJ_CDNA3_ENV}" TIMEOUT 120)
-        endforeach()
+        file(GLOB ROCBLAS_GFX942_TENSILE_FILES "${ROCBLAS_LIB_DIR}/rocblas/library/TensileLibrary*gfx942*")
+        if(ROCBLAS_GFX942_TENSILE_FILES)
+            foreach(TC IN ITEMS
+                Tiny_2x2x3 Square_16x16 Square_32x32 Rect_7x11x13)
+                add_test(NAME "RocblasGemmCdna3.${TC}"
+                    COMMAND ${GEMM_BIN} --gtest_filter=RocblasGemmTest.${TC})
+                set_tests_properties("RocblasGemmCdna3.${TC}" PROPERTIES
+                    ENVIRONMENT "${RJ_CDNA3_ENV}" TIMEOUT 120)
+            endforeach()
+            foreach(I RANGE 0 2)
+                add_test(NAME "RocblasGemmCdna3.Fuzz_Iter${I}"
+                    COMMAND ${GEMM_BIN} --gtest_filter=RocblasGemmFuzz.Iter${I})
+                set_tests_properties("RocblasGemmCdna3.Fuzz_Iter${I}" PROPERTIES
+                    ENVIRONMENT "${RJ_CDNA3_ENV}" TIMEOUT 120)
+            endforeach()
+        else()
+            message(STATUS "rocBLAS CDNA3 tests built but NOT registered with CTest (no gfx942 Tensile data)")
+        endif()
         message(STATUS "rocBLAS GEMM test enabled (found ${ROCBLAS_LIB})")
     else()
         message(STATUS "rocBLAS GEMM test disabled (librocblas not found)")
