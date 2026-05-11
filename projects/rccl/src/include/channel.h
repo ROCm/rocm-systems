@@ -24,7 +24,7 @@ inline uint8_t ncclP2pChannelBaseForRound(struct ncclComm* comm, int p2pRound, i
   if (comm->nNodes > 1) {
     int nodeDelta = p2pRound/comm->maxLocalRanks;
     int localDelta = p2pRound%comm->maxLocalRanks;
-    int fallbackBatch = (rcclParamPxnOptQpUsage() && rcclUseAinic()) ? 8 : 1;
+    int fallbackBatch = (!ncclPxnDisable(comm) && rcclParamPxnOptQpUsage() && rcclUseAinic()) ? comm->maxLocalRanks : 1;
     int batchSize = (comm->nNodes > 2 && p2pBatchEnable)
         ? NCCL_MAX_DEV_WORK_P2P_PER_BATCH
         : fallbackBatch;
