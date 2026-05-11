@@ -48,10 +48,9 @@ repos:
     hooks:
       - id: copyright-header-check
         name: Copyright header check
-        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/copyright_header_check.py'
-        language: system
+        entry: python projects/rocprofiler-compute/tools/copyright_header_check.py
+        language: python
         files: \.(py|hip|cpp)$
-        pass_filenames: false
         stages: [pre-commit]
 
   # Local hook: hash consistency check
@@ -59,7 +58,8 @@ repos:
     hooks:
       - id: hash-check
         name: Hash consistency check
-        entry: bash -lc 'cd projects/rocprofiler-compute && python3 src/utils/hash_checker.py'
-        language: system
+        entry: python projects/rocprofiler-compute/src/utils/hash_checker.py
+        language: python
+        additional_dependencies: [pyyaml==6.0.3]
         pass_filenames: false
         stages: [pre-commit]

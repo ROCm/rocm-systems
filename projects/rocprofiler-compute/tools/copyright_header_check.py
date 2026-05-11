@@ -19,8 +19,8 @@ COMMENT_PREFIXES = {
 }
 
 EXCLUDED_DIRS = (
-    "src/vendored/",
-    "docs/archive/",
+    "projects/rocprofiler-compute/src/vendored/",
+    "projects/rocprofiler-compute/docs/archive/",
 )
 
 EXCLUDED_FILES = ("__init__.py",)
@@ -53,31 +53,25 @@ def _check_header(filepath, prefix):
 
 
 def _get_staged_files():
-    prefix = subprocess.run(
-        ["git", "rev-parse", "--show-prefix"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
     result = subprocess.run(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
         capture_output=True,
         text=True,
         check=True,
     )
-    paths = []
-    for line in result.stdout.splitlines():
-        if prefix and line.startswith(prefix):
-            paths.append(line[len(prefix) :])
-        elif not prefix:
-            paths.append(line)
-    return paths
+    return result.stdout.splitlines()
+
+
+def _files_to_check():
+    if len(sys.argv) > 1:
+        return sys.argv[1:]
+    return _get_staged_files()
 
 
 def main():
     failures = []
 
-    for filepath in _get_staged_files():
+    for filepath in _files_to_check():
         if any(filepath.startswith(d) for d in EXCLUDED_DIRS):
             continue
         basename = filepath.rsplit("/", 1)[-1]
