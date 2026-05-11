@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import csv
 import glob
 import importlib
 import os
@@ -10,6 +11,7 @@ import shlex
 import shutil
 import time
 import traceback
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, Union, cast
 
@@ -58,6 +60,72 @@ def _classify_output_line(line: str) -> None:
         console_debug(line)
     else:
         console_error(line, exit=False)
+
+
+def _write_rocpd_query_to_csv(
+    db_paths: list[str],
+    csv_path: str,
+    query_fn: Callable[[str], Iterator[tuple]],
+) -> None:
+    """Stream rows from ``query_fn`` over N rocpd dbs into a single CSV.
+
+    ``query_fn`` must yield a header tuple followed by data rows for 
+    each db. The header from the first non-empty db is written once; 
+    subsequent dbs append data rows only.
+    """
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        header_written = False
+        for db_path in db_paths:
+            try:
+                iterator = iter(query_fn(db_path))
+                header = next(iterator, None)
+                if header is None:
+                    continue
+                if not header_written:
+                    writer.writerow(header)
+                    header_written = True
+                writer.writerows(iterator)
+            except OSError as e:
+                console_error(
+                    f"Database error while extracting {csv_path} from {db_path}: {e}"
+                )
+            except Exception as e:
+                console_error(
+                    f"Unexpected error while extracting {csv_path} "
+                    f"from {db_path}: {e}"
+                )
+
+
+def _attach_native_counters_to_rocpd(db_path: str, counter_csv_path: str) -> None:
+    """Enrich a rocpd db with native-tool counter rows from a CSV."""
+    try:
+        table_info = rocpd_data.query_pmc_event_table(db_path)
+        if table_info is None:
+            console_error("No pmc_event table found in the rocpd database")
+            return
+        table_name, guid = table_info
+
+        dispatch_to_event = rocpd_data.query_dispatch_to_event_map(db_path, guid)
+        if not dispatch_to_event:
+            console_error("No kernel dispatch data found.")
+            return
+
+        counter_rows, _ = csv_ops.read_csv_as_dicts(counter_csv_path)
+        rows_to_insert = (
+            (
+                guid,
+                dispatch_to_event.get(str(row.get("dispatch_id"))),
+                row.get("counter_id"),
+                row.get("counter_value"),
+            )
+            for row in counter_rows
+        )
+        rocpd_data.insert_pmc_events(db_path, table_name, rows_to_insert)
+    except OSError as e:
+        console_error(f"Database error while updating pmc_event table: {e}")
+    except Exception as e:
+        console_error(f"Unexpected error updating pmc_event table: {e}")
 
 
 def run_prof(
@@ -219,14 +287,11 @@ def run_prof(
         ):
             for db_name in per_host_db_paths:
                 pid = Path(db_name).stem.split("_")[0]
-                counter_rows, _ = csv_ops.read_csv_as_dicts(
+                counter_csv = (
                     f"{workload_dir}/out/{fbase}/"
                     f"{pid}_native_counter_collection.csv"
                 )
-                rocpd_data.update_rocpd_pmc_events(
-                    counter_rows,
-                    db_name,
-                )
+                _attach_native_counters_to_rocpd(db_name, counter_csv)
                 console_debug(f"Updated rocpd db {db_name} with native tool counters.")
         if (
             not per_host_db_paths
@@ -796,8 +861,12 @@ def save_torch_trace_inputs(
         merged_db = f"{workload_dir}/{fbase}.db"
         dst_counter = Path(workload_dir) / f"torch_trace_{fbase}_counter_collection.csv"
         dst_marker = Path(workload_dir) / f"torch_trace_{fbase}_marker_api_trace.csv"
-        rocpd_data.dump_counter_collection_csv([merged_db], str(dst_counter))
-        rocpd_data.dump_marker_trace_csv([merged_db], str(dst_marker))
+        _write_rocpd_query_to_csv(
+            [merged_db], str(dst_counter), rocpd_data.query_counter_collection
+        )
+        _write_rocpd_query_to_csv(
+            [merged_db], str(dst_marker), rocpd_data.query_marker_trace
+        )
         console_log(
             "torch trace",
             "Moved counter collection and marker trace files "

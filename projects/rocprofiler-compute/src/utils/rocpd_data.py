@@ -1,12 +1,28 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-import csv
+"""Pure rocpd interaction layer.
+
+This module is the only place that talks to rocpd ``.db`` files. It exposes
+single-purpose primitives:
+
+* ``query_*`` — read-only, stream rows from a rocpd db.
+* ``insert_*`` — bulk-write rocpd-shaped rows into a rocpd db.
+* ``merge_pass_dbs`` / ``count_counter_rows`` — db-level operations.
+
+Things that are deliberately NOT here (kept in ``utils_profile.py``):
+
+* CSV reading or writing.
+* Index/ID re-numbering arithmetic.
+* Filesystem layout assumptions beyond a single ``.db`` path.
+"""
+
 import shutil
 import sqlite3
+from collections.abc import Iterable, Iterator
 from contextlib import closing
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 from utils.logger import console_error
 
@@ -66,49 +82,76 @@ TABLE_NAME_PREFIX_QUERY = (
 INSERT_QUERY = "INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
 
 
-def _dump_query_to_csv(
-    db_paths: list[str],
-    query: str,
-    csv_path: str,
-) -> None:
-    """Stream the rows of `query` across all `db_paths` into a single CSV.
-    Rows are written out as the cursor produces them.
+def query_counter_collection(db_path: str) -> Iterator[tuple]:
+    """Stream rows of the ``counters_collection`` table from one rocpd db.
+
+    The first tuple yielded is the column header (names from the SELECT). All
+    subsequent tuples are data rows. Yields nothing if the table is missing or
+    the query returns no description.
     """
-    header_written = False
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        for db_path in db_paths:
-            with closing(sqlite3.connect(db_path)) as conn:
-                try:
-                    with closing(conn.execute(query)) as cursor:
-                        if cursor.description is None:
-                            continue
-                        if not header_written:
-                            writer.writerow([d[0] for d in cursor.description])
-                            header_written = True
-                        writer.writerows(cursor)
-                except OSError as e:
-                    console_error(
-                        f"Database error while extracting {csv_path} "
-                        f"from {db_path}: {e}"
-                    )
-                except Exception as e:
-                    console_error(
-                        f"Unexpected error while extracting {csv_path} "
-                        f"from {db_path}: {e}"
-                    )
+    yield from _stream_query(db_path, COUNTERS_COLLECTION_QUERY)
 
 
-def dump_counter_collection_csv(
-    db_paths: list[str], counter_collection_csv_path: str
+def query_marker_trace(db_path: str) -> Iterator[tuple]:
+    """Stream rows of the marker-API ``regions`` table from one rocpd db.
+
+    Same shape as :func:`query_counter_collection`: header tuple first, then
+    data rows.
+    """
+    yield from _stream_query(db_path, MARKER_API_TRACE_QUERY)
+
+
+def query_pmc_event_table(db_path: str) -> Optional[tuple[str, str]]:
+    """Return ``(table_name, guid)`` for the ``rocpd_pmc_event_<guid>`` table.
+
+    Returns ``None`` if no matching table exists in the db.
+    """
+    with closing(sqlite3.connect(db_path)) as conn:
+        with closing(
+            conn.execute(
+                TABLE_NAME_PREFIX_QUERY.format(
+                    table_name_prefix=ROCPD_PMC_EVENT_TABLE_NAME_PREFIX
+                )
+            )
+        ) as cursor:
+            row = cursor.fetchone()
+    if row is None:
+        return None
+    table_name = row[0]
+    guid = table_name[len(ROCPD_PMC_EVENT_TABLE_NAME_PREFIX) :].replace("_", "-")
+    return table_name, guid
+
+
+def query_dispatch_to_event_map(db_path: str, guid: str) -> dict[str, str]:
+    """Return ``{dispatch_id: event_id}`` from ``rocpd_kernel_dispatch`` for one guid.
+
+    Both keys and values are stringified to align with CSV-derived inputs in the
+    orchestrator. Returns an empty dict if the query yields no rows.
+    """
+    with closing(sqlite3.connect(db_path)) as conn:
+        with closing(conn.execute(KERNEL_DISPATCH_QUERY, (guid,))) as cursor:
+            rows = cursor.fetchall()
+    return {str(dispatch_id): str(event_id) for dispatch_id, event_id, _ in rows}
+
+
+def insert_pmc_events(
+    db_path: str,
+    table_name: str,
+    rows: Iterable[tuple],
 ) -> None:
-    """Write the counters_collection table from each db into one CSV."""
-    _dump_query_to_csv(db_paths, COUNTERS_COLLECTION_QUERY, counter_collection_csv_path)
+    """Bulk-INSERT pmc_event rows into the named table.
 
-
-def dump_marker_trace_csv(db_paths: list[str], marker_trace_csv_path: str) -> None:
-    """Write the regions (marker API) table from each db into one CSV."""
-    _dump_query_to_csv(db_paths, MARKER_API_TRACE_QUERY, marker_trace_csv_path)
+    ``rows`` must be an iterable of ``(guid, event_id, pmc_id, value)`` tuples.
+    """
+    columns = ("guid", "event_id", "pmc_id", "value")
+    placeholders = ", ".join(["?"] * len(columns))
+    statement = INSERT_QUERY.format(
+        table_name=table_name,
+        columns=", ".join(columns),
+        placeholders=placeholders,
+    )
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.executemany(statement, rows)
 
 
 def merge_pass_dbs(src_db_paths: list[str], dst_db_path: str) -> None:
@@ -163,69 +206,16 @@ def count_counter_rows(db_paths: list[str]) -> int:
     return total
 
 
-def update_rocpd_pmc_events(counter_info: list[dict], rocpd_db_path: str) -> None:
-    """Updates pmc_event table in the given rocpd database path."""
-    try:
-        with closing(sqlite3.connect(rocpd_db_path)) as conn:
-            # Get pmc_event table name
-            with closing(
-                conn.execute(
-                    TABLE_NAME_PREFIX_QUERY.format(
-                        table_name_prefix=ROCPD_PMC_EVENT_TABLE_NAME_PREFIX
-                    )
-                )
-            ) as cursor:
-                table_name = cursor.fetchone()
-            if table_name is None:
-                console_error("No pmc_event table found in the rocpd database")
-            table_name = table_name[0]
+def _stream_query(db_path: str, query: str) -> Iterator[tuple]:
+    """Yield header tuple followed by data rows for ``query`` against one db.
 
-            # get pmc_event table data
-            guid = table_name[len(ROCPD_PMC_EVENT_TABLE_NAME_PREFIX) :].replace(
-                "_", "-"
-            )
-            # Map dispatch_id to event_id from rocpd_kernel_dispatch
-            # Native counter collection CSV has dispatch_id, but schema needs event_id
-            # event_id may differ from dispatch_id when marker API tracing is enabled
-            with closing(conn.execute(KERNEL_DISPATCH_QUERY, (guid,))) as cursor:
-                db_rows = cursor.fetchall()
-            if not db_rows:
-                console_error("No kernel dispatch data found.")
+    Yields nothing if the query has no description (e.g. table missing). The
+    sqlite connection and cursor are closed when the generator is exhausted or
+    closed by the caller.
+    """
+    with closing(sqlite3.connect(db_path)) as conn:
+        with closing(conn.execute(query)) as cursor:
+            if cursor.description is None:
                 return
-            # DB output (numeric) converted to str to align with counter_info
-            dispatch_to_event = {
-                str(dispatch_id): str(event_id) for dispatch_id, event_id, _ in db_rows
-            }
-
-            # Map dispatch_id to event_id for each row
-            # Create new event_id column without destroying dispatch_id
-            for row in counter_info:
-                dispatch_id = row.get("dispatch_id")
-                row["event_id"] = dispatch_to_event.get(dispatch_id)
-
-            columns = ("guid", "event_id", "pmc_id", "value")
-            values = [
-                (
-                    guid,
-                    row.get("event_id"),
-                    row.get("counter_id"),
-                    row.get("counter_value"),
-                )
-                for row in counter_info
-            ]
-
-            # insert into pmc_event table
-            with conn:
-                placeholders = ", ".join(["?"] * len(columns))
-                conn.executemany(
-                    INSERT_QUERY.format(
-                        table_name=table_name,
-                        columns=", ".join(columns),
-                        placeholders=placeholders,
-                    ),
-                    values,
-                )
-    except OSError as e:
-        console_error(f"Database error while updating pmc_event table: {e}")
-    except Exception as e:
-        console_error(f"Unexpected error updating pmc_event table: {e}")
+            yield tuple(d[0] for d in cursor.description)
+            yield from cursor

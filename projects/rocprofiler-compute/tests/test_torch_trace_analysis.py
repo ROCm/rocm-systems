@@ -1,8 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import csv
 import json
 import sqlite3
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import common
@@ -11,8 +13,8 @@ import pandas as pd
 from utils.rocpd_data import (
     COUNTERS_COLLECTION_QUERY,
     MARKER_API_TRACE_QUERY,
-    dump_counter_collection_csv,
-    dump_marker_trace_csv,
+    query_counter_collection,
+    query_marker_trace,
 )
 from utils.utils_analysis import (
     build_call_trees_with_kernel_ids,
@@ -131,7 +133,21 @@ def test_marker_query_uses_stack_id():
     assert "\n    correlation_id" not in query_lower
 
 
-# ---- Test 2: dump_*_csv populates Correlation_Id from stack_id ----
+# ---- Test 2: rocpd query_* + CSV write populates Correlation_Id from stack_id ----
+
+
+def _write_query_to_csv(
+    query_fn: Callable[[str], Iterator[tuple]], db_path: str, csv_path: str
+) -> None:
+    """Test helper: stream a rocpd query into a CSV (header + rows)."""
+    iterator = iter(query_fn(db_path))
+    header = next(iterator, None)
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        if header is None:
+            return
+        writer.writerow(header)
+        writer.writerows(iterator)
 
 
 def create_rocpd_test_db(workload_dir):
@@ -183,8 +199,8 @@ def test_counter_csv_has_correlation_id_from_stack_id():
     marker_csv = str(Path(workload_dir) / "marker_api_trace.csv")
 
     db_path = create_rocpd_test_db(workload_dir)
-    dump_counter_collection_csv([db_path], counter_csv)
-    dump_marker_trace_csv([db_path], marker_csv)
+    _write_query_to_csv(query_counter_collection, db_path, counter_csv)
+    _write_query_to_csv(query_marker_trace, db_path, marker_csv)
 
     df = pd.read_csv(counter_csv)
     assert "Correlation_Id" in df.columns
@@ -204,8 +220,8 @@ def test_marker_csv_has_correlation_id_from_stack_id():
     marker_csv = str(Path(workload_dir) / "marker_api_trace.csv")
 
     db_path = create_rocpd_test_db(workload_dir)
-    dump_counter_collection_csv([db_path], counter_csv)
-    dump_marker_trace_csv([db_path], marker_csv)
+    _write_query_to_csv(query_counter_collection, db_path, counter_csv)
+    _write_query_to_csv(query_marker_trace, db_path, marker_csv)
 
     df = pd.read_csv(marker_csv)
     assert "Correlation_Id" in df.columns
