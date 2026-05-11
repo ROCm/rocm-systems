@@ -42,6 +42,9 @@ class Program : public device::Program {
     return hsaExecutable_;
   }
 
+  //! Returns the API hash for RGP thread trace (set via AddElfBinary at load time)
+  uint64_t ApiHash() const { return apiHash_; }
+
   virtual bool createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, size_t* bytes,
                                   const char* global_name) const override;
 
@@ -64,6 +67,7 @@ class Program : public device::Program {
   /* HSA executable */
   hsa_executable_t hsaExecutable_;                //!< Handle to HSA executable
   hsa_code_object_reader_t hsaCodeObjectReader_;  //!< Handle to HSA code reader
+  uint64_t apiHash_ = 0;                          //!< API hash for RGP thread trace
 };
 
 /*@}*/  // namespace amd::roc

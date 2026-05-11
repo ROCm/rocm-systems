@@ -22,9 +22,9 @@
 #define _LP64 1
 #endif
 
-#if defined(_DEBUG) && !defined(DEBUG)
+#if defined(_DEBUG) && !defined(DEBUG) && !defined(NDEBUG)
 #define DEBUG 1
-#endif  // _DEBUG && !DEBUG
+#endif  // _DEBUG && !DEBUG && !NDEBUG
 
 #if defined(DEBUG) && defined(RELEASE)
 #error "Build Error: cannot have both -DDEBUG and -DRELEASE"

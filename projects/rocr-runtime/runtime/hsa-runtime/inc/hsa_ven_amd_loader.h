@@ -528,9 +528,81 @@ hsa_ven_amd_loader_iterate_executables(
 //===----------------------------------------------------------------------===//
 
 /**
+ * @brief Loaded segment handle (opaque).
+ */
+typedef struct hsa_ven_amd_loader_loaded_segment_s {
+  uint64_t handle;
+} hsa_ven_amd_loader_loaded_segment_t;
+
+/**
+ * @brief Loaded segment attributes.
+ */
+typedef enum hsa_ven_amd_loader_loaded_segment_info_e {
+  /**
+   * The ELF virtual address (p_vaddr) of this segment. Type: uint64_t.
+   */
+  HSA_VEN_AMD_LOADER_LOADED_SEGMENT_INFO_ELF_BASE_ADDRESS = 1,
+  /**
+   * The GPU virtual address at which this segment was loaded (the real
+   * device-side load address). Equivalent to PAL's
+   * pGpuMemory->Desc().gpuVirtAddr + segment_offset. Type: uint64_t.
+   */
+  HSA_VEN_AMD_LOADER_LOADED_SEGMENT_INFO_LOAD_BASE_ADDRESS = 2,
+  /**
+   * The size in bytes of this segment. Type: size_t.
+   */
+  HSA_VEN_AMD_LOADER_LOADED_SEGMENT_INFO_SIZE = 3,
+} hsa_ven_amd_loader_loaded_segment_info_t;
+
+/**
+ * @brief Iterate over the loaded segments of a loaded code object, and invoke
+ * an application-defined callback on every iteration.
+ *
+ * @param[in] loaded_code_object Loaded code object whose segments to iterate.
+ *
+ * @param[in] callback Callback invoked once per loaded segment. If it returns
+ * a status other than ::HSA_STATUS_SUCCESS the traversal stops and that status
+ * is returned.
+ *
+ * @param[in] data Application data passed to @p callback. May be NULL.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been initialized.
+ * @retval ::HSA_STATUS_ERROR_INVALID_CODE_OBJECT The loaded code object is invalid.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p callback is NULL.
+ */
+hsa_status_t hsa_ven_amd_loader_loaded_code_object_iterate_loaded_segments(
+  hsa_loaded_code_object_t loaded_code_object,
+  hsa_status_t (*callback)(
+    hsa_ven_amd_loader_loaded_segment_t loaded_segment,
+    void *data),
+  void *data);
+
+/**
+ * @brief Get the current value of an attribute for a loaded segment.
+ *
+ * @param[in] loaded_segment Loaded segment handle obtained from the iterate callback.
+ *
+ * @param[in] attribute Attribute to query.
+ *
+ * @param[out] value Pointer to an application-allocated buffer to store the
+ * attribute value. Must not be NULL.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been initialized.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p attribute is invalid or @p value is NULL.
+ */
+hsa_status_t hsa_ven_amd_loader_loaded_segment_get_info(
+  hsa_ven_amd_loader_loaded_segment_t loaded_segment,
+  hsa_ven_amd_loader_loaded_segment_info_t attribute,
+  void *value);
+
+//===----------------------------------------------------------------------===//
+
+/**
  * @brief Extension version.
  */
-#define hsa_ven_amd_loader 001003
+#define hsa_ven_amd_loader 001004
 
 /**
  * @brief Extension function table version 1.00.
@@ -659,6 +731,63 @@ typedef struct hsa_ven_amd_loader_1_03_pfn_s {
         void *data),
       void *data);
 } hsa_ven_amd_loader_1_03_pfn_t;
+
+/**
+ * @brief Extension function table version 1.04.
+ * Adds per-loaded-segment iteration and attribute query.
+ */
+typedef struct hsa_ven_amd_loader_1_04_pfn_s {
+  hsa_status_t (*hsa_ven_amd_loader_query_host_address)(
+    const void *device_address,
+    const void **host_address);
+
+  hsa_status_t (*hsa_ven_amd_loader_query_segment_descriptors)(
+    hsa_ven_amd_loader_segment_descriptor_t *segment_descriptors,
+    size_t *num_segment_descriptors);
+
+  hsa_status_t (*hsa_ven_amd_loader_query_executable)(
+    const void *device_address,
+    hsa_executable_t *executable);
+
+  hsa_status_t (*hsa_ven_amd_loader_executable_iterate_loaded_code_objects)(
+    hsa_executable_t executable,
+    hsa_status_t (*callback)(
+      hsa_executable_t executable,
+      hsa_loaded_code_object_t loaded_code_object,
+      void *data),
+    void *data);
+
+  hsa_status_t (*hsa_ven_amd_loader_loaded_code_object_get_info)(
+    hsa_loaded_code_object_t loaded_code_object,
+    hsa_ven_amd_loader_loaded_code_object_info_t attribute,
+    void *value);
+
+  hsa_status_t
+    (*hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size)(
+      hsa_file_t file,
+      size_t offset,
+      size_t size,
+      hsa_code_object_reader_t *code_object_reader);
+
+  hsa_status_t
+    (*hsa_ven_amd_loader_iterate_executables)(
+      hsa_status_t (*callback)(
+        hsa_executable_t executable,
+        void *data),
+      void *data);
+
+  hsa_status_t (*hsa_ven_amd_loader_loaded_code_object_iterate_loaded_segments)(
+    hsa_loaded_code_object_t loaded_code_object,
+    hsa_status_t (*callback)(
+      hsa_ven_amd_loader_loaded_segment_t loaded_segment,
+      void *data),
+    void *data);
+
+  hsa_status_t (*hsa_ven_amd_loader_loaded_segment_get_info)(
+    hsa_ven_amd_loader_loaded_segment_t loaded_segment,
+    hsa_ven_amd_loader_loaded_segment_info_t attribute,
+    void *value);
+} hsa_ven_amd_loader_1_04_pfn_t;
 
 #ifdef __cplusplus
 }

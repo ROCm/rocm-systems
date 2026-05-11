@@ -32,6 +32,13 @@ class Kernel : public device::Kernel {
 
   const Program* program() const { return static_cast<const Program*>(&prog_); }
 
+  //! Returns the API hash for RGP thread trace — delegates to the owning Program
+  uint64_t ApiHash() const { return program()->ApiHash(); }
+
+  //! Returns the kernel's ELF symbol name (e.g. "_Z3addPiS_S_.kd" for COv3).
+  //! Exposes the protected base-class symbolName() for use in COLoadEvent writing.
+  const std::string& SymbolName() const { return symbolName(); }
+
   //! Pull demangled name, used only for logging
   const std::string& getDemangledName() {
     std::call_once(demangle_once_, [this] {
