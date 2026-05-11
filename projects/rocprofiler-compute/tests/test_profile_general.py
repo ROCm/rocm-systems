@@ -18,6 +18,7 @@ import pandas as pd
 import pytest
 import yaml
 from scipy.stats import zscore
+from tests.test_pc_sampling import skip_unsupported_pc_sampling_soc
 
 # Runtime config options
 config = {}
@@ -586,15 +587,6 @@ def skip_unsupported_roofline_soc():
 
 def is_rdna35_halo_soc():
     return soc == "RDNA35_HALO"
-
-
-def skip_unsupported_pc_sampling_soc(is_stochastic=False):
-    unsupported_socs = {"MI100", "RDNA35_HALO"}
-    if is_stochastic:
-        unsupported_socs.add("MI200")
-
-    if soc in unsupported_socs:
-        pytest.skip(f"PC sampling is not supported on {soc}")
 
 
 # --
