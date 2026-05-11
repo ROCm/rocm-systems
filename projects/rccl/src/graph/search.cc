@@ -1087,7 +1087,7 @@ ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph
         system->type |= RCCL_TOPO_4P2H_ROME;
       }
     }
-  } else if (!rcclParamModelMatchingDisable() && !graph->collNet) {
+  } else if (!rcclParamModelMatchingDisable() && !graph->collNet && !system->skipPresetTopoMatching) {
     // try to match 8P6L
     NCCLCHECK(parseChordalRing(system, graph));
     if (graph->nChannels) return ncclSuccess;

@@ -125,7 +125,7 @@ void IPCBackend::init() {
 
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
 
-  default_context_proxy_ = IPCDefaultContextProxyT(this, tinfo);
+  default_context_proxy_ = IPCDefaultContextProxy(this, tinfo);
 
   setup_ctxs();
 }

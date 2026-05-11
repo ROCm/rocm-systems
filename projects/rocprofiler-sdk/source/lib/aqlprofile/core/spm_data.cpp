@@ -20,13 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "hsa_includes.h"
+#include "lib/aqlprofile/hsa_includes.h"
 
 #include <thread>
 #include <condition_variable>
 
-#include "core/logger.h"
-#include "core/pm4_factory.h"
+#include "lib/aqlprofile/core/logger.hpp"
+#include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/aqlprofile/util/hsa_rsrc_factory.h"
 
 // C++11's solution for std::format()
 template <typename... Args>
@@ -84,12 +85,13 @@ static int data_ready_check[2] = {};
 inline static hsa_status_t
 HsaSpmSetDestBuffer(spm_set_dest_buffer_args& args)
 {
-    return hsa_amd_spm_set_dest_buffer(args.agent,
-                                       args.buf_size,
-                                       &args.timeout,
-                                       &args.size_copied,
-                                       args.dest_buf,
-                                       &args.is_data_loss);
+    return rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_set_dest_buffer_fn(
+        args.agent,
+        args.buf_size,
+        &args.timeout,
+        &args.size_copied,
+        args.dest_buf,
+        &args.is_data_loss);
 }
 
 static void
@@ -114,7 +116,7 @@ producer(spm_state_t* s)
         status = HsaSpmSetDestBuffer(args);
         if(status != HSA_STATUS_SUCCESS)
         {
-            ERR_LOGGING << "hsa_amd_spm_set_dest_buffer() error";
+            ERR_LOGGING("hsa_amd_spm_set_dest_buffer() error");
             goto exit_;
         }
 #if DEBUG_SPM >= 2
@@ -214,7 +216,7 @@ consumer(spm_state_t* s)
 
         if(status != HSA_STATUS_SUCCESS)
         {
-            ERR_LOGGING << "SPM consumer callback failed";
+            ERR_LOGGING("SPM consumer callback failed");
             s->stop_cons_thread = true;
         }
     } while(!s->stop_cons_thread);
@@ -234,10 +236,11 @@ manager(spm_state_t* s)
 hsa_status_t
 start_spm_threads(spm_state_t& s)
 {
-    hsa_status_t status = hsa_amd_spm_acquire(s.profile->agent);
+    hsa_status_t status =
+        rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_acquire_fn(s.profile->agent);
     if(status != HSA_STATUS_SUCCESS)
     {
-        ERR_LOGGING << "hsa_amd_spm_acquire() error";
+        ERR_LOGGING("hsa_amd_spm_acquire() error");
         abort();
         return status;
     }
@@ -303,7 +306,7 @@ start_spm_threads(spm_state_t& s)
     status                        = HsaSpmSetDestBuffer(args);
     if(status != HSA_STATUS_SUCCESS)
     {
-        ERR_LOGGING << "hsa_amd_spm_set_dest_buffer() init error";
+        ERR_LOGGING("hsa_amd_spm_set_dest_buffer() init error");
         abort();
         return status;
     }
@@ -316,7 +319,7 @@ start_spm_threads(spm_state_t& s)
 
     if(!s.manager_thread)
     {
-        hsa_amd_spm_release(s.profile->agent);
+        rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_release_fn(s.profile->agent);
         return HSA_STATUS_ERROR;
     }
 
@@ -328,7 +331,7 @@ stop_spm_threads(spm_state_t& s)
 {
     s.stop_prod_thread = true;
     s.manager_thread->join();
-    hsa_amd_spm_release(s.profile->agent);
+    rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_release_fn(s.profile->agent);
     delete s.manager_thread;
     s.manager_thread = nullptr;
 #if DEBUG_SPM >= 2

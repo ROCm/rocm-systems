@@ -8,10 +8,22 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * New HIP APIs
     - `cooperative_groups::reduce()` allows calling reduce operators on `thread_block_tile` and `coalesced_threads`. The implementation is based on the `__reduce_*_sync` operations, so the macro `HIP_ENABLE_EXTRA_WARP_SYNC_TYPES` may be needed to unlock some optimizations.
+* New device attribute `hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported`, indicating support for GPU Direct RDMA when using HIP VMM. This attribute corresponds to CUDA’s `CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED`.
+
+### Resolved issues
+
+* A segmentation fault that occurred in child graphs during the graph‑launch phase. The issue originated from the entire graph being launched solely according to the parent graph’s scheduling logic. The HIP runtime now introduces a per‑graph segment‑scheduling control flag and propagates the parent graph’s scheduling mode to its child graphs, ensuring consistent scheduling behavior (classic vs. segment) and preventing failures when the parent falls back to classic scheduling.
+* A segmentation fault caused by passing a null pointer to the hipMemGetAddressRange API. The function now handles null pointers correctly, matching the behavior of the corresponding CUDA API.
 
 ### Changed
 
 * `__reduce_and_sync()`, `__reduce_or_sync()` and `__reduce_xor_sync()` now provide a consistent behavior for all masks values and with CUDA. Before, some masks would be translated to bitwise operations but other would not (like the ones containing "holes"). Now all masks cause bitwise instructions to be emitted. This is a change of behavior from previous versions.
+
+### Optimized
+
+* Improves HIP runtime error logging when an application's fat binary does not include a compatible code object for the detected GPU architecture, offering clearer guidance to rebuild with the appropriate `--offload-arch=gfxXXXX` option.
+
+* Enables in‑memory and background‑thread asynchronous logging in the HIP runtime by default to improve overall logging capability. This behavior can be disabled by setting the environment variable `AMD_LOG_ASYNC=0`.
 
 ## HIP 7.12 for ROCm 7.12
 

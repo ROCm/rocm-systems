@@ -46,6 +46,7 @@ set(TEST_SRC
   hipGraphEventWaitNodeSetEvent.cc
   hipGraphMemsetNodeGetParams.cc
   hipGraphMemsetNodeSetParams.cc
+  hipGraphMemsetNodeFlatAlloc.cc
   hipGraphExecMemcpyNodeSetParamsFromSymbol_old.cc
   hipGraphExecMemcpyNodeSetParamsFromSymbol.cc
   hipGraphEventRecordNodeGetEvent.cc
@@ -131,7 +132,6 @@ set(TEST_SRC
   hipGraphKernelNodeCopyAttributes.cc
   hipGraphCycle.cc
   hipGraphPerf.cc
-  hipGraphProfilingTimestamps.cc
   hipGraphKernelNodeGetAttribute.cc
   hipGraphKernelNodeSetAttribute.cc
   hipGraphMemAllocNodeGetParams.cc

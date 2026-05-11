@@ -275,6 +275,7 @@ template <bool useGCR, bool scopeFields> hsa_status_t BlitSdma<useGCR, scopeFiel
     // Release queue resources from the kernel
     auto err = agent_->driver().DestroyQueue(queue_resource_.QueueId);
     assert(err == HSA_STATUS_SUCCESS);
+    (void)err;
     memset(&queue_resource_, 0, sizeof(queue_resource_));
   }
 
@@ -1142,6 +1143,40 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBroadcastCommand(
 }
 
 template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyB2BCommand(
+    const std::vector<void*>& dsts, const void* src, size_t size,
+    std::vector<core::Signal*>& dep_signals,
+    core::Signal& out_signal) {
+
+  if (dsts.empty() || size == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_
+                                                             : kMaxSingleCopySize;
+  const uint32_t num_chunks = static_cast<uint32_t>((size + max_copy_size - 1) / max_copy_size);
+
+  // One set of linear copy packets per destination, all packed back-to-back.
+  const size_t per_dst_bytes =
+      static_cast<size_t>(num_chunks) * static_cast<size_t>(linear_copy_command_size_);
+  const size_t total_cmd_size = dsts.size() * per_dst_bytes;
+
+  std::vector<char> cmd_buf(total_cmd_size);  // BuildCopyCommand memsets each packet
+  char* cmd_ptr = cmd_buf.data();
+
+  for (void* dst : dsts) {
+    BuildCopyCommand(cmd_ptr, num_chunks, dst, src, size);
+    cmd_ptr += per_dst_bytes;
+  }
+
+  const uint64_t total_bytes_moved = static_cast<uint64_t>(size) * dsts.size();
+
+  std::vector<core::Signal*> no_gang;
+  return SubmitCommand(cmd_buf.data(), total_cmd_size, total_bytes_moved,
+                       dep_signals, out_signal, no_gang);
+}
+
+template <bool useGCR, bool scopeFields>
 hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
     const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
     const hsa_dim3_t* src_offset, const hsa_dim3_t* range, std::vector<core::Signal*>& dep_signals,
@@ -1468,7 +1503,7 @@ template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::BuildBroadcastCopyCommand(char* cmd_addr, uint32_t num_copy_command,
                                                   void* dst1, void* dst2,
                                                   const void* src, size_t size) {
-  constexpr size_t kMask = SDMA_PKT_COPY_LINEAR_BROADCAST::kDstAlignMask_;
+  [[maybe_unused]] constexpr size_t kMask = SDMA_PKT_COPY_LINEAR_BROADCAST::kDstAlignMask_;
   assert((reinterpret_cast<uintptr_t>(dst1) & kMask) ==
          (reinterpret_cast<uintptr_t>(dst2) & kMask));
   size_t cur_size = 0;
@@ -1515,7 +1550,7 @@ void BlitSdma<useGCR, scopeFields>::BuildBroadcastCopyCommand(char* cmd_addr, ui
 template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::BuildSwapCopyCommand(char* cmd_addr, uint32_t num_copy_command,
                                             void* addr_a, void* addr_b, size_t size) {
-  constexpr size_t kAlign = SDMA_PKT_COPY_LINEAR_SWAP::kAlignment_;
+  [[maybe_unused]] constexpr size_t kAlign = SDMA_PKT_COPY_LINEAR_SWAP::kAlignment_;
   assert((reinterpret_cast<uintptr_t>(addr_a) & (kAlign - 1)) == 0);
   assert((reinterpret_cast<uintptr_t>(addr_b) & (kAlign - 1)) == 0);
 

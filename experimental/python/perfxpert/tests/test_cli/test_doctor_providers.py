@@ -74,10 +74,15 @@ def test_run_doctor_is_safe_for_ascii_stdout(monkeypatch):
 
 
 def test_check_llm_providers_accepts_canonical_env_names(monkeypatch):
+    monkeypatch.setattr(
+        "perfxpert.cli.opencode_launcher.resolve_opencode_binary",
+        lambda: "/tmp/opencode",
+    )
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
     monkeypatch.setenv("PERFXPERT_LLM_LOCAL_URL", "http://localhost:11434")
     monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_URL", "https://llm.example/v1")
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_API_KEY", "sk-private")
 
     configured, unconfigured = perfxpert_main._check_llm_providers()
 
@@ -88,11 +93,38 @@ def test_check_llm_providers_accepts_canonical_env_names(monkeypatch):
 
 
 def test_check_llm_providers_accepts_compatibility_aliases(monkeypatch):
+    monkeypatch.setattr(
+        "perfxpert.cli.opencode_launcher.resolve_opencode_binary",
+        lambda: "/tmp/opencode",
+    )
     monkeypatch.setenv("OLLAMA_HOST", "http://localhost:11434")
     monkeypatch.setenv("PRIVATE_LLM_ENDPOINT", "https://llm.example/v1")
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_API_KEY", "sk-private")
 
     configured, unconfigured = perfxpert_main._check_llm_providers()
 
     assert "ollama" in configured
     assert "private" in configured
     assert "opencode" in configured
+
+
+def test_check_llm_providers_private_endpoint_without_key_is_missing(monkeypatch):
+    monkeypatch.setenv("PRIVATE_LLM_ENDPOINT", "https://llm.example/v1")
+    monkeypatch.delenv("PERFXPERT_LLM_PRIVATE_API_KEY", raising=False)
+
+    configured, unconfigured = perfxpert_main._check_llm_providers()
+
+    assert "private" not in configured
+    assert "private" in unconfigured
+
+
+def test_check_llm_providers_requires_opencode_binary(monkeypatch):
+    def missing():
+        raise FileNotFoundError("missing opencode")
+
+    monkeypatch.setattr("perfxpert.cli.opencode_launcher.resolve_opencode_binary", missing)
+
+    configured, unconfigured = perfxpert_main._check_llm_providers()
+
+    assert "opencode" not in configured
+    assert "opencode" in unconfigured

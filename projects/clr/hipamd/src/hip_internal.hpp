@@ -19,6 +19,7 @@
 #include <mutex>
 #include <iterator>
 #include <algorithm>
+#include <vector>
 #ifdef _WIN32
 #include <process.h>
 #else
@@ -68,13 +69,23 @@ struct UserObject;
 class Stream;
 
 #define IHIP_IPC_EVENT_HANDLE_SIZE 32
-#define IHIP_IPC_EVENT_RESERVED_SIZE LP64_SWITCH(28,24)
+
+enum ihipIpcEventHandleType : uint32_t {
+    kIpcEventHandleEmulated = 0,
+    kIpcEventHandleROCr     = 1,
+};
+
 typedef struct ihipIpcEventHandle_st {
-    //hsa_amd_ipc_signal_t ipc_handle;  //!< ipc signal handle on ROCr
-    //char ipc_handle[IHIP_IPC_EVENT_HANDLE_SIZE];
-    //char reserved[IHIP_IPC_EVENT_RESERVED_SIZE];
-    char shmem_name[IHIP_IPC_EVENT_HANDLE_SIZE];
+    ihipIpcEventHandleType type;
+    int32_t creator_pid;
+    union {
+        char shmem_name[IHIP_IPC_EVENT_HANDLE_SIZE];
+        char ipc_signal_handle[IHIP_IPC_EVENT_HANDLE_SIZE];
+    };
 } ihipIpcEventHandle_t;
+
+static_assert(sizeof(ihipIpcEventHandle_t) <= sizeof(hipIpcEventHandle_t),
+              "ihipIpcEventHandle_t exceeds hipIpcEventHandle_t storage");
 
 const char* ihipGetErrorName(hipError_t hip_error);
 
@@ -232,12 +243,17 @@ const char* ihipGetErrorName(hipError_t hip_error);
 
 #define STREAM_CAPTURE(name, stream, ...)                                                          \
   hip::getStreamPerThread(stream);                                                                 \
-  if (stream != nullptr && stream != hipStreamLegacy) {                                            \
-    auto captureStatus = reinterpret_cast<hip::Stream*>(stream)->GetCaptureStatus();               \
-    if (captureStatus == hipStreamCaptureStatusActive) {                                           \
-      return hip::capture##name(stream, ##__VA_ARGS__);                                            \
-    } else if (captureStatus == hipStreamCaptureStatusInvalidated) {                               \
-      return hipErrorStreamCaptureInvalidated;                                                     \
+  if (!g_allCapturingStreams.empty()) {                                                            \
+    if (!hip::isValid(stream)) {                                                                   \
+      return hipErrorInvalidValue;                                                                 \
+    }                                                                                              \
+    if (stream != nullptr && stream != hipStreamLegacy) {                                          \
+      auto captureStatus = reinterpret_cast<hip::Stream*>(stream)->GetCaptureStatus();             \
+      if (captureStatus == hipStreamCaptureStatusActive) {                                         \
+        return hip::capture##name(stream, ##__VA_ARGS__);                                          \
+      } else if (captureStatus == hipStreamCaptureStatusInvalidated) {                             \
+        return hipErrorStreamCaptureInvalidated;                                                   \
+      }                                                                                            \
     }                                                                                              \
   }
 
@@ -616,6 +632,16 @@ namespace hip {
   extern hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
   extern hipError_t ihipMemGetInfo(size_t* free, size_t* total);
   extern amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size = 0);
+  extern std::vector<amd::Memory*> getMemoryObjectBatch(void* const* ptrs, size_t count,
+                                                         std::vector<size_t>& offsets);
+  extern void getMemoryObjectBatchPairs(void* const* srcs, void* const* dsts, size_t count,
+                                         std::vector<amd::Memory*>& src_memories,
+                                         std::vector<amd::Memory*>& dst_memories,
+                                         std::vector<size_t>& src_offsets,
+                                         std::vector<size_t>& dst_offsets);
+  extern void getMemoryObjectPairs(const void* src, const void* dst,
+                                    amd::Memory*& src_memory, amd::Memory*& dst_memory,
+                                    size_t& src_offset, size_t& dst_offset);
   extern amd::Memory* getMemoryObjectWithOffset(const void* ptr, const size_t size = 0);
   extern void getStreamPerThread(hipStream_t& stream);
   extern hipStream_t getPerThreadDefaultStream();

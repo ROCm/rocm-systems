@@ -476,10 +476,57 @@ add_custom_command(
 )
 
 # ===========================================================================
+# Symmetric kernels: per-instantiation device TUs from gensrc/symmetric/.
+# Each instantiation file defines a handful of __global__ ncclSymkDevKernel_*
+# entries. Compiled standalone as multi-arch fat objects, mirroring onerank.o.
+#
+# RCCL_DEVICE_TABLE_OMIT mirrors what specialized .cpp files do: it suppresses
+# the cross-TU ncclDevFuncTable_2 emission inside common.h. Without this guard
+# each sym TU pulls in the table and demands ncclDevFunc_* definitions that
+# only live in other TUs, breaking amdgcn-link on stricter toolchains
+# (lld error: undefined hidden symbol: ncclDevFunc_*).
+#
+# Compile every .cpp under gensrc/symmetric/. Some files (all_gather.cpp)
+# define __global__ kernels directly; others (all_reduce.cpp, reduce_scatter.cpp)
+# are include-only stubs that compile to empty objects — harmless.
+#
+# SYM_FAT_OBJS is plural (vs the singular COMMON/ONERANK/COLLECTIVES_FAT_OBJ
+# siblings) because the symmetric generator emits one TU per instantiation.
+# ===========================================================================
+set(SYM_FAT_OBJS "")
+if(GENERATE_SYM_KERNELS)
+  file(GLOB _sym_srcs CONFIGURE_DEPENDS "${HIPIFY_DIR}/gensrc/symmetric/*.cpp")
+  foreach(_sym_src IN LISTS _sym_srcs)
+    get_filename_component(_sym_name "${_sym_src}" NAME_WE)
+    set(_sym_obj "${DEVICE_BUILD_DIR}/sym_${_sym_name}.o")
+    add_custom_command(
+      OUTPUT  ${_sym_obj}
+      COMMAND ${DL_CLANG}
+        -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+        ${DL_HIP_COMPILER_FLAGS}
+        -DRCCL_DEVICE_LINKER
+        -DRCCL_DEVICE_TABLE_OMIT
+        ${_link_def_flags}
+        ${_host_inc_flags}
+        ${DL_OPT_FLAGS}
+        -std=c++17
+        -fPIC
+        -w
+        -c -o ${_sym_obj}
+        ${_sym_src}
+      DEPENDS ${_sym_src}
+      COMMENT "DL compile: sym ${_sym_name} (multi-arch fat object)"
+      VERBATIM
+    )
+    list(APPEND SYM_FAT_OBJS ${_sym_obj})
+  endforeach()
+endif()
+
+# ===========================================================================
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ}
+  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${SYM_FAT_OBJS}
 )
 add_dependencies(device_linker_build hipify_all)
 
@@ -487,6 +534,7 @@ set(DEVICE_LINKER_OBJECTS
   ${COMMON_FAT_OBJ}
   ${ONERANK_FAT_OBJ}
   ${COLLECTIVES_FAT_OBJ}
+  ${SYM_FAT_OBJS}
 )
 
 # ===========================================================================

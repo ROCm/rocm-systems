@@ -21,16 +21,17 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
+#include "lib/common/logging.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
+
 #include <fmt/core.h>
 #include <cstdlib>
 #include <iostream>
-#include "lib/common/logging.hpp"
 
 #define CHECK_HSA(fn, message)                                                                     \
-    if((fn) != HSA_STATUS_SUCCESS)                                                                 \
     {                                                                                              \
-        ROCP_ERROR << message;                                                                     \
-        exit(1);                                                                                   \
+        auto _status = (fn);                                                                       \
+        ROCP_FATAL_IF(_status != HSA_STATUS_SUCCESS) << message << ": " << _status;                \
     }
 
 namespace rocprofiler
@@ -210,6 +211,63 @@ TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tr
 
     clear();
 };
+
+SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _shader_engine_id)
+: handle(_handle)
+, shader_engine_id(_shader_engine_id)
+{
+    auto* aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
+    if(!aqlprofile_dl || !aqlprofile_dl->valid())
+    {
+        ROCP_FATAL << "AQLProfile dynamic library not loaded or missing required symbols. "
+                   << "Cannot create SQTT buffering packets.";
+    }
+
+    // We sometimes need 2x the number of packets as there are buffers.
+    uint64_t num_packets{6};
+    buffer_swap.resize(num_packets);
+
+    auto buffer_ptr = std::vector<hsa_ext_amd_aql_pm4_packet_t*>{};
+    for(auto& buffer : buffer_swap)
+        buffer_ptr.emplace_back(&buffer);
+
+    auto status = aqlprofile_dl->get_buffer_packets_fn(
+        &header, &query_status, buffer_ptr.data(), &num_packets, handle, shader_engine_id, 0);
+    CHECK_HSA(status, "failed to create ATT double buffer packet");
+
+    buffer_swap.resize(num_packets);  // Discard unused packets
+
+    query_status.header = VENDOR_BIT | BARRIER_BIT;
+    for(auto& buffer : buffer_swap)
+        buffer.header = VENDOR_BIT | BARRIER_BIT;
+}
+
+std::optional<sqtt_buffer_status_t>
+SQTTBufferingPackets::query_buffer_status()
+{
+    auto* aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
+    ROCP_FATAL_IF(!aqlprofile_dl || !aqlprofile_dl->valid())
+        << "AQLProfile dynamic library not valid. Cannot query buffer status.";
+
+    auto ret = aqlprofile_att_buffer_status_t{};
+
+    auto status = aqlprofile_dl->update_buffer_status_fn(&ret, handle, shader_engine_id, 0);
+    CHECK_HSA(status, "failed to query ATT status");
+
+    if(!ret.needs_swap) return {};
+
+    // Ensure aqlprofile and SDK agrees on which is the current buffer
+    ROCP_CI_LOG_IF(ERROR, (current_buffer++) != ret.num_swaps)
+        << "Mismatch of AQL and SDK buffer states!";
+
+    auto query     = sqtt_buffer_status_t{};
+    query.data     = ret.data;
+    query.size     = ret.read_size;
+    query.gpu_full = ret.is_too_late;
+    query.packet   = buffer_swap.at(ret.num_swaps % buffer_swap.size());
+
+    return query;
+}
 
 CodeobjMarkerAQLPacket::CodeobjMarkerAQLPacket(const TraceMemoryPool& _tracepool,
                                                uint64_t               id,
