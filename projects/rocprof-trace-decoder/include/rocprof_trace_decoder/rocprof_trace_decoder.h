@@ -276,10 +276,11 @@ rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse(
  * registers). No ISA resolution is performed and no decoder handle is
  * required.
  *
- * The caller must pass the trace header (::rocprof_trace_decoder_gfx9_header_t)
- * separately; @p data should point at the post-header token bytes.
+ * Chunk metadata from chunk_index is kept for further processing of the next chunks,
+ * and needs to be cleated by rocprof_trace_decoder_flush_chunk
  *
- * @param[in] header Trace header describing the architecture / capture mode.
+ * @param[in] handle Trace header handle.
+ * @param[in] chunk_index Chunk index (double buffering)
  * @param[in] data Pointer to the shader engine trace data (post-header tokens).
  * @param[in] data_size Size of the trace data in bytes.
  * @param[in] trace_callback Callback invoked once with the batch of decoded
@@ -294,12 +295,64 @@ rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse(
  *   architectures whose quick scan is not yet wired up.
  */
 rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick_scan(
-    rocprof_trace_decoder_gfx9_header_t header,
+    rocprof_trace_decoder_handle_t handle,
+    uint64_t chunk_index,
     const void* data,
     uint64_t data_size,
     rocprof_trace_decoder_trace_callback_t trace_callback,
-    void* userdata,
-    int flags
+    void* userdata
+);
+
+/**
+ * @brief Performs a fast partial scan of a thread trace buffer.
+ *
+ * Flushes data from rocprof_trace_decoder_quick_scan. Once this is called, the user may
+ * no longer be able to call rocprof_trace_decoder_build_standalone for this chunk.
+ *
+ * @param[in] handle Trace header handle.
+ * @param[in] chunk_index Chunk index to be flushed.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT for
+ *   invalid chunk and/or handle.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED for
+ *   architectures whose quick scan is not yet wired up.
+ */
+rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_flush_chunk(
+    rocprof_trace_decoder_handle_t handle, uint64_t chunk_index
+);
+
+/**
+ * @brief Performs a fast partial scan of a thread trace buffer.
+ *
+ * Flushes data from rocprof_trace_decoder_quick_scan. Once this is called, the user may
+ * no longer be able to call rocprof_trace_decoder_build_standalone for this chunk.
+ *
+ * @param[in] handle Trace header handle.
+ * @param[in] chunk_index Chunk index (double buffering)
+ * @param[in] data Pointer to the shader engine trace data (post-header tokens).
+ * @param[in] data_size Size of the trace data in bytes.
+ * @param[in] offset_begin Byte offset where to start the standalone cut.
+ * @param[in] offset_end Byte offset where to end the standalone cut.
+ * @param[out] data_out Where the cut trace data is written to.
+ * @param[inout] size_out Size of @p data_out . If size_out is insufficient, the necessary size_out will be written and
+ * the decoder returns OUT_OF_RESOURCES. Recommended offset_end - offset_begin + 4KB
+ *
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT for
+ *   invalid chunk and/or handle.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED for
+ *   architectures whose quick scan is not yet wired up.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES if insufficient size_out.
+ */
+rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_build_standalone(
+    rocprof_trace_decoder_handle_t handle,
+    uint64_t chunk_index,
+    const void* data,
+    uint64_t data_size,
+    uint64_t offset_begin,
+    uint64_t offset_end,
+    void* data_out,
+    uint64_t* size_out
 );
 
 #ifdef __cplusplus

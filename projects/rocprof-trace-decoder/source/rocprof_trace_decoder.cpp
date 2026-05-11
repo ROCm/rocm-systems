@@ -33,6 +33,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "handle.hpp"
 #include "stitch/stitch.hpp"
 #include "trace_parser.hpp"
 
@@ -136,35 +137,8 @@ static rocprofiler_thread_trace_decoder_status_t parse_data_impl(
 // Handle management (always available, no COMGR needed)
 // ============================================================================
 
-namespace
+namespace Handle
 {
-
-#ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
-using AddressTable = rocprof_trace_decoder::codeobj::CodeobjAddressTranslate;
-using Instruction = rocprof_trace_decoder::codeobj::Instruction;
-
-struct DecoderInstance
-{
-    std::mutex mtx{};
-    AddressTable table{};
-};
-#endif
-
-struct HandleData
-{
-    std::mutex mtx;
-#ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
-    std::shared_ptr<DecoderInstance> instance;
-#endif
-    rocprof_trace_decoder_isa_callback_t isa_cb{nullptr};
-    void* isa_userdata{nullptr};
-
-    rocprof_trace_decoder_se_data_callback_t se_data_cb{nullptr};
-    void* se_data_userdata{nullptr};
-};
-
-using HandleMap = std::unordered_map<uint64_t, std::shared_ptr<HandleData>>;
-
 std::mutex& get_map_mutex()
 {
     static std::mutex mtx;
@@ -177,8 +151,6 @@ HandleMap& get_map()
     return map;
 }
 
-std::atomic<uint64_t> g_handle_counter{1};
-
 std::shared_ptr<HandleData> get_handle_data(rocprof_trace_decoder_handle_t handle)
 {
     std::lock_guard<std::mutex> lock(get_map_mutex());
@@ -187,6 +159,12 @@ std::shared_ptr<HandleData> get_handle_data(rocprof_trace_decoder_handle_t handl
     if (it != map.end()) return it->second;
     return nullptr;
 }
+} // namespace Handle
+
+namespace
+{
+using namespace Handle;
+std::atomic<uint64_t> g_handle_counter{1};
 
 // The "comgr_isa_callback" name is historical — this callback is the bridge
 // from the wave-trace parser to whichever disassembly backend is compiled in
