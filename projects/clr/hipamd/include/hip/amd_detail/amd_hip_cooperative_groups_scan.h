@@ -173,17 +173,16 @@ __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& o
   int nextBit = laneId;
   unsigned long long mask = ~0ull;
 
-  // we cannot simply just use the __activemask() here, because more than one tile could have active
-  // threads at a time; we need to mask away the threads that not part of this tile first
-  if constexpr (!__hip_internal::is_same<TyGroup, cooperative_groups::coalesced_group>::value) {
+  if constexpr (impl::isCoalescedGroup<TyGroup>::value) {
+    // for coalesced_groups, the mask is simply the activemask
+    mask &= __activemask();
+  } else {
+    // we cannot simply just use the __activemask() here, because more than one tile could have active
+    // threads at a time; we need to mask away the threads that not part of this tile first
     mask >>= (64 - group.num_threads());
     mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
   }
 
-  // for coalesced_groups, the mask is simply the activemask
-  // for tiled groups, it is legal for some threads in a tile to not participate so we also
-  // need to apply the active mask
-  mask &= __activemask();
   maskNumBits = __popcll(mask);
   maskIdx = __popcll(((1ul << laneId) - 1) & mask);
 
