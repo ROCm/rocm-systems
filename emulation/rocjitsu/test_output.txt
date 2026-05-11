@@ -1,0 +1,699 @@
+Internal ctest changing into directory: /home/arosa/rocm-systems/emulation/rocjitsu/build
+Test project /home/arosa/rocm-systems/emulation/rocjitsu/build
+        Start   1: RvSimTest.ArithmeticAndMemory
+  1/373 Test   #1: RvSimTest.ArithmeticAndMemory .........................................................................................................................................................................................   Passed    0.01 sec
+        Start   2: RvSimTest.BranchAndJump
+  2/373 Test   #2: RvSimTest.BranchAndJump ...............................................................................................................................................................................................   Passed    0.01 sec
+        Start   3: RvSimTest.JalAndJalr
+  3/373 Test   #3: RvSimTest.JalAndJalr ..................................................................................................................................................................................................   Passed    0.01 sec
+        Start   4: RvSimTest.ShiftsAndLogic
+  4/373 Test   #4: RvSimTest.ShiftsAndLogic ..............................................................................................................................................................................................   Passed    0.01 sec
+        Start   5: GpuMemoryTest.ReadWriteRoundTrip
+  5/373 Test   #5: GpuMemoryTest.ReadWriteRoundTrip ......................................................................................................................................................................................   Passed    0.01 sec
+        Start   6: GpuMemoryTest.LoadImage
+  6/373 Test   #6: GpuMemoryTest.LoadImage ...............................................................................................................................................................................................   Passed    0.01 sec
+        Start   7: GpuMemoryTest.SparsePages
+  7/373 Test   #7: GpuMemoryTest.SparsePages .............................................................................................................................................................................................   Passed    0.01 sec
+        Start   8: VmLifecycleTest.CreateAndDestroy
+  8/373 Test   #8: VmLifecycleTest.CreateAndDestroy ......................................................................................................................................................................................   Passed    0.01 sec
+        Start   9: VmLifecycleTest.MissingArchFails
+  9/373 Test   #9: VmLifecycleTest.MissingArchFails ......................................................................................................................................................................................   Passed    0.03 sec
+        Start  10: VmLifecycleTest.InvalidArchFails
+ 10/373 Test  #10: VmLifecycleTest.InvalidArchFails ......................................................................................................................................................................................   Passed    0.03 sec
+        Start  11: AtomicStressTest.DsAddRtnU32_MultiWavefront
+ 11/373 Test  #11: AtomicStressTest.DsAddRtnU32_MultiWavefront ...........................................................................................................................................................................   Passed    0.01 sec
+        Start  12: AtomicStressTest.DsAddRtnU32_MultiWorkgroup
+ 12/373 Test  #12: AtomicStressTest.DsAddRtnU32_MultiWorkgroup ...........................................................................................................................................................................   Passed    0.01 sec
+        Start  13: AtomicStressTest.DsAddU32_NoReturn
+ 13/373 Test  #13: AtomicStressTest.DsAddU32_NoReturn ....................................................................................................................................................................................   Passed    0.01 sec
+        Start  14: AtomicStressTest.GlobalAtomicAdd_L2
+ 14/373 Test  #14: AtomicStressTest.GlobalAtomicAdd_L2 ...................................................................................................................................................................................   Passed    0.01 sec
+        Start  15: AtomicStressTest.GlobalAtomicAdd_MultiWorkgroup
+ 15/373 Test  #15: AtomicStressTest.GlobalAtomicAdd_MultiWorkgroup .......................................................................................................................................................................   Passed    0.01 sec
+        Start  16: ConfigLoaderTest.LoadCdna4Config
+ 16/373 Test  #16: ConfigLoaderTest.LoadCdna4Config ......................................................................................................................................................................................   Passed    0.39 sec
+        Start  17: ConfigLoaderTest.BuildFromJsonString
+ 17/373 Test  #17: ConfigLoaderTest.BuildFromJsonString ..................................................................................................................................................................................   Passed    0.01 sec
+        Start  18: ConfigLoaderTest.DispatchDistributesAcrossCUs
+ 18/373 Test  #18: ConfigLoaderTest.DispatchDistributesAcrossCUs .........................................................................................................................................................................   Passed    0.01 sec
+        Start  19: CheckpointTest.SaveAndRestoreMemory
+ 19/373 Test  #19: CheckpointTest.SaveAndRestoreMemory ...................................................................................................................................................................................   Passed    0.01 sec
+        Start  20: CApiTest.CreateAndDestroyFromString
+ 20/373 Test  #20: CApiTest.CreateAndDestroyFromString ...................................................................................................................................................................................   Passed    0.01 sec
+        Start  21: CApiTest.InvalidArguments
+ 21/373 Test  #21: CApiTest.InvalidArguments .............................................................................................................................................................................................   Passed    0.01 sec
+        Start  22: MatmulCodeObjectTest.NaiveLoadsAndDecodes
+ 22/373 Test  #22: MatmulCodeObjectTest.NaiveLoadsAndDecodes .............................................................................................................................................................................   Passed    0.01 sec
+        Start  23: MatmulCodeObjectTest.MfmaLoadsAndDecodes
+ 23/373 Test  #23: MatmulCodeObjectTest.MfmaLoadsAndDecodes ..............................................................................................................................................................................   Passed    0.01 sec
+        Start  24: MatmulCodeObjectTest.NaiveUsesVALU
+ 24/373 Test  #24: MatmulCodeObjectTest.NaiveUsesVALU ....................................................................................................................................................................................   Passed    0.01 sec
+        Start  25: MatmulCodeObjectTest.MfmaHasMultipleMfmaInstructions
+ 25/373 Test  #25: MatmulCodeObjectTest.MfmaHasMultipleMfmaInstructions ..................................................................................................................................................................   Passed    0.01 sec
+        Start  26: MatmulCodeObjectTest.KernelDescriptorParsesCorrectly
+ 26/373 Test  #26: MatmulCodeObjectTest.KernelDescriptorParsesCorrectly ..................................................................................................................................................................   Passed    0.01 sec
+        Start  27: MatmulCodeObjectTest.TiledLoadsAndDecodes
+ 27/373 Test  #27: MatmulCodeObjectTest.TiledLoadsAndDecodes .............................................................................................................................................................................   Passed    0.01 sec
+        Start  28: MatmulCodeObjectTest.TiledKernelDescriptor
+ 28/373 Test  #28: MatmulCodeObjectTest.TiledKernelDescriptor ............................................................................................................................................................................   Passed    0.01 sec
+        Start  29: MatmulStressTest.TiledAllCUs
+ 29/373 Test  #29: MatmulStressTest.TiledAllCUs ..........................................................................................................................................................................................   Passed    2.06 sec
+        Start  30: MatmulStressTest.MfmaAllCUs
+ 30/373 Test  #30: MatmulStressTest.MfmaAllCUs ...........................................................................................................................................................................................   Passed    1.52 sec
+        Start  31: MatmulStressTest.TiledAllCUs_MultiThreaded
+ 31/373 Test  #31: MatmulStressTest.TiledAllCUs_MultiThreaded ............................................................................................................................................................................   Passed    1.62 sec
+        Start  32: MatmulStressTest.MfmaAllCUs_MultiThreaded
+ 32/373 Test  #32: MatmulStressTest.MfmaAllCUs_MultiThreaded .............................................................................................................................................................................   Passed    1.92 sec
+        Start  33: MatmulStressTest.Cdna4TopologyDispatchAndHalt
+ 33/373 Test  #33: MatmulStressTest.Cdna4TopologyDispatchAndHalt .........................................................................................................................................................................   Passed    0.45 sec
+        Start  34: MatmulStressTest.Cdna4TopologyDispatchAndHalt_MultiThreaded
+ 34/373 Test  #34: MatmulStressTest.Cdna4TopologyDispatchAndHalt_MultiThreaded ...........................................................................................................................................................   Passed    0.41 sec
+        Start  35: VectorAddStressTest.AllCUsGoldenReference
+ 35/373 Test  #35: VectorAddStressTest.AllCUsGoldenReference .............................................................................................................................................................................   Passed    0.53 sec
+        Start  36: VectorAddStressTest.AllCUsGoldenReference_MultiThreaded
+ 36/373 Test  #36: VectorAddStressTest.AllCUsGoldenReference_MultiThreaded ...............................................................................................................................................................   Passed    0.87 sec
+        Start  37: VectorAddCodeObjectTest.LoadsAndDecodes
+ 37/373 Test  #37: VectorAddCodeObjectTest.LoadsAndDecodes ...............................................................................................................................................................................   Passed    0.01 sec
+        Start  38: PacingControllerTest.DisabledIsNoop
+ 38/373 Test  #38: PacingControllerTest.DisabledIsNoop ...................................................................................................................................................................................   Passed    0.01 sec
+        Start  39: PacingControllerTest.StateTransitions
+ 39/373 Test  #39: PacingControllerTest.StateTransitions .................................................................................................................................................................................   Passed    0.01 sec
+        Start  40: PacingControllerTest.StepThresholdResetsAnchor
+ 40/373 Test  #40: PacingControllerTest.StepThresholdResetsAnchor ........................................................................................................................................................................   Passed    0.01 sec
+        Start  41: PacingControllerTest.PauseResumeNoDrift
+ 41/373 Test  #41: PacingControllerTest.PauseResumeNoDrift ...............................................................................................................................................................................   Passed    0.13 sec
+        Start  42: PacingControllerTest.SeqlockConcurrentReads
+ 42/373 Test  #42: PacingControllerTest.SeqlockConcurrentReads ...........................................................................................................................................................................   Passed    0.03 sec
+        Start  43: PacingControllerTest.TokenBucketAbsorbsBursts
+ 43/373 Test  #43: PacingControllerTest.TokenBucketAbsorbsBursts .........................................................................................................................................................................   Passed    0.01 sec
+        Start  44: SpinlockTest.BasicLockUnlock
+ 44/373 Test  #44: SpinlockTest.BasicLockUnlock ..........................................................................................................................................................................................   Passed    0.01 sec
+        Start  45: SpinlockTest.ConcurrentIncrement
+ 45/373 Test  #45: SpinlockTest.ConcurrentIncrement ......................................................................................................................................................................................   Passed    0.18 sec
+        Start  46: SpinlockTest.CrossPartitionQueueHighContention
+ 46/373 Test  #46: SpinlockTest.CrossPartitionQueueHighContention ........................................................................................................................................................................   Passed    0.17 sec
+        Start  47: SpinlockTest.CrossPartitionQueueEmptyDrain
+ 47/373 Test  #47: SpinlockTest.CrossPartitionQueueEmptyDrain ............................................................................................................................................................................   Passed    0.01 sec
+        Start  48: TerminationTest.QuiescenceDetection
+ 48/373 Test  #48: TerminationTest.QuiescenceDetection ...................................................................................................................................................................................   Passed    0.01 sec
+        Start  49: TerminationTest.AllPrimaryDoneTrigger
+ 49/373 Test  #49: TerminationTest.AllPrimaryDoneTrigger .................................................................................................................................................................................   Passed    0.01 sec
+        Start  50: TerminationTest.MaxTicksSentinel
+ 50/373 Test  #50: TerminationTest.MaxTicksSentinel ......................................................................................................................................................................................   Passed    0.01 sec
+        Start  51: TerminationTest.RequestExitWakesAllPartitions
+ 51/373 Test  #51: TerminationTest.RequestExitWakesAllPartitions .........................................................................................................................................................................   Passed    0.06 sec
+        Start  52: TerminationTest.StepModeConsistency
+ 52/373 Test  #52: TerminationTest.StepModeConsistency ...................................................................................................................................................................................   Passed    0.01 sec
+        Start  53: LBTSTest.TwoPartitionPingPong
+ 53/373 Test  #53: LBTSTest.TwoPartitionPingPong .........................................................................................................................................................................................   Passed    0.01 sec
+        Start  54: LBTSTest.IdlePartitionDoesNotBlock
+ 54/373 Test  #54: LBTSTest.IdlePartitionDoesNotBlock ....................................................................................................................................................................................   Passed    0.01 sec
+        Start  55: LBTSTest.TimestampAdvancesEnableProgress
+ 55/373 Test  #55: LBTSTest.TimestampAdvancesEnableProgress ..............................................................................................................................................................................   Passed    0.01 sec
+        Start  56: CrossPartitionTest.MessageDelivery
+ 56/373 Test  #56: CrossPartitionTest.MessageDelivery ....................................................................................................................................................................................   Passed    0.01 sec
+        Start  57: CrossPartitionTest.LinkLatencyAdded
+ 57/373 Test  #57: CrossPartitionTest.LinkLatencyAdded ...................................................................................................................................................................................   Passed    0.01 sec
+        Start  58: AsyncCausalityTest.ScheduleEventNowProducesReasonableTimestamp
+ 58/373 Test  #58: AsyncCausalityTest.ScheduleEventNowProducesReasonableTimestamp ........................................................................................................................................................   Passed    0.01 sec
+        Start  59: StressTest.FourPartitionRingStress
+ 59/373 Test  #59: StressTest.FourPartitionRingStress ....................................................................................................................................................................................   Passed    0.01 sec
+        Start  60: StressTest.LongRunningThousandsOfEvents
+ 60/373 Test  #60: StressTest.LongRunningThousandsOfEvents ...............................................................................................................................................................................   Passed    0.01 sec
+        Start  61: StressTest.AsyncInjectionDuringActiveSimulation
+ 61/373 Test  #61: StressTest.AsyncInjectionDuringActiveSimulation .......................................................................................................................................................................   Passed    0.01 sec
+        Start  62: SimulatedDriverTest.CreateDefault
+ 62/373 Test  #62: SimulatedDriverTest.CreateDefault .....................................................................................................................................................................................   Passed    0.38 sec
+        Start  63: SimulatedDriverTest.OpenAndClose
+ 63/373 Test  #63: SimulatedDriverTest.OpenAndClose ......................................................................................................................................................................................   Passed    0.38 sec
+        Start  64: SimulatedDriverTest.TopologyDirectoryExists
+ 64/373 Test  #64: SimulatedDriverTest.TopologyDirectoryExists ...........................................................................................................................................................................   Passed    0.38 sec
+        Start  65: MfmaExecTest.InputLocF32_32x32
+ 65/373 Test  #65: MfmaExecTest.InputLocF32_32x32 ........................................................................................................................................................................................   Passed    0.01 sec
+        Start  66: MfmaExecTest.InputLocF16_16x16
+ 66/373 Test  #66: MfmaExecTest.InputLocF16_16x16 ........................................................................................................................................................................................   Passed    0.01 sec
+        Start  67: MfmaExecTest.OutputLoc32_4x4
+ 67/373 Test  #67: MfmaExecTest.OutputLoc32_4x4 ..........................................................................................................................................................................................   Passed    0.01 sec
+        Start  68: MfmaExecTest.ResolveAccConstant
+ 68/373 Test  #68: MfmaExecTest.ResolveAccConstant .......................................................................................................................................................................................   Passed    0.01 sec
+        Start  69: MfmaExecTest.ResolveAccVgpr
+ 69/373 Test  #69: MfmaExecTest.ResolveAccVgpr ...........................................................................................................................................................................................   Passed    0.01 sec
+        Start  70: MfmaExecTest.ResolveAccAccVgpr
+ 70/373 Test  #70: MfmaExecTest.ResolveAccAccVgpr ........................................................................................................................................................................................   Passed    0.01 sec
+        Start  71: DppPermuteTest.QuadPerm
+ 71/373 Test  #71: DppPermuteTest.QuadPerm ...............................................................................................................................................................................................   Passed    0.01 sec
+        Start  72: DppPermuteTest.RowShr1
+ 72/373 Test  #72: DppPermuteTest.RowShr1 ................................................................................................................................................................................................   Passed    0.01 sec
+        Start  73: DppPermuteTest.RowShl1
+ 73/373 Test  #73: DppPermuteTest.RowShl1 ................................................................................................................................................................................................   Passed    0.01 sec
+        Start  74: DppPermuteTest.RowMirror
+ 74/373 Test  #74: DppPermuteTest.RowMirror ..............................................................................................................................................................................................   Passed    0.01 sec
+        Start  75: DppPermuteTest.RowXmask
+ 75/373 Test  #75: DppPermuteTest.RowXmask ...............................................................................................................................................................................................   Passed    0.01 sec
+        Start  76: DppPermuteTest.DppRead
+ 76/373 Test  #76: DppPermuteTest.DppRead ................................................................................................................................................................................................   Passed    0.01 sec
+        Start  77: SdwaTest.SrcSelect
+ 77/373 Test  #77: SdwaTest.SrcSelect ....................................................................................................................................................................................................   Passed    0.01 sec
+        Start  78: SdwaTest.DstMerge
+ 78/373 Test  #78: SdwaTest.DstMerge .....................................................................................................................................................................................................   Passed    0.01 sec
+        Start  79: ScratchAddrCalcTest.FlatScratchUsesWavefrontBase
+ 79/373 Test  #79: ScratchAddrCalcTest.FlatScratchUsesWavefrontBase ......................................................................................................................................................................   Passed    0.01 sec
+        Start  80: ScratchAddrCalcTest.FlatGlobalDoesNotUseScratchBase
+ 80/373 Test  #80: ScratchAddrCalcTest.FlatGlobalDoesNotUseScratchBase ...................................................................................................................................................................   Passed    0.01 sec
+        Start  81: TranscendentalTest.RcpF32SpecialCases
+ 81/373 Test  #81: TranscendentalTest.RcpF32SpecialCases .................................................................................................................................................................................   Passed    0.01 sec
+        Start  82: TranscendentalTest.RsqF32SpecialCases
+ 82/373 Test  #82: TranscendentalTest.RsqF32SpecialCases .................................................................................................................................................................................   Passed    0.01 sec
+        Start  83: TranscendentalTest.SqrtF32SpecialCases
+ 83/373 Test  #83: TranscendentalTest.SqrtF32SpecialCases ................................................................................................................................................................................   Passed    0.01 sec
+        Start  84: TranscendentalTest.LogF32SpecialCases
+ 84/373 Test  #84: TranscendentalTest.LogF32SpecialCases .................................................................................................................................................................................   Passed    0.01 sec
+        Start  85: TranscendentalTest.ExpF32SpecialCases
+ 85/373 Test  #85: TranscendentalTest.ExpF32SpecialCases .................................................................................................................................................................................   Passed    0.01 sec
+        Start  86: TranscendentalTest.SinCosF32SpecialCases
+ 86/373 Test  #86: TranscendentalTest.SinCosF32SpecialCases ..............................................................................................................................................................................   Passed    0.01 sec
+        Start  87: TranscendentalTest.RcpF64SpecialCases
+ 87/373 Test  #87: TranscendentalTest.RcpF64SpecialCases .................................................................................................................................................................................   Passed    0.01 sec
+        Start  88: TranscendentalTest.SqrtF64SpecialCases
+ 88/373 Test  #88: TranscendentalTest.SqrtF64SpecialCases ................................................................................................................................................................................   Passed    0.01 sec
+        Start  89: TranscendentalTest.RcpF32Ulp
+ 89/373 Test  #89: TranscendentalTest.RcpF32Ulp ..........................................................................................................................................................................................   Passed    0.01 sec
+        Start  90: TranscendentalTest.SqrtF32Ulp
+ 90/373 Test  #90: TranscendentalTest.SqrtF32Ulp .........................................................................................................................................................................................   Passed    0.01 sec
+        Start  91: RegisterSetAnalysis.KeepsRegisterClassesSeparate
+ 91/373 Test  #91: RegisterSetAnalysis.KeepsRegisterClassesSeparate ......................................................................................................................................................................   Passed    0.01 sec
+        Start  92: RegisterSetAnalysis.IgnoresSpecialRegisterClasses
+ 92/373 Test  #92: RegisterSetAnalysis.IgnoresSpecialRegisterClasses .....................................................................................................................................................................   Passed    0.01 sec
+        Start  93: RegisterSetAnalysis.GeneratedCdna4OperandsMapTrackedRegisterRefs
+ 93/373 Test  #93: RegisterSetAnalysis.GeneratedCdna4OperandsMapTrackedRegisterRefs ......................................................................................................................................................   Passed    0.01 sec
+        Start  94: CfgAnalysis.LoopBackEdgeLinksPredecessor
+ 94/373 Test  #94: CfgAnalysis.LoopBackEdgeLinksPredecessor ..............................................................................................................................................................................   Passed    0.01 sec
+        Start  95: CfgAnalysis.IfElseSuccessorsAndPredecessorsAreInverse
+ 95/373 Test  #95: CfgAnalysis.IfElseSuccessorsAndPredecessorsAreInverse .................................................................................................................................................................   Passed    0.01 sec
+        Start  96: CfgAnalysis.ExtraLeaderSplitsBlockAtKernelEntry
+ 96/373 Test  #96: CfgAnalysis.ExtraLeaderSplitsBlockAtKernelEntry .......................................................................................................................................................................   Passed    0.01 sec
+        Start  97: CfgAnalysis.IndirectCallFallsThroughToReturnSuccessor
+ 97/373 Test  #97: CfgAnalysis.IndirectCallFallsThroughToReturnSuccessor .................................................................................................................................................................   Passed    0.01 sec
+        Start  98: CfgAnalysis.IndirectBranchHasNoStaticSuccessor
+ 98/373 Test  #98: CfgAnalysis.IndirectBranchHasNoStaticSuccessor ........................................................................................................................................................................   Passed    0.01 sec
+        Start  99: LivenessAnalysis.ExecMaskedVgprDefDoesNotKillInactiveLaneValue
+ 99/373 Test  #99: LivenessAnalysis.ExecMaskedVgprDefDoesNotKillInactiveLaneValue ........................................................................................................................................................   Passed    0.01 sec
+        Start 100: LivenessAnalysis.FindsDeadSgprAfterLiveSgpr
+100/373 Test #100: LivenessAnalysis.FindsDeadSgprAfterLiveSgpr ...........................................................................................................................................................................   Passed    0.01 sec
+        Start 101: LivenessAnalysis.ReadWriteSameRegisterIsLiveBeforeInstruction
+101/373 Test #101: LivenessAnalysis.ReadWriteSameRegisterIsLiveBeforeInstruction .........................................................................................................................................................   Passed    0.01 sec
+        Start 102: LivenessAnalysis.ReadWriteRegisterStaysLiveOutWhenUsedBySuccessor
+102/373 Test #102: LivenessAnalysis.ReadWriteRegisterStaysLiveOutWhenUsedBySuccessor .....................................................................................................................................................   Passed    0.01 sec
+        Start 103: LivenessAnalysis.ImplicitUseIsLiveBeforeInstruction
+103/373 Test #103: LivenessAnalysis.ImplicitUseIsLiveBeforeInstruction ...................................................................................................................................................................   Passed    0.01 sec
+        Start 104: LivenessAnalysis.PredicatedScalarDefDoesNotKillLiveOutValue
+104/373 Test #104: LivenessAnalysis.PredicatedScalarDefDoesNotKillLiveOutValue ...........................................................................................................................................................   Passed    0.01 sec
+        Start 105: LivenessAnalysis.LoopCarriedUseRevisitsBackEdgePredecessor
+105/373 Test #105: LivenessAnalysis.LoopCarriedUseRevisitsBackEdgePredecessor ............................................................................................................................................................   Passed    0.01 sec
+        Start 106: LivenessAnalysis.BranchMeetKeepsValueLiveWhenOneSuccessorPreservesIt
+106/373 Test #106: LivenessAnalysis.BranchMeetKeepsValueLiveWhenOneSuccessorPreservesIt ..................................................................................................................................................   Passed    0.01 sec
+        Start 107: LivenessAnalysis.ExplicitBlockSubsetIgnoresOutsideSuccessors
+107/373 Test #107: LivenessAnalysis.ExplicitBlockSubsetIgnoresOutsideSuccessors ..........................................................................................................................................................   Passed    0.01 sec
+        Start 108: CoherencyRemap.Gfx940ToGfx12AgentScope
+108/373 Test #108: CoherencyRemap.Gfx940ToGfx12AgentScope ................................................................................................................................................................................   Passed    0.01 sec
+        Start 109: CoherencyRemap.Gfx940ToGfx12SystemScope
+109/373 Test #109: CoherencyRemap.Gfx940ToGfx12SystemScope ...............................................................................................................................................................................   Passed    0.01 sec
+        Start 110: CoherencyRemap.Gfx940ToGfx12NonTemporal
+110/373 Test #110: CoherencyRemap.Gfx940ToGfx12NonTemporal ...............................................................................................................................................................................   Passed    0.01 sec
+        Start 111: CoherencyRemap.Gfx9GlcToGfx12
+111/373 Test #111: CoherencyRemap.Gfx9GlcToGfx12 .........................................................................................................................................................................................   Passed    0.01 sec
+        Start 112: EncodingTranslator.Sop1PreservesRegisters
+112/373 Test #112: EncodingTranslator.Sop1PreservesRegisters .............................................................................................................................................................................   Passed    0.01 sec
+        Start 113: EncodingTranslator.Sop2PreservesRegisters
+113/373 Test #113: EncodingTranslator.Sop2PreservesRegisters .............................................................................................................................................................................   Passed    0.01 sec
+        Start 114: EncodingTranslator.SoppPreservesSimm16
+114/373 Test #114: EncodingTranslator.SoppPreservesSimm16 ................................................................................................................................................................................   Passed    0.01 sec
+        Start 115: EncodingTranslator.SmemRemapsCoherency
+115/373 Test #115: EncodingTranslator.SmemRemapsCoherency ................................................................................................................................................................................   Passed    0.01 sec
+        Start 116: EncodingTranslator.Vop3PreservesModifiers
+116/373 Test #116: EncodingTranslator.Vop3PreservesModifiers .............................................................................................................................................................................   Passed    0.01 sec
+        Start 117: EncodingTranslator.UnknownEncodingReturnsEmpty
+117/373 Test #117: EncodingTranslator.UnknownEncodingReturnsEmpty ........................................................................................................................................................................   Passed    0.01 sec
+        Start 118: EncodingTranslator.DecodeEncodeRoundTrip
+118/373 Test #118: EncodingTranslator.DecodeEncodeRoundTrip ..............................................................................................................................................................................   Passed    0.01 sec
+        Start 119: InstructionBuilder.Sop2SetsEncodingPrefix
+119/373 Test #119: InstructionBuilder.Sop2SetsEncodingPrefix .............................................................................................................................................................................   Passed    0.01 sec
+        Start 120: LegalizationLookup.FindsKnownInstruction
+120/373 Test #120: LegalizationLookup.FindsKnownInstruction ..............................................................................................................................................................................   Passed    0.01 sec
+        Start 121: LegalizationLookup.ReturnsNullForUnknown
+121/373 Test #121: LegalizationLookup.ReturnsNullForUnknown ..............................................................................................................................................................................   Passed    0.01 sec
+        Start 122: LegalizationTable.NoIllegalEntries_Cdna4ToRdna4
+122/373 Test #122: LegalizationTable.NoIllegalEntries_Cdna4ToRdna4 .......................................................................................................................................................................   Passed    0.01 sec
+        Start 123: LegalizationTable.NoIllegalEntries_cdna1_to_cdna2
+123/373 Test #123: LegalizationTable.NoIllegalEntries_cdna1_to_cdna2 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 124: LegalizationTable.NoIllegalEntries_cdna1_to_cdna3
+124/373 Test #124: LegalizationTable.NoIllegalEntries_cdna1_to_cdna3 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 125: LegalizationTable.NoIllegalEntries_cdna1_to_cdna4
+125/373 Test #125: LegalizationTable.NoIllegalEntries_cdna1_to_cdna4 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 126: LegalizationTable.NoIllegalEntries_cdna1_to_rdna1
+126/373 Test #126: LegalizationTable.NoIllegalEntries_cdna1_to_rdna1 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 127: LegalizationTable.NoIllegalEntries_cdna1_to_rdna2
+127/373 Test #127: LegalizationTable.NoIllegalEntries_cdna1_to_rdna2 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 128: LegalizationTable.NoIllegalEntries_cdna1_to_rdna3
+128/373 Test #128: LegalizationTable.NoIllegalEntries_cdna1_to_rdna3 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 129: LegalizationTable.NoIllegalEntries_cdna1_to_rdna4
+129/373 Test #129: LegalizationTable.NoIllegalEntries_cdna1_to_rdna4 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 130: LegalizationTable.NoIllegalEntries_cdna2_to_cdna3
+130/373 Test #130: LegalizationTable.NoIllegalEntries_cdna2_to_cdna3 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 131: LegalizationTable.NoIllegalEntries_cdna2_to_cdna4
+131/373 Test #131: LegalizationTable.NoIllegalEntries_cdna2_to_cdna4 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 132: LegalizationTable.NoIllegalEntries_cdna2_to_rdna3
+132/373 Test #132: LegalizationTable.NoIllegalEntries_cdna2_to_rdna3 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 133: LegalizationTable.NoIllegalEntries_cdna2_to_rdna4
+133/373 Test #133: LegalizationTable.NoIllegalEntries_cdna2_to_rdna4 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 134: LegalizationTable.NoIllegalEntries_cdna3_to_cdna4
+134/373 Test #134: LegalizationTable.NoIllegalEntries_cdna3_to_cdna4 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 135: LegalizationTable.NoIllegalEntries_cdna3_to_rdna3
+135/373 Test #135: LegalizationTable.NoIllegalEntries_cdna3_to_rdna3 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 136: LegalizationTable.NoIllegalEntries_cdna3_to_rdna4
+136/373 Test #136: LegalizationTable.NoIllegalEntries_cdna3_to_rdna4 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 137: LegalizationTable.NoIllegalEntries_cdna4_to_rdna3
+137/373 Test #137: LegalizationTable.NoIllegalEntries_cdna4_to_rdna3 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 138: LegalizationTable.NoIllegalEntries_rdna1_to_cdna3
+138/373 Test #138: LegalizationTable.NoIllegalEntries_rdna1_to_cdna3 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 139: LegalizationTable.NoIllegalEntries_rdna1_to_cdna4
+139/373 Test #139: LegalizationTable.NoIllegalEntries_rdna1_to_cdna4 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 140: LegalizationTable.NoIllegalEntries_rdna1_to_rdna2
+140/373 Test #140: LegalizationTable.NoIllegalEntries_rdna1_to_rdna2 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 141: LegalizationTable.NoIllegalEntries_rdna1_to_rdna3
+141/373 Test #141: LegalizationTable.NoIllegalEntries_rdna1_to_rdna3 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 142: LegalizationTable.NoIllegalEntries_rdna1_to_rdna4
+142/373 Test #142: LegalizationTable.NoIllegalEntries_rdna1_to_rdna4 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 143: LegalizationTable.NoIllegalEntries_rdna2_to_rdna3
+143/373 Test #143: LegalizationTable.NoIllegalEntries_rdna2_to_rdna3 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 144: LegalizationTable.NoIllegalEntries_rdna2_to_rdna4
+144/373 Test #144: LegalizationTable.NoIllegalEntries_rdna2_to_rdna4 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 145: LegalizationTable.NoIllegalEntries_rdna3_5_to_rdna4
+145/373 Test #145: LegalizationTable.NoIllegalEntries_rdna3_5_to_rdna4 ...................................................................................................................................................................   Passed    0.01 sec
+        Start 146: LegalizationTable.NoIllegalEntries_rdna3_to_cdna4
+146/373 Test #146: LegalizationTable.NoIllegalEntries_rdna3_to_cdna4 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 147: LegalizationTable.NoIllegalEntries_rdna3_to_rdna4
+147/373 Test #147: LegalizationTable.NoIllegalEntries_rdna3_to_rdna4 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 148: LegalizationTable.NoIllegalEntries_rdna4_to_cdna4
+148/373 Test #148: LegalizationTable.NoIllegalEntries_rdna4_to_cdna4 .....................................................................................................................................................................   Passed    0.01 sec
+        Start 149: WaitcntTranslator.DecodeVmcnt0
+149/373 Test #149: WaitcntTranslator.DecodeVmcnt0 ........................................................................................................................................................................................   Passed    0.01 sec
+        Start 150: WaitcntTranslator.DecodeAllRelaxed
+150/373 Test #150: WaitcntTranslator.DecodeAllRelaxed ....................................................................................................................................................................................   Passed    0.01 sec
+        Start 151: WaitcntTranslator.DecodeVmcnt15Lgkm0
+151/373 Test #151: WaitcntTranslator.DecodeVmcnt15Lgkm0 ..................................................................................................................................................................................   Passed    0.01 sec
+        Start 152: WaitcntTranslator.EncodeAllZeroProducesMultipleWords
+152/373 Test #152: WaitcntTranslator.EncodeAllZeroProducesMultipleWords ..................................................................................................................................................................   Passed    0.01 sec
+        Start 153: WaitcntTranslator.EncodeAllRelaxedProducesNop
+153/373 Test #153: WaitcntTranslator.EncodeAllRelaxedProducesNop .........................................................................................................................................................................   Passed    0.01 sec
+        Start 154: WaitcntTranslator.EncodeVmcnt0EmitsLoadcntAndStorecnt
+154/373 Test #154: WaitcntTranslator.EncodeVmcnt0EmitsLoadcntAndStorecnt .................................................................................................................................................................   Passed    0.01 sec
+        Start 155: BinaryTranslatorE2E.TranslateVectorAddCdna4ToRdna4
+155/373 Test #155: BinaryTranslatorE2E.TranslateVectorAddCdna4ToRdna4 ....................................................................................................................................................................   Passed    0.01 sec
+        Start 156: BinaryTranslatorE2E.DescriptorPrologueRedirectsEntryWithoutOverwritingOriginalEntry
+156/373 Test #156: BinaryTranslatorE2E.DescriptorPrologueRedirectsEntryWithoutOverwritingOriginalEntry ...................................................................................................................................   Passed    0.01 sec
+        Start 157: BinaryTranslatorE2E.CaveOverflowLeavesCodeObjectUnchanged
+157/373 Test #157: BinaryTranslatorE2E.CaveOverflowLeavesCodeObjectUnchanged .............................................................................................................................................................   Passed    0.01 sec
+        Start 158: BinaryTranslatorE2E.OutputDecodesAsValidRdna4
+158/373 Test #158: BinaryTranslatorE2E.OutputDecodesAsValidRdna4 .........................................................................................................................................................................   Passed    0.01 sec
+        Start 159: BinaryTranslatorE2E.NoGfx9WaitcntInOutput
+159/373 Test #159: BinaryTranslatorE2E.NoGfx9WaitcntInOutput .............................................................................................................................................................................   Passed    0.01 sec
+        Start 160: BinaryTranslatorE2E.TextSizesMatch
+160/373 Test #160: BinaryTranslatorE2E.TextSizesMatch ....................................................................................................................................................................................   Passed    0.01 sec
+        Start 161: BinaryTranslatorE2E.WriteTranslatedElfToFile
+161/373 Test #161: BinaryTranslatorE2E.WriteTranslatedElfToFile ..........................................................................................................................................................................   Passed    0.01 sec
+        Start 162: BinaryTranslatorE2E.DumpTranslation
+162/373 Test #162: BinaryTranslatorE2E.DumpTranslation ...................................................................................................................................................................................   Passed    0.01 sec
+        Start 163: KernelDescriptorTranslator.Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGridPayload
+163/373 Test #163: KernelDescriptorTranslator.Cdna4ToRdna4MaterializesWorkgroupIdsFromTtmpGridPayload ....................................................................................................................................   Passed    0.01 sec
+        Start 164: KernelDescriptorTranslator.Cdna4ToRdna4MaterializesXOnlyWorkgroupId
+164/373 Test #164: KernelDescriptorTranslator.Cdna4ToRdna4MaterializesXOnlyWorkgroupId ...................................................................................................................................................   Passed    0.01 sec
+        Start 165: KernelDescriptorTranslator.Cdna4ToRdna4SkipsPrologueWhenNoWorkgroupIdsAreEnabled
+165/373 Test #165: KernelDescriptorTranslator.Cdna4ToRdna4SkipsPrologueWhenNoWorkgroupIdsAreEnabled ......................................................................................................................................   Passed    0.01 sec
+        Start 166: KernelDescriptorTranslator.CdnaAccVgprExpansionGrowsUnifiedVgprAllocationForRdna4
+166/373 Test #166: KernelDescriptorTranslator.CdnaAccVgprExpansionGrowsUnifiedVgprAllocationForRdna4 .....................................................................................................................................   Passed    0.01 sec
+        Start 167: KernelDescriptorTranslator.RdnaWave64UsesAmdhsaDescriptorVgprEncoding
+167/373 Test #167: KernelDescriptorTranslator.RdnaWave64UsesAmdhsaDescriptorVgprEncoding .................................................................................................................................................   Passed    0.01 sec
+        Start 168: CodeObjectPatcher.KernelEntryPrologueIs256ByteAligned
+168/373 Test #168: CodeObjectPatcher.KernelEntryPrologueIs256ByteAligned .................................................................................................................................................................   Passed    0.01 sec
+        Start 169: CodeObjectPatcher.KernelEntryPrologueRejectsOutOfRangeBranch
+169/373 Test #169: CodeObjectPatcher.KernelEntryPrologueRejectsOutOfRangeBranch ..........................................................................................................................................................   Passed    0.01 sec
+        Start 170: CodeObjectPatcher.RejectsOutOfRangeKernelDescriptorUpdates
+170/373 Test #170: CodeObjectPatcher.RejectsOutOfRangeKernelDescriptorUpdates ............................................................................................................................................................   Passed    0.01 sec
+        Start 171: MtypeFlagsTest.Gfx9GlcOff
+171/373 Test #171: MtypeFlagsTest.Gfx9GlcOff .............................................................................................................................................................................................   Passed    0.01 sec
+        Start 172: MtypeFlagsTest.Gfx9GlcOn
+172/373 Test #172: MtypeFlagsTest.Gfx9GlcOn ..............................................................................................................................................................................................   Passed    0.01 sec
+        Start 173: MtypeFlagsTest.Gfx940WaveScope
+173/373 Test #173: MtypeFlagsTest.Gfx940WaveScope ........................................................................................................................................................................................   Passed    0.01 sec
+        Start 174: MtypeFlagsTest.Gfx940DeviceScope
+174/373 Test #174: MtypeFlagsTest.Gfx940DeviceScope ......................................................................................................................................................................................   Passed    0.01 sec
+        Start 175: MtypeFlagsTest.Gfx940SystemScope
+175/373 Test #175: MtypeFlagsTest.Gfx940SystemScope ......................................................................................................................................................................................   Passed    0.01 sec
+        Start 176: MtypeFlagsTest.Gfx940SystemScopeBoth
+176/373 Test #176: MtypeFlagsTest.Gfx940SystemScopeBoth ..................................................................................................................................................................................   Passed    0.01 sec
+        Start 177: MtypeFlagsTest.Gfx940NonTemporal
+177/373 Test #177: MtypeFlagsTest.Gfx940NonTemporal ......................................................................................................................................................................................   Passed    0.01 sec
+        Start 178: MtypeFlagsTest.Gfx940NtOverridesScope
+178/373 Test #178: MtypeFlagsTest.Gfx940NtOverridesScope .................................................................................................................................................................................   Passed    0.01 sec
+        Start 179: MtypeFlagsTest.Gfx10AllOff
+179/373 Test #179: MtypeFlagsTest.Gfx10AllOff ............................................................................................................................................................................................   Passed    0.01 sec
+        Start 180: MtypeFlagsTest.Gfx10GlcOnly
+180/373 Test #180: MtypeFlagsTest.Gfx10GlcOnly ...........................................................................................................................................................................................   Passed    0.01 sec
+        Start 181: MtypeFlagsTest.Gfx10DlcOnly
+181/373 Test #181: MtypeFlagsTest.Gfx10DlcOnly ...........................................................................................................................................................................................   Passed    0.01 sec
+        Start 182: MtypeFlagsTest.Gfx10GlcAndDlc
+182/373 Test #182: MtypeFlagsTest.Gfx10GlcAndDlc .........................................................................................................................................................................................   Passed    0.01 sec
+        Start 183: MtypeFlagsTest.Gfx10SlcNonTemporal
+183/373 Test #183: MtypeFlagsTest.Gfx10SlcNonTemporal ....................................................................................................................................................................................   Passed    0.01 sec
+        Start 184: MtypeFlagsTest.Gfx10SlcOverrides
+184/373 Test #184: MtypeFlagsTest.Gfx10SlcOverrides ......................................................................................................................................................................................   Passed    0.01 sec
+        Start 185: MtypeFlagsTest.Gfx11CuScope
+185/373 Test #185: MtypeFlagsTest.Gfx11CuScope ...........................................................................................................................................................................................   Passed    0.01 sec
+        Start 186: MtypeFlagsTest.Gfx11DeviceScope
+186/373 Test #186: MtypeFlagsTest.Gfx11DeviceScope .......................................................................................................................................................................................   Passed    0.01 sec
+        Start 187: MtypeFlagsTest.Gfx11SystemScope
+187/373 Test #187: MtypeFlagsTest.Gfx11SystemScope .......................................................................................................................................................................................   Passed    0.01 sec
+        Start 188: MtypeFlagsTest.Gfx11NonTemporal
+188/373 Test #188: MtypeFlagsTest.Gfx11NonTemporal .......................................................................................................................................................................................   Passed    0.01 sec
+        Start 189: MtypeFlagsTest.Gfx11NtOverridesScope
+189/373 Test #189: MtypeFlagsTest.Gfx11NtOverridesScope ..................................................................................................................................................................................   Passed    0.01 sec
+        Start 190: MtypeFlagsTest.Gfx12CuScope
+190/373 Test #190: MtypeFlagsTest.Gfx12CuScope ...........................................................................................................................................................................................   Passed    0.01 sec
+        Start 191: MtypeFlagsTest.Gfx12SeScope
+191/373 Test #191: MtypeFlagsTest.Gfx12SeScope ...........................................................................................................................................................................................   Passed    0.01 sec
+        Start 192: MtypeFlagsTest.Gfx12DeviceScope
+192/373 Test #192: MtypeFlagsTest.Gfx12DeviceScope .......................................................................................................................................................................................   Passed    0.01 sec
+        Start 193: MtypeFlagsTest.Gfx12SystemScope
+193/373 Test #193: MtypeFlagsTest.Gfx12SystemScope .......................................................................................................................................................................................   Passed    0.01 sec
+        Start 194: MtypeFlagsTest.Gfx12NonTemporal
+194/373 Test #194: MtypeFlagsTest.Gfx12NonTemporal .......................................................................................................................................................................................   Passed    0.01 sec
+        Start 195: MtypeFlagsTest.Gfx12NtOverridesScope
+195/373 Test #195: MtypeFlagsTest.Gfx12NtOverridesScope ..................................................................................................................................................................................   Passed    0.01 sec
+        Start 196: MtypeFlagsTest.ScopeNtHelper
+196/373 Test #196: MtypeFlagsTest.ScopeNtHelper ..........................................................................................................................................................................................   Passed    0.01 sec
+        Start 197: KfdIoctlTest.SetMemoryPolicy
+197/373 Test #197: KfdIoctlTest.SetMemoryPolicy ..........................................................................................................................................................................................   Passed    0.40 sec
+        Start 198: KfdIoctlTest.ImportDmabufAndQueryInfo
+198/373 Test #198: KfdIoctlTest.ImportDmabufAndQueryInfo .................................................................................................................................................................................   Passed    0.39 sec
+        Start 199: KfdIoctlTest.SvmSetAndGetAttributes
+199/373 Test #199: KfdIoctlTest.SvmSetAndGetAttributes ...................................................................................................................................................................................   Passed    0.40 sec
+        Start 200: KfdIoctlTest.RuntimeEnableAndDisable
+200/373 Test #200: KfdIoctlTest.RuntimeEnableAndDisable ..................................................................................................................................................................................   Passed    0.40 sec
+        Start 201: WaitCounterTest.IncrementVmcnt
+201/373 Test #201: WaitCounterTest.IncrementVmcnt ........................................................................................................................................................................................   Passed    0.01 sec
+        Start 202: WaitCounterTest.DecrementVmcnt
+202/373 Test #202: WaitCounterTest.DecrementVmcnt ........................................................................................................................................................................................   Passed    0.01 sec
+        Start 203: WaitCounterTest.IncrementLgkmcnt
+203/373 Test #203: WaitCounterTest.IncrementLgkmcnt ......................................................................................................................................................................................   Passed    0.01 sec
+        Start 204: WaitCounterTest.IncrementExpcnt
+204/373 Test #204: WaitCounterTest.IncrementExpcnt .......................................................................................................................................................................................   Passed    0.01 sec
+        Start 205: WaitCounterTest.IncrementVscnt
+205/373 Test #205: WaitCounterTest.IncrementVscnt ........................................................................................................................................................................................   Passed    0.01 sec
+        Start 206: WaitCounterTest.IncrementStorecnt
+206/373 Test #206: WaitCounterTest.IncrementStorecnt .....................................................................................................................................................................................   Passed    0.01 sec
+        Start 207: WaitCounterTest.IncrementLoadcnt
+207/373 Test #207: WaitCounterTest.IncrementLoadcnt ......................................................................................................................................................................................   Passed    0.01 sec
+        Start 208: WaitCounterTest.IncrementDscnt
+208/373 Test #208: WaitCounterTest.IncrementDscnt ........................................................................................................................................................................................   Passed    0.01 sec
+        Start 209: WaitCounterTest.IncrementKmcnt
+209/373 Test #209: WaitCounterTest.IncrementKmcnt ........................................................................................................................................................................................   Passed    0.01 sec
+        Start 210: WaitCounterTest.DecrementDscnt
+210/373 Test #210: WaitCounterTest.DecrementDscnt ........................................................................................................................................................................................   Passed    0.01 sec
+        Start 211: WaitCounterTest.DecrementKmcnt
+211/373 Test #211: WaitCounterTest.DecrementKmcnt ........................................................................................................................................................................................   Passed    0.01 sec
+        Start 212: WaitCounterTest.MixedDscntKmcnt
+212/373 Test #212: WaitCounterTest.MixedDscntKmcnt .......................................................................................................................................................................................   Passed    0.01 sec
+        Start 213: WaitCounterTest.SaturationAtMax
+213/373 Test #213: WaitCounterTest.SaturationAtMax .......................................................................................................................................................................................   Passed    0.01 sec
+        Start 214: WaitTargetTest.DefaultSatisfied
+214/373 Test #214: WaitTargetTest.DefaultSatisfied .......................................................................................................................................................................................   Passed    0.01 sec
+        Start 215: WaitTargetTest.VmcntNotSatisfied
+215/373 Test #215: WaitTargetTest.VmcntNotSatisfied ......................................................................................................................................................................................   Passed    0.01 sec
+        Start 216: WaitTargetTest.VmcntSatisfied
+216/373 Test #216: WaitTargetTest.VmcntSatisfied .........................................................................................................................................................................................   Passed    0.01 sec
+        Start 217: WaitTargetTest.DscntNotSatisfied
+217/373 Test #217: WaitTargetTest.DscntNotSatisfied ......................................................................................................................................................................................   Passed    0.01 sec
+        Start 218: WaitTargetTest.MultipleCounters
+218/373 Test #218: WaitTargetTest.MultipleCounters .......................................................................................................................................................................................   Passed    0.01 sec
+        Start 219: InstructionExecutionHarness.Cdna1
+219/373 Test #219: InstructionExecutionHarness.Cdna1 .....................................................................................................................................................................................   Passed    0.03 sec
+        Start 220: InstructionExecutionHarness.Cdna2
+220/373 Test #220: InstructionExecutionHarness.Cdna2 .....................................................................................................................................................................................   Passed    0.03 sec
+        Start 221: InstructionExecutionHarness.Cdna3
+221/373 Test #221: InstructionExecutionHarness.Cdna3 .....................................................................................................................................................................................   Passed    0.03 sec
+        Start 222: InstructionExecutionHarness.Cdna4
+222/373 Test #222: InstructionExecutionHarness.Cdna4 .....................................................................................................................................................................................   Passed    0.03 sec
+        Start 223: InstructionExecutionHarness.Rdna1
+223/373 Test #223: InstructionExecutionHarness.Rdna1 .....................................................................................................................................................................................   Passed    0.03 sec
+        Start 224: InstructionExecutionHarness.Rdna2
+224/373 Test #224: InstructionExecutionHarness.Rdna2 .....................................................................................................................................................................................   Passed    0.03 sec
+        Start 225: InstructionExecutionHarness.Rdna3
+225/373 Test #225: InstructionExecutionHarness.Rdna3 .....................................................................................................................................................................................   Passed    0.03 sec
+        Start 226: InstructionExecutionHarness.Rdna3_5
+226/373 Test #226: InstructionExecutionHarness.Rdna3_5 ...................................................................................................................................................................................   Passed    0.04 sec
+        Start 227: InstructionExecutionHarness.Rdna4
+227/373 Test #227: InstructionExecutionHarness.Rdna4 .....................................................................................................................................................................................   Passed    0.03 sec
+        Start 228: DecodeExecuteBenchmark.Cdna4
+228/373 Test #228: DecodeExecuteBenchmark.Cdna4 ..........................................................................................................................................................................................   Passed    0.13 sec
+        Start 229: DecodeExecuteBenchmark.Rdna4
+229/373 Test #229: DecodeExecuteBenchmark.Rdna4 ..........................................................................................................................................................................................   Passed    0.12 sec
+        Start 230: ExecutionPluginTest.SimpleKernelFiresHooks
+230/373 Test #230: ExecutionPluginTest.SimpleKernelFiresHooks ............................................................................................................................................................................   Passed    0.01 sec
+        Start 231: ExecutionPluginTest.BarrierFiresHooks
+231/373 Test #231: ExecutionPluginTest.BarrierFiresHooks .................................................................................................................................................................................   Passed    0.01 sec
+        Start 232: ExecutionPluginTest.NoPluginNoCrash
+232/373 Test #232: ExecutionPluginTest.NoPluginNoCrash ...................................................................................................................................................................................   Passed    0.01 sec
+        Start 233: ExecutionPluginTest.RiscvInstructionHook
+233/373 Test #233: ExecutionPluginTest.RiscvInstructionHook ..............................................................................................................................................................................   Passed    0.01 sec
+        Start 234: Cdna/IsaTest.RegisterAccess/cdna3  # GetParam() = "cdna3"
+234/373 Test #234: Cdna/IsaTest.RegisterAccess/cdna3  # GetParam() = "cdna3" .............................................................................................................................................................   Passed    0.01 sec
+        Start 235: Cdna/IsaTest.RegisterAccess/cdna4  # GetParam() = "cdna4"
+235/373 Test #235: Cdna/IsaTest.RegisterAccess/cdna4  # GetParam() = "cdna4" .............................................................................................................................................................   Passed    0.01 sec
+        Start 236: Cdna/IsaTest.RegisterFileIsolation/cdna3  # GetParam() = "cdna3"
+236/373 Test #236: Cdna/IsaTest.RegisterFileIsolation/cdna3  # GetParam() = "cdna3" ......................................................................................................................................................   Passed    0.01 sec
+        Start 237: Cdna/IsaTest.RegisterFileIsolation/cdna4  # GetParam() = "cdna4"
+237/373 Test #237: Cdna/IsaTest.RegisterFileIsolation/cdna4  # GetParam() = "cdna4" ......................................................................................................................................................   Passed    0.01 sec
+        Start 238: Cdna/IsaTest.DispatchAndCapacity/cdna3  # GetParam() = "cdna3"
+238/373 Test #238: Cdna/IsaTest.DispatchAndCapacity/cdna3  # GetParam() = "cdna3" ........................................................................................................................................................   Passed    0.01 sec
+        Start 239: Cdna/IsaTest.DispatchAndCapacity/cdna4  # GetParam() = "cdna4"
+239/373 Test #239: Cdna/IsaTest.DispatchAndCapacity/cdna4  # GetParam() = "cdna4" ........................................................................................................................................................   Passed    0.01 sec
+        Start 240: Cdna/IsaTest.DispatchCreatesWavefronts/cdna3  # GetParam() = "cdna3"
+240/373 Test #240: Cdna/IsaTest.DispatchCreatesWavefronts/cdna3  # GetParam() = "cdna3" ..................................................................................................................................................   Passed    0.01 sec
+        Start 241: Cdna/IsaTest.DispatchCreatesWavefronts/cdna4  # GetParam() = "cdna4"
+241/373 Test #241: Cdna/IsaTest.DispatchCreatesWavefronts/cdna4  # GetParam() = "cdna4" ..................................................................................................................................................   Passed    0.01 sec
+        Start 242: Cdna/IsaTest.MultipleWavesPerWorkgroup/cdna3  # GetParam() = "cdna3"
+242/373 Test #242: Cdna/IsaTest.MultipleWavesPerWorkgroup/cdna3  # GetParam() = "cdna3" ..................................................................................................................................................   Passed    0.01 sec
+        Start 243: Cdna/IsaTest.MultipleWavesPerWorkgroup/cdna4  # GetParam() = "cdna4"
+243/373 Test #243: Cdna/IsaTest.MultipleWavesPerWorkgroup/cdna4  # GetParam() = "cdna4" ..................................................................................................................................................   Passed    0.01 sec
+        Start 244: Cdna/IsaTest.RunToCompletion/cdna3  # GetParam() = "cdna3"
+244/373 Test #244: Cdna/IsaTest.RunToCompletion/cdna3  # GetParam() = "cdna3" ............................................................................................................................................................   Passed    0.01 sec
+        Start 245: Cdna/IsaTest.RunToCompletion/cdna4  # GetParam() = "cdna4"
+245/373 Test #245: Cdna/IsaTest.RunToCompletion/cdna4  # GetParam() = "cdna4" ............................................................................................................................................................   Passed    0.01 sec
+        Start 246: Cdna/IsaTest.StepExecutesAndHalts/cdna3  # GetParam() = "cdna3"
+246/373 Test #246: Cdna/IsaTest.StepExecutesAndHalts/cdna3  # GetParam() = "cdna3" .......................................................................................................................................................   Passed    0.01 sec
+        Start 247: Cdna/IsaTest.StepExecutesAndHalts/cdna4  # GetParam() = "cdna4"
+247/373 Test #247: Cdna/IsaTest.StepExecutesAndHalts/cdna4  # GetParam() = "cdna4" .......................................................................................................................................................   Passed    0.01 sec
+        Start 248: Cdna/IsaTest.RoundRobinScheduling/cdna3  # GetParam() = "cdna3"
+248/373 Test #248: Cdna/IsaTest.RoundRobinScheduling/cdna3  # GetParam() = "cdna3" .......................................................................................................................................................   Passed    0.01 sec
+        Start 249: Cdna/IsaTest.RoundRobinScheduling/cdna4  # GetParam() = "cdna4"
+249/373 Test #249: Cdna/IsaTest.RoundRobinScheduling/cdna4  # GetParam() = "cdna4" .......................................................................................................................................................   Passed    0.01 sec
+        Start 250: Cdna/IsaTest.EngineRunsToCompletion/cdna3  # GetParam() = "cdna3"
+250/373 Test #250: Cdna/IsaTest.EngineRunsToCompletion/cdna3  # GetParam() = "cdna3" .....................................................................................................................................................   Passed    0.01 sec
+        Start 251: Cdna/IsaTest.EngineRunsToCompletion/cdna4  # GetParam() = "cdna4"
+251/373 Test #251: Cdna/IsaTest.EngineRunsToCompletion/cdna4  # GetParam() = "cdna4" .....................................................................................................................................................   Passed    0.01 sec
+        Start 252: Cdna/IsaTest.SMovB32_InlineConst/cdna3  # GetParam() = "cdna3"
+252/373 Test #252: Cdna/IsaTest.SMovB32_InlineConst/cdna3  # GetParam() = "cdna3" ........................................................................................................................................................   Passed    0.01 sec
+        Start 253: Cdna/IsaTest.SMovB32_InlineConst/cdna4  # GetParam() = "cdna4"
+253/373 Test #253: Cdna/IsaTest.SMovB32_InlineConst/cdna4  # GetParam() = "cdna4" ........................................................................................................................................................   Passed    0.01 sec
+        Start 254: Cdna/IsaTest.SMovB32_SgprToSgpr/cdna3  # GetParam() = "cdna3"
+254/373 Test #254: Cdna/IsaTest.SMovB32_SgprToSgpr/cdna3  # GetParam() = "cdna3" .........................................................................................................................................................   Passed    0.01 sec
+        Start 255: Cdna/IsaTest.SMovB32_SgprToSgpr/cdna4  # GetParam() = "cdna4"
+255/373 Test #255: Cdna/IsaTest.SMovB32_SgprToSgpr/cdna4  # GetParam() = "cdna4" .........................................................................................................................................................   Passed    0.01 sec
+        Start 256: Cdna/IsaTest.SAddI32_NoOverflow/cdna3  # GetParam() = "cdna3"
+256/373 Test #256: Cdna/IsaTest.SAddI32_NoOverflow/cdna3  # GetParam() = "cdna3" .........................................................................................................................................................   Passed    0.01 sec
+        Start 257: Cdna/IsaTest.SAddI32_NoOverflow/cdna4  # GetParam() = "cdna4"
+257/373 Test #257: Cdna/IsaTest.SAddI32_NoOverflow/cdna4  # GetParam() = "cdna4" .........................................................................................................................................................   Passed    0.01 sec
+        Start 258: Cdna/IsaTest.SAddI32_Overflow/cdna3  # GetParam() = "cdna3"
+258/373 Test #258: Cdna/IsaTest.SAddI32_Overflow/cdna3  # GetParam() = "cdna3" ...........................................................................................................................................................   Passed    0.01 sec
+        Start 259: Cdna/IsaTest.SAddI32_Overflow/cdna4  # GetParam() = "cdna4"
+259/373 Test #259: Cdna/IsaTest.SAddI32_Overflow/cdna4  # GetParam() = "cdna4" ...........................................................................................................................................................   Passed    0.01 sec
+        Start 260: Cdna/IsaTest.SAddU32_Carry/cdna3  # GetParam() = "cdna3"
+260/373 Test #260: Cdna/IsaTest.SAddU32_Carry/cdna3  # GetParam() = "cdna3" ..............................................................................................................................................................   Passed    0.01 sec
+        Start 261: Cdna/IsaTest.SAddU32_Carry/cdna4  # GetParam() = "cdna4"
+261/373 Test #261: Cdna/IsaTest.SAddU32_Carry/cdna4  # GetParam() = "cdna4" ..............................................................................................................................................................   Passed    0.01 sec
+        Start 262: Cdna/IsaTest.SAddU32_NoCarry/cdna3  # GetParam() = "cdna3"
+262/373 Test #262: Cdna/IsaTest.SAddU32_NoCarry/cdna3  # GetParam() = "cdna3" ............................................................................................................................................................   Passed    0.01 sec
+        Start 263: Cdna/IsaTest.SAddU32_NoCarry/cdna4  # GetParam() = "cdna4"
+263/373 Test #263: Cdna/IsaTest.SAddU32_NoCarry/cdna4  # GetParam() = "cdna4" ............................................................................................................................................................   Passed    0.01 sec
+        Start 264: Cdna/IsaTest.SCmpEqI32_Equal/cdna3  # GetParam() = "cdna3"
+264/373 Test #264: Cdna/IsaTest.SCmpEqI32_Equal/cdna3  # GetParam() = "cdna3" ............................................................................................................................................................   Passed    0.01 sec
+        Start 265: Cdna/IsaTest.SCmpEqI32_Equal/cdna4  # GetParam() = "cdna4"
+265/373 Test #265: Cdna/IsaTest.SCmpEqI32_Equal/cdna4  # GetParam() = "cdna4" ............................................................................................................................................................   Passed    0.01 sec
+        Start 266: Cdna/IsaTest.SCmpEqI32_NotEqual/cdna3  # GetParam() = "cdna3"
+266/373 Test #266: Cdna/IsaTest.SCmpEqI32_NotEqual/cdna3  # GetParam() = "cdna3" .........................................................................................................................................................   Passed    0.01 sec
+        Start 267: Cdna/IsaTest.SCmpEqI32_NotEqual/cdna4  # GetParam() = "cdna4"
+267/373 Test #267: Cdna/IsaTest.SCmpEqI32_NotEqual/cdna4  # GetParam() = "cdna4" .........................................................................................................................................................   Passed    0.01 sec
+        Start 268: Cdna/IsaTest.SCmpGtI32/cdna3  # GetParam() = "cdna3"
+268/373 Test #268: Cdna/IsaTest.SCmpGtI32/cdna3  # GetParam() = "cdna3" ..................................................................................................................................................................   Passed    0.01 sec
+        Start 269: Cdna/IsaTest.SCmpGtI32/cdna4  # GetParam() = "cdna4"
+269/373 Test #269: Cdna/IsaTest.SCmpGtI32/cdna4  # GetParam() = "cdna4" ..................................................................................................................................................................   Passed    0.01 sec
+        Start 270: Cdna/IsaTest.SBranch_Forward/cdna3  # GetParam() = "cdna3"
+270/373 Test #270: Cdna/IsaTest.SBranch_Forward/cdna3  # GetParam() = "cdna3" ............................................................................................................................................................   Passed    0.01 sec
+        Start 271: Cdna/IsaTest.SBranch_Forward/cdna4  # GetParam() = "cdna4"
+271/373 Test #271: Cdna/IsaTest.SBranch_Forward/cdna4  # GetParam() = "cdna4" ............................................................................................................................................................   Passed    0.01 sec
+        Start 272: Cdna/IsaTest.SCbranchScc0_Taken/cdna3  # GetParam() = "cdna3"
+272/373 Test #272: Cdna/IsaTest.SCbranchScc0_Taken/cdna3  # GetParam() = "cdna3" .........................................................................................................................................................   Passed    0.01 sec
+        Start 273: Cdna/IsaTest.SCbranchScc0_Taken/cdna4  # GetParam() = "cdna4"
+273/373 Test #273: Cdna/IsaTest.SCbranchScc0_Taken/cdna4  # GetParam() = "cdna4" .........................................................................................................................................................   Passed    0.01 sec
+        Start 274: Cdna/IsaTest.SCbranchScc0_NotTaken/cdna3  # GetParam() = "cdna3"
+274/373 Test #274: Cdna/IsaTest.SCbranchScc0_NotTaken/cdna3  # GetParam() = "cdna3" ......................................................................................................................................................   Passed    0.01 sec
+        Start 275: Cdna/IsaTest.SCbranchScc0_NotTaken/cdna4  # GetParam() = "cdna4"
+275/373 Test #275: Cdna/IsaTest.SCbranchScc0_NotTaken/cdna4  # GetParam() = "cdna4" ......................................................................................................................................................   Passed    0.01 sec
+        Start 276: Cdna/IsaTest.SCbranchScc1_Taken/cdna3  # GetParam() = "cdna3"
+276/373 Test #276: Cdna/IsaTest.SCbranchScc1_Taken/cdna3  # GetParam() = "cdna3" .........................................................................................................................................................   Passed    0.01 sec
+        Start 277: Cdna/IsaTest.SCbranchScc1_Taken/cdna4  # GetParam() = "cdna4"
+277/373 Test #277: Cdna/IsaTest.SCbranchScc1_Taken/cdna4  # GetParam() = "cdna4" .........................................................................................................................................................   Passed    0.01 sec
+        Start 278: Cdna/IsaTest.SEndpgm_Halts/cdna3  # GetParam() = "cdna3"
+278/373 Test #278: Cdna/IsaTest.SEndpgm_Halts/cdna3  # GetParam() = "cdna3" ..............................................................................................................................................................   Passed    0.01 sec
+        Start 279: Cdna/IsaTest.SEndpgm_Halts/cdna4  # GetParam() = "cdna4"
+279/373 Test #279: Cdna/IsaTest.SEndpgm_Halts/cdna4  # GetParam() = "cdna4" ..............................................................................................................................................................   Passed    0.01 sec
+        Start 280: Cdna/IsaTest.VMovB32_PerLane/cdna3  # GetParam() = "cdna3"
+280/373 Test #280: Cdna/IsaTest.VMovB32_PerLane/cdna3  # GetParam() = "cdna3" ............................................................................................................................................................   Passed    0.01 sec
+        Start 281: Cdna/IsaTest.VMovB32_PerLane/cdna4  # GetParam() = "cdna4"
+281/373 Test #281: Cdna/IsaTest.VMovB32_PerLane/cdna4  # GetParam() = "cdna4" ............................................................................................................................................................   Passed    0.01 sec
+        Start 282: Cdna/IsaTest.VAddF32_PerLane/cdna3  # GetParam() = "cdna3"
+282/373 Test #282: Cdna/IsaTest.VAddF32_PerLane/cdna3  # GetParam() = "cdna3" ............................................................................................................................................................   Passed    0.01 sec
+        Start 283: Cdna/IsaTest.VAddF32_PerLane/cdna4  # GetParam() = "cdna4"
+283/373 Test #283: Cdna/IsaTest.VAddF32_PerLane/cdna4  # GetParam() = "cdna4" ............................................................................................................................................................   Passed    0.01 sec
+        Start 284: Cdna/IsaTest.VMulF32_PerLane/cdna3  # GetParam() = "cdna3"
+284/373 Test #284: Cdna/IsaTest.VMulF32_PerLane/cdna3  # GetParam() = "cdna3" ............................................................................................................................................................   Passed    0.01 sec
+        Start 285: Cdna/IsaTest.VMulF32_PerLane/cdna4  # GetParam() = "cdna4"
+285/373 Test #285: Cdna/IsaTest.VMulF32_PerLane/cdna4  # GetParam() = "cdna4" ............................................................................................................................................................   Passed    0.01 sec
+        Start 286: Cdna/IsaTest.VAddU32_PerLane/cdna3  # GetParam() = "cdna3"
+286/373 Test #286: Cdna/IsaTest.VAddU32_PerLane/cdna3  # GetParam() = "cdna3" ............................................................................................................................................................   Passed    0.01 sec
+        Start 287: Cdna/IsaTest.VAddU32_PerLane/cdna4  # GetParam() = "cdna4"
+287/373 Test #287: Cdna/IsaTest.VAddU32_PerLane/cdna4  # GetParam() = "cdna4" ............................................................................................................................................................   Passed    0.01 sec
+        Start 288: Cdna/IsaTest.VCmpEqF32_SetsVCC/cdna3  # GetParam() = "cdna3"
+288/373 Test #288: Cdna/IsaTest.VCmpEqF32_SetsVCC/cdna3  # GetParam() = "cdna3" ..........................................................................................................................................................   Passed    0.01 sec
+        Start 289: Cdna/IsaTest.VCmpEqF32_SetsVCC/cdna4  # GetParam() = "cdna4"
+289/373 Test #289: Cdna/IsaTest.VCmpEqF32_SetsVCC/cdna4  # GetParam() = "cdna4" ..........................................................................................................................................................   Passed    0.01 sec
+        Start 290: Cdna/IsaTest.VCndmaskB32/cdna3  # GetParam() = "cdna3"
+290/373 Test #290: Cdna/IsaTest.VCndmaskB32/cdna3  # GetParam() = "cdna3" ................................................................................................................................................................   Passed    0.01 sec
+        Start 291: Cdna/IsaTest.VCndmaskB32/cdna4  # GetParam() = "cdna4"
+291/373 Test #291: Cdna/IsaTest.VCndmaskB32/cdna4  # GetParam() = "cdna4" ................................................................................................................................................................   Passed    0.01 sec
+        Start 292: Cdna/IsaTest.ExecMask_PreservesInactiveLanes/cdna3  # GetParam() = "cdna3"
+292/373 Test #292: Cdna/IsaTest.ExecMask_PreservesInactiveLanes/cdna3  # GetParam() = "cdna3" ............................................................................................................................................   Passed    0.01 sec
+        Start 293: Cdna/IsaTest.ExecMask_PreservesInactiveLanes/cdna4  # GetParam() = "cdna4"
+293/373 Test #293: Cdna/IsaTest.ExecMask_PreservesInactiveLanes/cdna4  # GetParam() = "cdna4" ............................................................................................................................................   Passed    0.01 sec
+        Start 294: Cdna/IsaTest.MultiInstructionProgram/cdna3  # GetParam() = "cdna3"
+294/373 Test #294: Cdna/IsaTest.MultiInstructionProgram/cdna3  # GetParam() = "cdna3" ....................................................................................................................................................   Passed    0.01 sec
+        Start 295: Cdna/IsaTest.MultiInstructionProgram/cdna4  # GetParam() = "cdna4"
+295/373 Test #295: Cdna/IsaTest.MultiInstructionProgram/cdna4  # GetParam() = "cdna4" ....................................................................................................................................................   Passed    0.01 sec
+        Start 296: Cdna/IsaTest.BranchLoop/cdna3  # GetParam() = "cdna3"
+296/373 Test #296: Cdna/IsaTest.BranchLoop/cdna3  # GetParam() = "cdna3" .................................................................................................................................................................   Passed    0.01 sec
+        Start 297: Cdna/IsaTest.BranchLoop/cdna4  # GetParam() = "cdna4"
+297/373 Test #297: Cdna/IsaTest.BranchLoop/cdna4  # GetParam() = "cdna4" .................................................................................................................................................................   Passed    0.01 sec
+        Start 298: Cdna/IsaTest.MfmaF16Accumulation/cdna3  # GetParam() = "cdna3"
+298/373 Test #298: Cdna/IsaTest.MfmaF16Accumulation/cdna3  # GetParam() = "cdna3" ........................................................................................................................................................   Passed    0.01 sec
+        Start 299: Cdna/IsaTest.MfmaF16Accumulation/cdna4  # GetParam() = "cdna4"
+299/373 Test #299: Cdna/IsaTest.MfmaF16Accumulation/cdna4  # GetParam() = "cdna4" ........................................................................................................................................................   Passed    0.01 sec
+        Start 300: Cdna/IsaTest.MfmaF16AccumulationPatterned/cdna3  # GetParam() = "cdna3"
+300/373 Test #300: Cdna/IsaTest.MfmaF16AccumulationPatterned/cdna3  # GetParam() = "cdna3" ...............................................................................................................................................   Passed    0.01 sec
+        Start 301: Cdna/IsaTest.MfmaF16AccumulationPatterned/cdna4  # GetParam() = "cdna4"
+301/373 Test #301: Cdna/IsaTest.MfmaF16AccumulationPatterned/cdna4  # GetParam() = "cdna4" ...............................................................................................................................................   Passed    0.01 sec
+        Start 302: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna1_s_nop  # GetParam() = 40-byte object <00-00 00-00 FC-7F 00-00 2C-6C 26-00 00-00 00-00 00-00 80-BF 00-00 00-00 25-44 27-00 00-00 00-00 04-00 00-00 FC-7F 00-00>
+302/373 Test #302: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna1_s_nop  # GetParam() = 40-byte object <00-00 00-00 FC-7F 00-00 2C-6C 26-00 00-00 00-00 00-00 80-BF 00-00 00-00 25-44 27-00 00-00 00-00 04-00 00-00 FC-7F 00-00> ........   Passed    0.01 sec
+        Start 303: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna1_s_endpgm  # GetParam() = 40-byte object <00-00 00-00 00-00 00-00 2C-6C 26-00 00-00 00-00 00-00 81-BF FC-7F 00-00 22-67 26-00 00-00 00-00 04-00 00-00 00-00 00-00>
+303/373 Test #303: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna1_s_endpgm  # GetParam() = 40-byte object <00-00 00-00 00-00 00-00 2C-6C 26-00 00-00 00-00 00-00 81-BF FC-7F 00-00 22-67 26-00 00-00 00-00 04-00 00-00 00-00 00-00> .....   Passed    0.01 sec
+        Start 304: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna2_s_nop  # GetParam() = 40-byte object <01-00 00-00 FC-7F 00-00 32-6C 26-00 00-00 00-00 00-00 80-BF 00-00 00-00 25-44 27-00 00-00 00-00 04-00 00-00 FC-7F 00-00>
+304/373 Test #304: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna2_s_nop  # GetParam() = 40-byte object <01-00 00-00 FC-7F 00-00 32-6C 26-00 00-00 00-00 00-00 80-BF 00-00 00-00 25-44 27-00 00-00 00-00 04-00 00-00 FC-7F 00-00> ........   Passed    0.01 sec
+        Start 305: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna2_s_endpgm  # GetParam() = 40-byte object <01-00 00-00 00-00 00-00 32-6C 26-00 00-00 00-00 00-00 81-BF 00-00 00-00 22-67 26-00 00-00 00-00 04-00 00-00 FC-7F 00-00>
+305/373 Test #305: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna2_s_endpgm  # GetParam() = 40-byte object <01-00 00-00 00-00 00-00 32-6C 26-00 00-00 00-00 00-00 81-BF 00-00 00-00 22-67 26-00 00-00 00-00 04-00 00-00 FC-7F 00-00> .....   Passed    0.01 sec
+        Start 306: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna3_s_nop  # GetParam() = 40-byte object <02-00 00-00 00-00 00-00 5C-E4 26-00 00-00 00-00 00-00 80-BF FC-7F 00-00 25-44 27-00 00-00 00-00 04-00 00-00 FC-7F 00-00>
+306/373 Test #306: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna3_s_nop  # GetParam() = 40-byte object <02-00 00-00 00-00 00-00 5C-E4 26-00 00-00 00-00 00-00 80-BF FC-7F 00-00 25-44 27-00 00-00 00-00 04-00 00-00 FC-7F 00-00> ........   Passed    0.01 sec
+        Start 307: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna3_s_endpgm  # GetParam() = 40-byte object <02-00 00-00 74-75 00-00 5C-E4 26-00 00-00 00-00 00-00 81-BF 74-75 00-00 22-67 26-00 00-00 00-00 04-00 00-00 00-00 00-00>
+307/373 Test #307: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna3_s_endpgm  # GetParam() = 40-byte object <02-00 00-00 74-75 00-00 5C-E4 26-00 00-00 00-00 00-00 81-BF 74-75 00-00 22-67 26-00 00-00 00-00 04-00 00-00 00-00 00-00> .....   Passed    0.01 sec
+        Start 308: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna4_s_nop  # GetParam() = 40-byte object <03-00 00-00 FC-7F 00-00 B3-EF 27-00 00-00 00-00 00-00 80-BF FC-7F 00-00 25-44 27-00 00-00 00-00 04-00 00-00 FC-7F 00-00>
+308/373 Test #308: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna4_s_nop  # GetParam() = 40-byte object <03-00 00-00 FC-7F 00-00 B3-EF 27-00 00-00 00-00 00-00 80-BF FC-7F 00-00 25-44 27-00 00-00 00-00 04-00 00-00 FC-7F 00-00> ........   Passed    0.01 sec
+        Start 309: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna4_s_endpgm  # GetParam() = 40-byte object <03-00 00-00 00-00 00-00 B3-EF 27-00 00-00 00-00 00-00 81-BF 00-00 00-00 22-67 26-00 00-00 00-00 04-00 00-00 D0-D2 D3-E0>
+309/373 Test #309: AllIsas/DecoderSmokeTest.DecodesCorrectly/cdna4_s_endpgm  # GetParam() = 40-byte object <03-00 00-00 00-00 00-00 B3-EF 27-00 00-00 00-00 00-00 81-BF 00-00 00-00 22-67 26-00 00-00 00-00 04-00 00-00 D0-D2 D3-E0> .....   Passed    0.01 sec
+        Start 310: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna1_s_nop  # GetParam() = 40-byte object <04-00 00-00 00-00 00-00 DE-1D 26-00 00-00 00-00 00-00 80-BF 00-00 00-00 25-44 27-00 00-00 00-00 04-00 00-00 FC-7F 00-00>
+310/373 Test #310: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna1_s_nop  # GetParam() = 40-byte object <04-00 00-00 00-00 00-00 DE-1D 26-00 00-00 00-00 00-00 80-BF 00-00 00-00 25-44 27-00 00-00 00-00 04-00 00-00 FC-7F 00-00> ........   Passed    0.01 sec
+        Start 311: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna1_s_endpgm  # GetParam() = 40-byte object <04-00 00-00 00-00 00-00 DE-1D 26-00 00-00 00-00 00-00 81-BF 74-75 00-00 22-67 26-00 00-00 00-00 04-00 00-00 FC-7F 00-00>
+311/373 Test #311: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna1_s_endpgm  # GetParam() = 40-byte object <04-00 00-00 00-00 00-00 DE-1D 26-00 00-00 00-00 00-00 81-BF 74-75 00-00 22-67 26-00 00-00 00-00 04-00 00-00 FC-7F 00-00> .....   Passed    0.01 sec
+        Start 312: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna2_s_nop  # GetParam() = 40-byte object <05-00 00-00 00-00 00-00 F5-6B 27-00 00-00 00-00 00-00 80-BF FC-7F 00-00 25-44 27-00 00-00 00-00 04-00 00-00 00-00 00-00>
+312/373 Test #312: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna2_s_nop  # GetParam() = 40-byte object <05-00 00-00 00-00 00-00 F5-6B 27-00 00-00 00-00 00-00 80-BF FC-7F 00-00 25-44 27-00 00-00 00-00 04-00 00-00 00-00 00-00> ........   Passed    0.01 sec
+        Start 313: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna2_s_endpgm  # GetParam() = 40-byte object <05-00 00-00 00-00 00-00 F5-6B 27-00 00-00 00-00 00-00 81-BF 00-00 00-00 22-67 26-00 00-00 00-00 04-00 00-00 00-00 00-00>
+313/373 Test #313: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna2_s_endpgm  # GetParam() = 40-byte object <05-00 00-00 00-00 00-00 F5-6B 27-00 00-00 00-00 00-00 81-BF 00-00 00-00 22-67 26-00 00-00 00-00 04-00 00-00 00-00 00-00> .....   Passed    0.01 sec
+        Start 314: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna3_s_nop  # GetParam() = 40-byte object <06-00 00-00 00-00 00-00 77-C2 26-00 00-00 00-00 00-00 80-BF 00-00 00-00 25-44 27-00 00-00 00-00 04-00 00-00 FC-7F 00-00>
+314/373 Test #314: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna3_s_nop  # GetParam() = 40-byte object <06-00 00-00 00-00 00-00 77-C2 26-00 00-00 00-00 00-00 80-BF 00-00 00-00 25-44 27-00 00-00 00-00 04-00 00-00 FC-7F 00-00> ........   Passed    0.01 sec
+        Start 315: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna3_s_endpgm  # GetParam() = 40-byte object <06-00 00-00 00-00 00-00 77-C2 26-00 00-00 00-00 00-00 B0-BF FC-7F 00-00 22-67 26-00 00-00 00-00 04-00 00-00 00-00 00-00>
+315/373 Test #315: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna3_s_endpgm  # GetParam() = 40-byte object <06-00 00-00 00-00 00-00 77-C2 26-00 00-00 00-00 00-00 B0-BF FC-7F 00-00 22-67 26-00 00-00 00-00 04-00 00-00 00-00 00-00> .....   Passed    0.01 sec
+        Start 316: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna3_5_s_nop  # GetParam() = 40-byte object <07-00 00-00 00-00 00-00 51-9B 27-00 00-00 00-00 00-00 80-BF 00-00 00-00 25-44 27-00 00-00 00-00 04-00 00-00 00-00 00-00>
+316/373 Test #316: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna3_5_s_nop  # GetParam() = 40-byte object <07-00 00-00 00-00 00-00 51-9B 27-00 00-00 00-00 00-00 80-BF 00-00 00-00 25-44 27-00 00-00 00-00 04-00 00-00 00-00 00-00> ......   Passed    0.01 sec
+        Start 317: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna3_5_s_endpgm  # GetParam() = 40-byte object <07-00 00-00 00-00 00-00 51-9B 27-00 00-00 00-00 00-00 B0-BF FC-7F 00-00 22-67 26-00 00-00 00-00 04-00 00-00 00-00 00-00>
+317/373 Test #317: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna3_5_s_endpgm  # GetParam() = 40-byte object <07-00 00-00 00-00 00-00 51-9B 27-00 00-00 00-00 00-00 B0-BF FC-7F 00-00 22-67 26-00 00-00 00-00 04-00 00-00 00-00 00-00> ...   Passed    0.01 sec
+        Start 318: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna4_s_nop  # GetParam() = 40-byte object <08-00 00-00 FC-7F 00-00 74-B0 26-00 00-00 00-00 00-00 80-BF FC-7F 00-00 25-44 27-00 00-00 00-00 04-00 00-00 00-00 00-00>
+318/373 Test #318: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna4_s_nop  # GetParam() = 40-byte object <08-00 00-00 FC-7F 00-00 74-B0 26-00 00-00 00-00 00-00 80-BF FC-7F 00-00 25-44 27-00 00-00 00-00 04-00 00-00 00-00 00-00> ........   Passed    0.01 sec
+        Start 319: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna4_s_endpgm  # GetParam() = 40-byte object <08-00 00-00 00-00 00-00 74-B0 26-00 00-00 00-00 00-00 B0-BF 00-00 00-00 22-67 26-00 00-00 00-00 04-00 00-00 00-00 00-00>
+319/373 Test #319: AllIsas/DecoderSmokeTest.DecodesCorrectly/rdna4_s_endpgm  # GetParam() = 40-byte object <08-00 00-00 00-00 00-00 74-B0 26-00 00-00 00-00 00-00 B0-BF 00-00 00-00 22-67 26-00 00-00 00-00 04-00 00-00 00-00 00-00> .....   Passed    0.01 sec
+        Start 320: MubufLds/MubufLdsModifierTest.LdsModifierInDisassembly/cdna4_without_lds  # GetParam() = 32-byte object <03-00 00-00 00-00 00-00 B3-EF 27-00 00-00 00-00 00-00 50-E0 00-00 00-00 00-44 5B-9E FC-7F 00-00>
+320/373 Test #320: MubufLds/MubufLdsModifierTest.LdsModifierInDisassembly/cdna4_without_lds  # GetParam() = 32-byte object <03-00 00-00 00-00 00-00 B3-EF 27-00 00-00 00-00 00-00 50-E0 00-00 00-00 00-44 5B-9E FC-7F 00-00> .............   Passed    0.01 sec
+        Start 321: MubufLds/MubufLdsModifierTest.LdsModifierInDisassembly/cdna4_with_lds  # GetParam() = 32-byte object <03-00 00-00 00-00 00-00 B3-EF 27-00 00-00 00-00 00-00 51-E0 00-00 00-00 01-45 5B-9E FC-7F 00-00>
+321/373 Test #321: MubufLds/MubufLdsModifierTest.LdsModifierInDisassembly/cdna4_with_lds  # GetParam() = 32-byte object <03-00 00-00 00-00 00-00 B3-EF 27-00 00-00 00-00 00-00 51-E0 00-00 00-00 01-45 5B-9E FC-7F 00-00> ................   Passed    0.01 sec
+        Start 322: MubufLds/MubufLdsModifierTest.LdsModifierInDisassembly/cdna1_without_lds  # GetParam() = 32-byte object <00-00 00-00 00-00 00-00 2C-6C 26-00 00-00 00-00 00-00 50-E0 00-00 00-00 00-47 5B-9E FC-7F 00-00>
+322/373 Test #322: MubufLds/MubufLdsModifierTest.LdsModifierInDisassembly/cdna1_without_lds  # GetParam() = 32-byte object <00-00 00-00 00-00 00-00 2C-6C 26-00 00-00 00-00 00-00 50-E0 00-00 00-00 00-47 5B-9E FC-7F 00-00> .............   Passed    0.01 sec
+        Start 323: MubufLds/MubufLdsModifierTest.LdsModifierInDisassembly/cdna1_with_lds  # GetParam() = 32-byte object <00-00 00-00 00-00 00-00 2C-6C 26-00 00-00 00-00 00-00 51-E0 00-00 00-00 01-00 00-00 00-00 00-00>
+323/373 Test #323: MubufLds/MubufLdsModifierTest.LdsModifierInDisassembly/cdna1_with_lds  # GetParam() = 32-byte object <00-00 00-00 00-00 00-00 2C-6C 26-00 00-00 00-00 00-00 51-E0 00-00 00-00 01-00 00-00 00-00 00-00> ................   Passed    0.01 sec
+        Start 324: AllIsas/CuFactoryTest.CreatesSuccessfully/0
+324/373 Test #324: AllIsas/CuFactoryTest.CreatesSuccessfully/0 ...........................................................................................................................................................................   Passed    0.01 sec
+        Start 325: AllIsas/CuFactoryTest.CreatesSuccessfully/1
+325/373 Test #325: AllIsas/CuFactoryTest.CreatesSuccessfully/1 ...........................................................................................................................................................................   Passed    0.01 sec
+        Start 326: AllIsas/CuFactoryTest.CreatesSuccessfully/2
+326/373 Test #326: AllIsas/CuFactoryTest.CreatesSuccessfully/2 ...........................................................................................................................................................................   Passed    0.01 sec
+        Start 327: AllIsas/CuFactoryTest.CreatesSuccessfully/3
+327/373 Test #327: AllIsas/CuFactoryTest.CreatesSuccessfully/3 ...........................................................................................................................................................................   Passed    0.01 sec
+        Start 328: AllIsas/CuFactoryTest.CreatesSuccessfully/4
+328/373 Test #328: AllIsas/CuFactoryTest.CreatesSuccessfully/4 ...........................................................................................................................................................................   Passed    0.01 sec
+        Start 329: AllIsas/CuFactoryTest.CreatesSuccessfully/5
+329/373 Test #329: AllIsas/CuFactoryTest.CreatesSuccessfully/5 ...........................................................................................................................................................................   Passed    0.01 sec
+        Start 330: AllIsas/CuFactoryTest.CreatesSuccessfully/6
+330/373 Test #330: AllIsas/CuFactoryTest.CreatesSuccessfully/6 ...........................................................................................................................................................................   Passed    0.01 sec
+        Start 331: AllIsas/CuFactoryTest.CreatesSuccessfully/7
+331/373 Test #331: AllIsas/CuFactoryTest.CreatesSuccessfully/7 ...........................................................................................................................................................................   Passed    0.01 sec
+        Start 332: AllIsas/CuFactoryTest.CreatesSuccessfully/8
+332/373 Test #332: AllIsas/CuFactoryTest.CreatesSuccessfully/8 ...........................................................................................................................................................................   Passed    0.01 sec
+        Start 333: RocminfoTest.ExitsSuccessfully
+333/373 Test #333: RocminfoTest.ExitsSuccessfully ........................................................................................................................................................................................   Passed    0.10 sec
+        Start 334: RocminfoTest.InterposerActive
+334/373 Test #334: RocminfoTest.InterposerActive .........................................................................................................................................................................................   Passed    0.10 sec
+        Start 335: RocminfoTest.HsaSystemAttributes
+335/373 Test #335: RocminfoTest.HsaSystemAttributes ......................................................................................................................................................................................   Passed    0.10 sec
+        Start 336: RocminfoTest.DetectsGpuAgent
+336/373 Test #336: RocminfoTest.DetectsGpuAgent ..........................................................................................................................................................................................   Passed    0.10 sec
+        Start 337: RocminfoTest.ReportsGfx950
+337/373 Test #337: RocminfoTest.ReportsGfx950 ............................................................................................................................................................................................   Passed    0.10 sec
+        Start 338: RocminfoTest.ReportsWavefrontSize
+338/373 Test #338: RocminfoTest.ReportsWavefrontSize .....................................................................................................................................................................................   Passed    0.10 sec
+        Start 339: HsaTest.InitSucceeded
+339/373 Test #339: HsaTest.InitSucceeded .................................................................................................................................................................................................   Passed    0.09 sec
+        Start 340: HsaTest.GpuAgentFound
+340/373 Test #340: HsaTest.GpuAgentFound .................................................................................................................................................................................................   Passed    0.09 sec
+        Start 341: hip_memcpy_test
+341/373 Test #341: hip_memcpy_test .......................................................................................................................................................................................................   Passed    0.24 sec
+        Start 342: HipMemcpyTest.RoundTripFloat
+342/373 Test #342: HipMemcpyTest.RoundTripFloat ..........................................................................................................................................................................................   Passed    0.16 sec
+        Start 343: HipMemcpyTest.RoundTripInt
+343/373 Test #343: HipMemcpyTest.RoundTripInt ............................................................................................................................................................................................   Passed    0.15 sec
+        Start 344: HipMemcpyTest.DeviceToDevice
+344/373 Test #344: HipMemcpyTest.DeviceToDevice ..........................................................................................................................................................................................   Passed    0.17 sec
+        Start 345: HipMemcpyTest.LargeCopy_16MB
+345/373 Test #345: HipMemcpyTest.LargeCopy_16MB ..........................................................................................................................................................................................   Passed    0.10 sec
+        Start 346: HipMemcpyTest.LargeCopy_256MB
+346/373 Test #346: HipMemcpyTest.LargeCopy_256MB .........................................................................................................................................................................................   Passed    0.10 sec
+        Start 347: HipMemcpyTest.ReuseAfterFree
+347/373 Test #347: HipMemcpyTest.ReuseAfterFree ..........................................................................................................................................................................................   Passed    0.10 sec
+        Start 348: hip_vector_add_test
+348/373 Test #348: hip_vector_add_test ...................................................................................................................................................................................................   Passed    0.20 sec
+        Start 349: RocblasGemmTest.Tiny_2x2x3

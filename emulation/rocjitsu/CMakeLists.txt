@@ -158,6 +158,7 @@ rj_setup_python_venv(
   OUT_VENV_DIR RJ_TESTS_VENV_DIR
   OUT_PYTHON RJ_TESTS_PYTHON_EXECUTABLE
   OUT_PROGRAM_DIRS RJ_TESTS_VENV_PROGRAM_DIRS
+  OUT_INCLUDE_DIRS RJ_TESTS_VENV_INCLUDE_DIRS
   OUT_LIBRARY_DIRS RJ_TESTS_VENV_LIBRARY_DIRS
 )
 
@@ -300,11 +301,9 @@ add_custom_command(
 add_custom_target(rocjitsu_generate_amdgpu_isa
   DEPENDS "${RJ_AMDGPU_ISA_CODEGEN_STAMP}")
 
-set(RJ_AMDGPU_ISA_TARGETS
-  rocjitsu_isa_cdna1 rocjitsu_isa_cdna2 rocjitsu_isa_cdna3 rocjitsu_isa_cdna4
-  rocjitsu_isa_rdna1 rocjitsu_isa_rdna2 rocjitsu_isa_rdna3 rocjitsu_isa_rdna3_5
-  rocjitsu_isa_rdna4)
-foreach(target IN LISTS RJ_AMDGPU_ISA_TARGETS)
+get_property(RJ_AMDGPU_ISA_CONSUMER_TARGETS GLOBAL PROPERTY RJ_AMDGPU_ISA_CONSUMER_TARGETS)
+list(REMOVE_DUPLICATES RJ_AMDGPU_ISA_CONSUMER_TARGETS)
+foreach(target IN LISTS RJ_AMDGPU_ISA_CONSUMER_TARGETS)
   if(TARGET ${target})
     add_dependencies(${target} rocjitsu_generate_amdgpu_isa)
   endif()

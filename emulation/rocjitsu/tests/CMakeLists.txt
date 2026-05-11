@@ -91,14 +91,24 @@ set(RJ_KMD_PRELOAD_ENV
     "HSA_ENABLE_SDMA=1"
 )
 
+set(RJ_TESTS_ROCM_INCLUDE_DIRS ${RJ_TESTS_VENV_INCLUDE_DIRS})
+list(APPEND RJ_TESTS_ROCM_INCLUDE_DIRS /opt/rocm/include)
+
 # --- rocminfo test (requires rocminfo binary + HSA runtime + LD_PRELOAD) ---
 # Spawns rocminfo as a subprocess against the simulated GPU and validates output.
 
 find_program(ROCMINFO_EXECUTABLE NAMES rocminfo
-    HINTS ${RJ_TESTS_VENV_PROGRAM_DIRS} ${CMAKE_SOURCE_DIR}/.venv ENV ROCM_PATH /opt/rocm
-    PATH_SUFFIXES bin
+    HINTS ${RJ_TESTS_VENV_PROGRAM_DIRS}
+    NO_DEFAULT_PATH
     DOC "Path to the rocminfo executable"
 )
+if(NOT ROCMINFO_EXECUTABLE)
+    find_program(ROCMINFO_EXECUTABLE NAMES rocminfo
+        HINTS ${CMAKE_SOURCE_DIR}/.venv ENV ROCM_PATH /opt/rocm
+        PATH_SUFFIXES bin
+        DOC "Path to the rocminfo executable"
+    )
+endif()
 if(ROCMINFO_EXECUTABLE)
     add_executable(rocminfo_test rocminfo_test.cpp)
     target_compile_definitions(rocminfo_test PRIVATE
@@ -145,11 +155,15 @@ endif()
 
 find_library(HSA_RUNTIME64 hsa-runtime64
     HINTS ${RJ_TESTS_VENV_LIBRARY_DIRS}
-    PATHS /opt/rocm/lib ENV ROCM_PATH
-    PATH_SUFFIXES lib)
+    NO_DEFAULT_PATH)
+if(NOT HSA_RUNTIME64)
+    find_library(HSA_RUNTIME64 hsa-runtime64
+        PATHS /opt/rocm/lib ENV ROCM_PATH
+        PATH_SUFFIXES lib)
+endif()
 if(HSA_RUNTIME64)
     add_executable(hsa_init_test hsa_init_test.cpp)
-    target_include_directories(hsa_init_test PRIVATE /opt/rocm/include ${HSA_INCLUDE_DIR})
+    target_include_directories(hsa_init_test PRIVATE ${RJ_TESTS_ROCM_INCLUDE_DIRS} ${HSA_INCLUDE_DIR})
     target_link_libraries(hsa_init_test PRIVATE ${HSA_RUNTIME64} GTest::gtest)
     target_link_options(hsa_init_test PRIVATE -Wl,-rpath,/opt/rocm/lib)
     # Use explicit add_test rather than gtest_discover_tests: gtest_discover_tests
@@ -190,7 +204,7 @@ if(HSA_RUNTIME64)
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
             ${CMAKE_SOURCE_DIR}/lib/util/include
-            /opt/rocm/include)
+            ${RJ_TESTS_ROCM_INCLUDE_DIRS})
         target_link_libraries(hsa_translate_test PRIVATE
             ${RJ_OBJECT_LIBS} ${HSA_RUNTIME64} GTest::gtest GTest::gtest_main)
         target_link_options(hsa_translate_test PRIVATE -Wl,-rpath,/opt/rocm/lib)
@@ -227,8 +241,12 @@ endif()
 
 find_program(HIPCC_EXECUTABLE hipcc
     HINTS ${RJ_TESTS_VENV_PROGRAM_DIRS}
-    PATHS /opt/rocm/bin ENV ROCM_PATH
-    PATH_SUFFIXES bin)
+    NO_DEFAULT_PATH)
+if(NOT HIPCC_EXECUTABLE)
+    find_program(HIPCC_EXECUTABLE hipcc
+        PATHS /opt/rocm/bin ENV ROCM_PATH
+        PATH_SUFFIXES bin)
+endif()
 if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
@@ -278,15 +296,31 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     # --- rocBLAS GEMM test ---
     find_library(ROCBLAS_LIB rocblas
         HINTS ${RJ_TESTS_VENV_LIBRARY_DIRS}
-        PATHS /opt/rocm/lib ENV ROCM_PATH
-        PATH_SUFFIXES lib)
+        NO_DEFAULT_PATH)
+    if(NOT ROCBLAS_LIB)
+        find_library(ROCBLAS_LIB rocblas
+            PATHS /opt/rocm/lib ENV ROCM_PATH
+            PATH_SUFFIXES lib)
+    endif()
     if(ROCBLAS_LIB)
+        find_path(ROCBLAS_INCLUDE_DIR rocblas/rocblas.h
+            HINTS ${RJ_TESTS_VENV_INCLUDE_DIRS}
+            NO_DEFAULT_PATH)
+        if(NOT ROCBLAS_INCLUDE_DIR)
+            find_path(ROCBLAS_INCLUDE_DIR rocblas/rocblas.h
+                PATHS /opt/rocm/include ENV ROCM_PATH
+                PATH_SUFFIXES include)
+        endif()
+        if(NOT ROCBLAS_INCLUDE_DIR)
+            message(FATAL_ERROR "rocBLAS library was found, but rocblas/rocblas.h was not found")
+        endif()
         get_filename_component(ROCBLAS_LIB_DIR ${ROCBLAS_LIB} DIRECTORY)
         set(GEMM_SRC ${CMAKE_CURRENT_SOURCE_DIR}/hip_gemm_test.cpp)
         set(GEMM_BIN ${CMAKE_CURRENT_BINARY_DIR}/hip_gemm_test)
         add_custom_command(OUTPUT ${GEMM_BIN}
             COMMAND ${HIPCC_EXECUTABLE} --offload-arch=gfx950 -std=c++20
                 -isystem ${GTEST_INC}
+                -isystem ${ROCBLAS_INCLUDE_DIR}
                 -L${GTEST_LIB_DIR} -L${ROCBLAS_LIB_DIR} -lgtest -lpthread -lrocblas
                 -Wl,-rpath,${GTEST_LIB_DIR}
                 -o ${GEMM_BIN} ${GEMM_SRC}
