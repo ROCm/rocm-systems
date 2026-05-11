@@ -8,6 +8,13 @@
 Building RCCL from source
 *************************
 
+To build RCCL as part of the ROCm Core SDK, see `TheRock build instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build RCCL standalone using the following
+instructions.
+
 To build RCCL directly from the source code, follow these steps. This guide also includes
 instructions explaining how to test the build.
 For information on using the quick start install script to build RCCL, see :doc:`installation`.
@@ -24,7 +31,6 @@ Build and install RCCL using the install script
 ===============================================
 
 To quickly install RCCL using the install script, follow these steps.
-For instructions on building RCCL from the source code, see :doc:`building-installing`.
 For additional tips, see :doc:`../how-to/rccl-usage-tips`.
 
 Quick start RCCL build
@@ -156,7 +162,7 @@ Building the RCCL package and install package:
 ----------------------------------------------
 
 After you have cloned the repository and built the library as described in the previous section,
-use this command to build the package:
+use this command to build the package on Debian-based distros:
 
 .. code-block:: shell
 
