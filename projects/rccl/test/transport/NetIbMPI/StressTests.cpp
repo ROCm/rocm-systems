@@ -276,5 +276,52 @@ TEST_F(NetIbMPITest, InlineSendBoundary) {
 // E8.  MixedSizeBarrage — 25 sizes from 1B to 64MB on a single connection.
 //      Exercises alignment boundaries, AR threshold, inline paths, and
 //      large-MR registration.
+TEST_F(NetIbMPITest, MixedSizeBarrage) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    ConnectionPair cp;
+    NetConnectionGuard guard(net_);
+    SetupConnectionWithGuard(0, cp, guard);
+
+    const size_t maxSz = 64 * 1024 * 1024; // 64 MB
+    auto buf = makeHostBufferAutoGuard(malloc(maxSz));
+    ASSERT_NE(buf.get(), nullptr);
+
+    void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
+    void* mh = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf.get(), maxSz, NCCL_PTR_HOST, &mh), ncclSuccess);
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+    const size_t sizes[] = {
+        1, 7, 13, 64, 127, 128, 129, 255, 256, 512,
+        1023, 1024, 4095, 4096, 8191, 8192, 8193,
+        16384, 32768, 65536, 131072,
+        1048576,   // 1 MB
+        4194304,   // 4 MB
+        16777216,  // 16 MB
+        67108864   // 64 MB
+    };
+
+    int tag = 0;
+    for (size_t sz : sizes) {
+        int timeout = (sz > 1024 * 1024) ? kLargeTransferTimeoutMs : kDefaultTimeoutMs;
+        DoSendRecv(cp.sendComm, cp.recvComm,
+                   buf.get(), buf.get(), sz,
+                   tag, mh, mh,
+                   /*patternSeed=*/tag, timeout);
+        tag++;
+    }
+}
+
+// =====================================================================
+//  Group A: Resource exhaustion (2-rank)
+// =====================================================================
+
+// A2.  FifoPressureSenderFast — receiver deliberately slow, sender in
+//      tight loop.  Verifies that isend returns *request==NULL when the
+//      FIFO slot is not ready (backpressure, net_ib.cc:2535).
 
 #endif /* MPI_TESTS_ENABLED */
