@@ -62,6 +62,9 @@ const reg_base_offset_table* sienna_cichlid_reg_base_init() {
     // HW has more IP blocks,  only initialize the blocks needed
     init_hwip(GC_HWIP, GC_BASE);
     init_hwip(ATHUB_HWIP, ATHUB_BASE);
+    // Temporary patch for gfx1250 before IP Discovery is enabled for rocprofv3
+    reg_table->reg_offset[GC_HWIP][8][1] = 0x6000;
+
     return reg_table;
   }();
 
@@ -85,13 +88,19 @@ const reg_base_offset_table* navi_ip_offset_table_discovery_sysfs(uint32_t domai
 
   // helper lambda to initialize blocks
   auto init_hwip = [&](amd_hw_ip_block_type hwip, const auto& entry) {
-    std::copy(std::begin(entry.segments), std::end(entry.segments),
-              std::begin(reg_table->reg_offset[hwip][entry.instance]));
+    if (hwip == AIGC_HWIP)
+      std::copy(std::begin(entry.segments), std::end(entry.segments),
+                std::begin(reg_table->reg_offset[GC_HWIP][entry.instance+8]));
+    else
+      std::copy(std::begin(entry.segments), std::end(entry.segments),
+                std::begin(reg_table->reg_offset[hwip][entry.instance]));
   };
 
   for (auto& entry : table) {
     if (entry.ipname == "gc") {
       init_hwip(GC_HWIP, entry);
+    } else if (entry.ipname == "aigc") {
+      init_hwip(AIGC_HWIP, entry);
     } else if (entry.ipname == "athub") {
       init_hwip(ATHUB_HWIP, entry);
     }

@@ -10,15 +10,14 @@ from typing import Any, Dict, List
 
 from perfxpert.knowledge import load_yaml
 from perfxpert.tools._class import ToolClass, tool_class
+from perfxpert.tools._pmc_limits import pmc_block_limit
 
 # TCC-derived metrics must be isolated to their own rocprofv3 pass
-# Ref: CLAUDE.md — FETCH_SIZE/WRITE_SIZE each need own pass
+# Ref: knowledge/rocprofv3_counter_limits.yaml
 _TCC_DERIVED = frozenset({"FETCH_SIZE", "WRITE_SIZE"})
 
 
-def _build_multi_pass_escalation(
-    passes: List[List[str]], gpu_arch: str
-) -> Dict[str, Any]:
+def _build_multi_pass_escalation(passes: List[List[str]], gpu_arch: str) -> Dict[str, Any]:
     """Return concrete guidance for multi-pass counter collection."""
     pass_specs = [
         {
@@ -53,8 +52,7 @@ def _build_multi_pass_escalation(
             {
                 "tool": "rocprofv3",
                 "description": (
-                    "Write one pmc group per line, then collect the requested "
-                    "passes with rocprofv3 -i."
+                    "Write one pmc group per line, then collect the requested " "passes with rocprofv3 -i."
                 ),
                 "full_command": "rocprofv3 -i pmc_groups.txt -- ./app",
             },
@@ -83,6 +81,7 @@ def lookup_info(name: str, gfx_id: str = None) -> Dict[str, Any]:
             return {
                 "name": name,
                 "block": entry["block"],
+                "block_limit": pmc_block_limit(entry["block"], gfx_id or ""),
                 "unit": entry.get("unit", "count"),
                 "description": entry.get("description", ""),
             }
@@ -109,7 +108,6 @@ def validate_for_gpu(counter_list: List[str], gpu_arch: str) -> Dict[str, Any]:
           "escalation": {...} | None,
         }
     """
-    limits_cfg = load_yaml("pmc_limits")["per_block_limits"]
     catalog = load_yaml("counter_catalog")
 
     # Build name → block index from the flat catalog
@@ -117,12 +115,6 @@ def validate_for_gpu(counter_list: List[str], gpu_arch: str) -> Dict[str, Any]:
     # TCC-derived counters are implicitly TCC block
     for derived in _TCC_DERIVED:
         name_to_block.setdefault(derived, "TCC")
-
-    def _limit_for(block: str) -> int:
-        """Look up per-pass limit, preferring arch-specific override."""
-        info = limits_cfg.get(block, {})
-        arch_key = f"{gpu_arch}_limit"
-        return int(info.get(arch_key, info.get("limit", 4)))
 
     # Separate TCC-derived counters — each gets its own pass (anti-Sakana)
     derived = [c for c in counter_list if c in _TCC_DERIVED]
@@ -139,7 +131,7 @@ def validate_for_gpu(counter_list: List[str], gpu_arch: str) -> Dict[str, Any]:
     active: List[str] = []
     active_counts: Dict[str, int] = {}
     for block, names in by_block.items():
-        lim = _limit_for(block)
+        lim = pmc_block_limit(block, gpu_arch)
         for c in names:
             if active_counts.get(block, 0) >= lim:
                 passes.append(active)

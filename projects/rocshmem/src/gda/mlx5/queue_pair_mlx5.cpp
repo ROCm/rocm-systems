@@ -73,6 +73,11 @@ __device__ static inline uint16_t mlx5_wqe_idx(const gda_mlx5_device_sq& sq, uin
   return static_cast<uint16_t>(sq.post + lane_id);
 }
 
+__device__ static inline uint16_t mlx5_sq_idx(const gda_mlx5_device_sq& sq, uint16_t wqe_idx) {
+  // sq.depth is a power of 2, so just mask off everything above that
+  return wqe_idx & sq.depth_mask;
+}
+
 __device__ void QueuePair::mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_wqe& wqe) {
   // sq_wqebb_counter is the least significant bits of the post counter
   uint16_t sq_wqebb_counter = static_cast<uint16_t>(sq_post);
@@ -264,7 +269,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, ui
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, wf_info.pe_group_logical_lane_id);
-  uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
+  uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
 
   // can we inline the data into the WQE?
   bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
@@ -296,7 +301,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t la
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, 0);
-  uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
+  uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
 
   // can we inline the data into the WQE?
   bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
@@ -344,7 +349,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, wf_info.pe_group_logical_lane_id);
-  uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
+  uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
@@ -394,7 +399,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, 0);
-  uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
+  uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,

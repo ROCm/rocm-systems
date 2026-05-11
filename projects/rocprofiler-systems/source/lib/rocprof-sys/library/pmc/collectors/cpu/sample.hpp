@@ -26,9 +26,9 @@ struct sample : trace_cache::cacheable_t
     };
 
     sample() = default;
-    sample(enabled_metrics _settings, uint32_t _device_id, uint64_t _timestamp,
-           const process_metrics& _process_data, std::vector<uint8_t> _freqs,
-           std::vector<uint8_t> _loads)
+    sample(enabled_metrics _settings, std::uint32_t _device_id, std::uint64_t _timestamp,
+           const process_metrics& _process_data, std::vector<std::uint8_t> _freqs,
+           std::vector<std::uint8_t> _loads)
     : enabled_metric(_settings)
     , device_id(_device_id)
     , timestamp(_timestamp)
@@ -37,21 +37,21 @@ struct sample : trace_cache::cacheable_t
     , loads(std::move(_loads))
     {}
 
-    enabled_metrics      enabled_metric{};
-    uint32_t             device_id = 0;
-    uint64_t             timestamp = 0;
-    process_metrics      process_data{};
-    std::vector<uint8_t> freqs;  // serialized cpu_id+freq pairs
-    std::vector<uint8_t> loads;  // serialized cpu_id+load pairs
+    enabled_metrics           enabled_metric{};
+    std::uint32_t             device_id = 0;
+    std::uint64_t             timestamp = 0;
+    process_metrics           process_data{};
+    std::vector<std::uint8_t> freqs;  // serialized cpu_id+freq pairs
+    std::vector<std::uint8_t> loads;  // serialized cpu_id+load pairs
 };
 
-inline std::vector<uint8_t>
+inline std::vector<std::uint8_t>
 serialize_frequencies(const std::vector<per_cpu_metrics>& cpu_data)
 {
     constexpr size_t idx_size   = sizeof(size_t);
     constexpr size_t value_size = sizeof(float);
 
-    std::vector<uint8_t> result;
+    std::vector<std::uint8_t> result;
     result.resize(cpu_data.size() * (idx_size + value_size));
 
     size_t offset = 0;
@@ -65,13 +65,13 @@ serialize_frequencies(const std::vector<per_cpu_metrics>& cpu_data)
     return result;
 }
 
-inline std::vector<uint8_t>
+inline std::vector<std::uint8_t>
 serialize_loads(const std::vector<per_cpu_metrics>& cpu_data)
 {
     constexpr size_t idx_size   = sizeof(size_t);
     constexpr size_t value_size = sizeof(double);
 
-    std::vector<uint8_t> result;
+    std::vector<std::uint8_t> result;
     result.resize(cpu_data.size() * (idx_size + value_size));
 
     size_t offset = 0;
@@ -92,9 +92,9 @@ namespace rocprofsys::trace_cache
 
 template <>
 inline void
-serialize(uint8_t* buffer, const pmc::collectors::cpu::sample& item)
+serialize(std::uint8_t* buffer, const pmc::collectors::cpu::sample& item)
 {
-    utility::store_value(buffer, static_cast<uint32_t>(item.enabled_metric.value),
+    utility::store_value(buffer, static_cast<std::uint32_t>(item.enabled_metric.value),
                          item.device_id, item.timestamp, item.process_data.page_rss,
                          item.process_data.virt_mem, item.process_data.peak_rss,
                          item.process_data.context_switches,
@@ -104,7 +104,7 @@ serialize(uint8_t* buffer, const pmc::collectors::cpu::sample& item)
 
 template <>
 inline pmc::collectors::cpu::sample
-deserialize(uint8_t*& buffer)
+deserialize(std::uint8_t*& buffer)
 {
     pmc::collectors::cpu::sample item;
     utility::parse_value(buffer, item.enabled_metric.value, item.device_id,
@@ -121,8 +121,8 @@ inline size_t
 get_size(const pmc::collectors::cpu::sample& item)
 {
     return utility::get_size(
-        static_cast<uint32_t>(item.enabled_metric.value), item.device_id, item.timestamp,
-        item.process_data.page_rss, item.process_data.virt_mem,
+        static_cast<std::uint32_t>(item.enabled_metric.value), item.device_id,
+        item.timestamp, item.process_data.page_rss, item.process_data.virt_mem,
         item.process_data.peak_rss, item.process_data.context_switches,
         item.process_data.page_faults, item.process_data.user_mode_time,
         item.process_data.kernel_mode_time, item.freqs, item.loads);

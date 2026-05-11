@@ -43,6 +43,7 @@
 #include <shared_mutex>
 
 namespace amd {
+namespace roc { struct GraphSignalPool; }
 class Command;
 class CommandQueue;
 class ReadMemoryCommand;
@@ -283,6 +284,9 @@ struct Info : public amd::EmbeddedObject {
   //! Maximum number of work-items in a work-group executing a kernel
   //  using the data-parallel execution model.
   size_t maxWorkGroupSize_;
+
+  //! Maximum grid dimensions (from HSA_AGENT_INFO_GRID_MAX_DIM). Work-items per dimension.
+  uint32_t maxGridDim_[3];
 
   //! Preferred number of work-items in a work-group executing a kernel
   //  using the data-parallel execution model.
@@ -710,7 +714,7 @@ class Settings : public amd::HeapObject {
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
       uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
-      uint reserved_ : 12;
+      uint reserved_ : 10;
     };
     uint value_;
   };
@@ -1351,6 +1355,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
 
   //! Returns fence state of the VirtualGPU
   virtual bool isFenceDirty() const = 0;
+  //! Insert a system scope on the next dispatch
+  virtual void addSystemScope() {}
   //! Init hidden heap for device memory allocations
   virtual void HiddenHeapInit() = 0;
 
@@ -1454,6 +1460,23 @@ class MemObjMap : public AllStatic {
 
   //!< Find the mem object based on the input pointer, outputs the offset
   static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
+  //!< Batched version: find multiple mem objects in one lock acquisition
+  static void FindMemObjBatch(const void* const* ptrs, size_t count,
+                              std::vector<amd::Memory*>& memories,
+                              std::vector<size_t>& offsets, Device* dev = nullptr);
+  //!< Batched pairs version: find src/dst pairs in one lock acquisition
+  static void FindMemObjBatchPairs(const void* const* srcs, const void* const* dsts,
+                                   size_t count,
+                                   std::vector<amd::Memory*>& src_memories,
+                                   std::vector<amd::Memory*>& dst_memories,
+                                   std::vector<size_t>& src_offsets,
+                                   std::vector<size_t>& dst_offsets,
+                                   Device* dev = nullptr);
+  //!< Single pair version: find one src/dst pair in one lock acquisition
+  static void FindMemObjPairs(const void* src, const void* dst,
+                              amd::Memory*& src_memory, amd::Memory*& dst_memory,
+                              size_t& src_offset, size_t& dst_offset,
+                              Device* dev = nullptr);
   static void UpdateAccess(amd::Device* peerDev);
   //!< Purge all user allocated memories on the given device
   static void Purge(amd::Device* dev);
@@ -1472,10 +1495,22 @@ class MemObjMap : public AllStatic {
   //!< Same as FindMemObj but for ipc handle to MemObj mapping
   static amd::Memory* FindIpcHandleMemObj(const IpcMemHandle& k);
 
+  //!< Atomically find and remove a mem object by ptr. Returns the removed Memory* or nullptr.
+  static amd::Memory* FindAndRemoveMemObj(const void* k);
+
   //!< Shared read/write lock for all MemObjMap operations (including per-device maps)
   static std::shared_mutex AllocatedLock_;
 
  private:
+  // Helper struct for memory object lookup results
+  struct LookupResult {
+    amd::Memory* memory;
+    size_t offset;
+  };
+
+  //!< Core lookup helper used by all FindMemObj* functions. Caller must hold AllocatedLock_.
+  static LookupResult findMemObjNoLock(const void* ptr, Device* dev);
+
   //!< the mem object<->hostptr information container
   static std::map<uintptr_t, amd::Memory*> MemObjMap_;
   //!< the virtual mem object<->hostptr information container
@@ -1811,6 +1846,9 @@ class Device : public RuntimeObject {
   ///! Allocates a device signal object
   virtual device::Signal* createSignal() const = 0;
 
+  ///! Allocates an IPC-capable signal, or returns nullptr if unsupported
+  virtual device::Signal* createIpcSignal() const { return nullptr; }
+
   //! Return true if initialized external API interop, otherwise false
   virtual bool bindExternalDevice(
       uint flags,             //!< Enum val. for ext.API type: GL, D3D10, etc.
@@ -2093,6 +2131,19 @@ class Device : public RuntimeObject {
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const {}
+
+  // Creates a fully-initialised per-launch graph signal pool.
+  // Allocates gpu_count GPU-only signals and irq_count interrupt signals,
+  // then acquires segment_count hw-event slots into hw_events and resets
+  // the last-acquired pointer so GetLastAcquired() only tracks dispatches.
+  // Returns nullptr (and leaves hw_events empty) on allocation failure.
+  virtual roc::GraphSignalPool* CreateGraphSignalPool(
+      size_t gpu_count, size_t irq_count,
+      size_t segment_count, std::vector<void*>& hw_events) const { return nullptr; }
+
+  // Returns the number of GPU-only signals consumed from the pool so far.
+  // Used by the graph executor to cache the count for the next launch.
+  virtual size_t GetGraphSignalPoolUsedCount(roc::GraphSignalPool* pool) const { return 0; }
 
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;

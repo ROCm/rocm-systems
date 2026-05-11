@@ -127,6 +127,9 @@ rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 
 namespace
 {
+// Thread for safe cleanup output generation
+auto output_generation_thread = common::Synchronized<std::optional<std::thread>>{};
+
 using sigaction_t      = struct sigaction;
 using signal_func_t    = sighandler_t (*)(int signum, sighandler_t handler);
 using sigaction_func_t = int (*)(int signum,
@@ -269,7 +272,7 @@ auto  target_kernels         = common::Synchronized<targeted_kernels_map_t>{};
 auto* execution_profile      = as_pointer<common::Synchronized<tool::execution_profile_data>>();
 auto  counter_collection_ctx = rocprofiler_context_id_t{0};
 auto  att_device_context     = rocprofiler_context_id_t{0};
-auto  att_consecutive_kernel_dispatch_id =
+auto  att_device_trace_id =
     std::atomic<rocprofiler_dispatch_id_t>{std::numeric_limits<uint64_t>::max()};
 std::mutex att_shader_data;
 
@@ -657,7 +660,10 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 (tool::get_config().selected_regions_ref_count) ? pause_resume_count++ : int64_t{0};
             // only resume if there are no active contexts and the ref count was zero
             if(_active_contexts == 0 && _ref_count == 0)
+            {
+                if(tool::get_config().selected_regions) att_device_trace_id++;
                 set_contexts_active(*ctxs, true);
+            }
             else if(_ref_count < 0)
             {
                 ROCP_WARNING << fmt::format(
@@ -1386,7 +1392,12 @@ construct_counter_collection_profile(rocprofiler_agent_id_t       agent_id,
 
         // search the gpu agent counter info for a counter with a matching name
         bool counter_found = false;
-        for(const auto& citr : gpu_agents_counter_info.at(agent_id))
+        auto counter_vec   = gpu_agents_counter_info.find(agent_id);
+        ROCP_FATAL_IF(counter_vec == gpu_agents_counter_info.end())
+            << "No counter information found for agent " << agent_v->node_id << " (gpu-"
+            << agent_v->gpu_index << ", " << agent_v->name << "). Unable to find counter: " << itr;
+
+        for(const auto& citr : counter_vec->second)
         {
             if(name_v == std::string_view{citr.name})
             {
@@ -1610,18 +1621,21 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
 }
 
 void
-att_shader_data_callback(rocprofiler_agent_id_t  agent,
-                         int64_t                 se_id,
-                         void*                   se_data,
-                         size_t                  data_size,
-                         rocprofiler_user_data_t userdata)
+att_shader_data_callback(rocprofiler_agent_id_t                       agent,
+                         int64_t                                      se_id,
+                         void*                                        se_data,
+                         size_t                                       data_size,
+                         rocprofiler_thread_trace_shader_data_flags_t flags,
+                         rocprofiler_user_data_t                      userdata)
 {
+    if((flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL) != 0)
+        ROCP_CI_LOG(WARNING) << "Thread trace buffer full!";
     std::lock_guard<std::mutex> lock(att_shader_data);
     std::stringstream           filename;
     auto dispatch_id = static_cast<rocprofiler_dispatch_id_t>(userdata.value);
-    // If dispatch_id/userdata.value == 0, then we are in device mode and get dispatch id from
-    // global atomic
-    if(dispatch_id == 0) dispatch_id = att_consecutive_kernel_dispatch_id.load();
+    // If dispatch_id/userdata.value == 0, then we are in device mode and get the trace id
+    // from the global atomic (set by consecutive-kernels or marker-trace logic)
+    if(dispatch_id == 0) dispatch_id = att_device_trace_id.load();
     filename << fmt::format("{}_shader_engine_{}_{}", agent.handle, se_id, dispatch_id);
 
     auto        output_stream   = get_output_stream(tool::get_config(), filename.str(), ".att");
@@ -1699,8 +1713,8 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
                     // Keep track of launched dispatch ids
                     _data.emplace(_dispatch_id);
                     // Store lowest dispatch id for shader callback function
-                    if(att_consecutive_kernel_dispatch_id.load() > _dispatch_id)
-                        att_consecutive_kernel_dispatch_id.store(_dispatch_id);
+                    if(att_device_trace_id.load() > _dispatch_id)
+                        att_device_trace_id.store(_dispatch_id);
                 }
                 if(local_count >= _consecutive_kernels) stop_profiling = true;
             },
@@ -1728,7 +1742,7 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
 
             ROCPROFILER_CALL(rocprofiler_stop_context(att_device_context), "context stop");
             stop_profiling = false;
-            att_consecutive_kernel_dispatch_id.store(std::numeric_limits<uint64_t>::max());
+            att_device_trace_id.store(std::numeric_limits<uint64_t>::max());
         },
         dispatch_id);
 }
@@ -2087,12 +2101,34 @@ get_tracing_callbacks()
     return tracing_callbacks_t{use_real_callbacks};
 }
 
+void
+reset_output_thread(std::optional<std::thread>& thread_ptr)
+{
+    if(thread_ptr.has_value())
+    {
+        ROCP_TRACE << "finalize output thread started...";
+        if(thread_ptr->joinable()) thread_ptr->join();
+        thread_ptr.reset();
+        ROCP_TRACE << "finalize output thread exiting...";
+    }
+}
+
 int
 tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             rocprofiler_context_id_t* context_ids,
             uint64_t                  context_ids_length,
             void* /*tool_data*/)
 {
+    // reset any existing output thread from prior tool usage
+    // Only log if previous attachment used async mode (where background thread may still be
+    // running)
+    if(!tool::get_config().attach_output_generation_sync)
+    {
+        ROCP_INFO << "If files are still being written from the last detach, there will be a delay "
+                     "until this process is finished";
+    }
+    ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
+
     // save the existing config for comparison
     auto original_config = tool::get_config();
 
@@ -2447,11 +2483,26 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
         const auto selecting_by_gpuid = !gpu_idx_set.empty();
 
-        // Use device_thread_trace_service when handling consecutive kernels
+        // Use device_thread_trace_service when handling consecutive kernels or marker trace
         const auto handle_consecutive_kernels = tool::get_config().att_consecutive_kernels >= 1;
+        const auto handle_marker_trace        = tool::get_config().selected_regions;
         rocprofiler_user_data_t user{.value = 0};
 
-        if(handle_consecutive_kernels)
+        ROCP_ERROR_IF(handle_consecutive_kernels && handle_marker_trace)
+            << "selected-regions and att-consecutive-kernels options are mutually exclusive";
+
+        if(handle_marker_trace)
+        {
+            // Marker-controlled device thread trace:
+            // Context is registered for pause/resume control and starts stopped.
+            // roctxProfilerResume(0) starts it, roctxProfilerPause(0) stops it.
+            // No KERNEL_TRACING overhead.
+            // Initialize trace ID counter to 0 (default is UINT64_MAX for consecutive-kernels
+            // min-tracking).
+            att_device_trace_id.store(0);
+            create_pause_resume_ctx(att_device_context, "advanced thread trace (ATT)");
+        }
+        else if(handle_consecutive_kernels)
         {
             // TODO: Fix DeviceThreadTracer to handle remaining thread traces before stopping
             // contexts so the following call can function correctly with marker trace:
@@ -2479,7 +2530,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             auto agent_params = global_parameters;
             for(auto& counter : get_att_perfcounter_params(id, att_perf))
                 agent_params.push_back(counter);
-            if(!handle_consecutive_kernels)
+            if(!handle_consecutive_kernels && !handle_marker_trace)
             {
                 ROCPROFILER_CALL(
                     rocprofiler_configure_dispatch_thread_trace_service(get_client_ctx(),
@@ -3129,7 +3180,35 @@ tool_detach(void* /*tool_data*/)
     if(tool_metadata->process_end_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
-    generate_output(cleanup_mode::reset);
+    // Check configuration to decide between async or sync output generation
+    if(tool::get_config().attach_output_generation_sync)
+    {
+        // Synchronous output generation - complete before returning
+        // This ensures output files are fully written before detach returns
+        ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
+        generate_output(cleanup_mode::reset);
+    }
+    else
+    {
+        // Launch generate output in an async background thread
+        // This allows tool_detach to return immediately without waiting.
+        // The thread will be joined later in tool_attach (for reattachment) or tool_fini
+        ::output_generation_thread.wlock([](auto& thread_ptr) {
+            reset_output_thread(thread_ptr);
+            thread_ptr.emplace([]() {
+                try
+                {
+                    generate_output(cleanup_mode::reset);
+                } catch(const std::exception& e)
+                {
+                    ROCP_ERROR << "Exception in detach cleanup thread: " << e.what();
+                } catch(...)
+                {
+                    ROCP_ERROR << "Unknown exception in detach cleanup thread";
+                }
+            });
+        });
+    }
 }
 
 void
@@ -3141,6 +3220,9 @@ tool_fini(void* /*tool_data*/)
 
     client_identifier = nullptr;
     client_finalizer  = nullptr;
+
+    // Join the cleanup thread if it exists and is active
+    ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
 
     auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
 

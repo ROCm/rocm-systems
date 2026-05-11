@@ -391,9 +391,9 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_snapshot_v0_
     uint32_t arb_state_stall_brmsg      : 1;  ///< branch/message instruction was stalled
     uint32_t arb_state_state_reserved   : 1;  ///< reserved for the future use
     // We have two reserved bits
-    uint32_t dual_issue_valu : 1;
-    uint32_t reserved1       : 1;  ///< reserved for the future use
-    uint32_t reserved2       : 3;  ///< reserved for the future use
+    uint32_t dual_issue_valu     : 1;
+    uint32_t sampling_lock_error : 1;
+    uint32_t reserved2           : 3;  ///< reserved for the future use
 
     /// @var reason_not_issued
     /// @brief The reason for not issuing an instruction. The field takes one of the value defined
@@ -402,6 +402,10 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_snapshot_v0_
     /// @brief VALU instruction was stalled when a sample was generated
     /// @var dual_issue_valu
     /// @brief Two VALU instructions were issued for coexecution (MI3xx specific)
+    /// @var sampling_lock_error
+    /// @brief At least one wave was locked out from taking a sample,
+    /// due to the latency instroduced by current sample read.
+    /// Too many samples with this bit on indicates that the sampling frequency is too high
 } rocprofiler_pc_sampling_snapshot_v0_t;
 
 /**
@@ -409,12 +413,17 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_snapshot_v0_
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_counters_t
 {
-    uint32_t load_cnt   : 6;
-    uint32_t store_cnt  : 6;
-    uint32_t bvh_cnt    : 3;
-    uint32_t sample_cnt : 6;
-    uint32_t ds_cnt     : 6;
-    uint32_t km_cnt     : 5;
+    uint64_t load_cnt   : 6;
+    uint64_t store_cnt  : 6;
+    uint64_t bvh_cnt    : 3;
+    uint64_t sample_cnt : 6;
+    uint64_t ds_cnt     : 6;
+    uint64_t km_cnt     : 5;
+    // The following counters are relevant for gfx1250 only.
+    uint64_t async_cnt  : 6;
+    uint64_t tensor_cnt : 6;
+    uint64_t xnack_cnt  : 6;
+    uint64_t reserved   : 14;  ///< reserved for the future use
 
     /// @var load_cnt
     /// @brief Counts the number of VMEM load instructions issued but not yet completed.
@@ -429,6 +438,13 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_count
     /// @var km_cnt
     /// @brief Counts the number of scalar memory reads and memory instructions issued but not yet
     /// completed.
+    /// @var async_cnt
+    /// @brief Counts the number of async instructions issued but not yet completed.
+    /// @var tensor_cnt
+    /// @brief Counts the number of tensor instructions issued but not yet completed.
+    /// @var xnack_cnt
+    /// @brief Counts the number of oustanding memory instruction not yet reported
+    /// XNACK ackwlodgement.
 } rocprofiler_pc_sampling_memory_counters_t;
 
 /**

@@ -39,35 +39,44 @@ Exceptions that can be thrown by `amdsmi_init` function:
 Initialize GPUs only example:
 
 ```python
+import amdsmi
 try:
     # by default we initialize with AmdSmiInitFlags.INIT_AMD_GPUS
-    ret = amdsmi_init()
+    amdsmi.amdsmi_init()
     # continue with amdsmi
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print("Init GPUs failed")
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 Initialize CPUs only example:
 
 ```python
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
     # continue with amdsmi
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print("Init CPUs failed")
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 Initialize both GPUs and CPUs example:
 
 ```python
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_APUS)
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_APUS)
     # continue with amdsmi
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print("Init both GPUs & CPUs failed")
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_shut_down
@@ -91,12 +100,19 @@ Exceptions that can be thrown by `amdsmi_shut_down` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    amdsmi_init()
-    amdsmi_shut_down()
-except AmdSmiException as e:
-    print("Shut down failed")
+    amdsmi.amdsmi_init()
+    # continue with amdsmi
+except amdsmi.AmdSmiException as e:
+    print("AMD SMI operation failed")
     print(e)
+finally:
+    try:
+        amdsmi.amdsmi_shut_down()
+    except amdsmi.AmdSmiException as e:
+        print("Shut down failed")
+        print(e)
 ```
 
 ### amdsmi_get_processor_type
@@ -131,13 +147,64 @@ Exceptions that can be thrown by `amdsmi_get_processor_type` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    info = amdsmi_get_processor_type(processor_handle)
-    processor_type = info["processor_type"]
-    if processor_type == AmdSmiProcessorType.AMD_GPU.name:
-        print("This is an AMD GPU")
-except AmdSmiException as e:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi.amdsmi_get_processor_type(device)
+            processor_type = info["processor_type"]
+            if processor_type == amdsmi.AmdSmiProcessorType.AMD_GPU.name:
+                print("This is an AMD GPU")
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_processor_info
+
+**Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
+
+Description: Return processor name. Available regardless of whether the library
+was built with ESMI support.
+
+Input parameters:
+`processor_handle` processor handle
+
+Output: Processor name
+
+Exceptions that can be thrown by `amdsmi_get_processor_info` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No processors on machine")
+    else:
+        for device in devices:
+            print(amdsmi.amdsmi_get_processor_info(device))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_processor_handles
@@ -164,15 +231,19 @@ Exceptions that can be thrown by `amdsmi_get_processor_handles` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            print(amdsmi_get_gpu_device_uuid(device))
-except AmdSmiException as e:
+            print(amdsmi.amdsmi_get_gpu_device_uuid(device))
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_socket_handles
@@ -192,11 +263,15 @@ Exceptions that can be thrown by `amdsmi_get_socket_handles` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    sockets = amdsmi_get_socket_handles()
+    amdsmi.amdsmi_init()
+    sockets = amdsmi.amdsmi_get_socket_handles()
     print('Socket numbers: {}'.format(len(sockets)))
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_socket_info
@@ -225,15 +300,19 @@ Exceptions that can be thrown by `amdsmi_get_socket_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    socket_handles = amdsmi_get_socket_handles()
+    amdsmi.amdsmi_init()
+    socket_handles = amdsmi.amdsmi_get_socket_handles()
     if len(socket_handles) == 0:
         print("No sockets on machine")
     else:
         for socket in socket_handles:
-            print(amdsmi_get_socket_info(socket))
-except AmdSmiException as e:
+            print(amdsmi.amdsmi_get_socket_info(socket))
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_processor_handle_from_bdf
@@ -266,11 +345,15 @@ Exceptions that can be thrown by `amdsmi_get_processor_handle_from_bdf` function
 Example:
 
 ```python
+import amdsmi
 try:
-    device = amdsmi_get_processor_handle_from_bdf("0000:23:00.0")
-    print(amdsmi_get_gpu_device_uuid(device))
-except AmdSmiException as e:
+    amdsmi.amdsmi_init()
+    device = amdsmi.amdsmi_get_processor_handle_from_bdf("0000:23:00.0")
+    print(amdsmi.amdsmi_get_gpu_device_uuid(device))
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_device_bdf
@@ -279,7 +362,7 @@ Description: Returns BDF of the given device
 
 Input parameters:
 
-* `processor_handle` dev for which to query
+* `processor_handle` device for which to query
 
 Output: BDF string in form of `<domain>:<bus>:<device>.<function>` in hexcode format.
 Where:
@@ -305,11 +388,19 @@ Exceptions that can be thrown by `amdsmi_get_gpu_device_bdf` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    device = amdsmi_get_processor_handles()[0]
-    print("Device's bdf:", amdsmi_get_gpu_device_bdf(device))
-except AmdSmiException as e:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            print("Device's bdf:", amdsmi.amdsmi_get_gpu_device_bdf(device))
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_device_uuid
@@ -318,7 +409,7 @@ Description: Returns the UUID of the device
 
 Input parameters:
 
-* `processor_handle` dev for which to query
+* `processor_handle` device for which to query
 
 Output: UUID string unique to the device
 
@@ -338,11 +429,19 @@ Exceptions that can be thrown by `amdsmi_get_gpu_device_uuid` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    device = amdsmi_get_processor_handles()[0]
-    print("Device UUID: ", amdsmi_get_gpu_device_uuid(device))
-except AmdSmiException as e:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            print("Device UUID: ", amdsmi.amdsmi_get_gpu_device_uuid(device))
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_enumeration_info
@@ -380,18 +479,25 @@ Exceptions that can be thrown by `amdsmi_get_gpu_enumeration_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
-    for device in devices:
-        info = amdsmi_get_gpu_enumeration_info(device)
-        print("DRM Render ID:", info['drm_render'])
-        print("DRM Card ID:", info['drm_card'])
-        print("HSA ID:", info['hsa_id'])
-        print("HIP ID:", info['hip_id'])
-        print("HIP UUID:", info['hip_uuid'])
-        print("OAM ID:", info['oam_id'])
-except AmdSmiException as e:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi.amdsmi_get_gpu_enumeration_info(device)
+            print("DRM Render ID:", info['drm_render'])
+            print("DRM Card ID:", info['drm_card'])
+            print("HSA ID:", info['hsa_id'])
+            print("HIP ID:", info['hip_id'])
+            print("HIP UUID:", info['hip_uuid'])
+            print("OAM ID:", info['oam_id'])
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_driver_info
@@ -400,7 +506,7 @@ Description: Returns the info of the driver
 
 Input parameters:
 
-* `processor_handle` dev for which to query
+* `processor_handle` device for which to query
 
 Output: Dictionary with fields
 
@@ -427,11 +533,19 @@ Exceptions that can be thrown by `amdsmi_get_gpu_driver_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    device = amdsmi_get_processor_handles()[0]
-    print("Driver info: ", amdsmi_get_gpu_driver_info(device))
-except AmdSmiException as e:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            print("Driver info: ", amdsmi.amdsmi_get_gpu_driver_info(device))
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_asic_info
@@ -474,16 +588,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_asic_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            asic_info = amdsmi_get_gpu_asic_info(device)
+            asic_info = amdsmi.amdsmi_get_gpu_asic_info(device)
             print(asic_info)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_kfd_info
@@ -518,16 +636,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_kfd_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            kfd_info = amdsmi_get_gpu_kfd_info(device)
+            kfd_info = amdsmi.amdsmi_get_gpu_kfd_info(device)
             print(kfd_info)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_power_cap_info
@@ -565,20 +687,24 @@ Exceptions that can be thrown by `amdsmi_get_power_cap_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            power_cap_info = amdsmi_get_power_cap_info(device)
+            power_cap_info = amdsmi.amdsmi_get_power_cap_info(device)
             print(power_cap_info['power_cap'])
             print(power_cap_info['dpm_cap'])
             print(power_cap_info['default_power_cap'])
             print(power_cap_info['min_power_cap'])
             print(power_cap_info['max_power_cap'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_supported_power_cap
@@ -592,10 +718,10 @@ Input parameters:
 
 Output: Dictionary with fields
 
-Field | Description | Units
+Field | Description
 ---|---
-`sensor_inds` | List of integer indices of the supported ppt types. 0 indicates PPT0 and 1 indicates PPT1. Should be used as input for `amdsmi_get_power_cap_info` and `amdsmi_set_power_cap_info`.
-`sensor_types` | Enum `AmdSmiPowerCapType` that corresponds to the ppt types that are supported on the device.
+`sensor_inds` | List of integer indices of the supported ppt types. 0 indicates PPT0 and 1 indicates PPT1. Should be used as input for `amdsmi_get_power_cap_info` and `amdsmi_set_power_cap_info`
+`sensor_types` | Enum `AmdSmiPowerCapType` that corresponds to the ppt types that are supported on the device
 
 Exceptions that can be thrown by `amdsmi_get_supported_power_cap` function:
 
@@ -605,17 +731,21 @@ Exceptions that can be thrown by `amdsmi_get_supported_power_cap` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            power_cap_types = amdsmi_get_supported_power_cap(device)
+            power_cap_types = amdsmi.amdsmi_get_supported_power_cap(device)
             print(power_cap_types['sensor_inds'])
             print(power_cap_types['sensor_types'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_vram_info
@@ -651,19 +781,23 @@ Exceptions that can be thrown by `amdsmi_get_gpu_vram_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            vram_info = amdsmi_get_gpu_vram_info(device)
+            vram_info = amdsmi.amdsmi_get_gpu_vram_info(device)
             print(vram_info['vram_type'])
             print(vram_info['vram_vendor'])
             print(vram_info['vram_size'])
             print(vram_info['vram_bit_width'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_board_info
@@ -698,16 +832,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_board_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    device = amdsmi_get_processor_handle_from_bdf("0000:23.00.0")
-    board_info = amdsmi_get_gpu_board_info(device)
+    amdsmi.amdsmi_init()
+    device = amdsmi.amdsmi_get_processor_handle_from_bdf("0000:23:00.0")
+    board_info = amdsmi.amdsmi_get_gpu_board_info(device)
     print(board_info["model_number"])
     print(board_info["product_serial"])
     print(board_info["fru_id"])
     print(board_info["product_name"])
     print(board_info["manufacturer_name"])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_revision
@@ -738,18 +876,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_revision` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            revision = amdsmi_get_gpu_revision(device)
+            revision = amdsmi.amdsmi_get_gpu_revision(device)
             print(revision)
-except AmdSmiLibraryException as e:
+except amdsmi.AmdSmiLibraryException as e:
     print(e)
-except AmdSmiParameterException as e:
-    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_cache_info
@@ -798,21 +938,25 @@ Exceptions that can be thrown by `amdsmi_get_gpu_cache_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            cache_info = amdsmi_get_gpu_cache_info(device)
+            cache_info = amdsmi.amdsmi_get_gpu_cache_info(device)
             for cache_values in cache_info.values():
                 for cache_value in cache_values:
                     print(cache_value['cache_properties'])
                     print(cache_value['cache_level'])
                     print(cache_value['max_num_cu_shared'])
                     print(cache_value['num_cache_instance'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_vbios_info
@@ -848,20 +992,24 @@ Exceptions that can be thrown by `amdsmi_get_gpu_vbios_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            vbios_info = amdsmi_get_gpu_vbios_info(device)
+            vbios_info = amdsmi.amdsmi_get_gpu_vbios_info(device)
             print(vbios_info['name'])
             print(vbios_info['build_date'])
             print(vbios_info['part_number'])
             print(vbios_info['version'])
             print(vbios_info['boot_firmware'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_fw_info
@@ -895,19 +1043,23 @@ Exceptions that can be thrown by `amdsmi_get_fw_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            firmware_list = amdsmi_get_fw_info(device)['fw_list']
+            firmware_list = amdsmi.amdsmi_get_fw_info(device)['fw_list']
             for firmware_block in firmware_list:
                 print(firmware_block['fw_name'])
                 # String formatted hex or decimal value ie: 21.00.00.AC or 130
                 print(firmware_block['fw_version'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_activity
@@ -943,18 +1095,22 @@ Exceptions that can be thrown by `amdsmi_get_gpu_activity` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            engine_usage = amdsmi_get_gpu_activity(device)
+            engine_usage = amdsmi.amdsmi_get_gpu_activity(device)
             print(engine_usage['gfx_activity'])
             print(engine_usage['umc_activity'])
             print(engine_usage['mm_activity'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_power_info
@@ -994,13 +1150,15 @@ Exceptions that can be thrown by `amdsmi_get_power_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            power_info = amdsmi_get_power_info(device)
+            power_info = amdsmi.amdsmi_get_power_info(device)
             print(power_info['current_socket_power'])
             print(power_info['average_socket_power'])
             print(power_info['gfx_voltage'])
@@ -1008,8 +1166,10 @@ try:
             print(power_info['mem_voltage'])
             print(power_info['power_limit'])
             print(power_info['ubb_power'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_vram_usage
@@ -1043,17 +1203,21 @@ Exceptions that can be thrown by `amdsmi_get_gpu_vram_usage` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            vram_usage = amdsmi_get_gpu_vram_usage(device)
+            vram_usage = amdsmi.amdsmi_get_gpu_vram_usage(device)
             print(vram_usage['vram_used'])
             print(vram_usage['vram_total'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_violation_status
@@ -1120,45 +1284,23 @@ Exceptions that can be thrown by `amdsmi_get_violation_status` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    violation_status = amdsmi_interface.amdsmi_get_violation_status(args.gpu)
-    throttle_status['accumulation_counter'] = violation_status['acc_counter']
-    throttle_status['prochot_accumulated'] = violation_status['acc_prochot_thrm']
-    throttle_status['ppt_accumulated'] = violation_status['acc_ppt_pwr']
-    throttle_status['socket_thermal_accumulated'] = violation_status['acc_socket_thrm']
-    throttle_status['vr_thermal_accumulated'] = violation_status['acc_vr_thrm']
-    throttle_status['hbm_thermal_accumulated'] = violation_status['acc_hbm_thrm']
-    throttle_status['gfx_clk_below_host_limit_accumulated'] = violation_status['acc_gfx_clk_below_host_limit']
-    throttle_status['gfx_clk_below_host_limit_pwr_accumulated'] = violation_status['acc_gfx_clk_below_host_limit_pwr']
-    throttle_status['gfx_clk_below_host_limit_thm_accumulated'] = violation_status['acc_gfx_clk_below_host_limit_thm']
-    throttle_status['low_utilization_accumulated'] = violation_status['acc_low_utilization']
-    throttle_status['gfx_clk_below_host_limit_total_accumulated'] = violation_status['acc_gfx_clk_below_host_limit_total']
-
-    throttle_status['prochot_violation_status'] = violation_status['active_prochot_thrm']
-    throttle_status['ppt_violation_status'] = violation_status['active_ppt_pwr']
-    throttle_status['socket_thermal_violation_status'] = violation_status['active_socket_thrm']
-    throttle_status['vr_thermal_violation_status'] = violation_status['active_vr_thrm']
-    throttle_status['hbm_thermal_violation_status'] = violation_status['active_hbm_thrm']
-    throttle_status['gfx_clk_below_host_limit_violation_status'] = violation_status['active_gfx_clk_below_host_limit']
-    throttle_status['gfx_clk_below_host_limit_pwr_violation_status'] = violation_status['active_gfx_clk_below_host_limit_pwr']
-    throttle_status['gfx_clk_below_host_limit_thm_violation_status'] = violation_status['active_gfx_clk_below_host_limit_thm']
-    throttle_status['low_utilization_violation_status'] = violation_status['active_low_utilization']
-    throttle_status['gfx_clk_below_host_limit_total_violation_status'] = violation_status['active_gfx_clk_below_host_limit_total']
-
-    throttle_status['prochot_violation_activity'] = violation_status['per_prochot_thrm']
-    throttle_status['ppt_violation_activity'] = violation_status['per_ppt_pwr']
-    throttle_status['socket_thermal_violation_activity'] = violation_status['per_socket_thrm']
-    throttle_status['vr_thermal_violation_activity'] = violation_status['per_vr_thrm']
-    throttle_status['hbm_thermal_violation_activity'] = violation_status['per_hbm_thrm']
-    throttle_status['gfx_clk_below_host_limit_violation_activity'] = violation_status['per_gfx_clk_below_host_limit']
-    throttle_status['gfx_clk_below_host_limit_pwr_violation_activity'] = violation_status['per_gfx_clk_below_host_limit_pwr']
-    throttle_status['gfx_clk_below_host_limit_thm_violation_activity'] = violation_status['per_gfx_clk_below_host_limit_thm']
-    throttle_status['low_utilization_violation_activity'] = violation_status['per_low_utilization']
-    throttle_status['gfx_clk_below_host_limit_total_violation_activity'] = violation_status['per_gfx_clk_below_host_limit_total']
-
-except AmdSmiException as e:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            violation_status = amdsmi.amdsmi_get_violation_status(device)
+            print(violation_status)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
+
+Refer to [amd_smi_violation_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_violation_example.py) for a complete example.
 
 ### amdsmi_get_clock_info
 
@@ -1210,20 +1352,24 @@ Exceptions that can be thrown by `amdsmi_get_clock_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            clock_measure = amdsmi_get_clock_info(device, AmdSmiClkType.GFX)
+            clock_measure = amdsmi.amdsmi_get_clock_info(device, amdsmi.AmdSmiClkType.GFX)
             print(clock_measure['clk'])
             print(clock_measure['min_clk'])
             print(clock_measure['max_clk'])
             print(clock_measure['clk_locked'])
             print(clock_measure['clk_deep_sleep'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_pcie_info
@@ -1258,17 +1404,21 @@ Exceptions that can be thrown by `amdsmi_get_pcie_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            pcie_info = amdsmi_get_pcie_info(device)
+            pcie_info = amdsmi.amdsmi_get_pcie_info(device)
             print(pcie_info["pcie_static"])
             print(pcie_info["pcie_metric"])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_bad_page_info
@@ -1305,13 +1455,15 @@ Exceptions that can be thrown by `amdsmi_get_gpu_bad_page_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            bad_page_info = amdsmi_get_gpu_bad_page_info(device)
+            bad_page_info = amdsmi.amdsmi_get_gpu_bad_page_info(device)
             if not bad_page_info: # Can be empty list
                 print("No bad pages found")
                 continue
@@ -1320,8 +1472,10 @@ try:
                 print(bad_page["page_address"])
                 print(bad_page["page_size"])
                 print(bad_page["status"])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_bad_page_threshold
@@ -1351,16 +1505,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_bad_page_threshold` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            threshold = amdsmi_get_gpu_bad_page_threshold(device)
-            print(bad_page["threshold"])
-except AmdSmiException as e:
+            bad_page = amdsmi.amdsmi_get_gpu_bad_page_threshold(device)
+            print(bad_page)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_memory_reserved_pages
@@ -1397,13 +1555,15 @@ Exceptions that can be thrown by `amdsmi_get_gpu_memory_reserved_pages` function
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            reserved_memory_page_info = amdsmi_get_gpu_memory_reserved_pages(device)
+            reserved_memory_page_info = amdsmi.amdsmi_get_gpu_memory_reserved_pages(device)
             if not reserved_memory_page_info: # Can be empty list
                 print("No memory reserved pages found")
                 continue
@@ -1412,8 +1572,10 @@ try:
                 print(reserved_memory_page["page_address"])
                 print(reserved_memory_page["page_size"])
                 print(reserved_memory_page["status"])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_process_list
@@ -1454,20 +1616,24 @@ Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            processes = amdsmi_get_gpu_process_list(device)
+            processes = amdsmi.amdsmi_get_gpu_process_list(device)
             if len(processes) == 0:
                 print("No processes running on this GPU")
             else:
                 for process in processes:
                     print(process)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_total_ecc_count
@@ -1507,17 +1673,21 @@ Exceptions that can be thrown by `amdsmi_get_gpu_total_ecc_count` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            ecc_error_count = amdsmi_get_gpu_total_ecc_count(device)
+            ecc_error_count = amdsmi.amdsmi_get_gpu_total_ecc_count(device)
             print(ecc_error_count["correctable_count"])
             print(ecc_error_count["uncorrectable_count"])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_cper_entries
@@ -1585,11 +1755,23 @@ Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
 Example:
 
 ```python
+import amdsmi
+severity_mask = 7
+buffer_size = 1048576
+cursor = 0
 try:
-    entries, new_cursor, cper_data, status_code = amdsmi_get_gpu_cper_entries(
-        device, severity_mask, buffer_size, initial_cursor)
-except AmdSmiException as e:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            entries, new_cursor, cper_data, status_code = amdsmi.amdsmi_get_gpu_cper_entries(
+                device, severity_mask, buffer_size, cursor)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 Refer to [amd_smi_cper_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_cper_example.py) for a complete example.
@@ -1606,9 +1788,7 @@ Output: Tuple[List[int], int]: A tuple containing:
           - A list of extracted AFIDs.
           - The total count of AFIDs.
 
-* `status_code` | Upon successful retrieval of data, status_code will be AMDSMI_STATUS_SUCCESS (0) or AMDSMI_STATUS_MORE_DATA (39) if more data can be retrieve by subsequent call to the `amdsmi_get_gpu_cper_entries` function. In the later case, the input parameter `cursor` should be set to the updated `cursor` that was returned from the previous call.
-
-Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
+Exceptions that can be thrown by `amdsmi_get_afids_from_cper` function:
 
 * `AmdSmiParameterException`
 * `AmdSmiLibraryException` 
@@ -1623,31 +1803,53 @@ Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
 Example 1: Using a single CPER record as bytes
 
 ```python
-cper_bytes = b'\x43\x50\x45\x52...'  # Replace with actual bytes
-afids, num_afids = amdsmi_get_afids_from_cper(cper_bytes)
-print(f"AFIDs: {afids}\nTotal count: {num_afids}")
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cper_bytes = b'\x43\x50\x45\x52...'  # Replace with actual bytes
+    afids, num_afids = amdsmi.amdsmi_get_afids_from_cper(cper_bytes)
+    print(f"AFIDs: {afids}\nTotal count: {num_afids}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 Example 2: Using a list of dicts
 
 ```python
-cper_record = {
-'bytes': [67, 80, 69, 82, ...],  # Replace with actual byte values
-'size': 376}
-afids, num_afids = amdsmi_get_afids_from_cper([cper_record])
-print(f"AFIDs: {afids}\nTotal count: {num_afids}")
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cper_record = {
+    'bytes': [67, 80, 69, 82, ...],  # Replace with actual byte values
+    'size': 376}
+    afids, num_afids = amdsmi.amdsmi_get_afids_from_cper([cper_record])
+    print(f"AFIDs: {afids}\nTotal count: {num_afids}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 Example 3: General Usage
 
 ```python
+import amdsmi
+import os
 try:
-    with open(cper_file.path, "rb") as file:
-        afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(file.read())
-        print(f"AFIDs: {afids}\nTotal count: {num_afids}")
-
-except AmdSmiException as e:
+    amdsmi.amdsmi_init()
+    directory_path = "/tmp/cper_dump/"
+    if os.path.exists(directory_path):
+        with os.scandir(directory_path) as cper_files:
+            for cper_file in cper_files:
+                with open(cper_file.path, "rb") as file:
+                    afids, num_afids = amdsmi.amdsmi_get_afids_from_cper(file.read())
+                    print(f"AFIDs: {afids}\nTotal count: {num_afids}")
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 Refer to [amd_smi_afid_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_afid_example.py) for a complete example.
@@ -1678,34 +1880,35 @@ Exceptions that can be thrown by `amdsmi_get_gpu_ras_feature_info` function:
 
 #### Possible Library Exceptions
 
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported"
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported"
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented"
-- `AMDSMI_STATUS_INVAL` - Invalid parameters"
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call"
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
 
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 import os
-
-amdsmi_init()
-
-def amdsmi_get_afids_from_cper():
+amdsmi.amdsmi_init()
+try:
     directory_path = "/tmp/cper_dump/"
-    print(f"Searching for cper file in {directory_path}")
-    with os.scandir(directory_path) as cper_files:
-        for cper_file in cper_files:
-            if cper_file.is_file():
-                if ".bin" in cper_file.path:
-                    print(f"Found {cper_file.path}")
-                    with open(cper_file.path, "rb") as file:
-                        raw = file.read()
-                        afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(raw)
-                        print(f"afids: {afids}")
-
-amdsmi_get_afids_from_cper()
+    if os.path.exists(directory_path):
+        print(f"Searching for cper file in {directory_path}")
+        with os.scandir(directory_path) as cper_files:
+            for cper_file in cper_files:
+                if cper_file.is_file():
+                    if ".bin" in cper_file.path:
+                        print(f"Found {cper_file.path}")
+                        with open(cper_file.path, "rb") as file:
+                            raw = file.read()
+                            afids, num_afids = amdsmi.amdsmi_get_afids_from_cper(raw)
+                            print(f"afids: {afids}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 
 ```
 Output:
@@ -1751,16 +1954,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_ras_block_features_enabled` fun
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            ras_block_features = amdsmi_get_gpu_ras_block_features_enabled(device)
+            ras_block_features = amdsmi.amdsmi_get_gpu_ras_block_features_enabled(device)
             print(ras_block_features)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### AmdSmiEventReader class
@@ -1814,31 +2021,38 @@ Input parameters: `None`
 Example with manual cleanup of AmdSmiEventReader:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
-        event = AmdSmiEventReader(devices[0], [AmdSmiEvtNotificationType.GPU_PRE_RESET, AmdSmiEvtNotificationType.GPU_POST_RESET])
+        event = amdsmi.AmdSmiEventReader(devices[0], [amdsmi.AmdSmiEvtNotificationType.GPU_PRE_RESET, amdsmi.AmdSmiEvtNotificationType.GPU_POST_RESET])
         event.read(10000)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
 finally:
     event.stop()
+    amdsmi.amdsmi_shut_down()
 ```
 
 Example with automatic cleanup using `with` statement:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
-        with AmdSmiEventReader(devices[0], [AmdSmiEvtNotificationType.GPU_PRE_RESET, AmdSmiEvtNotificationType.GPU_POST_RESET]) as event:
+        with amdsmi.AmdSmiEventReader(devices[0], [amdsmi.AmdSmiEvtNotificationType.GPU_PRE_RESET, amdsmi.AmdSmiEvtNotificationType.GPU_POST_RESET]) as event:
             event.read(10000)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 
 ```
 
@@ -1872,15 +2086,19 @@ Exceptions that can be thrown by `amdsmi_set_gpu_pci_bandwidth` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_pci_bandwidth(device, 0)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_gpu_pci_bandwidth(device, 0)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_power_cap
@@ -1914,16 +2132,20 @@ Exceptions that can be thrown by `amdsmi_set_power_cap` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
             power_cap = 250 * 1000000
-             amdsmi_set_power_cap(device, 0, power_cap)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_power_cap(device, 0, power_cap)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_gpu_power_profile
@@ -1956,16 +2178,20 @@ Exceptions that can be thrown by `amdsmi_set_gpu_power_profile` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            profile = AmdSmiPowerProfilePresetMasks.BOOTUP_DEFAULT
-             amdsmi_set_gpu_power_profile(device, 0, profile)
-except AmdSmiException as e:
+            profile = amdsmi.AmdSmiPowerProfilePresetMasks.BOOTUP_DEFAULT
+            amdsmi.amdsmi_set_gpu_power_profile(device, 0, profile)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_gpu_clk_range
@@ -1998,15 +2224,19 @@ Exceptions that can be thrown by `amdsmi_set_gpu_clk_range` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_clk_range(device, 0, 1000, AmdSmiClkType.SYS)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_gpu_clk_range(device, 0, 1000, amdsmi.AmdSmiClkType.SYS)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_bdf_id
@@ -2047,16 +2277,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_bdf_id` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            bdfid = amdsmi_get_gpu_bdf_id(device)
+            bdfid = amdsmi.amdsmi_get_gpu_bdf_id(device)
             print(bdfid)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_pci_bandwidth
@@ -2099,16 +2333,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_pci_bandwidth` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            bandwidth = amdsmi_get_gpu_pci_bandwidth(device)
+            bandwidth = amdsmi.amdsmi_get_gpu_pci_bandwidth(device)
             print(bandwidth)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_pci_throughput
@@ -2143,16 +2381,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_pci_throughput` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            pci = amdsmi_get_gpu_pci_throughput(device)
+            pci = amdsmi.amdsmi_get_gpu_pci_throughput(device)
             print(pci)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_pci_replay_counter
@@ -2182,16 +2424,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_pci_replay_counter` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            counter =  amdsmi_get_gpu_pci_replay_counter(device)
+            counter =  amdsmi.amdsmi_get_gpu_pci_replay_counter(device)
             print(counter)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_topo_numa_affinity
@@ -2221,16 +2467,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_topo_numa_affinity` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            numa_node = amdsmi_get_gpu_topo_numa_affinity(device)
+            numa_node = amdsmi.amdsmi_get_gpu_topo_numa_affinity(device)
             print(numa_node)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_energy_count
@@ -2268,16 +2518,20 @@ Exceptions that can be thrown by `amdsmi_get_energy_count` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            energy_dict = amdsmi_get_energy_count(device)
+            energy_dict = amdsmi.amdsmi_get_energy_count(device)
             print(energy_dict)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_memory_total
@@ -2307,20 +2561,24 @@ Exceptions that can be thrown by `amdsmi_get_gpu_memory_total` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            vram_memory_total = amdsmi_get_gpu_memory_total(device, amdsmi_interface.AmdSmiMemoryType.VRAM)
+            vram_memory_total = amdsmi.amdsmi_get_gpu_memory_total(device, amdsmi.AmdSmiMemoryType.VRAM)
             print(vram_memory_total)
-            vis_vram_memory_total = amdsmi_get_gpu_memory_total(device, amdsmi_interface.AmdSmiMemoryType.VIS_VRAM)
+            vis_vram_memory_total = amdsmi.amdsmi_get_gpu_memory_total(device, amdsmi.AmdSmiMemoryType.VIS_VRAM)
             print(vis_vram_memory_total)
-            gtt_memory_total = amdsmi_get_gpu_memory_total(device, amdsmi_interface.AmdSmiMemoryType.GTT)
+            gtt_memory_total = amdsmi.amdsmi_get_gpu_memory_total(device, amdsmi.AmdSmiMemoryType.GTT)
             print(gtt_memory_total)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_gpu_od_clk_info
@@ -2354,20 +2612,24 @@ Exceptions that can be thrown by `amdsmi_set_gpu_od_clk_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_od_clk_info(
+            amdsmi.amdsmi_set_gpu_od_clk_info(
                 device,
-                AmdSmiFreqInd.MAX,
+                amdsmi.AmdSmiFreqInd.MAX,
                 1000,
-                AmdSmiClkType.SYS
+                amdsmi.AmdSmiClkType.SYS
             )
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_memory_usage
@@ -2398,20 +2660,24 @@ Exceptions that can be thrown by `amdsmi_get_gpu_memory_usage` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            vram_memory_usage = amdsmi_get_gpu_memory_usage(device, amdsmi_interface.AmdSmiMemoryType.VRAM)
+            vram_memory_usage = amdsmi.amdsmi_get_gpu_memory_usage(device, amdsmi.AmdSmiMemoryType.VRAM)
             print(vram_memory_usage)
-            vis_vram_memory_usage = amdsmi_get_gpu_memory_usage(device, amdsmi_interface.AmdSmiMemoryType.VIS_VRAM)
+            vis_vram_memory_usage = amdsmi.amdsmi_get_gpu_memory_usage(device, amdsmi.AmdSmiMemoryType.VIS_VRAM)
             print(vis_vram_memory_usage)
-            gtt_memory_usage = amdsmi_get_gpu_memory_usage(device, amdsmi_interface.AmdSmiMemoryType.GTT)
+            gtt_memory_usage = amdsmi.amdsmi_get_gpu_memory_usage(device, amdsmi.AmdSmiMemoryType.GTT)
             print(gtt_memory_usage)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_gpu_od_volt_info
@@ -2444,15 +2710,19 @@ Exceptions that can be thrown by `amdsmi_set_gpu_od_volt_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_od_volt_info(device, 1, 1000, 980)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_gpu_od_volt_info(device, 1, 1000, 980)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_fan_rpms
@@ -2484,16 +2754,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_fan_rpms` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            fan_rpm = amdsmi_get_gpu_fan_rpms(device, 0)
+            fan_rpm = amdsmi.amdsmi_get_gpu_fan_rpms(device, 0)
             print(fan_rpm)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_fan_speed
@@ -2527,16 +2801,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_fan_speed` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            fan_speed = amdsmi_get_gpu_fan_speed(device, 0)
+            fan_speed = amdsmi.amdsmi_get_gpu_fan_speed(device, 0)
             print(fan_speed)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_fan_speed_max
@@ -2570,16 +2848,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_fan_speed_max` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            max_fan_speed = amdsmi_get_gpu_fan_speed_max(device, 0)
+            max_fan_speed = amdsmi.amdsmi_get_gpu_fan_speed_max(device, 0)
             print(max_fan_speed)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_is_gpu_power_management_enabled
@@ -2608,16 +2890,20 @@ Exceptions that can be thrown by `amdsmi_is_gpu_power_management_enabled` functi
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for processor in devices:
-            is_power_management_enabled = amdsmi_is_gpu_power_management_enabled(processor)
+            is_power_management_enabled = amdsmi.amdsmi_is_gpu_power_management_enabled(processor)
             print(is_power_management_enabled)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_npm_info
@@ -2650,18 +2936,22 @@ Exceptions that can be thrown by `amdsmi_get_npm_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
-        node_handle = amdsmi_get_node_handle(devices[0])
-        npm_info = amdsmi_get_npm_info(node_handle)
+        node_handle = amdsmi.amdsmi_get_node_handle(devices[0])
+        npm_info = amdsmi.amdsmi_get_npm_info(node_handle)
         print(npm_info['status'])
         print(npm_info['limit'])
         print(npm_info['ubb_power_threshold'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_temp_metric
@@ -2694,17 +2984,21 @@ Exceptions that can be thrown by `amdsmi_get_temp_metric` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            temp_metric =  amdsmi_get_temp_metric(device, AmdSmiTemperatureType.EDGE,
-                            AmdSmiTemperatureMetric.CURRENT)
+            temp_metric =  amdsmi.amdsmi_get_temp_metric(device, amdsmi.AmdSmiTemperatureType.EDGE,
+                            amdsmi.AmdSmiTemperatureMetric.CURRENT)
             print(temp_metric)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_volt_metric
@@ -2739,20 +3033,24 @@ Exceptions that can be thrown by `amdsmi_get_gpu_volt_metric` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            voltage = amdsmi_get_gpu_volt_metric(
+            voltage = amdsmi.amdsmi_get_gpu_volt_metric(
                 device,
-                AmdSmiVoltageType.VDDBOARD,
-                AmdSmiVoltageMetric.AVERAGE
+                amdsmi.AmdSmiVoltageType.VDDBOARD,
+                amdsmi.AmdSmiVoltageMetric.AVERAGE
             )
             print(voltage)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_utilization_count
@@ -2787,29 +3085,33 @@ Exceptions that can be thrown by `amdsmi_get_utilization_count` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            utilization = amdsmi_get_utilization_count(
+            utilization = amdsmi.amdsmi_get_utilization_count(
                             device,
-                            AmdSmiUtilizationCounterType.COARSE_GRAIN_GFX_ACTIVITY
+                            amdsmi.AmdSmiUtilizationCounterType.COARSE_GRAIN_GFX_ACTIVITY
                         )
             print(utilization)
-            utilization = amdsmi_get_utilization_count(
+            utilization = amdsmi.amdsmi_get_utilization_count(
                             device,
-                            [AmdSmiUtilizationCounterType.COARSE_GRAIN_GFX_ACTIVITY,
-                            AmdSmiUtilizationCounterType.COARSE_GRAIN_MEM_ACTIVITY,
-                            AmdSmiUtilizationCounterType.COARSE_DECODER_ACTIVITY,
-                            AmdSmiUtilizationCounterType.FINE_GRAIN_GFX_ACTIVITY,
-                            AmdSmiUtilizationCounterType.FINE_GRAIN_MEM_ACTIVITY,
-                            AmdSmiUtilizationCounterType.FINE_DECODER_ACTIVITY]
+                            [amdsmi.AmdSmiUtilizationCounterType.COARSE_GRAIN_GFX_ACTIVITY,
+                            amdsmi.AmdSmiUtilizationCounterType.COARSE_GRAIN_MEM_ACTIVITY,
+                            amdsmi.AmdSmiUtilizationCounterType.COARSE_DECODER_ACTIVITY,
+                            amdsmi.AmdSmiUtilizationCounterType.FINE_GRAIN_GFX_ACTIVITY,
+                            amdsmi.AmdSmiUtilizationCounterType.FINE_GRAIN_MEM_ACTIVITY,
+                            amdsmi.AmdSmiUtilizationCounterType.FINE_DECODER_ACTIVITY]
                         )
             print(utilization)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_perf_level
@@ -2839,16 +3141,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_perf_level` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            perf_level = amdsmi_get_gpu_perf_level(device)
+            perf_level = amdsmi.amdsmi_get_gpu_perf_level(device)
             print(perf_level)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_gpu_perf_determinism_mode
@@ -2880,15 +3186,19 @@ Exceptions that can be thrown by `amdsmi_set_gpu_perf_determinism_mode` function
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_perf_determinism_mode(device, 1333)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_gpu_perf_determinism_mode(device, 1333)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_process_isolation
@@ -2918,16 +3228,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_process_isolation` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            isolate = amdsmi_get_gpu_process_isolation(device)
+            isolate = amdsmi.amdsmi_get_gpu_process_isolation(device)
             print("Process Isolation Status: ", isolate)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_gpu_process_isolation
@@ -2958,15 +3272,19 @@ Exceptions that can be thrown by `amdsmi_set_gpu_process_isolation` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_process_isolation(device, 1)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_gpu_process_isolation(device, 1)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_clean_gpu_local_data
@@ -2996,15 +3314,19 @@ Exceptions that can be thrown by `amdsmi_clean_gpu_local_data` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_clean_gpu_local_data(device)
-except AmdSmiException as e:
+            amdsmi.amdsmi_clean_gpu_local_data(device)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_overdrive_level
@@ -3034,16 +3356,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_overdrive_level` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            od_level = amdsmi_get_gpu_overdrive_level(dev)
+            od_level = amdsmi.amdsmi_get_gpu_overdrive_level(device)
             print(od_level)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_mem_overdrive_level
@@ -3073,16 +3399,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_mem_overdrive_level` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            od_level = amdsmi_get_gpu_mem_overdrive_level(dev)
+            od_level = amdsmi.amdsmi_get_gpu_mem_overdrive_level(device)
             print(od_level)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_clk_freq
@@ -3119,15 +3449,19 @@ Exceptions that can be thrown by `amdsmi_get_clk_freq` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_get_clk_freq(device, AmdSmiClkType.SYS)
-except AmdSmiException as e:
+            amdsmi.amdsmi_get_clk_freq(device, amdsmi.AmdSmiClkType.SYS)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_od_volt_info
@@ -3167,15 +3501,19 @@ Exceptions that can be thrown by `amdsmi_get_gpu_od_volt_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_get_gpu_od_volt_info(dev)
-except AmdSmiException as e:
+            amdsmi.amdsmi_get_gpu_od_volt_info(device)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_metrics_info
@@ -3266,15 +3604,19 @@ Exceptions that can be thrown by `amdsmi_get_gpu_metrics_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_get_gpu_metrics_info(dev)
-except AmdSmiException as e:
+            amdsmi.amdsmi_get_gpu_metrics_info(device)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_pm_metrics_info
@@ -3309,15 +3651,19 @@ Exceptions that can be thrown by `amdsmi_get_gpu_pm_metrics_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            print(amdsmi_get_gpu_pm_metrics_info(device))
-except AmdSmiException as e:
+            print(amdsmi.amdsmi_get_gpu_pm_metrics_info(device))
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_reg_table_info
@@ -3352,15 +3698,19 @@ Exceptions that can be thrown by `amdsmi_get_gpu_reg_table_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            print(amdsmi_get_gpu_reg_table_info(device, AmdSmiRegType.PCIE))
-except AmdSmiException as e:
+            print(amdsmi.amdsmi_get_gpu_reg_table_info(device, amdsmi.AmdSmiRegType.PCIE))
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_od_volt_curve_regions
@@ -3398,15 +3748,19 @@ Exceptions that can be thrown by `amdsmi_get_gpu_od_volt_curve_regions` function
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_get_gpu_od_volt_curve_regions(device, 3)
-except AmdSmiException as e:
+            amdsmi.amdsmi_get_gpu_od_volt_curve_regions(device, 3)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_power_profile_presets
@@ -3443,15 +3797,19 @@ Exceptions that can be thrown by `amdsmi_get_gpu_power_profile_presets` function
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_get_gpu_power_profile_presets(device, 0)
-except AmdSmiException as e:
+            amdsmi.amdsmi_get_gpu_power_profile_presets(device, 0)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_gpu_counter_group_supported
@@ -3482,15 +3840,19 @@ Exceptions that can be thrown by `amdsmi_gpu_counter_group_supported` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_gpu_counter_group_supported(device, AmdSmiEventGroup.XGMI)
-except AmdSmiException as e:
+            amdsmi.amdsmi_gpu_counter_group_supported(device, amdsmi.AmdSmiEventGroup.XGMI)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_gpu_create_counter
@@ -3520,15 +3882,19 @@ Exceptions that can be thrown by `amdsmi_gpu_create_counter` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            event_handle = amdsmi_gpu_create_counter(device, AmdSmiEventType.XGMI_0_REQUEST_TX)
-except AmdSmiException as e:
+            event_handle = amdsmi.amdsmi_gpu_create_counter(device, amdsmi.AmdSmiEventType.XGMI_0_REQUEST_TX)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_gpu_destroy_counter
@@ -3557,16 +3923,20 @@ Exceptions that can be thrown by `amdsmi_gpu_destroy_counter` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            event_handle = amdsmi_gpu_create_counter(device, AmdSmiEventType.XGMI_0_REQUEST_TX)
-            amdsmi_gpu_destroy_counter(event_handle)
-except AmdSmiException as e:
+            event_handle = amdsmi.amdsmi_gpu_create_counter(device, amdsmi.AmdSmiEventType.XGMI_0_REQUEST_TX)
+            amdsmi.amdsmi_gpu_destroy_counter(event_handle)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_gpu_control_counter
@@ -3597,16 +3967,20 @@ Exceptions that can be thrown by `amdsmi_gpu_control_counter` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            event_handle = amdsmi_gpu_create_counter(device, AmdSmiEventType.XGMI_1_REQUEST_TX)
-            amdsmi_gpu_control_counter(event_handle, AmdSmiCounterCommand.CMD_START)
-except AmdSmiException as e:
+            event_handle = amdsmi.amdsmi_gpu_create_counter(device, amdsmi.AmdSmiEventType.XGMI_1_REQUEST_TX)
+            amdsmi.amdsmi_gpu_control_counter(event_handle, amdsmi.AmdSmiCounterCommand.CMD_START)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_gpu_read_counter
@@ -3641,17 +4015,21 @@ Exceptions that can be thrown by `amdsmi_gpu_read_counter` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            event_handle = amdsmi_gpu_create_counter(device, AmdSmiEventType.XGMI_1_REQUEST_TX)
-            amdsmi_gpu_control_counter(event_handle, AmdSmiCounterCommand.CMD_START)
-            amdsmi_gpu_read_counter(event_handle)
-except AmdSmiException as e:
+            event_handle = amdsmi.amdsmi_gpu_create_counter(device, amdsmi.AmdSmiEventType.XGMI_1_REQUEST_TX)
+            amdsmi.amdsmi_gpu_control_counter(event_handle, amdsmi.AmdSmiCounterCommand.CMD_START)
+            amdsmi.amdsmi_gpu_read_counter(event_handle)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_available_counters
@@ -3682,16 +4060,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_available_counters` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            available_counters =  amdsmi_get_gpu_available_counters(device, AmdSmiEventGroup.XGMI)
+            available_counters =  amdsmi.amdsmi_get_gpu_available_counters(device, amdsmi.AmdSmiEventGroup.XGMI)
             print(available_counters)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_gpu_perf_level
@@ -3723,15 +4105,19 @@ Exceptions that can be thrown by `amdsmi_set_gpu_perf_level` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_perf_level(device, AmdSmiDevPerfLevel.STABLE_PEAK)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_gpu_perf_level(device, amdsmi.AmdSmiDevPerfLevel.STABLE_PEAK)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_reset_gpu
@@ -3758,15 +4144,19 @@ Exceptions that can be thrown by `amdsmi_reset_gpu` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_reset_gpu(device)
-except AmdSmiException as e:
+            amdsmi.amdsmi_reset_gpu(device)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_gpu_fan_speed
@@ -3798,15 +4188,19 @@ Exceptions that can be thrown by `amdsmi_set_gpu_fan_speed` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_fan_speed(device, 0, 1333)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_gpu_fan_speed(device, 0, 1333)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_reset_gpu_fan
@@ -3835,15 +4229,19 @@ Exceptions that can be thrown by `amdsmi_reset_gpu_fan` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_reset_gpu_fan(device, 0)
-except AmdSmiException as e:
+            amdsmi.amdsmi_reset_gpu_fan(device, 0)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_clk_freq
@@ -3877,16 +4275,20 @@ Exceptions that can be thrown by `amdsmi_set_clk_freq` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
             freq_bitmask = 0
-            amdsmi_set_clk_freq(device, "SCLK", freq_bitmask)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_clk_freq(device, "SCLK", freq_bitmask)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_soc_pstate
@@ -3921,16 +4323,20 @@ Exceptions that can be thrown by `amdsmi_get_soc_pstate` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            dpm_policies = amdsmi_get_soc_pstate(device)
+            dpm_policies = amdsmi.amdsmi_get_soc_pstate(device)
             print(dpm_policies)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_soc_pstate
@@ -3961,15 +4367,19 @@ Exceptions that can be thrown by `amdsmi_set_soc_pstate` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_soc_pstate(device, 0)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_soc_pstate(device, 0)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_xgmi_plpd
@@ -4000,15 +4410,19 @@ Exceptions that can be thrown by `amdsmi_set_xgmi_plpd` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_xgmi_plpd(device, 0)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_xgmi_plpd(device, 0)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_xgmi_plpd
@@ -4043,16 +4457,20 @@ Exceptions that can be thrown by `amdsmi_get_xgmi_plpd` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            xgmi_plpd =  amdsmi_get_xgmi_plpd(device)
+            xgmi_plpd =  amdsmi.amdsmi_get_xgmi_plpd(device)
             print(xgmi_plpd)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_gpu_overdrive_level
@@ -4085,15 +4503,19 @@ Exceptions that can be thrown by `amdsmi_set_gpu_overdrive_level` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_overdrive_level(device, 0)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_gpu_overdrive_level(device, 0)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_ecc_count
@@ -4134,16 +4556,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_ecc_count` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            ecc_count =  amdsmi_get_gpu_ecc_count(device, AmdSmiGpuBlock.UMC)
+            ecc_count =  amdsmi.amdsmi_get_gpu_ecc_count(device, amdsmi.AmdSmiGpuBlock.UMC)
             print(ecc_count)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_ecc_enabled
@@ -4177,16 +4603,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_ecc_enabled` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            enabled =  amdsmi_get_gpu_ecc_enabled(device)
+            enabled =  amdsmi.amdsmi_get_gpu_ecc_enabled(device)
             print(enabled)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_ecc_status
@@ -4221,16 +4651,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_ecc_status` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            status =  amdsmi_get_gpu_ecc_status(device, AmdSmiGpuBlock.UMC)
+            status =  amdsmi.amdsmi_get_gpu_ecc_status(device, amdsmi.AmdSmiGpuBlock.UMC)
             print(status)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_status_code_to_string
@@ -4256,11 +4690,15 @@ Exceptions that can be thrown by `amdsmi_status_code_to_string` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    status_str = amdsmi_status_code_to_string(int(0))
+    amdsmi.amdsmi_init()
+    status_str = amdsmi.amdsmi_status_code_to_string(int(0))
     print(status_str)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_compute_process_info
@@ -4298,12 +4736,16 @@ Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    procs = amdsmi_get_gpu_compute_process_info()
+    amdsmi.amdsmi_init()
+    procs = amdsmi.amdsmi_get_gpu_compute_process_info()
     for proc in procs:
         print(proc)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_compute_process_info_by_pid
@@ -4342,12 +4784,16 @@ Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info_by_pid` fu
 Example:
 
 ```python
+import amdsmi
 try:
+    amdsmi.amdsmi_init()
     pid = 0 # << valid pid here
-    proc = amdsmi_get_gpu_compute_process_info_by_pid(pid)
+    proc = amdsmi.amdsmi_get_gpu_compute_process_info_by_pid(pid)
     print(proc)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_compute_process_gpus
@@ -4377,12 +4823,16 @@ Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_gpus` function:
 Example:
 
 ```python
+import amdsmi
 try:
+    amdsmi.amdsmi_init()
     pid = 0 # << valid pid here
-    indices = amdsmi_get_gpu_compute_process_gpus(pid)
+    indices = amdsmi.amdsmi_get_gpu_compute_process_gpus(pid)
     print(indices)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_gpu_xgmi_error_status
@@ -4412,16 +4862,20 @@ Exceptions that can be thrown by `amdsmi_gpu_xgmi_error_status` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            status = amdsmi_gpu_xgmi_error_status(device)
+            status = amdsmi.amdsmi_gpu_xgmi_error_status(device)
             print(status)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_reset_gpu_xgmi_error
@@ -4452,15 +4906,19 @@ Exceptions that can be thrown by `amdsmi_reset_gpu_xgmi_error` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_reset_gpu_xgmi_error(device)
-except AmdSmiException as e:
+            amdsmi.amdsmi_reset_gpu_xgmi_error(device)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_vendor_name
@@ -4489,16 +4947,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_vendor_name` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            vendor_name = amdsmi_get_gpu_vendor_name(device)
+            vendor_name = amdsmi.amdsmi_get_gpu_vendor_name(device)
             print(vendor_name)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_id
@@ -4527,16 +4989,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_id` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            dev_id = amdsmi_get_gpu_id(device)
+            dev_id = amdsmi.amdsmi_get_gpu_id(device)
             print(dev_id)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_vram_vendor
@@ -4565,16 +5031,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_vram_vendor` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            vram_vendor = amdsmi_get_gpu_vram_vendor(device)
+            vram_vendor = amdsmi.amdsmi_get_gpu_vram_vendor(device)
             print(vram_vendor)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_subsystem_id
@@ -4603,16 +5073,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_subsystem_id` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            id = amdsmi_get_gpu_subsystem_id(device)
+            id = amdsmi.amdsmi_get_gpu_subsystem_id(device)
             print(id)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_subsystem_name
@@ -4641,16 +5115,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_subsystem_name` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            subsystem_nam = amdsmi_get_gpu_subsystem_name(device)
+            subsystem_nam = amdsmi.amdsmi_get_gpu_subsystem_name(device)
             print(subsystem_nam)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_topo_get_numa_node_number
@@ -4679,16 +5157,20 @@ Exceptions that can be thrown by `amdsmi_topo_get_numa_node_number` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            node_number = amdsmi_topo_get_numa_node_number(device)
+            node_number = amdsmi.amdsmi_topo_get_numa_node_number(device)
             print(node_number)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_topo_get_link_weight
@@ -4718,17 +5200,23 @@ Exceptions that can be thrown by `amdsmi_topo_get_link_weight` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
+    elif len(devices) == 1:
+        print("Only 1 GPU on machine")
     else:
         processor_handle_src = devices[0]
         processor_handle_dest = devices[1]
-        weight = amdsmi_topo_get_link_weight(processor_handle_src, processor_handle_dest)
+        weight = amdsmi.amdsmi_topo_get_link_weight(processor_handle_src, processor_handle_dest)
         print(weight)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_minmax_bandwidth_between_processors
@@ -4763,18 +5251,24 @@ Exceptions that can be thrown by `amdsmi_get_minmax_bandwidth_between_processors
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
+    elif len(devices) == 1:
+        print("Only 1 GPU on machine")
     else:
         processor_handle_src = devices[0]
         processor_handle_dest = devices[1]
-        bandwidth =  amdsmi_get_minmax_bandwidth_between_processors(processor_handle_src, processor_handle_dest)
+        bandwidth =  amdsmi.amdsmi_get_minmax_bandwidth_between_processors(processor_handle_src, processor_handle_dest)
         print(bandwidth['min_bandwidth'])
         print(bandwidth['max_bandwidth'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_link_metrics
@@ -4814,28 +5308,32 @@ Exceptions that can be thrown by `amdsmi_get_link_metrics` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device_num, device in enumerate(devices):
-            link_metrics = amdsmi_get_link_metrics(device)
+            link_metrics = amdsmi.amdsmi_get_link_metrics(device)
             print(link_metrics['num_links'])
             for idx, links in enumerate(link_metrics['links']):
                 print(f"{idx}: {links['bdf']}, {links['read']} KB, {links['write']} KB")
-                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
+                if links['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
                     print('internal')
-                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+                if links['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
                     print('pcie')
-                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+                if links['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
                     print('xgmi')
-                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
+                if links['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
                     print('not applicable')
-                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
+                if links['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
                     print('unknown')
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_topo_get_link_type
@@ -4870,27 +5368,33 @@ Exceptions that can be thrown by `amdsmi_topo_get_link_type` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
+    elif len(devices) == 1:
+        print("Only 1 GPU on machine")
     else:
         processor_handle_src = devices[0]
         processor_handle_dest = devices[1]
-        link_type = amdsmi_topo_get_link_type(processor_handle_src, processor_handle_dest)
+        link_type = amdsmi.amdsmi_topo_get_link_type(processor_handle_src, processor_handle_dest)
         print(link_type['hops'])
-        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
             print('internal')
-        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
             print('pcie')
-        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
             print('xgmi')
-        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
             print('not applicable')
-        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
             print('unknown')
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_topo_get_p2p_status
@@ -4925,27 +5429,33 @@ Exceptions that can be thrown by `amdsmi_topo_get_p2p_status` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
+    elif len(devices) == 1:
+        print("Only 1 GPU on machine")
     else:
         processor_handle_src = devices[0]
         processor_handle_dest = devices[1]
-        link_type = amdsmi_topo_get_p2p_status(processor_handle_src, processor_handle_dest)
-        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
+        link_type = amdsmi.amdsmi_topo_get_p2p_status(processor_handle_src, processor_handle_dest)
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
             print('internal')
-        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
             print('pcie')
-        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
             print('xgmi')
-        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
             print('not applicable')
-        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
             print('unknown')
         print(link_type['caps'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_is_P2P_accessible
@@ -4975,17 +5485,23 @@ Exceptions that can be thrown by `amdsmi_is_P2P_accessible` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
+    elif len(devices) == 1:
+        print("Only 1 GPU on machine")
     else:
         processor_handle_src = devices[0]
         processor_handle_dest = devices[1]
-        accessible = amdsmi_is_P2P_accessible(processor_handle_src, processor_handle_dest)
+        accessible = amdsmi.amdsmi_is_P2P_accessible(processor_handle_src, processor_handle_dest)
         print(accessible)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_compute_partition
@@ -5015,16 +5531,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_compute_partition` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            compute_partition_type = amdsmi_get_gpu_compute_partition(device)
+            compute_partition_type = amdsmi.amdsmi_get_gpu_compute_partition(device)
             print(compute_partition_type)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_gpu_compute_partition
@@ -5056,16 +5576,20 @@ Exceptions that can be thrown by `amdsmi_set_gpu_compute_partition` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    compute_partition = AmdSmiComputePartitionType.SPX
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    compute_partition = amdsmi.AmdSmiComputePartitionType.SPX
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_compute_partition(device, compute_partition)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_gpu_compute_partition(device, compute_partition)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 
@@ -5095,16 +5619,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_memory_partition` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            memory_partition_type = amdsmi_get_gpu_memory_partition(device)
+            memory_partition_type = amdsmi.amdsmi_get_gpu_memory_partition(device)
             print(memory_partition_type)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_gpu_memory_partition
@@ -5135,21 +5663,40 @@ Exceptions that can be thrown by `amdsmi_set_gpu_memory_partition` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    memory_partition = AmdSmiMemoryPartitionType.NPS1
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    memory_partition = amdsmi.AmdSmiMemoryPartitionType.NPS1
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_memory_partition(device, memory_partition)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_gpu_memory_partition(device, memory_partition)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_uma_carveout_info
 
 **Note:** This is a kernel UAPI feature (sysfs), not libdrm.
+
+**Supported ASICs and prerequisites:**
+
+- Only available on APU parts whose VBIOS exposes ATCS function 0xA
+  ("Set UMA Allocation Size") and an `integrated_system_info` table of
+  at least v2.3. In practice this covers Strix and later APUs
+  (gfx1150/gfx1151/gfx1152).
+- **Not available** on dedicated GPUs or Instinct MI-series accelerators
+  (including MI300A); the call returns `AMDSMI_STATUS_NOT_SUPPORTED` and
+  `amd-smi static --mem-carveout` prints
+  `MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)`.
+- Requires Linux kernel >= 7.0 (upstream commit
+  [`685b711`](https://github.com/torvalds/linux/commit/685b711); some
+  distros backport it to earlier kernels) and read access to
+  `/sys/class/drm/<card>/device/uma/carveout`.
 
 Description: Get UMA carveout (VRAM) configuration information for a GPU. Returns the current carveout index, total number of available options, and a list of option descriptions.
 
@@ -5178,19 +5725,23 @@ Exceptions that can be thrown by `amdsmi_get_gpu_uma_carveout_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            info = amdsmi_get_gpu_uma_carveout_info(device)
+            info = amdsmi.amdsmi_get_gpu_uma_carveout_info(device)
             print(f"Current index: {info['current_index']}")
             print(f"Number of options: {info['num_options']}")
             for opt in info['options']:
                 print(f"  Option {opt['index']}: {opt['description']}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_gpu_uma_carveout
@@ -5220,17 +5771,36 @@ Exceptions that can be thrown by `amdsmi_set_gpu_uma_carveout` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
             # Set carveout to option index 2
-            amdsmi_set_gpu_uma_carveout(device, 2)
-except AmdSmiException as e:
+            amdsmi.amdsmi_set_gpu_uma_carveout(device, 2)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
+
+### GTT (TTM `pages_limit`) APIs
+
+**Supported ASICs and prerequisites:**
+
+- Supported on every system running the amdgpu stack, including Ryzen
+  APUs (in-kernel amdgpu), Radeon dGPUs, and Instinct MI-series
+  accelerators with amdgpu-dkms (MI100 / MI200 / MI300 / MI300A).
+- The kernel TTM module may be named `ttm` (upstream), `amdttm` (older
+  amdgpu-dkms), or `amd-ttm` (newer amdgpu-dkms). amd-smi detects the
+  loaded module automatically by inspecting `/sys/module/` and writes the
+  corresponding `/etc/modprobe.d/<module>.conf`.
+- Writing `pages_limit` requires root and a reboot to take effect.
+  `dracut -f` is invoked automatically when available so that the change
+  is picked up by the initramfs.
 
 ### amdsmi_get_ttm_info
 
@@ -5257,11 +5827,15 @@ Exceptions that can be thrown by `amdsmi_get_ttm_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    info = amdsmi_get_ttm_info()
+    amdsmi.amdsmi_init()
+    info = amdsmi.amdsmi_get_ttm_info()
     print(f"Current TTM pages limit: {info['current_pages']}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_ttm_pages_limit
@@ -5289,11 +5863,15 @@ Exceptions that can be thrown by `amdsmi_set_ttm_pages_limit` function:
 Example:
 
 ```python
+import amdsmi
 try:
+    amdsmi.amdsmi_init()
     # Set TTM limit to 1048576 pages (4 GB with 4K pages)
-    amdsmi_set_ttm_pages_limit(1048576)
-except AmdSmiException as e:
+    amdsmi.amdsmi_set_ttm_pages_limit(1048576)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_reset_ttm_pages_limit
@@ -5318,10 +5896,14 @@ Exceptions that can be thrown by `amdsmi_reset_ttm_pages_limit` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    amdsmi_reset_ttm_pages_limit()
-except AmdSmiException as e:
+    amdsmi.amdsmi_init()
+    amdsmi.amdsmi_reset_ttm_pages_limit()
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_gpu_accelerator_partition_profile
@@ -5357,16 +5939,20 @@ Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_profile` 
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            partition_id = amdsmi_get_gpu_accelerator_partition_profile(device)["partition_id"]
+            partition_id = amdsmi.amdsmi_get_gpu_accelerator_partition_profile(device)["partition_id"]
             print(partition_id)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_xgmi_info
@@ -5402,19 +5988,23 @@ Exceptions that can be thrown by `amdsmi_get_xgmi_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
         for device in devices:
-            xgmi_info = amdsmi_get_xgmi_info(device)
+            xgmi_info = amdsmi.amdsmi_get_xgmi_info(device)
             print(xgmi_info['xgmi_lanes'])
             print(xgmi_info['xgmi_hive_id'])
             print(xgmi_info['xgmi_node_id'])
             print(xgmi_info['index'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_link_topology_nearest
@@ -5445,31 +6035,29 @@ Exceptions that can be thrown by `amdsmi_get_link_topology_nearest` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    amdsmi_init()
+    amdsmi.amdsmi_init()
 
-    devices = amdsmi_get_processor_handles()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs found on machine")
         exit()
     else:
-        print(amdsmi_get_gpu_device_uuid(devices[0]))
+        print(amdsmi.amdsmi_get_gpu_device_uuid(devices[0]))
 
-    nearest_gpus = amdsmi_get_link_topology_nearest(devices[0], AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE)
+    nearest_gpus = amdsmi.amdsmi_get_link_topology_nearest(devices[0], amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE)
     if (len(nearest_gpus['processor_list'])) == 0:
         print("No nearest GPUs found on machine")
     else:
         print("Nearest GPUs")
         for gpu in nearest_gpus['processor_list']:
-            print(amdsmi_get_gpu_device_uuid(gpu))
+            print(amdsmi.amdsmi_get_gpu_device_uuid(gpu))
 
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
 finally:
-    try:
-        amdsmi_shut_down()
-    except AmdSmiException as e:
-        print(e)
+    amdsmi.amdsmi_shut_down()
 ```
 
 
@@ -5505,13 +6093,17 @@ Exceptions that can be thrown by `amdsmi_get_gpu_virtualization_mode` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    device_handles = amdsmi_interface.amdsmi_get_processor_handles()
-    for dev in device_handles:
-        virtualization_info = amdsmi_interface.amdsmi_get_gpu_virtualization_mode(dev)
+    amdsmi.amdsmi_init()
+    device_handles = amdsmi.amdsmi_get_processor_handles()
+    for device in device_handles:
+        virtualization_info = amdsmi.amdsmi_get_gpu_virtualization_mode(device)
         print(virtualization_info['mode'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_affinity_with_scope
@@ -5542,56 +6134,25 @@ Exceptions that can be thrown by `amdsmi_get_gpu_vram_info` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    devices = amdsmi_get_processor_handles()
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
+        scope = amdsmi.AmdSmiAffinityScope.NUMA_SCOPE
+        scope = amdsmi.AmdSmiAffinityScope.SOCKET_SCOPE
         for device in devices:
-            bitmask = amdsmi_get_cpu_affinity_with_scope(device)
+            bitmask = amdsmi.amdsmi_get_cpu_affinity_with_scope(device, scope)
             print(bitmask['size'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ## CPU APIs
-
-### amdsmi_get_processor_info
-
-**Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
-
-Description: Return processor name
-
-Input parameters:
-`processor_handle` processor handle
-
-Output: Processor name
-
-Exceptions that can be thrown by `amdsmi_get_processor_info` function:
-
-* `AmdSmiLibraryException`
-
-#### Possible Library Exceptions
-
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
-- `AMDSMI_STATUS_INVAL` - Invalid parameters
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
-
-Example:
-
-```python
-try:
-    processor_handles = amdsmi_get_processor_handles()
-    if len(processor_handles) == 0:
-        print("No processors on machine")
-    else:
-        for processor in processor_handles:
-            print(amdsmi_get_processor_info(processor))
-except AmdSmiException as e:
-    print(e)
-```
 
 ### amdsmi_get_cpu_hsmp_proto_ver
 
@@ -5614,18 +6175,22 @@ Exceptions that can be thrown by `amdsmi_get_cpu_hsmp_proto_ver` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            version = amdsmi_get_cpu_hsmp_proto_ver(processor)
+            version = amdsmi.amdsmi_get_cpu_hsmp_proto_ver(processor)
             print(version)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_threads_per_core
@@ -5649,11 +6214,15 @@ Exceptions that can be thrown by `amdsmi_get_cpu_family` function:
 Example:
 
 ```python
+import amdsmi
 try:
-     threads_per_core = amdsmi_get_threads_per_core()
-     print(threads_per_core)
-except AmdSmiException as e:
+    amdsmi.amdsmi_init()
+    threads_per_core = amdsmi.amdsmi_get_threads_per_core()
+    print(threads_per_core)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_hsmp_driver_version
@@ -5677,18 +6246,22 @@ Exceptions that can be thrown by `amdsmi_get_cpu_hsmp_driver_version` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            version = amdsmi_get_cpu_hsmp_driver_version(processor)
+            version = amdsmi.amdsmi_get_cpu_hsmp_driver_version(processor)
             print(version)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_smu_fw_version
@@ -5712,18 +6285,22 @@ Exceptions that can be thrown by `amdsmi_get_cpu_smu_fw_version` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            version = amdsmi_get_cpu_smu_fw_version(processor)
+            version = amdsmi.amdsmi_get_cpu_smu_fw_version(processor)
             print(version)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_prochot_status
@@ -5747,18 +6324,22 @@ Exceptions that can be thrown by `amdsmi_get_cpu_prochot_status` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            prochot = amdsmi_get_cpu_prochot_status(processor)
+            prochot = amdsmi.amdsmi_get_cpu_prochot_status(processor)
             print(prochot)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_fclk_mclk
@@ -5782,20 +6363,24 @@ Exceptions that can be thrown by `amdsmi_get_cpu_fclk_mclk` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            clk = amdsmi_get_cpu_fclk_mclk(processor)
+            clk = amdsmi.amdsmi_get_cpu_fclk_mclk(processor)
             for fclk, mclk in clk.items():
                 print(fclk)
                 print(mclk)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_cclk_limit
@@ -5819,18 +6404,22 @@ Exceptions that can be thrown by `amdsmi_get_cpu_cclk_limit` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            cclk_limit = amdsmi_get_cpu_cclk_limit(processor)
+            cclk_limit = amdsmi.amdsmi_get_cpu_cclk_limit(processor)
             print(cclk_limit)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_socket_current_active_freq_limit
@@ -5854,20 +6443,24 @@ Exceptions that can be thrown by `amdsmi_get_cpu_socket_current_active_freq_limi
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            freq_limit = amdsmi_get_cpu_socket_current_active_freq_limit(processor)
+            freq_limit = amdsmi.amdsmi_get_cpu_socket_current_active_freq_limit(processor)
             for freq, src in freq_limit.items():
                 print(freq)
                 print(src)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_socket_freq_range
@@ -5891,20 +6484,24 @@ Exceptions that can be thrown by `amdsmi_get_cpu_socket_freq_range` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            freq_range = amdsmi_get_cpu_socket_freq_range(processor)
+            freq_range = amdsmi.amdsmi_get_cpu_socket_freq_range(processor)
             for fmax, fmin in freq_range.items():
                 print(fmax)
                 print(fmin)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_core_current_freq_limit
@@ -5928,16 +6525,20 @@ Exceptions that can be thrown by `amdsmi_get_cpu_core_current_freq_limit` functi
 Example:
 
 ```python
+import amdsmi
 try:
-    processor_handles = amdsmi_get_cpucore_handles()
+    amdsmi.amdsmi_init()
+    processor_handles = amdsmi.amdsmi_get_cpucore_handles()
     if len(processor_handles) == 0:
         print("No CPU cores on machine")
     else:
         for processor in processor_handles:
-            freq_limit = amdsmi_get_cpu_core_current_freq_limit(processor)
+            freq_limit = amdsmi.amdsmi_get_cpu_core_current_freq_limit(processor)
             print(freq_limit)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_socket_power
@@ -5961,18 +6562,22 @@ Exceptions that can be thrown by `amdsmi_get_cpu_socket_power` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            sock_power = amdsmi_get_cpu_socket_power(processor)
+            sock_power = amdsmi.amdsmi_get_cpu_socket_power(processor)
             print(sock_power)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_socket_power_cap
@@ -5996,18 +6601,22 @@ Exceptions that can be thrown by `amdsmi_get_cpu_socket_power_cap` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            sock_power = amdsmi_get_cpu_socket_power_cap(processor)
+            sock_power = amdsmi.amdsmi_get_cpu_socket_power_cap(processor)
             print(sock_power)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_socket_power_cap_max
@@ -6031,18 +6640,22 @@ Exceptions that can be thrown by `amdsmi_get_cpu_socket_power_cap_max` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            sock_power = amdsmi_get_cpu_socket_power_cap_max(processor)
+            sock_power = amdsmi.amdsmi_get_cpu_socket_power_cap_max(processor)
             print(sock_power)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_pwr_svi_telemetry_all_rails
@@ -6066,18 +6679,22 @@ Exceptions that can be thrown by `amdsmi_get_cpu_pwr_svi_telemetry_all_rails` fu
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            power = amdsmi_get_cpu_pwr_svi_telemetry_all_rails(processor)
+            power = amdsmi.amdsmi_get_cpu_pwr_svi_telemetry_all_rails(processor)
             print(power)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_socket_power_cap
@@ -6101,17 +6718,21 @@ Exceptions that can be thrown by `amdsmi_set_cpu_socket_power_cap` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            power = amdsmi_set_cpu_socket_power_cap(processor, 1000)
-except AmdSmiException as e:
+            power = amdsmi.amdsmi_set_cpu_socket_power_cap(processor, 1000)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_pwr_efficiency_mode
@@ -6145,10 +6766,10 @@ Exceptions that can be thrown by `amdsmi_set_cpu_pwr_efficiency_mode` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -6160,11 +6781,11 @@ try:
                 power_efficiency_mode = 4    # Use mode
                 utilization = 100      # Use Util 100%
                 ppt_limit = 1000  # Use PPT Limit 1000 mW
-                updated_util, updated_ppt_limit = amdsmi_set_cpu_pwr_efficiency_mode(processor, power_efficiency_mode, utilization, ppt_limit)
+                updated_util, updated_ppt_limit = amdsmi.amdsmi_set_cpu_pwr_efficiency_mode(processor, power_efficiency_mode, utilization, ppt_limit)
                 ppt_limit_watts = updated_ppt_limit/1000.0  # Convert milliwatts to watts
                 print(f"CPU: {i}")
                 print(f"    PWR_EFF_MODE:")
-                print(f"    	MODE: {power_efficiency_mode}")
+                print(f"        MODE: {power_efficiency_mode}")
                 # Only show utilization and ppt_limit for modes 4 and 5
                 if power_efficiency_mode in [4, 5]:
                     print(f"        UTIL: {updated_util}%")
@@ -6174,10 +6795,12 @@ try:
                     # For power efficiency mode 0-3, utilization and ppt_limit are not displayed
                     pass
                 print(f"        RESPONSE: Set power efficiency mode operation successful")
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to set power efficiency mode for CPU {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_pwr_efficiency_mode
@@ -6208,10 +6831,10 @@ Exceptions that can be thrown by `amdsmi_get_cpu_pwr_efficiency_mode` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -6220,22 +6843,24 @@ try:
         for i, processor in enumerate(processor_handles):
             try:
                 # This has been tested on CPU family 0x1A model 0x50, so with mode 4 , utilization and ppt limit are valid
-                power_efficiency_mode, utilization, ppt_limit = amdsmi_get_cpu_pwr_efficiency_mode(processor)
+                power_efficiency_mode, utilization, ppt_limit = amdsmi.amdsmi_get_cpu_pwr_efficiency_mode(processor)
                 print(f"CPU: {i}")
                 print(f"    PWR_EFF_MODE:")
-                print(f"    	MODE: {power_efficiency_mode}")
+                print(f"        MODE: {power_efficiency_mode}")
                 # Only show utilization and ppt_limit for modes 4 and 5
                 if power_efficiency_mode in [4, 5]:
-                    print(f"    	UTIL: {utilization}%")
-                    print(f"    	PPT_LIMIT: {ppt_limit} Watts")
+                    print(f"        UTIL: {utilization}%")
+                    print(f"        PPT_LIMIT: {ppt_limit} Watts")
                     print()
                 else:
                     # For modes 0-3, utilization and ppt_limit are not displayed
                     pass
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to get power efficiency mode for CPU {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_core_boostlimit
@@ -6259,16 +6884,20 @@ Exceptions that can be thrown by `amdsmi_get_cpu_core_boostlimit` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    processor_handles = amdsmi_get_cpucore_handles()
+    amdsmi.amdsmi_init()
+    processor_handles = amdsmi.amdsmi_get_cpucore_handles()
     if len(processor_handles) == 0:
         print("No CPU cores on machine")
     else:
         for processor in processor_handles:
-            boost_limit = amdsmi_get_cpu_core_boostlimit(processor)
+            boost_limit = amdsmi.amdsmi_get_cpu_core_boostlimit(processor)
             print(boost_limit)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_socket_c0_residency
@@ -6292,18 +6921,22 @@ Exceptions that can be thrown by `amdsmi_get_cpu_socket_c0_residency` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            c0_residency = amdsmi_get_cpu_socket_c0_residency(processor)
+            c0_residency = amdsmi.amdsmi_get_cpu_socket_c0_residency(processor)
             print(c0_residency)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_core_boostlimit
@@ -6327,15 +6960,19 @@ Exceptions that can be thrown by `amdsmi_set_cpu_core_boostlimit` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    processor_handles = amdsmi_get_cpucore_handles()
+    amdsmi.amdsmi_init()
+    processor_handles = amdsmi.amdsmi_get_cpucore_handles()
     if len(processor_handles) == 0:
         print("No CPU cores on machine")
     else:
         for processor in processor_handles:
-            boost_limit = amdsmi_set_cpu_core_boostlimit(processor, 1000)
-except AmdSmiException as e:
+            boost_limit = amdsmi.amdsmi_set_cpu_core_boostlimit(processor, 1000)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_socket_boostlimit
@@ -6359,17 +6996,21 @@ Exceptions that can be thrown by `amdsmi_set_cpu_socket_boostlimit` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            boost_limit = amdsmi_set_cpu_socket_boostlimit(processor, 1000)
-except AmdSmiException as e:
+            boost_limit = amdsmi.amdsmi_set_cpu_socket_boostlimit(processor, 1000)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_ddr_bw
@@ -6393,20 +7034,24 @@ Exceptions that can be thrown by `amdsmi_get_cpu_ddr_bw` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            ddr_bw = amdsmi_get_cpu_ddr_bw(processor)
+            ddr_bw = amdsmi.amdsmi_get_cpu_ddr_bw(processor)
             print(ddr_bw['max_bw'])
             print(ddr_bw['utilized_bw'])
             print(ddr_bw['utilized_pct'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_socket_temperature
@@ -6430,18 +7075,22 @@ Exceptions that can be thrown by `amdsmi_get_cpu_socket_temperature` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            ptmon = amdsmi_get_cpu_socket_temperature(processor)
+            ptmon = amdsmi.amdsmi_get_cpu_socket_temperature(processor)
             print(ptmon)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_dimm_temp_range_and_refresh_rate
@@ -6465,19 +7114,23 @@ Exceptions that can be thrown by `amdsmi_get_cpu_dimm_temp_range_and_refresh_rat
 Example:
 
 ```python
+import amdsmi
 try:
+    amdsmi.amdsmi_init()
     dimm_addr =0
-    cpu_handles = amdsmi_get_cpu_handles()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            dimm = amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(processor, dimm_addr)
+            dimm = amdsmi.amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(processor, dimm_addr)
             print(dimm)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_dimm_power_consumption
@@ -6501,21 +7154,25 @@ Exceptions that can be thrown by `amdsmi_get_cpu_dimm_power_consumption` functio
 Example:
 
 ```python
+import amdsmi
 try:
+    amdsmi.amdsmi_init()
     dimm_addr = 0
-    cpu_handles = amdsmi_get_cpu_handles()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            dimm = amdsmi_get_cpu_dimm_power_consumption(processor, dimm_addr)
+            dimm = amdsmi.amdsmi_get_cpu_dimm_power_consumption(processor, dimm_addr)
             print(dimm['power'])
             print(dimm['update_rate'])
             print(dimm['dimm_addr'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_dimm_thermal_sensor
@@ -6539,22 +7196,26 @@ Exceptions that can be thrown by `amdsmi_get_cpu_dimm_thermal_sensor` function:
 Example:
 
 ```python
+import amdsmi
 try:
+    amdsmi.amdsmi_init()
     dimm_addr = 0
-    cpu_handles = amdsmi_get_cpu_handles()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            dimm = amdsmi_get_cpu_dimm_thermal_sensor(processor,dimm_addr)
+            dimm = amdsmi.amdsmi_get_cpu_dimm_thermal_sensor(processor,dimm_addr)
             print(dimm['sensor'])
             print(dimm['update_rate'])
             print(dimm['dimm_addr'])
             print(dimm['temp'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_xgmi_width
@@ -6578,17 +7239,21 @@ Exceptions that can be thrown by `amdsmi_set_cpu_xgmi_width` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            xgmi_width = amdsmi_set_cpu_xgmi_width(processor, 0, 100)
-except AmdSmiException as e:
+            xgmi_width = amdsmi.amdsmi_set_cpu_xgmi_width(processor, 0, 100)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_gmi3_link_width_range
@@ -6612,17 +7277,21 @@ Exceptions that can be thrown by `amdsmi_set_cpu_gmi3_link_width_range` function
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            gmi_link_width = amdsmi_set_cpu_gmi3_link_width_range(processor, 0, 100)
-except AmdSmiException as e:
+            gmi_link_width = amdsmi.amdsmi_set_cpu_gmi3_link_width_range(processor, 0, 100)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_cpu_apb_enable
@@ -6646,17 +7315,21 @@ Exceptions that can be thrown by `amdsmi_cpu_apb_enable` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            apb_enable = amdsmi_cpu_apb_enable(processor)
-except AmdSmiException as e:
+            apb_enable = amdsmi.amdsmi_cpu_apb_enable(processor)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_cpu_apb_disable
@@ -6680,17 +7353,21 @@ Exceptions that can be thrown by `amdsmi_cpu_apb_disable` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            apb_disable = amdsmi_cpu_apb_disable(processor, 0)
-except AmdSmiException as e:
+            apb_disable = amdsmi.amdsmi_cpu_apb_disable(processor, 0)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_socket_lclk_dpm_level
@@ -6714,17 +7391,21 @@ Exceptions that can be thrown by `amdsmi_set_cpu_socket_lclk_dpm_level` function
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for socket in socket_handles:
-            nbio = amdsmi_set_cpu_socket_lclk_dpm_level(socket, 0, 0, 2)
-except AmdSmiException as e:
+            nbio = amdsmi.amdsmi_set_cpu_socket_lclk_dpm_level(socket, 0, 0, 2)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_socket_lclk_dpm_level
@@ -6748,19 +7429,23 @@ Exceptions that can be thrown by `amdsmi_get_cpu_socket_lclk_dpm_level` function
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            nbio = amdsmi_get_cpu_socket_lclk_dpm_level(processor, 0)
+            nbio = amdsmi.amdsmi_get_cpu_socket_lclk_dpm_level(processor, 0)
             print(nbio['nbio_max_dpm_level'])
             print(nbio['nbio_max_dpm_level'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_pcie_link_rate
@@ -6784,17 +7469,21 @@ Exceptions that can be thrown by `amdsmi_set_cpu_pcie_link_rate` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            link_rate = amdsmi_set_cpu_pcie_link_rate(processor, 0)
-except AmdSmiException as e:
+            link_rate = amdsmi.amdsmi_set_cpu_pcie_link_rate(processor, 0)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_df_pstate_range
@@ -6818,17 +7507,21 @@ Exceptions that can be thrown by `amdsmi_set_cpu_df_pstate_range` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            pstate_range = amdsmi_set_cpu_df_pstate_range(processor, 0, 2)
-except AmdSmiException as e:
+            pstate_range = amdsmi.amdsmi_set_cpu_df_pstate_range(processor, 0, 2)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_current_io_bandwidth
@@ -6853,18 +7546,22 @@ Exceptions that can be thrown by `amdsmi_get_cpu_current_io_bandwidth` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            io_bw = amdsmi_get_cpu_current_io_bandwidth(processor)
+            io_bw = amdsmi.amdsmi_get_cpu_current_io_bandwidth(processor)
             print(io_bw)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_current_xgmi_bw
@@ -6885,8 +7582,10 @@ Exceptions that can be thrown by `amdsmi_get_cpu_current_xgmi_bw` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -6895,10 +7594,12 @@ try:
         encoding = 0
         link_name = "P0"
         for processor in processor_handles:
-            xgmi_bw = amdsmi_get_cpu_current_xgmi_bw(processor, encoding, link_name)
+            xgmi_bw = amdsmi.amdsmi_get_cpu_current_xgmi_bw(processor, encoding, link_name)
             print(xgmi_bw)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_hsmp_metrics_table_version
@@ -6922,18 +7623,22 @@ Exceptions that can be thrown by `amdsmi_get_hsmp_metrics_table_version` functio
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            met_ver = amdsmi_get_hsmp_metrics_table_version(processor)
+            met_ver = amdsmi.amdsmi_get_hsmp_metrics_table_version(processor)
             print(met_ver)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_hsmp_metrics_table
@@ -6957,15 +7662,17 @@ Exceptions that can be thrown by `amdsmi_get_hsmp_metrics_table` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            mtbl = amdsmi_get_hsmp_metrics_table(processor)
+            mtbl = amdsmi.amdsmi_get_hsmp_metrics_table(processor)
             print(mtbl['accumulation_counter'])
             print(mtbl['max_socket_temperature'])
             print(mtbl['max_vr_temperature'])
@@ -6973,8 +7680,10 @@ try:
             print(mtbl['socket_power_limit'])
             print(mtbl['max_socket_power_limit'])
             print(mtbl['socket_power'])
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_first_online_core_on_cpu_socket
@@ -6998,18 +7707,22 @@ Exceptions that can be thrown by `amdsmi_first_online_core_on_cpu_socket` functi
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            pcore_ind = amdsmi_first_online_core_on_cpu_socket(processor)
+            pcore_ind = amdsmi.amdsmi_first_online_core_on_cpu_socket(processor)
             print(pcore_ind)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_family
@@ -7033,11 +7746,15 @@ Exceptions that can be thrown by `amdsmi_get_cpu_family` function:
 Example:
 
 ```python
+import amdsmi
 try:
-     cpu_family = amdsmi_get_cpu_family()
-     print(cpu_family)
-except AmdSmiException as e:
+    amdsmi.amdsmi_init()
+    cpu_family = amdsmi.amdsmi_get_cpu_family()
+    print(cpu_family)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_model
@@ -7061,11 +7778,15 @@ Exceptions that can be thrown by `amdsmi_get_cpu_model` function:
 Example:
 
 ```python
+import amdsmi
 try:
-     cpu_model = amdsmi_get_cpu_model()
-     print(cpu_model)
-except AmdSmiException as e:
+    amdsmi.amdsmi_init()
+    cpu_model = amdsmi.amdsmi_get_cpu_model()
+    print(cpu_model)
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_model_name
@@ -7086,18 +7807,22 @@ Exceptions that can be thrown by `amdsmi_get_cpu_model_name` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles: 
-            cpu_model_name = amdsmi_get_cpu_model_name(processor)
+            cpu_model_name = amdsmi.amdsmi_get_cpu_model_name(processor)
             print(cpu_model_name)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ## No amdsmi_init APIs
@@ -7124,11 +7849,15 @@ Exceptions that can be thrown by `amdsmi_get_lib_version` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    version = amdsmi_get_lib_version()
+    amdsmi.amdsmi_init()
+    version = amdsmi.amdsmi_get_lib_version()
     print(version)
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_rocm_version
@@ -7144,13 +7873,16 @@ Exceptions that can be thrown by `amdsmi_get_rocm_version` function:
 Example:
 
 ```python
+import amdsmi
 try:
-    import amdsmi
-    rocm_load_status, version_message = amdsmi_get_rocm_version()
+    amdsmi.amdsmi_init()
+    rocm_load_status, version_message = amdsmi.amdsmi_get_rocm_version()
     print(f"ROCm load status: {rocm_load_status}")
     print(f"ROCm version msg: {version_message}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_xgmi_pstate_range
@@ -7180,10 +7912,10 @@ Exceptions that can be thrown by `amdsmi_set_cpu_xgmi_pstate_range` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7193,15 +7925,17 @@ try:
             try:
                 min_pstate = 1
                 max_pstate = 1
-                amdsmi_set_cpu_xgmi_pstate_range(processor, min_pstate, max_pstate)
+                amdsmi.amdsmi_set_cpu_xgmi_pstate_range(processor, min_pstate, max_pstate)
                 print(f"CPU: {i}")
                 print(f"    XGMI_PSTATE_RANGE:")
                 print(f"        RESPONSE: Set, MIN_PSTATE: {min_pstate}, MAX_PSTATE: {max_pstate}, successful")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to set xgmi pstate range for cpu {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_xgmi_pstate_range
@@ -7230,10 +7964,10 @@ Exceptions that can be thrown by `amdsmi_get_cpu_xgmi_pstate_range` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7241,17 +7975,19 @@ try:
     else:
         for i, processor in enumerate(processor_handles):
             try:
-                pstate_range = amdsmi_get_cpu_xgmi_pstate_range(processor)
+                pstate_range = amdsmi.amdsmi_get_cpu_xgmi_pstate_range(processor)
 
                 print(f"CPU: {i}")
                 print(f"    XGMI_PSTATE_RANGE:")
                 print(f"        MIN_PSTATE: {pstate_range['min_pstate']}")
                 print(f"        MAX_PSTATE: {pstate_range['max_pstate']}")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to get XGMI PState range for CPU {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_rail_isofreq_policy
@@ -7282,10 +8018,10 @@ Exceptions that can be thrown by `amdsmi_set_cpu_rail_isofreq_policy` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7294,15 +8030,17 @@ try:
         for i, processor in enumerate(processor_handles):
             try:
                 value = 1
-                amdsmi_set_cpu_rail_isofreq_policy(processor, value)
+                amdsmi.amdsmi_set_cpu_rail_isofreq_policy(processor, value)
                 print(f"CPU: {i}")
                 print(f"    RAILISOFREQ_POLICY:")
                 print(f"        RESPONSE: Set, VALUE: {value}, successful")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to set cpurailiso frequency policy for cpu {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_rail_isofreq_policy
@@ -7331,10 +8069,10 @@ Exceptions that can be thrown by `amdsmi_get_cpu_rail_isofreq_policy` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7342,15 +8080,17 @@ try:
     else:
         for i, processor in enumerate(processor_handles):
             try:
-                cpurailisofreq_policy = amdsmi_get_cpu_rail_isofreq_policy(processor)
+                cpurailisofreq_policy = amdsmi.amdsmi_get_cpu_rail_isofreq_policy(processor)
                 print(f"CPU: {i}")
                 print(f"    RAILISOFREQ_POLICY:")
                 print(f"        VALUE: {cpurailisofreq_policy}")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to get cpurailiso frequency policy for cpu {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_dfc_ctrl
@@ -7381,10 +8121,10 @@ Exceptions that can be thrown by `amdsmi_set_cpu_dfc_ctrl` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7393,15 +8133,17 @@ try:
         for i, processor in enumerate(processor_handles):
             try:
                 value = 1
-                amdsmi_set_cpu_dfc_ctrl(processor, value)
+                amdsmi.amdsmi_set_cpu_dfc_ctrl(processor, value)
                 print(f"CPU: {i}")
                 print(f"    DFCSTATE_CTRL:")
                 print(f"        RESPONSE: Set, VALUE: {value}, successful")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to set dfcstate control status for cpu {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_dfc_ctrl
@@ -7430,10 +8172,10 @@ Exceptions that can be thrown by `amdsmi_get_cpu_dfc_ctrl` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7441,16 +8183,18 @@ try:
     else:
         for i, processor in enumerate(processor_handles):
             try:
-                dfcstatectrl_status = amdsmi_get_cpu_dfc_ctrl(processor)
+                dfcstatectrl_status = amdsmi.amdsmi_get_cpu_dfc_ctrl(processor)
 
                 print(f"CPU: {i}")
                 print(f"    DFCSTATE_CTRL:")
                 print(f"        VALUE: {dfcstatectrl_status}")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to get dfcstate control status for cpu {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_pc6_enable
@@ -7481,10 +8225,10 @@ Exceptions that can be thrown by `amdsmi_set_cpu_pc6_enable` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7493,15 +8237,17 @@ try:
         for i, processor in enumerate(processor_handles):
             try:
                 value = 1
-                amdsmi_set_cpu_pc6_enable(processor, value)
+                amdsmi.amdsmi_set_cpu_pc6_enable(processor, value)
                 print(f"CPU: {i}")
                 print(f"    PC6_ENABLE:")
                 print(f"        RESPONSE: Set, VALUE: {value}, successful")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to set PC6 enable status for cpu {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_pc6_enable
@@ -7530,10 +8276,10 @@ Exceptions that can be thrown by `amdsmi_get_cpu_pc6_enable` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7541,16 +8287,18 @@ try:
     else:
         for i, processor in enumerate(processor_handles):
             try:
-                pc6_enable_status = amdsmi_get_cpu_pc6_enable(processor)
+                pc6_enable_status = amdsmi.amdsmi_get_cpu_pc6_enable(processor)
 
                 print(f"CPU: {i}")
                 print(f"    PC6_ENABLE:")
                 print(f"        VALUE: {pc6_enable_status}")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to get PC6 enable status for cpu {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_cc6_enable
@@ -7581,10 +8329,10 @@ Exceptions that can be thrown by `amdsmi_set_cpu_cc6_enable` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7593,15 +8341,17 @@ try:
         for i, processor in enumerate(processor_handles):
             try:
                 value = 1
-                amdsmi_set_cpu_cc6_enable(processor, value)
+                amdsmi.amdsmi_set_cpu_cc6_enable(processor, value)
                 print(f"CPU: {i}")
                 print(f"    CC6_ENABLE:")
                 print(f"        RESPONSE: Set, VALUE: {value}, successful")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to set CC6 enable status for cpu {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_cc6_enable
@@ -7630,10 +8380,10 @@ Exceptions that can be thrown by `amdsmi_get_cpu_cc6_enable` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7641,15 +8391,17 @@ try:
     else:
         for i, processor in enumerate(processor_handles):
             try:
-                cc6_enable_status = amdsmi_get_cpu_cc6_enable(processor)
+                cc6_enable_status = amdsmi.amdsmi_get_cpu_cc6_enable(processor)
                 print(f"CPU: {i}")
                 print(f"    CC6_ENABLE:")
                 print(f"        VALUE: {cc6_enable_status}")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to get CC6 enable status for cpu {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_dimm_sb_reg
@@ -7685,10 +8437,10 @@ Exceptions that can be thrown by `amdsmi_get_cpu_dimm_sb_reg` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7701,7 +8453,7 @@ try:
                 lid = 0xA         # SPD Hub
                 reg_offset = 0x00 # Register offset
                 reg_space = 1     # Volatile register space
-                data = amdsmi_get_cpu_dimm_sb_reg(processor, dimm_addr, lid, reg_offset, reg_space)
+                data = amdsmi.amdsmi_get_cpu_dimm_sb_reg(processor, dimm_addr, lid, reg_offset, reg_space)
                 print(f"CPU: {i}")
                 print(f"    DIMM_SB_REG:")
                 print(f"        DIMMADDRESS: 0x{dimm_addr:X}")
@@ -7710,10 +8462,12 @@ try:
                 print(f"        REGSPACE: 0x{reg_space:X}")
                 print(f"        DATA: 0x{data:X}")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to read DIMM sideband register for cpu {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_dimm_sb_reg
@@ -7751,10 +8505,10 @@ Exceptions that can be thrown by `amdsmi_set_cpu_dimm_sb_reg` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7767,16 +8521,18 @@ try:
                 lid = 0xA         # SPD Hub
                 reg_offset = 0x00 # Register offset
                 reg_space = 1     # Volatile register space
-                date = 0x12345678
-                amdsmi_set_cpu_dimm_sb_reg(processor, dimm_addr, lid, reg_offset, reg_space, data)
+                data = 0x12345678
+                amdsmi.amdsmi_set_cpu_dimm_sb_reg(processor, dimm_addr, lid, reg_offset, reg_space, data)
                 print(f"CPU: {i}")
                 print(f"    DIMM_SB_REG:")
                 print(f"        RESPONSE: Set, VALUE: 0x{data:X}, successful")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to write DIMM sideband register for cpu {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_core_ccd_power
@@ -7804,20 +8560,22 @@ Exceptions that can be thrown by `amdsmi_get_cpu_core_ccd_power` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    core_handles = amdsmi_get_cpucore_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    core_handles = amdsmi.amdsmi_get_cpucore_handles()
     if len(core_handles) == 0:
         print("No CPU cores on machine")
     else:
         core0 = core_handles[0]   # <-- pick core 0 explicitly
-        power = amdsmi_get_cpu_core_ccd_power(core0)
+        power = amdsmi.amdsmi_get_cpu_core_ccd_power(core0)
         print("CPU: 0")
         print("    CCD_POWER:")
         print(f"        VALUE: {power} Watts")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_tdelta
@@ -7844,10 +8602,10 @@ Exceptions that can be thrown by `amdsmi_get_cpu_tdelta` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7856,15 +8614,17 @@ try:
         for i, processor in enumerate(processor_handles):
             try:
                 # Read TDELTA value
-                tdelta_value = amdsmi_get_cpu_tdelta(processor)
+                tdelta_value = amdsmi.amdsmi_get_cpu_tdelta(processor)
                 print(f"CPU: {i}")
                 print(f"    TDELTA:")
                 print(f"        VALUE: {tdelta_value}")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to read TDELTA for CPU {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_svi3_vr_controller_temp
@@ -7898,10 +8658,10 @@ Exceptions that can be thrown by `amdsmi_get_cpu_svi3_vr_controller_temp` functi
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7912,17 +8672,19 @@ try:
                 # Get SVI3 VR controller temperature with hardcoded values
                 rail_selection = 1  # Use rail selection 1
                 rail_index = 1      # Use rail index 1
-                vr_temp_info = amdsmi_get_cpu_svi3_vr_controller_temp(processor, rail_selection, rail_index)
+                vr_temp_info = amdsmi.amdsmi_get_cpu_svi3_vr_controller_temp(processor, rail_selection, rail_index)
                 print(f"CPU: {i}")
                 print(f"    SVI3_VR_CONTROLLER_TEMP:")
                 print(f"        RAIL_SELECTION: {vr_temp_info['rail_selection']}")
                 print(f"        RAIL_INDEX: {vr_temp_info['rail_index']}")
                 print(f"        TEMPERATURE: {vr_temp_info['temperature']:.1f} 'C")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to get SVI3 VR controller temperature for CPU {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_enabled_commands
@@ -7955,10 +8717,10 @@ Exceptions that can be thrown by `amdsmi_get_cpu_enabled_commands` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -7967,7 +8729,7 @@ try:
         for i, processor in enumerate(processor_handles):
             try:
                 # Get enabled commands bitmasks
-                enabled_cmds = amdsmi_get_cpu_enabled_commands(processor)
+                enabled_cmds = amdsmi.amdsmi_get_cpu_enabled_commands(processor)
                 print(f"CPU: {i}")
                 print(f"    ENABLED_COMMANDS:")
                 print(f"        READ_ENABLED_COMMANDS_BITMASK0: 0x{enabled_cmds['ReadEnabledCommandsBitMask0']:08X}")
@@ -7977,10 +8739,12 @@ try:
                 print(f"        WRITE_ENABLED_COMMANDS_BITMASK1: 0x{enabled_cmds['WriteEnabledCommandsBitMask1']:08X}")
                 print(f"        WRITE_ENABLED_COMMANDS_BITMASK2: 0x{enabled_cmds['WriteEnabledCommandsBitMask2']:08X}")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to get enabled commands for CPU {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_core_floor_freq_limit
@@ -8007,22 +8771,24 @@ Exceptions that can be thrown by `amdsmi_get_cpu_core_floor_freq_limit` function
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    core_handles = amdsmi_get_cpucore_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    core_handles = amdsmi.amdsmi_get_cpucore_handles()
     if len(core_handles) == 0:
         print("No CPU Cores on machine")
     else:
         core0 = core_handles[0]   # <-- pick core 0 explicitly
         # Get core floor limit for core 0
-        floor_limit = amdsmi_get_cpu_core_floor_freq_limit(core0)
+        floor_limit = amdsmi.amdsmi_get_cpu_core_floor_freq_limit(core0)
         print(f"CORE: 0")
         print(f"    FLOOR_LIMIT:")
         print(f"        VALUE: {floor_limit} MHz")
         print()
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_core_eff_floor_freq_limit
@@ -8049,22 +8815,24 @@ Exceptions that can be thrown by `amdsmi_get_cpu_core_eff_floor_freq_limit` func
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    core_handles = amdsmi_get_cpucore_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    core_handles = amdsmi.amdsmi_get_cpucore_handles()
     if len(core_handles) == 0:
         print("No CPU cores on machine")
     else:
         core0 = core_handles[0]   # <-- pick core 0 explicitly
         # Get core effective floor limit for core 0
-        eff_floor_limit = amdsmi_get_cpu_core_eff_floor_freq_limit(core0)
+        eff_floor_limit = amdsmi.amdsmi_get_cpu_core_eff_floor_freq_limit(core0)
         print(f"CORE: 0")
         print(f"    EFF_FLOOR_LIMIT:")
         print(f"        VALUE: {eff_floor_limit} MHz")
         print()
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_floor_freq_limit
@@ -8091,23 +8859,25 @@ Exceptions that can be thrown by `amdsmi_get_cpu_floor_freq_limit` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
-            floor_limit = amdsmi_get_cpu_floor_freq_limit(processor)
+            floor_limit = amdsmi.amdsmi_get_cpu_floor_freq_limit(processor)
             print(f"CPU: {i}")
             print(f"    FLOOR_LIMIT:")
             print(f"        VALUE: {floor_limit} MHz")
             print()
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_eff_floor_freq_limit
@@ -8134,23 +8904,25 @@ Exceptions that can be thrown by `amdsmi_get_cpu_eff_floor_freq_limit` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
-            eff_floor_limit = amdsmi_get_cpu_eff_floor_freq_limit(processor)
+            eff_floor_limit = amdsmi.amdsmi_get_cpu_eff_floor_freq_limit(processor)
             print(f"CPU: {i}")
             print(f"    EFF_FLOOR_LIMIT:")
             print(f"        VALUE: {eff_floor_limit} MHz")
             print()
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_freq_range
@@ -8178,15 +8950,17 @@ Exceptions that can be thrown by `amdsmi_get_cpu_freq_range` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    freq_range = amdsmi_get_cpu_freq_range()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    freq_range = amdsmi.amdsmi_get_cpu_freq_range()
     print(f"CPU Frequency Range:")
     print(f"    FMAX: {freq_range['fmax']} MHz")
     print(f"    FMIN: {freq_range['fmin']} MHz")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_core_floor_freq_limit
@@ -8213,22 +8987,24 @@ Exceptions that can be thrown by `amdsmi_set_cpu_core_floor_freq_limit` function
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    core_handles = amdsmi_get_cpucore_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    core_handles = amdsmi.amdsmi_get_cpucore_handles()
     if len(core_handles) == 0:
         print("No CPU cores on machine")
     else:
         core0 = core_handles[0]   # <-- pick core 0 explicitly
         floor_limit_value = 1200  # Set floor limit to 1200 MHz
-        amdsmi_set_cpu_core_floor_freq_limit(core0, floor_limit_value)
+        amdsmi.amdsmi_set_cpu_core_floor_freq_limit(core0, floor_limit_value)
         print(f"CORE: 0")
         print(f"    FLOOR_LIMIT:")
         print(f"        RESPONSE: Set, VALUE: {floor_limit_value} MHz, successful")
         print()
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_floor_freq_limit
@@ -8257,10 +9033,10 @@ Exceptions that can be thrown by `amdsmi_set_cpu_floor_freq_limit` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -8270,15 +9046,17 @@ try:
             try:
                 # Set CPU floor limit from 600 MHz to  4000 MHz
                 floor_limit_value = 1200
-                amdsmi_set_cpu_floor_freq_limit(processor, floor_limit_value)
+                amdsmi.amdsmi_set_cpu_floor_freq_limit(processor, floor_limit_value)
                 print(f"CPU: {i}")
                 print(f"    FLOOR_LIMIT:")
                 print(f"        RESPONSE: Set, VALUE: {floor_limit_value} MHz, successful")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to set CPU floor limit for CPU {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_msr_floor_freq_limit
@@ -8307,10 +9085,10 @@ Exceptions that can be thrown by `amdsmi_set_cpu_msr_floor_freq_limit` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -8320,15 +9098,17 @@ try:
             try:
                 # Set CPU MSR floor limit to 1200 MHz
                 msr_floor_limit_value = 1200
-                amdsmi_set_cpu_msr_floor_freq_limit(processor, msr_floor_limit_value)
+                amdsmi.amdsmi_set_cpu_msr_floor_freq_limit(processor, msr_floor_limit_value)
                 print(f"CPU: {i}")
                 print(f"    MSR_FLOOR_LIMIT:")
                 print(f"        RESPONSE: Set, VALUE: {msr_floor_limit_value} MHz, successful")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to set CPU MSR floor limit for CPU {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_core_msr_floor_freq_limit
@@ -8357,23 +9137,25 @@ Exceptions that can be thrown by `amdsmi_set_cpu_core_msr_floor_freq_limit` func
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    core_handles = amdsmi_get_cpucore_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    core_handles = amdsmi.amdsmi_get_cpucore_handles()
     if len(core_handles) == 0:
         print("No CPU cores on machine")
     else:
         core0 = core_handles[0]   # <-- pick core 0 explicitly
         # Set MSR floor limit for core 0 only
         msr_floor_limit_value = 1200  # Set MSR floor limit to 1200 MHz
-        amdsmi_set_cpu_core_msr_floor_freq_limit(core0, msr_floor_limit_value)
+        amdsmi.amdsmi_set_cpu_core_msr_floor_freq_limit(core0, msr_floor_limit_value)
         print(f"CORE: 0")
         print(f"    MSR_FLOOR_LIMIT:")
         print(f"        RESPONSE: Set, VALUE: {msr_floor_limit_value} MHz, successful")
         print()
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_set_cpu_sdps_limit
@@ -8401,10 +9183,10 @@ Exceptions that can be thrown by `amdsmi_set_cpu_sdps_limit` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -8415,15 +9197,17 @@ try:
                 # Set CPU socket SDPS limit to 1000 mWatts
                 sdps_limit_value_mW = 1000
                 sdps_limit_watts = float(sdps_limit_value_mW) / 1000
-                amdsmi_set_cpu_sdps_limit(processor, sdps_limit_value_mW)
+                amdsmi.amdsmi_set_cpu_sdps_limit(processor, sdps_limit_value_mW)
                 print(f"CPU: {i}")
                 print(f"    SDPS_LIMIT:")
                 print(f"        RESPONSE: Set, VALUE: {sdps_limit_watts} Watts, successful")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to set CPU socket SDPS limit for CPU {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```
 
 ### amdsmi_get_cpu_sdps_limit
@@ -8450,10 +9234,10 @@ Exceptions that can be thrown by `amdsmi_get_cpu_sdps_limit` function:
 Example:
 
 ```python
-from amdsmi import *
+import amdsmi
 try:
-    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
     cpu_count = cpu_handles["cpu_count"]
     processor_handles = cpu_handles["processor_handles"]
     if cpu_count == 0:
@@ -8462,13 +9246,15 @@ try:
         for i, processor in enumerate(processor_handles):
             try:
                 # Get CPU socket SDPS limit
-                sdps_limit = amdsmi_get_cpu_sdps_limit(processor)
+                sdps_limit = amdsmi.amdsmi_get_cpu_sdps_limit(processor)
                 print(f"CPU: {i}")
                 print(f"    SDPS_LIMIT:")
                 print(f"        VALUE: {sdps_limit}")
                 print()
-            except AmdSmiException as e:
+            except amdsmi.AmdSmiException as e:
                 print(f"Failed to get CPU socket SDPS limit for CPU {i}: {e}")
-except AmdSmiException as e:
+except amdsmi.AmdSmiException as e:
     print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
 ```

@@ -16,7 +16,7 @@
 #   PERFXPERT_OPENCODE_DIR  override submodule location
 #   PERFXPERT_BUNDLED_DIR   override output directory
 #
-# Requires: bun (https://bun.sh/install). Exits 2 if bun is missing.
+# Requires: bun on PATH. Exits 2 if bun is missing.
 
 set -euo pipefail
 
@@ -50,8 +50,9 @@ if ! command -v bun >/dev/null 2>&1; then
   cat >&2 <<'EOF'
 build-bundled-opencode: bun is required to compile opencode.
 
-Install bun (one line, no root required):
-    curl -fsSL https://bun.sh/install | bash
+Install bun from your approved package source, or rerun the pip build with
+PERFXPERT_AUTO_INSTALL_BUN=1 to explicitly allow setup.py to bootstrap bun
+into your home directory for this build.
 
 Then re-run:
     perfxpert-code install-patches

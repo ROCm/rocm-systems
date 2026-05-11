@@ -270,9 +270,9 @@ Installation prefix
 ^^^^^^^^^^^^^^^^^^^
 
 By default, the build scripts install the library to ``~/rocshmem``. You can customize the installation path by adding
-the desired path as the script parameter. For example, to relocate the default configuration:
+the desired path through the ``INSTALL_PREFIX`` environment variable. For example, to relocate the default configuration:
 
 .. code-block:: bash
 
-  ../scripts/build_configs/ro_ipc /path/to/install
+  INSTALL_PREFIX=/path/to/install ../scripts/build_configs/all_backends
 

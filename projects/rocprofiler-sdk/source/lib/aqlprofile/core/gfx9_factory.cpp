@@ -20,11 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/gfx9_factory.h"
-#include "def/gfx9_def.h"
-#include "pm4/gfx9_cmd_builder.h"
-#include "pm4/pmc_builder.h"
-#include "pm4/sqtt_builder.h"
+#include "lib/aqlprofile/core/gfx9_factory.h"
+#include "lib/aqlprofile/def/gfx9_def.h"
+#include "lib/aqlprofile/pm4/gfx9_cmd_builder.h"
+#include "lib/aqlprofile/pm4/pmc_builder.h"
+#include "lib/aqlprofile/pm4/sqtt_builder.h"
 
 namespace aql_profile
 {

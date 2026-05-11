@@ -464,6 +464,76 @@ def test_multi_gpu_separate_agents(att_multi_gpu_out_dir_path):
                 prev_end_time = end_time
 
 
+def test_att_marker_trace(json_data, att_marker_trace_out_dir_path):
+    """Verify marker-controlled ATT traced only kernels between Resume and Pause.
+
+    Test binary launches 4 kernels:
+    - before_trace_kernel: before roctxProfilerResume (should NOT be traced)
+    - traced_kernel_first: after roctxProfilerResume (should be traced)
+    - traced_kernel_second: after roctxProfilerResume (should be traced)
+    - after_trace_kernel: after roctxProfilerPause (should NOT be traced)
+
+    Validation parses the stats_*.csv files produced by the ATT decoder.
+    Kernel names appear as instruction rows with "; <mangled_name>" and the
+    demangled name in the Source column.
+    """
+    data = json_data["rocprofiler-sdk-tool"]
+    strings = data["strings"]
+
+    # Verify ATT data was produced
+    assert "att_filenames" in strings.keys(), "No att_filenames in output"
+    att_files = strings["att_filenames"]
+    assert len(att_files) > 0, "Expected ATT data from marker-controlled thread trace"
+
+    # Verify decoded ATT output directories exist
+    att_ui_dirs = [
+        p
+        for p in Path(att_marker_trace_out_dir_path).glob("ui_output_agent_*")
+        if p.is_dir()
+    ]
+    assert len(att_ui_dirs) > 0, "No ui_output_agent_* directories found"
+
+    # Parse stats_*.csv files for kernel names.
+    # stats_*.csv are written to the PARENT of ui_output_* dirs (see code.cpp).
+    # The CSV has rows where the Instruction column is "; <mangled_name>" for
+    # kernel entry points and the Source column holds the demangled name.
+    traced_kernel_names = set()
+    stats_files = list(Path(att_marker_trace_out_dir_path).glob("stats_*.csv"))
+    assert (
+        len(stats_files) > 0
+    ), f"No stats_*.csv files found in {att_marker_trace_out_dir_path}"
+    for stats_file in stats_files:
+        with open(stats_file, "r") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            assert header is not None, f"Empty stats CSV: {stats_file}"
+            for row in reader:
+                # Instruction column (index 2) starts with "; " for kernel names
+                if len(row) >= 3 and row[2].startswith("; "):
+                    traced_kernel_names.add(row[2][2:].strip())
+                # Also check demangled name in Source column (index 7)
+                if len(row) >= 8 and row[7].strip():
+                    traced_kernel_names.add(row[7].strip())
+
+    assert len(traced_kernel_names) > 0, "No kernel names found in stats CSV files"
+
+    # Verify traced_kernel_first and traced_kernel_second were traced
+    for expected in ("traced_kernel_first", "traced_kernel_second"):
+        found = any(expected in name for name in traced_kernel_names)
+        assert found, (
+            f"Expected '{expected}' to be in ATT trace but it was not. "
+            f"Traced kernels: {traced_kernel_names}"
+        )
+
+    # Verify before_trace_kernel and after_trace_kernel were NOT traced
+    for not_expected in ("before_trace_kernel", "after_trace_kernel"):
+        found = any(not_expected in name for name in traced_kernel_names)
+        assert not found, (
+            f"Expected '{not_expected}' to NOT be in ATT trace but it was. "
+            f"Traced kernels: {traced_kernel_names}"
+        )
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)
