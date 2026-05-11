@@ -3,6 +3,7 @@
 
 set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:lib-common-tests>
+    $<TARGET_OBJECTS:diagnostic-tests>
     $<TARGET_OBJECTS:trace-cache-tests>
     $<TARGET_OBJECTS:demangler-tests>
     $<TARGET_OBJECTS:progress-tests>
@@ -27,6 +28,7 @@ target_link_libraries(
         rocprofiler-systems-googletest-library
         rocprofiler-systems-common-library
         rocprofiler-systems-core-library
+        rocprofiler-systems::rocprofiler-systems-diagnostic
         rocprofiler-systems::rocprofiler-systems-binary
         $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>
         rocprofiler-systems::rocprofiler-systems-interface-library

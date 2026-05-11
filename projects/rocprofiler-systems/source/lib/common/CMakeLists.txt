@@ -55,6 +55,8 @@ target_compile_definitions(
     INTERFACE $<BUILD_INTERFACE:ROCPROFSYS_INTERNAL_BUILD=1>
 )
 
+add_subdirectory(diagnostic)
+
 if(ROCPROFSYS_BUILD_TESTING)
     add_subdirectory(tests)
 endif()
