@@ -83,7 +83,6 @@ env:
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
   ROCPROFILER_SDK_ARTIFACT_BUCKET: "therock-ci-artifacts-external"
-  # Configure the bucket lifecycle for this prefix with Expiration.Days = 7.
   ROCPROFILER_SDK_ARTIFACT_PREFIX: "ROCm-rocm-systems/rocprofiler-sdk/ci-handoff/${{ github.run_id }}"
   ROCPROFILER_SDK_ARTIFACT_REGION: "us-east-2"
 jobs:
@@ -216,8 +215,6 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
-          PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH \
           python3 ./source/scripts/run-ci.py \
             -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core-build \
@@ -247,8 +244,6 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
           cmake --build build --target install --parallel 16
 
       - name: Build install test projects
@@ -257,8 +252,6 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples -DGPU_TARGETS="gfx942" -DCMAKE_HIP_ARCHITECTURES=gfx942 samples
           CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests -DGPU_TARGETS="gfx942" -DCMAKE_HIP_ARCHITECTURES=gfx942 tests
           export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
@@ -270,8 +263,6 @@ jobs:
         timeout-minutes: 10
         working-directory: projects/rocprofiler-sdk
         run: |
-          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
           cmake --build build --target package --parallel 16
 
       - name: Create ROCM dependencies tarball
@@ -290,8 +281,6 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
           ls -la
           ls -la ./build
@@ -305,8 +294,6 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-samples-deb -DGPU_TARGETS="gfx942" -DCMAKE_HIP_ARCHITECTURES=gfx942 ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/samples
           CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DGPU_TARGETS="gfx942" -DCMAKE_HIP_ARCHITECTURES=gfx942 ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
           cmake --build build-samples-deb --target all --parallel 16
@@ -340,9 +327,6 @@ jobs:
           aws-region: ${{ env.ROCPROFILER_SDK_ARTIFACT_REGION }}
           role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
 
-      # Run-scoped build handoff. The bucket lifecycle policy should expire this
-      # prefix after 7 days; these tarballs only need to survive delayed GPU jobs
-      # and short rerun/debug windows.
       - name: Upload build handoff artifacts to S3
         shell: bash
         run: |
@@ -392,6 +376,12 @@ jobs:
           submodules: false
           set-safe-directory: true
 
+      - name: Configure Env
+        shell: bash
+        run: |
+          echo "${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:${HOME}/.local/bin:${PATH}" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib64:${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+
       - name: Download build handoff artifacts from S3
         shell: bash
         run: |
@@ -435,8 +425,6 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           python3 ./source/scripts/run-ci.py -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core-test \
             --mode ${CI_MODE} \
@@ -456,8 +444,6 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
           ctest --test-dir build-samples -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
           ctest --test-dir build-tests   -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
@@ -468,8 +454,6 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
           ls -la
           ls -la ./build
@@ -483,8 +467,6 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           ctest --test-dir build-samples-deb -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
           ctest --test-dir build-tests-deb   -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
 
@@ -613,7 +595,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           source ${{ env.PYTHON_VENV_ACTIVATE }}
-          export PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 ./source/scripts/run-ci.py -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core-build \
             --mode ${CI_MODE} \
@@ -710,6 +692,12 @@ jobs:
           submodules: false
           set-safe-directory: true
 
+      - name: Configure Env
+        shell: bash
+        run: |
+          echo "${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:${HOME}/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:${PATH}" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib64:${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+
       - name: Download build handoff artifacts from S3
         shell: bash
         run: |
@@ -758,7 +746,6 @@ jobs:
             exit 1
           fi
           source ${{ env.PYTHON_VENV_ACTIVATE }}
-          export PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 ./source/scripts/run-ci.py -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core-test \
             --mode ${CI_MODE} \
@@ -890,7 +877,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-        export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}-build \
           --build-jobs 16 \
@@ -983,28 +969,34 @@ jobs:
         submodules: false
         set-safe-directory: true
 
+    - name: Configure Env
+      shell: bash
+      run: |
+        echo "${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:${HOME}/.local/bin:${PATH}" >> "$GITHUB_PATH"
+        echo "LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib64:${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+
     # Download all 4 sanitizer build artifacts. ROCm dependencies are identical;
     # pick AddressSanitizer's dependency tarball for the shared test setup.
     - name: Download sanitizer handoff artifacts from S3
       shell: bash
       run: |
-        python3 .github/scripts/rocprofiler_sdk_s3_handoff.py download \
-          --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
-          --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/continuous-integration/build-sanitizers/ubuntu-22.04/mi325/AddressSanitizer" \
-          --file "projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-AddressSanitizer.tar.zst" \
-          --file "rocm-deps-ubuntu-22.04-mi325-AddressSanitizer.tar.zst"
-        python3 .github/scripts/rocprofiler_sdk_s3_handoff.py download \
-          --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
-          --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/continuous-integration/build-sanitizers/ubuntu-22.04/mi325/ThreadSanitizer" \
-          --file "projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-ThreadSanitizer.tar.zst"
-        python3 .github/scripts/rocprofiler_sdk_s3_handoff.py download \
-          --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
-          --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/continuous-integration/build-sanitizers/ubuntu-22.04/mi325/LeakSanitizer" \
-          --file "projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-LeakSanitizer.tar.zst"
-        python3 .github/scripts/rocprofiler_sdk_s3_handoff.py download \
-          --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}" \
-          --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/continuous-integration/build-sanitizers/ubuntu-22.04/mi325/UndefinedBehaviorSanitizer" \
-          --file "projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer.tar.zst"
+        sanitizers=(
+          AddressSanitizer
+          ThreadSanitizer
+          LeakSanitizer
+          UndefinedBehaviorSanitizer
+        )
+        for sanitizer in "${sanitizers[@]}"; do
+          download_args=(
+            --bucket "${{ env.ROCPROFILER_SDK_ARTIFACT_BUCKET }}"
+            --prefix "${{ env.ROCPROFILER_SDK_ARTIFACT_PREFIX }}/continuous-integration/build-sanitizers/ubuntu-22.04/mi325/${sanitizer}"
+            --file "projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-${sanitizer}.tar.zst"
+          )
+          if [[ "${sanitizer}" == "AddressSanitizer" ]]; then
+            download_args+=(--file "rocm-deps-ubuntu-22.04-mi325-AddressSanitizer.tar.zst")
+          fi
+          python3 .github/scripts/rocprofiler_sdk_s3_handoff.py download "${download_args[@]}"
+        done
 
     - name: Install requirements
       timeout-minutes: 5
@@ -1040,7 +1032,6 @@ jobs:
         echo "=========================================="
         rm -rf build
         tar --use-compress-program='zstd -d -T0' -xf rocprofiler-sdk-build-ubuntu-22.04-mi325-AddressSanitizer.tar.zst
-        export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-AddressSanitizer-test \
           --mode ${CI_MODE} \
@@ -1067,7 +1058,6 @@ jobs:
         echo "=========================================="
         rm -rf build
         tar --use-compress-program='zstd -d -T0' -xf rocprofiler-sdk-build-ubuntu-22.04-mi325-ThreadSanitizer.tar.zst
-        export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-ThreadSanitizer-test \
           --mode ${CI_MODE} \
@@ -1094,7 +1084,6 @@ jobs:
         echo "=========================================="
         rm -rf build
         tar --use-compress-program='zstd -d -T0' -xf rocprofiler-sdk-build-ubuntu-22.04-mi325-LeakSanitizer.tar.zst
-        export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-LeakSanitizer-test \
           --mode ${CI_MODE} \
@@ -1121,7 +1110,6 @@ jobs:
         echo "=========================================="
         rm -rf build
         tar --use-compress-program='zstd -d -T0' -xf rocprofiler-sdk-build-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer.tar.zst
-        export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer-test \
           --mode ${CI_MODE} \

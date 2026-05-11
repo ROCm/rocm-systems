@@ -76,7 +76,6 @@ env:
   INSTALL_NIGHTLY_ROCM: "true"
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
   ROCPROFILER_SDK_ARTIFACT_BUCKET: "therock-ci-artifacts-external"
-  # Configure the bucket lifecycle for this prefix with Expiration.Days = 7.
   ROCPROFILER_SDK_ARTIFACT_PREFIX: "ROCm-rocm-systems/rocprofiler-sdk/ci-handoff/${{ github.run_id }}"
   ROCPROFILER_SDK_ARTIFACT_REGION: "us-east-2"
 
