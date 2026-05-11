@@ -323,5 +323,66 @@ TEST_F(NetIbMPITest, MixedSizeBarrage) {
 // A2.  FifoPressureSenderFast — receiver deliberately slow, sender in
 //      tight loop.  Verifies that isend returns *request==NULL when the
 //      FIFO slot is not ready (backpressure, net_ib.cc:2535).
+TEST_F(NetIbMPITest, FifoPressureSenderFast) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    ConnectionPair cp;
+    NetConnectionGuard guard(net_);
+    SetupConnectionWithGuard(0, cp, guard);
+
+    const size_t sz = kSmallBufferSize;
+    auto buf = makeHostBufferAutoGuard(malloc(sz));
+    ASSERT_NE(buf.get(), nullptr);
+
+    void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
+    void* mh = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf.get(), sz, NCCL_PTR_HOST, &mh), ncclSuccess);
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+    static constexpr int kMsgs = 50;
+    static constexpr int kRecvDelayUs = 200000; // 200ms
+
+    if (rank == 0) {
+        // Receiver: deliberately slow
+        for (int i = 0; i < kMsgs; i++) {
+            if (i > 0) usleep(kRecvDelayUs);
+            void* req = nullptr;
+            PostSingleRecv(cp.recvComm, buf.get(), sz, /*tag=*/i, mh, &req);
+            int rsz = 0;
+            ASSERT_EQ(WaitForCompletion(req, &rsz, kStressTimeoutMs), ncclSuccess);
+        }
+    } else {
+        // Sender: tight loop, count NULL-request returns
+        int nullCount = 0;
+        for (int i = 0; i < kMsgs; i++) {
+            fillHostBufferWithPattern<uint8_t>(buf.get(), sz, makeBytePattern(i));
+
+            void* req = nullptr;
+            int attempts = 0;
+            do {
+                ASSERT_EQ(PostSend(cp.sendComm, buf.get(), sz, /*tag=*/i, mh, &req), ncclSuccess);
+                if (!req) {
+                    nullCount++;
+                    usleep(1000); // 1ms
+                }
+                if (++attempts > 100000) {
+                    FAIL() << "PostSend stuck at msg " << i;
+                }
+            } while (!req);
+
+            int rsz = 0;
+            ASSERT_EQ(WaitForCompletion(req, &rsz, kStressTimeoutMs), ncclSuccess);
+        }
+        // Backpressure must have been observed at least once
+        EXPECT_GT(nullCount, 0) << "Expected at least one NULL-request (FIFO backpressure)";
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// A1.  RequestSlotExhaustion — post NCCL_NET_MAX_REQUESTS (32) irecvs,
+//      then drain all via matching sends, then verify slots are recycled.
 
 #endif /* MPI_TESTS_ENABLED */
