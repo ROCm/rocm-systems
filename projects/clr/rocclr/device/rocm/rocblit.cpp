@@ -2693,8 +2693,6 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   // Partition into intra-device (kernel blit) and inter-device (DMA batch) groups.
   std::vector<amd::BatchCopyOp> d2dCopyOps;
   std::vector<amd::BatchCopyOp> p2pCopyOps;
-  d2dCopyOps.reserve(copyOps.size());
-  p2pCopyOps.reserve(copyOps.size());
 
   for (const auto& op : copyOps) {
     device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
@@ -2707,18 +2705,9 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
       return false;
     }
 
-    // Normal same-device allocations do not need the heavier agent-resolution path.
+    // Resolve real agents for partition decision (handles IPC shared memory)
     const Memory& srcMem = gpuMem(*srcDevMem);
     const Memory& dstMem = gpuMem(*dstDevMem);
-    const bool isLocalD2D = (&srcMem.dev() == &dstMem.dev()) && !op.srcMemory->ipcShared() &&
-                            !op.dstMemory->ipcShared() && !op.srcMemory->vmmImported() &&
-                            !op.dstMemory->vmmImported() && !op.metadata.preferCE_;
-    if (isLocalD2D) {
-      d2dCopyOps.push_back(op);
-      continue;
-    }
-
-    // Resolve real agents for IPC/VMM and remote resources.
     address srcAddr = reinterpret_cast<address>(srcMem.getDeviceMemory()) + op.srcOffset;
     address dstAddr = reinterpret_cast<address>(dstMem.getDeviceMemory()) + op.dstOffset;
 
