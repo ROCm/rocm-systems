@@ -5,6 +5,7 @@ import csv
 import inspect
 import os
 import re
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -667,6 +668,39 @@ def test_path_rocpd(
     assert code == 0
 
     common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.path
+def test_analyze_rocpd_missing_db_errors_cleanly(
+    tmp_path, binary_handler_analyze_rocprof_compute
+):
+    """Strict rocpd contract: analyze must exit non-zero when a workload
+    declares format_rocprof_output: rocpd but contains no .db files.
+
+    This locks in the contract that replaced the legacy results_*.csv
+    fallback removed from analysis_base.join_prof.
+    """
+    workload_dir = tmp_path / "rocpd_missing_db"
+    workload_dir.mkdir()
+
+    # sysinfo.csv is required for analyze to load machine specs before
+    # reaching join_workload_csvs; copy a known-good one from a real fixture.
+    src_sysinfo = Path("tests/workloads/no_roof/MI350/sysinfo.csv")
+    shutil.copyfile(src_sysinfo, workload_dir / "sysinfo.csv")
+
+    (workload_dir / "profiling_config.yaml").write_text(
+        "format_rocprof_output: rocpd\njoin_type: grid\n"
+    )
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        str(workload_dir),
+    ])
+    assert code != 0, (
+        "analyze must exit non-zero when format_rocprof_output: rocpd is "
+        "declared but no .db files exist at the workload root"
+    )
 
 
 @pytest.mark.path

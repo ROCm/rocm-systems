@@ -75,7 +75,7 @@ class tui_analysis(OmniAnalyze_Base):
             parser.nullify_unevaluated_metric_values(workload)
             return
 
-        # Join pmc_perf_*.csv or results_*.csv files if needed (Phase 2)
+        # Join pmc_perf_*.csv files if needed (Phase 2)
         self.join_workload_csvs(Path(self.path))
 
         workload.raw_pmc = file_io.create_df_pmc(

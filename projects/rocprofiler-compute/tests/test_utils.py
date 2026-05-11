@@ -7,6 +7,7 @@ import locale
 import logging
 import math
 import os
+import sqlite3
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -17,6 +18,7 @@ import pytest
 import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
+from utils import rocpd_data
 from utils.tty import (
     format_duration,
     format_node_stats,
@@ -946,8 +948,9 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
     """
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    fbase = fname.stem
     workload_dir = str(tmp_path / "workload")
-    os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
+    os.makedirs(f"{workload_dir}/out/{fbase}", exist_ok=True)
 
     csv_content = (
         "Agent_Type,Node_Id,Wave_Front_Size,Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,"
@@ -956,7 +959,7 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
         "End_Timestamp,Counter_Name,Counter_Value\n"
         "GPU,0,0,0,0,0,0,0,0,0,0,test_kernel,0,0,0,0,0,0,0,1,SQ_WAVES,100"
     )
-    with open(workload_dir + "/out/pmc_1/results_0.csv", "w") as f:
+    with open(f"{workload_dir}/out/{fbase}/results_0.csv", "w") as f:
         f.write(csv_content)
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
@@ -967,12 +970,12 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr(
-        "glob.glob", lambda pattern: [workload_dir + "/out/pmc_1/results_0.csv"]
+        "glob.glob", lambda pattern: [f"{workload_dir}/out/{fbase}/results_0.csv"]
     )
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
-    assert Path(workload_dir + "/pmc_perf_test.csv").exists()
+    assert Path(f"{workload_dir}/{fbase}.csv").exists()
 
 
 def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
@@ -988,10 +991,11 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     """
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    fbase = fname.stem
     workload_dir = str(tmp_path / "workload")
-    os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
+    os.makedirs(f"{workload_dir}/out/{fbase}", exist_ok=True)
 
-    csv_files = [workload_dir + "/out/pmc_1/converted.csv"]
+    csv_files = [f"{workload_dir}/out/{fbase}/converted.csv"]
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
@@ -1196,9 +1200,10 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     """
     fname = tmp_path / "pmc_perf_timestamps.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    fbase = fname.stem
     workload_dir = str(tmp_path / "workload")
 
-    os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
+    os.makedirs(f"{workload_dir}/out/{fbase}", exist_ok=True)
 
     csv_content = (
         "Agent_Type,Node_Id,Wave_Front_Size,Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,"
@@ -1279,11 +1284,12 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     """
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    fbase = fname.stem
     workload_dir = str(tmp_path / "workload")
 
-    os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
+    os.makedirs(f"{workload_dir}/out/{fbase}", exist_ok=True)
 
-    results_csv = workload_dir + "/out/pmc_1/results_test.csv"
+    results_csv = f"{workload_dir}/out/{fbase}/results_test.csv"
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
@@ -1601,9 +1607,9 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
     Path(fname_str).write_text("jobs:\n  - pmc:\n    - C1\n")
     fbase_str = "pmc_perf_counters"
     workload_dir_str = str(tmp_path)
-    (tmp_path / "out" / "pmc_1").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "out" / fbase_str).mkdir(parents=True, exist_ok=True)
 
-    results_csv = str(tmp_path) + "/out/pmc_1/results1.csv"
+    results_csv = str(tmp_path) + f"/out/{fbase_str}/results1.csv"
 
     monkeypatch.setattr(
         "utils.utils_profile.capture_subprocess_output",
@@ -1939,7 +1945,7 @@ def test_process_kokkos_trace_output_single_file(tmp_path, monkeypatch):
 
     utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
-    # Check output file in pmc_1 directory
+    # Check output file in the per-fbase out directory
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
     assert output_file.exists()
 
@@ -7806,3 +7812,91 @@ def test_format_table_ascii_text_wrapping():
     ]
     # Should have multiple lines for the wrapped description
     assert len(desc_lines) > 1, "Long description should wrap to multiple lines"
+
+# -- Rocpd Data Merge Test ---------------------------------------------------  
+
+def _seed_rocpd_db(db_path, rows, pmc_event_table, pmc_event_rows):
+    """Build a minimal rocpd-shaped sqlite file for merge_pass_dbs tests.
+
+    Schemas are intentionally narrow: only the columns/tables the merge
+    code actually iterates over are present.
+    """
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE counters_collection ("
+            "dispatch_id INTEGER, counter_name TEXT, value REAL"
+            ")"
+        )
+        conn.executemany("INSERT INTO counters_collection VALUES (?, ?, ?)", rows)
+        conn.execute(
+            f'CREATE TABLE "{pmc_event_table}" ('
+            "guid TEXT, event_id INTEGER, pmc_id TEXT, value REAL"
+            ")"
+        )
+        conn.executemany(
+            f'INSERT INTO "{pmc_event_table}" VALUES (?, ?, ?, ?)',
+            pmc_event_rows,
+        )
+
+
+def test_merge_pass_dbs_unions_rows(tmp_path):
+    """merge_pass_dbs concatenates rows across per-host dbs into one db.
+
+    Verifies: (1) all tables present in db1 survive the copy, (2) rows from
+    db2 are appended via ATTACH+INSERT, (3) the merged db is the union.
+    """
+    db1 = tmp_path / "host1.db"
+    db2 = tmp_path / "host2.db"
+    merged = tmp_path / "merged.db"
+
+    table_name = f"{rocpd_data.ROCPD_PMC_EVENT_TABLE_NAME_PREFIX}deadbeef_cafe_babe"
+
+    _seed_rocpd_db(
+        str(db1),
+        rows=[(1, "SQ_WAVES", 10.0), (2, "SQ_WAVES", 20.0)],
+        pmc_event_table=table_name,
+        pmc_event_rows=[("g1", 1, "c1", 1.5)],
+    )
+    _seed_rocpd_db(
+        str(db2),
+        rows=[(3, "SQ_WAVES", 30.0)],
+        pmc_event_table=table_name,
+        pmc_event_rows=[("g1", 2, "c1", 2.5), ("g1", 3, "c1", 3.5)],
+    )
+
+    rocpd_data.merge_pass_dbs([str(db1), str(db2)], str(merged))
+
+    assert merged.exists(), "merge_pass_dbs must create the destination db"
+
+    with sqlite3.connect(str(merged)) as conn:
+        counters = conn.execute(
+            "SELECT dispatch_id, value FROM counters_collection ORDER BY dispatch_id"
+        ).fetchall()
+        pmc_events = conn.execute(
+            f'SELECT event_id, value FROM "{table_name}" ORDER BY event_id'
+        ).fetchall()
+
+    assert counters == [(1, 10.0), (2, 20.0), (3, 30.0)]
+    assert pmc_events == [(1, 1.5), (2, 2.5), (3, 3.5)]
+
+
+def test_merge_pass_dbs_single_source_is_copy(tmp_path):
+    """With one source db, merge_pass_dbs short-circuits to a copy."""
+    src = tmp_path / "only.db"
+    dst = tmp_path / "merged.db"
+
+    table_name = f"{rocpd_data.ROCPD_PMC_EVENT_TABLE_NAME_PREFIX}deadbeef_cafe_babe"
+    _seed_rocpd_db(
+        str(src),
+        rows=[(1, "SQ_WAVES", 10.0)],
+        pmc_event_table=table_name,
+        pmc_event_rows=[("g1", 1, "c1", 1.5)],
+    )
+
+    rocpd_data.merge_pass_dbs([str(src)], str(dst))
+
+    with sqlite3.connect(str(dst)) as conn:
+        counters = conn.execute(
+            "SELECT dispatch_id, value FROM counters_collection"
+        ).fetchall()
+    assert counters == [(1, 10.0)]

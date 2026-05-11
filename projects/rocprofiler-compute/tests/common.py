@@ -58,8 +58,8 @@ def check_file_pattern(pattern, file_path):
 def _check_in_workload(workload_dir, db_query, db_params, csv_pattern):
     """Return True when `csv_pattern` (or `db_query`) matches workload data.
 
-    Looks at rocpd .db files first (default profile path) and falls back
-    to results_*.csv / pmc_perf*.csv (legacy csv profile path).
+    Looks at rocpd .db files first (default profile path), then falls back
+    to pmc_perf*.csv (csv profile path).
     """
     import sqlite3
     from contextlib import closing
@@ -75,9 +75,6 @@ def _check_in_workload(workload_dir, db_query, db_params, csv_pattern):
         except sqlite3.DatabaseError:
             continue
 
-    for results_file in workload_path.glob("results_*.csv"):
-        if check_file_pattern(csv_pattern, str(results_file)):
-            return True
     for pmc_perf in workload_path.glob("pmc_perf*.csv"):
         if check_file_pattern(csv_pattern, str(pmc_perf)):
             return True
@@ -106,31 +103,29 @@ def check_kernel_in_workload(kernel_name_substr, workload_dir):
 
 def load_workload_timestamps(workload_dir):
     """Return a DataFrame with Start_Timestamp/End_Timestamp for the
-    workload, reading rocpd .db (default) or the legacy results_*.csv.
+    workload, reading rocpd .db files. Returns an empty DataFrame when
+    no .db files are present.
     """
     import sqlite3
     from contextlib import closing
 
     workload_path = Path(workload_dir)
     db_paths = rocpd_data.find_workload_db_paths(workload_path)
-    if db_paths:
-        frames = []
-        for db_path in db_paths:
-            with closing(sqlite3.connect(str(db_path))) as conn:
-                frames.append(
-                    pd.read_sql_query(
-                        "SELECT start AS Start_Timestamp, "
-                        "end AS End_Timestamp "
-                        "FROM counters_collection",
-                        conn,
-                    )
-                )
-        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-
-    results_files = list(workload_path.glob("results_*.csv"))
-    if not results_files:
+    if not db_paths:
         return pd.DataFrame()
-    return pd.concat([pd.read_csv(f) for f in results_files], ignore_index=True)
+
+    frames = []
+    for db_path in db_paths:
+        with closing(sqlite3.connect(str(db_path))) as conn:
+            frames.append(
+                pd.read_sql_query(
+                    "SELECT start AS Start_Timestamp, "
+                    "end AS End_Timestamp "
+                    "FROM counters_collection",
+                    conn,
+                )
+            )
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
 def get_output_dir(suffix="_output", clean_existing=True, param_id=None):

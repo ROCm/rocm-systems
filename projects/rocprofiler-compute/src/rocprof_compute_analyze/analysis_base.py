@@ -3,7 +3,6 @@
 
 import argparse
 import copy
-import csv
 import re
 import sys
 from abc import abstractmethod
@@ -417,30 +416,6 @@ class OmniAnalyze_Base:
                     df = utils_analysis.process_rocpd_csv(long_df)
                     df.to_csv(output_file, index=False)
                     console_debug(f"Created file: {output_file}")
-                return None
-
-            # Vertically concat (by rows) results_*.csv into pmc_perf.csv
-            result_files = list(workload_dir.glob("results_*.csv"))
-
-            console_warning(
-                "Reading intermediate results_*.csv files is deprecated and "
-                "will be removed in a future release."
-            )
-
-            with open(output_file, "w", newline="") as outfile:
-                writer = None
-                for file in result_files:
-                    with open(file, newline="") as infile:
-                        reader = csv.reader(infile)
-                        header = next(reader)
-                        # Write header only once
-                        if writer is None:
-                            writer = csv.writer(outfile)
-                            writer.writerow(header)
-                        for row in reader:
-                            writer.writerow(row)
-
-            console_debug(f"Created file: {output_file}")
             return None
 
         # Collect files to process - normalize to Path objects
@@ -740,7 +715,7 @@ class OmniAnalyze_Base:
                 setattr(self._runs[path_info[0]], attr_name, filter_value)
 
         if not self.pc_sampling_only():
-            # Join pmc_perf_*.csv or results_*.csv files if needed
+            # Join pmc_perf_*.csv files if needed
             for path_info in args.path:
                 workload_dir = Path(path_info[0])
                 self.join_workload_csvs(workload_dir)
