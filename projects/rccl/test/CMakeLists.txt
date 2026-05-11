@@ -192,6 +192,36 @@ if(BUILD_TESTS)
   # Create rccl-UnitTests binary
   add_executable(rccl-UnitTests ${TEST_SOURCE_FILES})
 
+  # rccl-UnitTestsDrainError: Standalone binary for the NVIDIA NCCL PR #1864
+  # regression test (drain error code on kernel-not-found).  This test uses
+  # symbol interposition (.symver hipFuncGetAttributes@@hip_4.2) and a
+  # device-side noop_kernel that get registered AT BINARY LOAD TIME, before
+  # any test runs.  Hosting the test in the main rccl-UnitTests binary
+  # therefore pollutes every other test's hipFuncGetAttributes call path
+  # and leaves device-side state that has caused observed HSA "Memory in
+  # use" errors in unrelated subsequent tests (e.g. Gather.OutOfPlace).
+  # Building the test as its OWN small executable keeps the pollution
+  # confined: the binary is invoked separately by CI and exits cleanly,
+  # and the main rccl-UnitTests binary is never affected.
+  list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsDrainError)
+
+  set(TEST_DRAIN_ERROR_SOURCE_FILES
+    EnqueueDrainErrorTest.cpp
+    common/main_fixtures.cpp
+    common/EnvVars.cpp
+    common/ProcessIsolatedTestRunner.cpp
+    common/TestChecks.cpp
+  )
+
+  add_executable(rccl-UnitTestsDrainError ${TEST_DRAIN_ERROR_SOURCE_FILES})
+
+  # The .symver alias inside EnqueueDrainErrorTest.cpp re-binds the
+  # hipFuncGetAttributes import that librccl.so dynamically resolves;
+  # --export-dynamic is required so the dynamic linker resolves librccl's
+  # import to our intercept_hipFuncGetAttributes (in this binary's dynamic
+  # symbol table) rather than libamdhip64.so's real implementation.
+  target_link_options(rccl-UnitTestsDrainError PRIVATE "LINKER:--export-dynamic")
+
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
