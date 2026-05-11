@@ -14,6 +14,8 @@ subtrees:
       title: Installation and deployment
     - file: install/quickstart.rst
       title: Quickstart
+    - file: install/build.rst
+      title: Build from source
 
   - caption: How to
     entries:
