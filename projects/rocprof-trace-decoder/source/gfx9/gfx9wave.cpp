@@ -438,7 +438,8 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
                          1,
                          (uint64_t) wstart.me,
                          (uint64_t) wstart.pipe,
-                         (uint64_t) wstart.count}
+                         1,
+                         (uint64_t) wstart.tg_id}
                     );
                 else
                     it.first->second = wave_addr;
@@ -477,7 +478,8 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
                          0,
                          (uint64_t) wend.me,
                          (uint64_t) wend.pipe,
-                         (uint64_t) wend.count}
+                         1,
+                         (uint64_t) wend.tg_id}
                     );
                 }
                 else if (!info.bPacketLost)
@@ -492,7 +494,8 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
                          1,
                          (uint64_t) wend.me,
                          (uint64_t) wend.pipe,
-                         (uint64_t) wend.count}
+                         1,
+                         (uint64_t) wend.tg_id}
                     );
                     occupancy.push_back(
                         {startpc,
@@ -503,7 +506,8 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
                          0,
                          (uint64_t) wend.me,
                          (uint64_t) wend.pipe,
-                         (uint64_t) wend.count}
+                         1,
+                         (uint64_t) wend.tg_id}
                     );
                 }
 
