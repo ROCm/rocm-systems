@@ -43,7 +43,7 @@ cmake --build <build_dir> --target openmp-cg openmp-lu
 **Targets:**
 
 | Target | Description |
-|--------|-------------|
+| -------- | ------------- |
 | `openmp-cg` | NAS Conjugate Gradient benchmark |
 | `openmp-lu` | NAS LU Gauss-Seidel benchmark |
 
@@ -63,7 +63,7 @@ export OMP_NUM_THREADS=4
 **Recommended OpenMP settings:**
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `OMP_NUM_THREADS` | `2`-`N` | Number of OpenMP threads |
 | `OMP_PROC_BIND` | `spread` | Thread placement policy |
 | `OMP_PLACES` | `threads` | Thread affinity granularity |
@@ -77,7 +77,7 @@ OMP_NUM_THREADS=4 rocprof-sys-run -- ./openmp-cg
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace with OpenMP regions |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 | `ROCPROFSYS_USE_SAMPLING` | `ON` | Enable statistical sampling |

@@ -44,7 +44,7 @@ cmake --build <build_dir> --target rewrite-caller
 **Arguments:**
 
 | Position | Description | Default |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | 1 | Number of calls to outer() | 10 |
 
 ## Profiling with rocprofiler-systems
@@ -68,7 +68,7 @@ rocprof-sys-instrument -- ./rewrite-caller 100
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace showing call chain |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile with call counts |
 | `ROCPROFSYS_USE_SAMPLING` | `ON` | Enable sampling alongside instrumentation |

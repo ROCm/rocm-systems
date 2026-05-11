@@ -34,7 +34,7 @@ cmake --build <build_dir> --target all_reduce_perf
 **Targets:**
 
 | Target | Description |
-|--------|-------------|
+| -------- | ------------- |
 | `all_gather_perf` | AllGather performance test |
 | `all_reduce_perf` | AllReduce performance test |
 | `alltoall_perf` | AllToAll performance test |
@@ -65,7 +65,7 @@ rocprof-sys-run -- ./all_reduce_perf -b 8 -e 128M -f 2 -g 2
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,memory_copy` | Trace HIP API and GPU operations |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace for timeline analysis |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |

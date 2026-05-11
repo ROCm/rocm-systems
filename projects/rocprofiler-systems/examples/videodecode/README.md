@@ -54,7 +54,7 @@ rocprof-sys-run -- ./videodecode -i /path/to/video.mp4
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_ROCM_DOMAINS` | `hip_runtime_api,kernel_dispatch,memory_copy` | Trace HIP API and GPU operations |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace for timeline analysis |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
