@@ -66,7 +66,14 @@ AccumulateCommand::~AccumulateCommand() {
   if (owned_graph_signal_pool_ != nullptr) {
     // Graph pool owns all signals (SyncPlan HW events + ActiveSignal signals).
     // Skip per-device HW event release — pool destructor handles everything.
-    delete owned_graph_signal_pool_;
+    // Route through the device's virtual deleter so ~GraphSignalPool actually
+    // runs: a plain `delete owned_graph_signal_pool_;` here would only see
+    // the forward declaration of roc::GraphSignalPool and silently skip the
+    // destructor (delete-on-incomplete-type, which is UB and leaks every
+    // ProfilingSignal/HSA signal handle owned by the pool).
+    if (device_ != nullptr) {
+      device_->DestroyGraphSignalPool(owned_graph_signal_pool_);
+    }
   } else {
     // Non-graph path: release HW events per device as before
     for (auto& device_events_pair : hw_events_) {

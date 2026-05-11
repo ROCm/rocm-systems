@@ -3727,6 +3727,13 @@ size_t Device::GetGraphSignalPoolUsedCount(GraphSignalPool* pool) const {
 }
 
 // ================================================================================================
+// Out-of-line deleter so ~GraphSignalPool is actually invoked from generic
+// platform/ code (which only sees a forward declaration of GraphSignalPool).
+void Device::DestroyGraphSignalPool(GraphSignalPool* pool) const {
+  delete pool;
+}
+
+// ================================================================================================
 void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                  const std::vector<void*>& hw_events) const {
   for (const auto& patch : patches) {

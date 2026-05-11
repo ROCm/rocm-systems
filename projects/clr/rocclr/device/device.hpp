@@ -2145,6 +2145,14 @@ class Device : public RuntimeObject {
   // Used by the graph executor to cache the count for the next launch.
   virtual size_t GetGraphSignalPoolUsedCount(roc::GraphSignalPool* pool) const { return 0; }
 
+  // Destroys a graph signal pool created by CreateGraphSignalPool.
+  // Required because GraphSignalPool is only forward-declared in platform/
+  // headers; calling `delete pool;` from generic code would not invoke
+  // ~GraphSignalPool (delete-on-incomplete-type is undefined behaviour and
+  // in practice silently skips the destructor). Routing through this virtual
+  // ensures the destructor in rocdevice.cpp is actually called.
+  virtual void DestroyGraphSignalPool(roc::GraphSignalPool* pool) const {}
+
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
   }

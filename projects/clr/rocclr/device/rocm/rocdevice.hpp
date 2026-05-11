@@ -549,6 +549,7 @@ class Device : public NullDevice {
       size_t gpu_count, size_t irq_count,
       size_t segment_count, std::vector<void*>& hw_events) const override;
   virtual size_t GetGraphSignalPoolUsedCount(GraphSignalPool* pool) const override;
+  virtual void DestroyGraphSignalPool(GraphSignalPool* pool) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 
