@@ -1469,5 +1469,64 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
 // =====================================================================
 
 // J1.  RapidRecvPostDrain — 100 cycles of post-32-recv → send-32 → drain.
+TEST_F(NetIbMPITest, RapidRecvPostDrain) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    ConnectionPair cp;
+    NetConnectionGuard guard(net_);
+    SetupConnectionWithGuard(0, cp, guard);
+
+    static constexpr int kCycles = 100;
+    static constexpr int kBatch  = 32;
+    const size_t sz = 256;
+
+    auto buf = makeHostBufferAutoGuard(malloc(sz * kBatch));
+    ASSERT_NE(buf.get(), nullptr);
+
+    void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
+    void* mh = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf.get(), sz * kBatch, NCCL_PTR_HOST, &mh), ncclSuccess);
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+    for (int cycle = 0; cycle < kCycles; cycle++) {
+        if (rank == 0) {
+            // Post all recvs
+            std::vector<void*> reqs(kBatch, nullptr);
+            for (int i = 0; i < kBatch; i++) {
+                char* p = static_cast<char*>(buf.get()) + i * sz;
+                PostSingleRecv(cp.recvComm, p, sz, /*tag=*/i, mh, &reqs[i]);
+            }
+            // Signal sender
+            MPI_Barrier(MPI_COMM_WORLD);
+            // Drain all
+            for (int i = 0; i < kBatch; i++) {
+                int rsz = 0;
+                ASSERT_EQ(WaitForCompletion(reqs[i], &rsz, kStressTimeoutMs), ncclSuccess)
+                    << "Drain failed cycle=" << cycle << " msg=" << i;
+            }
+        } else {
+            // Wait for recvs to be posted
+            MPI_Barrier(MPI_COMM_WORLD);
+            // Send all
+            for (int i = 0; i < kBatch; i++) {
+                char* p = static_cast<char*>(buf.get()) + i * sz;
+                fillHostBufferWithPattern<uint8_t>(p, sz, makeBytePattern(cycle * kBatch + i));
+                void* req = nullptr;
+                PostSendWithRetry(cp.sendComm, p, sz, /*tag=*/i, mh, &req);
+                int rsz = 0;
+                ASSERT_EQ(WaitForCompletion(req, &rsz, kStressTimeoutMs), ncclSuccess)
+                    << "Send failed cycle=" << cycle << " msg=" << i;
+            }
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+}
+
+// E5.  SetNetAttrNoOp — calls ncclIbSetNetAttr (the last entry in ncclNet_t).
+//      The function is a pure no-op (two (void) casts + return ncclSuccess).
+//      All it needs is a call to reach its body; FNDA shows 0 hits without this test.
 
 #endif /* MPI_TESTS_ENABLED */
