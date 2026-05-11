@@ -1401,5 +1401,73 @@ TEST_F(NetIbMPITest, LongRunningEndurance) {
 // =====================================================================
 
 // H1.  GpuMemoryTransferStress — 5 alloc/transfer/flush/verify/free cycles.
+TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    // Check GDR support
+    ncclNetProperties_t props;
+    ASSERT_EQ(GetDeviceProperties(0, &props), ncclSuccess);
+    if (!(props.ptrSupport & NCCL_PTR_CUDA)) {
+        GTEST_SKIP() << "No GPU Direct RDMA support";
+    }
+
+    ConnectionPair cp;
+    NetConnectionGuard guard(net_);
+    SetupConnectionWithGuard(0, cp, guard);
+
+    static constexpr int kCycles = 5;
+    const size_t sizes[] = {512 * 1024, 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 1024 * 1024};
+
+    for (int cycle = 0; cycle < kCycles; cycle++) {
+        size_t sz = sizes[cycle];
+        void* devBuf = nullptr;
+        ASSERT_EQ(hipMalloc(&devBuf, sz), hipSuccess);
+        auto devGuard = makeDeviceBufferAutoGuard(devBuf);
+
+        void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
+        void* mh = nullptr;
+        ASSERT_EQ(RegisterMemory(comm, devBuf, sz, NCCL_PTR_CUDA, &mh), ncclSuccess);
+        NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+        if (rank == 1) {
+            ASSERT_EQ(initializeBufferWithPattern<uint8_t>(devBuf, sz, makeBytePattern(cycle)), hipSuccess);
+        }
+
+        void* req = nullptr;
+        if (rank == 0) {
+            PostSingleRecv(cp.recvComm, devBuf, sz, /*tag=*/cycle, mh, &req);
+        } else {
+            PostSendWithRetry(cp.sendComm, devBuf, sz, /*tag=*/cycle, mh, &req);
+        }
+
+        int rsz = 0;
+        ASSERT_EQ(WaitForCompletion(req, &rsz, kLargeTransferTimeoutMs), ncclSuccess);
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Flush on receiver
+        if (rank == 0) {
+            void* flushReq = nullptr;
+            int flushSz = static_cast<int>(sz);
+            ncclResult_t fr = FlushRecv(cp.recvComm, 1, &devBuf, &flushSz, &mh, &flushReq);
+            if (fr == ncclSuccess && flushReq) {
+                int fsz = 0;
+                ASSERT_EQ(WaitForCompletion(flushReq, &fsz, kLargeTransferTimeoutMs), ncclSuccess);
+            }
+            // Verify
+            bool ok = verifyBufferData<uint8_t>(devBuf, sz, makeBytePattern(cycle));
+            ASSERT_TRUE(ok) << "GPU data mismatch at cycle " << cycle;
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+}
+
+// =====================================================================
+//  Group J: Rapid recycling (2-rank)
+// =====================================================================
+
+// J1.  RapidRecvPostDrain — 100 cycles of post-32-recv → send-32 → drain.
 
 #endif /* MPI_TESTS_ENABLED */
