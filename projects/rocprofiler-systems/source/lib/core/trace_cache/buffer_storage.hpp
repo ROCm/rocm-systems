@@ -4,6 +4,7 @@
 #pragma once
 
 #include "core/trace_cache/cacheable.hpp"
+#include "core/trace_cache/cereal_buffer_archive.hpp"
 
 #include "common/defines.h"
 
@@ -144,12 +145,33 @@ public:
                 "Trying to use buffered storage while it is not running");
         }
 
-        type_traits::check_type<Type, TypeIdentifierEnum>();
+        if constexpr(use_cereal<Type>)
+        {
+            static_assert(
+                type_traits::has_type_identifier<Type, TypeIdentifierEnum>::value,
+                "Type doesn't have `type_identifier` member with correct type.");
+        }
+        else
+        {
+            type_traits::check_type<Type, TypeIdentifierEnum>();
+        }
 
         using TypeIdentifierEnumUderlayingType =
             std::underlying_type_t<TypeIdentifierEnum>;
 
-        size_t sample_size      = get_size(value);
+        size_t sample_size = 0;
+        if constexpr(use_cereal<Type>)
+        {
+            // Cereal binary archive does not precompute sizes; do a counting
+            // pass first so the ring slot can be reserved without an extra
+            // staging allocation.  Same number of value walks as the legacy
+            // get_size + serialize path.
+            sample_size = cereal_serialized_size(value);
+        }
+        else
+        {
+            sample_size = get_size(value);
+        }
         size_t bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
 
         // Hold the mutex for the entire reserve-and-write operation so that
@@ -166,7 +188,14 @@ public:
 
         utility::store_value(type_identifier_value, buf, position);
         utility::store_value(sample_size, buf, position);
-        serialize(buf + position, value);
+        if constexpr(use_cereal<Type>)
+        {
+            cereal_serialize_to(buf + position, sample_size, value);
+        }
+        else
+        {
+            serialize(buf + position, value);
+        }
     }
 
     ROCPROFSYS_INLINE bool is_running() const

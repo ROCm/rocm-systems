@@ -49,6 +49,12 @@ get_size(const T&)
     return 0;
 }
 
+// Per-type opt-in for the cereal-backed serialization path.  Specialize to
+// true to route store/load for T through cereal binary archives instead of
+// the hand-rolled serialize/deserialize/get_size free functions.
+template <typename T>
+inline constexpr bool use_cereal = false;
+
 namespace type_traits
 {
 

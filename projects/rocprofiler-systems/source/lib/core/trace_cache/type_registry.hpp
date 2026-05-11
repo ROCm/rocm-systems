@@ -3,6 +3,7 @@
 
 #pragma once
 #include "core/trace_cache/cache_type_traits.hpp"
+#include "core/trace_cache/cereal_buffer_archive.hpp"
 #include <cstdint>
 
 #include <functional>
@@ -43,11 +44,20 @@ private:
     {
         static_assert(type_traits::has_type_identifier<T, TypeIdentifierEnum>::value,
                       "Type must have type_identifier");
-        static_assert(type_traits::has_deserialize<T>::value,
-                      "Type must have deserialize function");
-        deserializers[T::type_identifier] = [](std::uint8_t*& data) -> variant_t {
-            return deserialize<T>(data);
-        };
+        if constexpr(use_cereal<T>)
+        {
+            deserializers[T::type_identifier] = [](std::uint8_t*& data) -> variant_t {
+                return cereal_deserialize_from<T>(data);
+            };
+        }
+        else
+        {
+            static_assert(type_traits::has_deserialize<T>::value,
+                          "Type must have deserialize function");
+            deserializers[T::type_identifier] = [](std::uint8_t*& data) -> variant_t {
+                return deserialize<T>(data);
+            };
+        }
     }
 };
 
