@@ -6,8 +6,8 @@ inputs:
     description: 'Path to ROCm installation'
     required: false
     default: '/opt/rocm'
-  gpu-target:
-    description: 'GPU target (e.g., gfx94X, gfx110X, gfx120X)'
+  gpu-family:
+    description: 'GPU family for ROCm artifacts (e.g., gfx94X, gfx110X, gfx120X)'
     required: true
   compiler-launcher:
     description: 'Path to compiler cache launcher (ccache or sccache)'
@@ -79,10 +79,10 @@ runs:
       shell: bash
       working-directory: /tmp
       run: |
-        mv "${{ inputs.rocm-path }}-${{ inputs.gpu-target }}.tar.gz" .
+        mv "${{ inputs.rocm-path }}-${{ inputs.gpu-family }}.tar.gz" .
         rm -rf ${{ inputs.rocm-path }}*
         mkdir -p "${{ inputs.rocm-path }}"
-        tar -xf "rocm-${{ inputs.gpu-target }}.tar.gz" -C "${{ inputs.rocm-path }}"
+        tar -xf "rocm-${{ inputs.gpu-family }}.tar.gz" -C "${{ inputs.rocm-path }}"
         echo "ROCm installed to: ${{ inputs.rocm-path }}"
 
     - name: Setup environment variables

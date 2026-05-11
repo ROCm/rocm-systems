@@ -104,12 +104,12 @@ jobs:
       matrix:
         system:
           # TEMPORARILY DISABLED: navi3/navi4 jobs pending CI stabilization
-          # - { gpu: 'navi4', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx120X' }
-          # - { gpu: 'navi3', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx110X' }
-          - { gpu: 'mi325', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx94X' }
+          # - { gpu: 'navi4', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-family: 'gfx120X', gpu-target: 'gfx1201' }
+          # - { gpu: 'navi3', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-family: 'gfx110X', gpu-target: 'gfx1100' }
+          - { gpu: 'mi325', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-family: 'gfx94X', gpu-target: 'gfx942' }
     runs-on: azure-linux-scale-rocm
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-family }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -197,7 +197,7 @@ jobs:
         uses: ./.github/actions/rocprofiler-sdk-util
         with:
           rocm-path: ${{ env.ROCM_PATH }}
-          gpu-target: ${{ matrix.system.gpu-target }}
+          gpu-family: ${{ matrix.system.gpu-family }}
           compiler-launcher: /usr/bin/ccache
           enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
           enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
@@ -221,12 +221,12 @@ jobs:
             --build-jobs 16 \
             --mode ${CI_MODE} \
             --site build-deb-cpu \
-            --gpu-targets gfx942 \
+            --gpu-targets ${{ matrix.system.gpu-target }} \
             --run-attempt ${{ github.run_attempt }} \
             --build-only \
             ${{ matrix.system.ci-flags }} -- \
-            -DGPU_TARGETS=gfx942 \
-            -DCMAKE_HIP_ARCHITECTURES=gfx942 \
+            -DGPU_TARGETS=${{ matrix.system.gpu-target }} \
+            -DCMAKE_HIP_ARCHITECTURES=${{ matrix.system.gpu-target }} \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
             -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
@@ -252,8 +252,8 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples -DGPU_TARGETS="gfx942" -DCMAKE_HIP_ARCHITECTURES=gfx942 samples
-          CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests -DGPU_TARGETS="gfx942" -DCMAKE_HIP_ARCHITECTURES=gfx942 tests
+          CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples -DGPU_TARGETS="${{ matrix.system.gpu-target }}" -DCMAKE_HIP_ARCHITECTURES=${{ matrix.system.gpu-target }} samples
+          CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests -DGPU_TARGETS="${{ matrix.system.gpu-target }}" -DCMAKE_HIP_ARCHITECTURES=${{ matrix.system.gpu-target }} tests
           export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
           cmake --build build-samples --target all --parallel 16
           cmake --build build-tests --target all --parallel 16
@@ -294,8 +294,8 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-samples-deb -DGPU_TARGETS="gfx942" -DCMAKE_HIP_ARCHITECTURES=gfx942 ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/samples
-          CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DGPU_TARGETS="gfx942" -DCMAKE_HIP_ARCHITECTURES=gfx942 ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
+          CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-samples-deb -DGPU_TARGETS="${{ matrix.system.gpu-target }}" -DCMAKE_HIP_ARCHITECTURES=${{ matrix.system.gpu-target }} ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/samples
+          CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DGPU_TARGETS="${{ matrix.system.gpu-target }}" -DCMAKE_HIP_ARCHITECTURES=${{ matrix.system.gpu-target }} ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
           cmake --build build-samples-deb --target all --parallel 16
           cmake --build build-tests-deb --target all --parallel 16
 
@@ -347,12 +347,12 @@ jobs:
       matrix:
         system:
           # TEMPORARILY DISABLED: navi3/navi4 jobs pending CI stabilization
-          # - { gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', gpu-target: 'gfx120X' }
-          # - { gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', gpu-target: 'gfx110X' }
-          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'ubuntu-22.04', gpu-target: 'gfx94X' }
+          # - { gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', gpu-family: 'gfx120X', gpu-target: 'gfx1201' }
+          # - { gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', gpu-family: 'gfx110X', gpu-target: 'gfx1100' }
+          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'ubuntu-22.04', gpu-family: 'gfx94X', gpu-target: 'gfx942' }
     runs-on: ${{ matrix.system.runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-family }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -429,7 +429,7 @@ jobs:
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core-test \
             --mode ${CI_MODE} \
             --site test-deb-gpu \
-            --gpu-targets gfx942 \
+            --gpu-targets ${{ matrix.system.gpu-target }} \
             --run-attempt ${{ github.run_attempt }} \
             --test-only \
             -- \
@@ -493,12 +493,12 @@ jobs:
       fail-fast: false
       matrix:
         system:
-          - { os: 'rhel-8.8', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-          - { os: 'rhel-9.5', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-          - { os: 'sles-15.6', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'rhel-8.8', gpu: 'mi325', gpu-family: 'gfx94X', gpu-target: 'gfx942', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'rhel-9.5', gpu: 'mi325', gpu-family: 'gfx94X', gpu-target: 'gfx942', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'sles-15.6', gpu: 'mi325', gpu-family: 'gfx94X', gpu-target: 'gfx942', build-type: 'RelWithDebInfo', ci-flags: '' }
     runs-on: azure-linux-scale-rocm
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-family }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -578,7 +578,7 @@ jobs:
         uses: ./.github/actions/rocprofiler-sdk-util
         with:
           rocm-path: ${{ env.ROCM_PATH }}
-          gpu-target: ${{ matrix.system.gpu-target }}
+          gpu-family: ${{ matrix.system.gpu-family }}
           compiler-launcher: /usr/local/bin/sccache
           enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
           enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
@@ -601,13 +601,13 @@ jobs:
             --mode ${CI_MODE} \
             --build-jobs 16 \
             --site build-rpm-cpu \
-            --gpu-targets gfx942 \
+            --gpu-targets ${{ matrix.system.gpu-target }} \
             --run-attempt ${{ github.run_attempt }} \
             --build-only \
             ${{ matrix.system.ci-flags }} \
             -- \
-            -DGPU_TARGETS=gfx942 \
-            -DCMAKE_HIP_ARCHITECTURES=gfx942 \
+            -DGPU_TARGETS=${{ matrix.system.gpu-target }} \
+            -DCMAKE_HIP_ARCHITECTURES=${{ matrix.system.gpu-target }} \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
             -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
@@ -665,12 +665,12 @@ jobs:
       fail-fast: false
       matrix:
         system:
-          - { os: 'rhel-8.8', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X' }
-          - { os: 'rhel-9.5', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X' }
-          - { os: 'sles-15.6', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X' }
+          - { os: 'rhel-8.8', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-family: 'gfx94X', gpu-target: 'gfx942' }
+          - { os: 'rhel-9.5', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-family: 'gfx94X', gpu-target: 'gfx942' }
+          - { os: 'sles-15.6', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-family: 'gfx94X', gpu-target: 'gfx942' }
     runs-on: ${{ matrix.system.runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-family }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -750,7 +750,7 @@ jobs:
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core-test \
             --mode ${CI_MODE} \
             --site test-rpm-gpu \
-            --gpu-targets gfx942 \
+            --gpu-targets ${{ matrix.system.gpu-target }} \
             --run-attempt ${{ github.run_attempt }} \
             --test-only \
             -- \
@@ -776,15 +776,15 @@ jobs:
       fail-fast: false
       matrix:
         system:
-          - { sanitizer: 'AddressSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'ThreadSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'LeakSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'UndefinedBehaviorSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'AddressSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-family: 'gfx94X', gpu-target: 'gfx942', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'ThreadSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-family: 'gfx94X', gpu-target: 'gfx942', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'LeakSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-family: 'gfx94X', gpu-target: 'gfx942', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'UndefinedBehaviorSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-family: 'gfx94X', gpu-target: 'gfx942', build-type: 'RelWithDebInfo' }
 
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: azure-linux-scale-rocm
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-family }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -861,7 +861,7 @@ jobs:
       uses: ./.github/actions/rocprofiler-sdk-util
       with:
         rocm-path: ${{ env.ROCM_PATH }}
-        gpu-target: ${{ matrix.system.gpu-target }}
+        gpu-family: ${{ matrix.system.gpu-family }}
         compiler-launcher: /usr/bin/ccache
         enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
         enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
@@ -881,13 +881,13 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}-build \
           --build-jobs 16 \
           --site build-sanitizers-cpu \
-          --gpu-targets gfx942 \
+          --gpu-targets ${{ matrix.system.gpu-target }} \
           --memcheck ${{ matrix.system.sanitizer }} \
           --run-attempt ${{ github.run_attempt }} \
           --build-only \
           -- \
-          -DGPU_TARGETS=gfx942 \
-          -DCMAKE_HIP_ARCHITECTURES=gfx942 \
+          -DGPU_TARGETS=${{ matrix.system.gpu-target }} \
+          -DCMAKE_HIP_ARCHITECTURES=${{ matrix.system.gpu-target }} \
           -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}" \
@@ -958,6 +958,7 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       GCC_COMPILER_VERSION: 12
       GPU_RUNNER: mi325
+      GPU_TARGET: gfx942
 
     steps:
     - name: Clone ROCProfiler SDK (for test scripts)
@@ -1036,7 +1037,7 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-AddressSanitizer-test \
           --mode ${CI_MODE} \
           --site test-sanitizers-gpu \
-          --gpu-targets gfx942 \
+          --gpu-targets ${{ env.GPU_TARGET }} \
           --memcheck AddressSanitizer \
           --run-attempt ${{ github.run_attempt }} \
           --test-only \
@@ -1062,7 +1063,7 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-ThreadSanitizer-test \
           --mode ${CI_MODE} \
           --site test-sanitizers-gpu \
-          --gpu-targets gfx942 \
+          --gpu-targets ${{ env.GPU_TARGET }} \
           --memcheck ThreadSanitizer \
           --run-attempt ${{ github.run_attempt }} \
           --test-only \
@@ -1088,7 +1089,7 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-LeakSanitizer-test \
           --mode ${CI_MODE} \
           --site test-sanitizers-gpu \
-          --gpu-targets gfx942 \
+          --gpu-targets ${{ env.GPU_TARGET }} \
           --memcheck LeakSanitizer \
           --run-attempt ${{ github.run_attempt }} \
           --test-only \
@@ -1114,7 +1115,7 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer-test \
           --mode ${CI_MODE} \
           --site test-sanitizers-gpu \
-          --gpu-targets gfx942 \
+          --gpu-targets ${{ env.GPU_TARGET }} \
           --memcheck UndefinedBehaviorSanitizer \
           --run-attempt ${{ github.run_attempt }} \
           --test-only \

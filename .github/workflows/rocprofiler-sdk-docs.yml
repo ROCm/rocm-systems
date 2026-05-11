@@ -151,7 +151,7 @@ jobs:
         uses: ./.github/actions/rocprofiler-sdk-util
         with:
           rocm-path: ${{ env.ROCM_PATH }}
-          gpu-target: 'gfx94X'
+          gpu-family: 'gfx94X'
           compiler-launcher: /usr/bin/ccache
           enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
           enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
