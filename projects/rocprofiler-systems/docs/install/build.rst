@@ -2,23 +2,29 @@
    :description: ROCm Systems Profiler installation documentation and reference
    :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, installation, installer, profiler, tracking, visualization, tool, Instinct, accelerator, AMD
 
-*************************************
-ROCm Systems Profiler installation
-*************************************
+***************************************
+Build ROCm Systems Profiler from source
+***************************************
+
+To build ROCm Systems Profiler as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build ROCm Systems Profiler standalone using the following
+instructions.
 
 If you have problems using ROCm Systems Profiler after installation,
 consult the :ref:`post-installation-troubleshooting` section.
 
-
 Operating system support
-========================================
+========================
 
-ROCm Systems Profiler is only supported on Linux. See
-`Supported operating systems <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_
-for ROCm supported operating systems.
+ROCm Systems Profiler is only supported on Linux. For more information, see
+:ref:`ROCm Core SDK components <rocm:release-components>`.
 
 Identifying the operating system
------------------------------------
+--------------------------------
 
 If you are unsure of the Linux distribution and version, the ``/etc/os-release`` and
 ``/usr/lib/os-release`` files contain this information.
@@ -34,40 +40,15 @@ If you are unsure of the Linux distribution and version, the ``/etc/os-release``
 
 The relevant fields are ``ID`` and the ``VERSION_ID``.
 
-Install via package manager
-============================
-
-If you have ROCm version 6.3 or higher installed, you can use the package manager to install a pre-built copy of ROCm Systems Profiler.
-
-.. tab-set::
-
-   .. tab-item:: Ubuntu
-
-      .. code-block:: shell
-
-         $ sudo apt install rocprofiler-systems
-
-   .. tab-item:: Red Hat Enterprise Linux
-
-      .. code-block:: shell
-
-         $ sudo dnf install rocprofiler-systems
-
-   .. tab-item:: SUSE Linux Enterprise Server
-
-      .. code-block:: shell
-
-         $ sudo zypper install rocprofiler-systems
-
-Building ROCm Systems Profiler from source
-==========================================
+Build ROCm Systems Profiler from source
+=======================================
 
 ROCm Systems Profiler needs a GCC compiler with full support for C++17 and CMake v3.25 or higher.
 The Clang compiler may be used instead of the GCC compiler if `Dyninst <https://github.com/dyninst/dyninst>`_
 is already installed.
 
 Build requirements
------------------------------------
+------------------
 
 * GCC compiler v10+
 
@@ -86,7 +67,7 @@ Build requirements
         export PATH=${HOME}/.local/bin:${PATH}
 
 Required third-party packages
------------------------------------
+-----------------------------
 
 * `Dyninst <https://github.com/dyninst/dyninst>`_ for dynamic or static instrumentation.
   Dyninst uses the following required and optional components.
@@ -122,18 +103,19 @@ while Dyninst requires TBB), and the CMake option to build the package alongside
    "OpenMP", "4.x", "Dyninst", ""
 
 Optional third-party packages
------------------------------------
+-----------------------------
 
-* `ROCm <https://rocm.docs.amd.com/projects/install-on-linux/en/latest>`_
+* :doc:`ROCm <rocm:install/rocm>`
 
-  * AMD SMI Lib for GPU and AI NIC monitoring
-  * ROCprofiler SDK for GPU hardware counters and ROCm tracing
+  * :doc:`AMD SMI Lib <amdsmi:index>` for GPU and AI NIC monitoring
+  * :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` for GPU hardware counters
+    and ROCm tracing
 
 * Python
 
   * ``ROCPROFSYS_USE_PYTHON`` enables Python support.
 
-* `PAPI <https://icl.utk.edu/papi/>`_
+* `PAPI <https://icl.utk.edu/papi/>`__
 * MPI
 
   * ``ROCPROFSYS_USE_MPI`` enables full MPI support
@@ -150,12 +132,12 @@ Optional third-party packages
    "MPI (header-only)", "``ROCPROFSYS_USE_MPI_HEADERS`` (default: ON)"
 
 Installing Dyninst
------------------------------------
+------------------
 
 The easiest way to install Dyninst is alongside ROCm Systems Profiler, but it can also be installed using Spack.
 
 Building Dyninst alongside ROCm Systems Profiler
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To install Dyninst alongside ROCm Systems Profiler, configure ROCm Systems Profiler with ``ROCPROFSYS_BUILD_DYNINST=ON``.
 Depending on the version of Ubuntu, the ``apt`` package manager might have current enough
@@ -175,7 +157,7 @@ where ``-DROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=ON`` is expanded by
 the shell to ``-DROCPROFSYS_BUILD_TBB=ON -DROCPROFSYS_BUILD_ELFUTILS=ON ...``
 
 Installing Dyninst via Spack
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 `Spack <https://github.com/spack/spack>`_ is another option to install Dyninst and its dependencies:
 
@@ -261,7 +243,7 @@ Use ``./scripts/build-release.sh --help`` for more information.
 .. _mpi-support-rocprof-sys:
 
 MPI support within ROCm Systems Profiler
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ROCm Systems Profiler can have full (``ROCPROFSYS_USE_MPI=ON``) or partial (``ROCPROFSYS_USE_MPI_HEADERS=ON``) MPI support.
 The only difference between these two modes is whether or not the results collected
@@ -288,7 +270,7 @@ This happens because the value of the ``MPI_COMM_WORLD`` is truncated
 during the function wrapping before being passed along to the underlying MPI function.
 
 Python support within ROCm Systems Profiler
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ROCm Systems Profiler supports profiling Python code via the ``ROCPROFSYS_USE_PYTHON`` CMake option.
 Python support is enabled via the ``ROCPROFSYS_USE_PYTHON`` and the
@@ -304,111 +286,3 @@ be the same size.
 
    cmake --preset release -D ROCPROFSYS_PYTHON_ROOT_DIRS="/usr/bin;/usr/bin" -D ROCPROFSYS_PYTHON_VERSIONS="3.10;3.12"
 
-
-.. _post-installation-steps:
-
-Post-installation steps
-========================================
-
-After installation, you can optionally configure the ROCm Systems Profiler environment.
-You should also test the executables to confirm ROCm Systems Profiler is correctly installed.
-
-Configure the environment
------------------------------------
-
-If environment modules are available and preferred, then add them using these commands:
-
-* Replacing ``1.0.0`` with the desired version number to load:
-
-.. code-block:: shell
-
-   module use /opt/rocprofiler-systems/share/modulefiles
-   module load rocprofiler-systems/1.0.0
-
-* Alternatively, you can directly source the ``setup-env.sh`` script:
-
-.. code-block:: shell
-
-   source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
-
-Test the executables
------------------------------------
-
-Successful execution of these commands confirms that the installation does not have any
-issues locating the installed libraries:
-
-.. code-block:: shell
-
-   rocprof-sys-instrument --help
-   rocprof-sys-avail --help
-
-.. note::
-
-   If ROCm support is enabled, you might have to add the path to the ROCm libraries to ``LD_LIBRARY_PATH``,
-   for example, ``export LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}``.
-
-.. _post-installation-troubleshooting:
-
-Post-installation troubleshooting
-========================================
-
-This section explains how to resolve certain issues that might happen when you first use ROCm Systems Profiler.
-
-Issues with RHEL and SELinux
-----------------------------------------------------
-
-RHEL (Red Hat Enterprise Linux) and related distributions of Linux automatically enable a security feature
-named SELinux (Security-Enhanced Linux) that prevents ROCm Systems Profiler from running.
-This issue applies to any Linux distribution with SELinux installed, including RHEL and Rocky Linux.
-The problem can happen with any GPU, or even without a GPU.
-
-The problem occurs after you instrument a program and try to
-run ``rocprof-sys-run`` with the instrumented program.
-
-.. code-block:: shell
-
-   g++ hello.cpp -o hello
-   rocprof-sys-instrument -M sampling -o hello.instr -- ./hello
-   rocprof-sys-run -- ./hello.instr
-
-Instead of successfully running the binary with call-stack sampling,
-ROCm Systems Profiler crashes with a segmentation fault.
-
-.. note::
-
-   If you are physically logged in on the system (not using SSH or a remote connection),
-   the operating system might display an SELinux pop-up warning in the notifications.
-
-To workaround this problem, either disable SELinux or configure it to use a more
-permissive setting.
-
-To avoid this problem for the duration of the current session, run this command
-from the shell:
-
-.. code-block:: shell
-
-   sudo setenforce 0
-
-For a permanent workaround, edit the SELinux configuration file using the command
-``sudo vim /etc/sysconfig/selinux`` and change the ``SELINUX`` setting to
-either ``Permissive`` or ``Disabled``.
-
-.. note::
-
-   Permanently changing the SELinux settings can have security implications.
-   Ensure you review your system security settings before making any changes.
-
-Modifying RPATH details
-----------------------------------------------------
-
-If you're experiencing problems loading your application with an instrumented library,
-then you might have to check and modify the RPATH specified in your application.
-See the section on `troubleshooting RPATHs <../how-to/instrumenting-rewriting-binary-application.html#rpath-troubleshooting>`_
-for further details.
-
-Configuring PAPI to collect hardware counters
-----------------------------------------------------
-
-To use PAPI to collect the majority of hardware counters, ensure
-the ``/proc/sys/kernel/perf_event_paranoid`` setting has a value less than or equal to ``2``.
-For more information, see the :ref:`rocprof-sys_papi_events` section.
