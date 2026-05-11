@@ -240,5 +240,41 @@ TEST_F(NetIbMPITest, AdaptiveRoutingThresholdBoundary) {
 
 // E7.  InlineSendBoundary — CTS inline path (NCCL_IB_USE_INLINE=1).
 //      Exercises IBV_SEND_INLINE for the FIFO CTS write.
+TEST_F(NetIbMPITest, InlineSendBoundary) {
+    const char* env = getenv("NCCL_IB_USE_INLINE");
+    if (!env || strcmp(env, "1") != 0) {
+        GTEST_SKIP() << "Requires NCCL_IB_USE_INLINE=1";
+    }
+
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    ConnectionPair cp;
+    NetConnectionGuard guard(net_);
+    SetupConnectionWithGuard(0, cp, guard);
+
+    const size_t maxSz = 1024 * 1024; // 1 MB
+    auto buf = makeHostBufferAutoGuard(malloc(maxSz));
+    ASSERT_NE(buf.get(), nullptr);
+
+    void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
+    void* mh = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf.get(), maxSz, NCCL_PTR_HOST, &mh), ncclSuccess);
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+    const size_t sizes[] = {1, 64, 128, 4096, maxSz};
+    int tag = 0;
+    for (size_t sz : sizes) {
+        DoSendRecv(cp.sendComm, cp.recvComm,
+                   buf.get(), buf.get(), sz,
+                   tag++, mh, mh, static_cast<int>(sz));
+    }
+}
+
+// E8.  MixedSizeBarrage — 25 sizes from 1B to 64MB on a single connection.
+//      Exercises alignment boundaries, AR threshold, inline paths, and
+//      large-MR registration.
 
 #endif /* MPI_TESTS_ENABLED */
