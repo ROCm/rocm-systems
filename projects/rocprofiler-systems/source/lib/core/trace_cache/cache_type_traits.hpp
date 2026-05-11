@@ -5,6 +5,7 @@
 #include "common/span.hpp"
 #include <array>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string_view>

@@ -11,6 +11,7 @@
 #include <sqlite3.h>
 #include <sstream>
 #include <stdexcept>
+#include <type_traits>
 
 namespace rocprofsys
 {

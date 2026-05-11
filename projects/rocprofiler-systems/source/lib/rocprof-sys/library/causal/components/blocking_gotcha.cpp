@@ -19,7 +19,6 @@
 #include <cstdint>
 #include <pthread.h>
 #include <stdexcept>
-#include <type_traits>
 
 #pragma weak pthread_join
 #pragma weak pthread_mutex_lock
