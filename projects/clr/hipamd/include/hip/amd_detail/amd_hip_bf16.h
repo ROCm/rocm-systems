@@ -126,6 +126,14 @@
 #define HIPRT_NAN_BF16 __ushort_as_bfloat16((unsigned short)0x7FFFU)
 #define HIPRT_NEG_ZERO_BF16 __ushort_as_bfloat16((unsigned short)0x8000U)
 
+// Detect native __bf16 type support.
+// Clang with HIP always has __bf16. GCC added __bf16 on x86-64 in GCC 13.
+// Note: Clang also defines __GNUC__, so exclude it explicitly.
+#if (defined(__clang__) && defined(__HIP__)) || \
+    (!defined(__clang__) && defined(__GNUC__) && (__GNUC__ >= 13))
+#define __HIP_BF16_NATIVE_TYPE__ 1
+#endif
+
 // Since we are using unsigned short to represent data in bfloat16, it can be of different sizes on
 // different machines. These naive checks should prevent some undefined behavior on systems which
 // have different sizes for basic types.
@@ -133,7 +141,9 @@
 static_assert(CHAR_BIT == 8, "byte size should be of 8 bits");
 #endif
 static_assert(sizeof(unsigned short) == 2, "size of unsigned short should be 2 bytes");
+#if defined(__HIP_BF16_NATIVE_TYPE__)
 static_assert(sizeof(__bf16) == sizeof(unsigned short));
+#endif
 
 /**
  * \ingroup HIP_INTRINSIC_BFLOAT16_RAW
@@ -163,8 +173,10 @@ struct __attribute__((aligned(2))) __hip_bfloat16 {
   union {
     /*! \brief raw representation of bfloat16 */
     unsigned short __x;
+#if defined(__HIP_BF16_NATIVE_TYPE__)
     /*! \brief bf16 represenation */
     __bf16 __x_bf16;
+#endif
   };
 
  public:
@@ -176,6 +188,7 @@ struct __attribute__((aligned(2))) __hip_bfloat16 {
   // unsigned long
   // Casting directly to double might lead to double rounding.
 
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   /*! \brief create __hip_bfloat16 from an unsigned int */
   __BF16_HOST_DEVICE__ __hip_bfloat16(unsigned int val) : __x_bf16(static_cast<__bf16>(val)) {}
 
@@ -193,12 +206,39 @@ struct __attribute__((aligned(2))) __hip_bfloat16 {
 
   /*! \brief create __hip_bfloat16 from a float */
   __BF16_HOST_DEVICE__ __hip_bfloat16(const float val) : __x_bf16(static_cast<__bf16>(val)) {}
+#else
+  /*! \brief create __hip_bfloat16 from a float */
+  __BF16_HOST_DEVICE__ __hip_bfloat16(const float val) {
+    union { float f; unsigned int u; } fu;
+    fu.f = val;
+    __x = static_cast<unsigned short>((fu.u + ((fu.u >> 16) & 1) + 0x7FFFU) >> 16);
+  }
+
+  /*! \brief create __hip_bfloat16 from an unsigned int */
+  __BF16_HOST_DEVICE__ __hip_bfloat16(unsigned int val) : __hip_bfloat16(static_cast<float>(val)) {}
+
+  /*! \brief create __hip_bfloat16 from a int */
+  __BF16_HOST_DEVICE__ __hip_bfloat16(int val) : __hip_bfloat16(static_cast<float>(val)) {}
+
+  /*! \brief create __hip_bfloat16 from an unsigned short */
+  __BF16_HOST_DEVICE__ __hip_bfloat16(unsigned short val)
+      : __hip_bfloat16(static_cast<float>(val)) {}
+
+  /*! \brief create __hip_bfloat16 from a short */
+  __BF16_HOST_DEVICE__ __hip_bfloat16(short val) : __hip_bfloat16(static_cast<float>(val)) {}
+
+  /*! \brief create __hip_bfloat16 from a double */
+  __BF16_HOST_DEVICE__ __hip_bfloat16(const double val)
+      : __hip_bfloat16(static_cast<float>(val)) {}
+#endif
 
   /*! \brief create __hip_bfloat16 from a __hip_bfloat16_raw */
   __BF16_HOST_DEVICE__ constexpr __hip_bfloat16(const __hip_bfloat16_raw& val) : __x(val.x) {}
 
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   /*! \brief create __hip_bfloat16 from __bf16 */
   __BF16_HOST_DEVICE__ __hip_bfloat16(const __bf16 val) : __x_bf16(val) {}
+#endif
 
   /*! \brief default constructor */
   __BF16_HOST_DEVICE__ __hip_bfloat16() = default;
@@ -212,89 +252,189 @@ struct __attribute__((aligned(2))) __hip_bfloat16 {
   }
 
   /*! \brief return false if bfloat value is +0.0 or -0.0, returns true otherwise */
-  __BF16_HOST_DEVICE__ constexpr operator bool() const { return __x_bf16 != 0.0f; }
-
-  /*! \brief return a casted char from underlying float val */
-  __BF16_HOST_DEVICE__ operator char() const { return static_cast<char>(__x_bf16); }
+  __BF16_HOST_DEVICE__ constexpr operator bool() const {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
+    return __x_bf16 != 0.0f;
+#else
+    return (__x & 0x7FFF) != 0;
+#endif
+  }
 
   /*! \brief return a float */
-  __BF16_HOST_DEVICE__ operator float() const { return static_cast<float>(__x_bf16); }
+  __BF16_HOST_DEVICE__ operator float() const {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
+    return static_cast<float>(__x_bf16);
+#else
+    union { unsigned int u; float f; } fu;
+    fu.u = static_cast<unsigned int>(__x) << 16;
+    return fu.f;
+#endif
+  }
+
+  /*! \brief return a casted char from underlying float val */
+  __BF16_HOST_DEVICE__ operator char() const {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
+    return static_cast<char>(__x_bf16);
+#else
+    return static_cast<char>(static_cast<float>(*this));
+#endif
+  }
 
   /*! \brief return a casted int casted from float of underlying bfloat16 value */
-  __BF16_HOST_DEVICE__ operator int() const { return static_cast<int>(__x_bf16); }
+  __BF16_HOST_DEVICE__ operator int() const {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
+    return static_cast<int>(__x_bf16);
+#else
+    return static_cast<int>(static_cast<float>(*this));
+#endif
+  }
 
   /*! \brief return a casted long casted from float of underlying bfloat16 value */
-  __BF16_HOST_DEVICE__ operator long() const { return static_cast<long>(__x_bf16); }
+  __BF16_HOST_DEVICE__ operator long() const {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
+    return static_cast<long>(__x_bf16);
+#else
+    return static_cast<long>(static_cast<float>(*this));
+#endif
+  }
 
   /*! \brief return a casted long long casted from float of underlying bfloat16 value */
-  __BF16_HOST_DEVICE__ operator long long() const { return static_cast<long long>(__x_bf16); }
+  __BF16_HOST_DEVICE__ operator long long() const {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
+    return static_cast<long long>(__x_bf16);
+#else
+    return static_cast<long long>(static_cast<float>(*this));
+#endif
+  }
 
   /*! \brief return a casted short casted from float of underlying bfloat16 value */
-  __BF16_HOST_DEVICE__ operator short() const { return static_cast<short>(__x_bf16); }
+  __BF16_HOST_DEVICE__ operator short() const {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
+    return static_cast<short>(__x_bf16);
+#else
+    return static_cast<short>(static_cast<float>(*this));
+#endif
+  }
 
   /*! \brief return a casted signed char from float of underlying bfloat16 value */
-  __BF16_HOST_DEVICE__ operator signed char() const { return static_cast<signed char>(__x_bf16); }
+  __BF16_HOST_DEVICE__ operator signed char() const {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
+    return static_cast<signed char>(__x_bf16);
+#else
+    return static_cast<signed char>(static_cast<float>(*this));
+#endif
+  }
 
   /*! \brief return a casted unsigned char casted from float of underlying bfloat16 value */
   __BF16_HOST_DEVICE__ operator unsigned char() const {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
     return static_cast<unsigned char>(__x_bf16);
+#else
+    return static_cast<unsigned char>(static_cast<float>(*this));
+#endif
   }
 
   /*! \brief return a casted unsigned int casted from float of underlying bfloat16 value */
-  __BF16_HOST_DEVICE__ operator unsigned int() const { return static_cast<unsigned int>(__x_bf16); }
+  __BF16_HOST_DEVICE__ operator unsigned int() const {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
+    return static_cast<unsigned int>(__x_bf16);
+#else
+    return static_cast<unsigned int>(static_cast<float>(*this));
+#endif
+  }
 
   /*! \brief return a casted unsigned from float of underlying bfloat16 value */
   __BF16_HOST_DEVICE__ operator unsigned long() const {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
     return static_cast<unsigned long>(__x_bf16);
+#else
+    return static_cast<unsigned long>(static_cast<float>(*this));
+#endif
   }
 
   /*! \brief return a casted unsigned long long from float of underlying bfloat16 value */
   __BF16_HOST_DEVICE__ operator unsigned long long() const {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
     return static_cast<unsigned long long>(__x_bf16);
+#else
+    return static_cast<unsigned long long>(static_cast<float>(*this));
+#endif
   }
 
   /*! \brief return a casted unsigned short from float of underlying bfloat16 value */
   __BF16_HOST_DEVICE__ operator unsigned short() const {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
     return static_cast<unsigned short>(__x_bf16);
+#else
+    return static_cast<unsigned short>(static_cast<float>(*this));
+#endif
   }
 
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   __BF16_HOST_DEVICE__ operator __bf16() const { return __x_bf16; }
+#endif
 
   // TODO: SWDEV-452411 add operator which converts unsigned long long and long long to bfloat
 
   /*! \brief assign value from an unsigned int */
   __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(unsigned int val) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
     __x_bf16 = static_cast<__bf16>(val);
+#else
+    *this = __hip_bfloat16(static_cast<float>(val));
+#endif
     return *this;
   }
 
   /*! \brief assign value from a int */
   __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(int val) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
     __x_bf16 = static_cast<__bf16>(val);
+#else
+    *this = __hip_bfloat16(static_cast<float>(val));
+#endif
     return *this;
   }
 
   /*! \brief assign value from an unsigned short */
   __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(unsigned short val) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
     __x_bf16 = static_cast<__bf16>(val);
+#else
+    *this = __hip_bfloat16(static_cast<float>(val));
+#endif
     return *this;
   }
 
   /*! \brief assign value from a short int */
   __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(short val) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
     __x_bf16 = static_cast<__bf16>(val);
+#else
+    *this = __hip_bfloat16(static_cast<float>(val));
+#endif
     return *this;
   }
 
   /*! \brief assign value from a double */
   __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(const double f) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
     __x_bf16 = static_cast<__bf16>(f);
+#else
+    *this = __hip_bfloat16(static_cast<float>(f));
+#endif
     return *this;
   }
 
   /*! \brief assign value from a float */
   __BF16_HOST_DEVICE__ __hip_bfloat16& operator=(const float f) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
     __x_bf16 = static_cast<__bf16>(f);
+#else
+    union { float fl; unsigned int u; } fu;
+    fu.fl = f;
+    __x = static_cast<unsigned short>((fu.u + ((fu.u >> 16) & 1) + 0x7FFFU) >> 16);
+#endif
     return *this;
   }
 
@@ -319,10 +459,12 @@ struct __attribute__((aligned(2))) __hip_bfloat16 {
 };
 /**@}*/
 
+#if defined(__HIP_BF16_NATIVE_TYPE__)
 #if defined(__clang__)
 typedef __bf16 __bf16_2 __attribute__((ext_vector_type(2)));
 #else
 typedef __bf16 __bf16_2 __attribute__((vector_size(sizeof(__bf16) * 2)));
+#endif
 #endif
 
 /**
@@ -332,10 +474,12 @@ typedef __bf16 __bf16_2 __attribute__((vector_size(sizeof(__bf16) * 2)));
  * @{
  */
 struct __attribute__((aligned(4))) __hip_bfloat162 {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   static_assert(sizeof(__hip_bfloat16[2]) == sizeof(__bf16_2));
+#endif
 
  public:
-#if defined(__clang__)
+#if defined(__clang__) && defined(__HIP_BF16_NATIVE_TYPE__)
   union {
     struct {
       __hip_bfloat16 x; /*! \brief raw representation of bfloat16 */
@@ -363,11 +507,13 @@ struct __attribute__((aligned(4))) __hip_bfloat162 {
   __BF16_HOST_DEVICE__ constexpr __hip_bfloat162(const __hip_bfloat16& a, const __hip_bfloat16& b)
       : x(a), y(b) {}
 
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   /*! \brief create __hip_bfloat162 from vector of __bf16_2 */
 #if defined(__clang__)
   __BF16_HOST_DEVICE__ __hip_bfloat162(const __bf16_2 in) : __xy_bf162(in) {}
 #else
   __BF16_HOST_DEVICE__ __hip_bfloat162(const __bf16_2 in) : x{in[0]}, y{in[1]} {}
+#endif
 #endif
 
   /*! \brief default constructor of __hip_bfloat162 */
@@ -386,6 +532,7 @@ struct __attribute__((aligned(4))) __hip_bfloat162 {
     return ret;
   }
 
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   /*! \brief return a vector of bf16 */
   __BF16_HOST_DEVICE__ operator __bf16_2() const {
 #if defined(__clang__)
@@ -405,6 +552,7 @@ struct __attribute__((aligned(4))) __hip_bfloat162 {
 #endif
     return *this;
   }
+#endif
 
   /*! \brief assign value from __hip_bfloat162_raw */
   __BF16_HOST_DEVICE__ __hip_bfloat162& operator=(const __hip_bfloat162_raw& h2r) {
@@ -802,7 +950,11 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 __shfl_xor_sync(const unsigned long long 
  * \brief Adds two bfloat16 values
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hadd(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return (__bf16)a + (__bf16)b;
+#else
+  return __hip_bfloat16(static_cast<float>(a) + static_cast<float>(b));
+#endif
 }
 
 /**
@@ -811,8 +963,12 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hadd(const __hip_bfloat16 a, const 
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hadd_rn(const __hip_bfloat16 a,
                                                      const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
 #pragma clang fp contract(off)
   return (__bf16)a + (__bf16)b;
+#else
+  return __hip_bfloat16(static_cast<float>(a) + static_cast<float>(b));
+#endif
 }
 
 /**
@@ -820,7 +976,11 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hadd_rn(const __hip_bfloat16 a,
  * \brief Subtracts two bfloat16 values
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hsub(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return (__bf16)a - (__bf16)b;
+#else
+  return __hip_bfloat16(static_cast<float>(a) - static_cast<float>(b));
+#endif
 }
 
 /**
@@ -829,8 +989,12 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hsub(const __hip_bfloat16 a, const 
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hsub_rn(const __hip_bfloat16 a,
                                                      const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
 #pragma clang fp contract(off)
   return (__bf16)a - (__bf16)b;
+#else
+  return __hip_bfloat16(static_cast<float>(a) - static_cast<float>(b));
+#endif
 }
 
 /**
@@ -838,7 +1002,11 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hsub_rn(const __hip_bfloat16 a,
  * \brief Divides two bfloat16 values
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hdiv(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return (__bf16)a / (__bf16)b;
+#else
+  return __hip_bfloat16(static_cast<float>(a) / static_cast<float>(b));
+#endif
 }
 
 #if defined(__clang__) && defined(__HIP__)
@@ -858,7 +1026,11 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 __hfma(const __hip_bfloat16 a, const __hip
  * \brief Multiplies two bfloat16 values
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmul(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return (__bf16)a * (__bf16)b;
+#else
+  return __hip_bfloat16(static_cast<float>(a) * static_cast<float>(b));
+#endif
 }
 
 /**
@@ -867,8 +1039,12 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmul(const __hip_bfloat16 a, const 
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmul_rn(const __hip_bfloat16 a,
                                                      const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
 #pragma clang fp contract(off)
   return (__bf16)a * (__bf16)b;
+#else
+  return __hip_bfloat16(static_cast<float>(a) * static_cast<float>(b));
+#endif
 }
 
 /**
@@ -897,7 +1073,11 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __habs(const __hip_bfloat16 a) {
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __h2div(const __hip_bfloat162 a,
                                                     const __hip_bfloat162 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return __hip_bfloat162{__bf16_2(a) / __bf16_2(b)};
+#else
+  return __hip_bfloat162{__hdiv(a.x, b.x), __hdiv(a.y, b.y)};
+#endif
 }
 
 /**
@@ -914,7 +1094,11 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __habs2(const __hip_bfloat162 a) {
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hadd2(const __hip_bfloat162 a,
                                                     const __hip_bfloat162 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return __hip_bfloat162{__bf16_2(a) + __bf16_2(b)};
+#else
+  return __hip_bfloat162{__hadd(a.x, b.x), __hadd(a.y, b.y)};
+#endif
 }
 
 /**
@@ -923,8 +1107,12 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hadd2(const __hip_bfloat162 a,
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hadd2_rn(const __hip_bfloat162 a,
                                                        const __hip_bfloat162 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
 #pragma clang fp contract(off)
   return __hip_bfloat162{__bf16_2(a) + __bf16_2(b)};
+#else
+  return __hip_bfloat162{__hadd(a.x, b.x), __hadd(a.y, b.y)};
+#endif
 }
 
 
@@ -945,7 +1133,11 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 __hfma2(const __hip_bfloat162 a, const __
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hmul2(const __hip_bfloat162 a,
                                                     const __hip_bfloat162 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return __hip_bfloat162{__bf16_2(a) * __bf16_2(b)};
+#else
+  return __hip_bfloat162{__hmul(a.x, b.x), __hmul(a.y, b.y)};
+#endif
 }
 
 /**
@@ -954,8 +1146,12 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hmul2(const __hip_bfloat162 a,
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hmul2_rn(const __hip_bfloat162 a,
                                                        const __hip_bfloat162 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
 #pragma clang fp contract(off)
   return __hip_bfloat162{__bf16_2(a) * __bf16_2(b)};
+#else
+  return __hip_bfloat162{__hmul(a.x, b.x), __hmul(a.y, b.y)};
+#endif
 }
 
 /**
@@ -972,7 +1168,11 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hneg2(const __hip_bfloat162 a) {
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hsub2(const __hip_bfloat162 a,
                                                     const __hip_bfloat162 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return __hip_bfloat162{__bf16_2(a) - __bf16_2(b)};
+#else
+  return __hip_bfloat162{__hsub(a.x, b.x), __hsub(a.y, b.y)};
+#endif
 }
 
 /**
@@ -981,8 +1181,12 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hsub2(const __hip_bfloat162 a,
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hsub2_rn(const __hip_bfloat162 a,
                                                        const __hip_bfloat162 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
 #pragma clang fp contract(off)
   return __hip_bfloat162{__bf16_2(a) - __bf16_2(b)};
+#else
+  return __hip_bfloat162{__hsub(a.x, b.x), __hsub(a.y, b.y)};
+#endif
 }
 
 /**
@@ -1240,7 +1444,11 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162& operator/=(__hip_bfloat162& l,
  * \brief Compare two bfloat162 values
  */
 __BF16_HOST_DEVICE_STATIC__ bool __heq(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return (__bf16)a == (__bf16)b;
+#else
+  return static_cast<float>(a) == static_cast<float>(b);
+#endif
 }
 
 /**
@@ -1248,7 +1456,12 @@ __BF16_HOST_DEVICE_STATIC__ bool __heq(const __hip_bfloat16 a, const __hip_bfloa
  * \brief Compare two bfloat162 values - unordered equal
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hequ(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return !((__bf16)a < (__bf16)b) && !((__bf16)a > (__bf16)b);
+#else
+  float fa = static_cast<float>(a), fb = static_cast<float>(b);
+  return !(fa < fb) && !(fa > fb);
+#endif
 }
 
 /**
@@ -1256,7 +1469,11 @@ __BF16_HOST_DEVICE_STATIC__ bool __hequ(const __hip_bfloat16 a, const __hip_bflo
  * \brief Compare two bfloat162 values - greater than
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hgt(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return (__bf16)a > (__bf16)b;
+#else
+  return static_cast<float>(a) > static_cast<float>(b);
+#endif
 }
 
 /**
@@ -1264,7 +1481,11 @@ __BF16_HOST_DEVICE_STATIC__ bool __hgt(const __hip_bfloat16 a, const __hip_bfloa
  * \brief Compare two bfloat162 values - unordered greater than
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hgtu(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return !((__bf16)a <= (__bf16)b);
+#else
+  return !(static_cast<float>(a) <= static_cast<float>(b));
+#endif
 }
 
 /**
@@ -1272,7 +1493,11 @@ __BF16_HOST_DEVICE_STATIC__ bool __hgtu(const __hip_bfloat16 a, const __hip_bflo
  * \brief Compare two bfloat162 values - greater than equal
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hge(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return (__bf16)a >= (__bf16)b;
+#else
+  return static_cast<float>(a) >= static_cast<float>(b);
+#endif
 }
 
 /**
@@ -1280,7 +1505,11 @@ __BF16_HOST_DEVICE_STATIC__ bool __hge(const __hip_bfloat16 a, const __hip_bfloa
  * \brief Compare two bfloat162 values - unordered greater than equal
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hgeu(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return !((__bf16)a < (__bf16)b);
+#else
+  return !(static_cast<float>(a) < static_cast<float>(b));
+#endif
 }
 
 /**
@@ -1288,7 +1517,11 @@ __BF16_HOST_DEVICE_STATIC__ bool __hgeu(const __hip_bfloat16 a, const __hip_bflo
  * \brief Compare two bfloat162 values - not equal
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hne(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return (__bf16)a != (__bf16)b;
+#else
+  return static_cast<float>(a) != static_cast<float>(b);
+#endif
 }
 
 /**
@@ -1296,7 +1529,11 @@ __BF16_HOST_DEVICE_STATIC__ bool __hne(const __hip_bfloat16 a, const __hip_bfloa
  * \brief Compare two bfloat162 values - unordered not equal
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hneu(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return !((__bf16)a == (__bf16)b);
+#else
+  return !(static_cast<float>(a) == static_cast<float>(b));
+#endif
 }
 
 /**
@@ -1309,7 +1546,11 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmax(const __hip_bfloat16 a, const 
     if (a_nan && b_nan) return HIPRT_NAN_BF16;  // return canonical NaN
     return a_nan ? b : a;
   }
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return (__bf16)a > (__bf16)b ? a : b;
+#else
+  return static_cast<float>(a) > static_cast<float>(b) ? a : b;
+#endif
 }
 
 /**
@@ -1322,7 +1563,11 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmin(const __hip_bfloat16 a, const 
     if (a_nan && b_nan) return HIPRT_NAN_BF16;  // return canonical NaN
     return a_nan ? b : a;
   }
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return (__bf16)a < (__bf16)b ? a : b;
+#else
+  return static_cast<float>(a) < static_cast<float>(b) ? a : b;
+#endif
 }
 
 /**
@@ -1330,7 +1575,11 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmin(const __hip_bfloat16 a, const 
  * \brief Compare two bfloat162 values - less than operator
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hlt(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return (__bf16)a < (__bf16)b;
+#else
+  return static_cast<float>(a) < static_cast<float>(b);
+#endif
 }
 
 /**
@@ -1338,7 +1587,11 @@ __BF16_HOST_DEVICE_STATIC__ bool __hlt(const __hip_bfloat16 a, const __hip_bfloa
  * \brief Compare two bfloat162 values - unordered less than
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hltu(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return !((__bf16)a >= (__bf16)b);
+#else
+  return !(static_cast<float>(a) >= static_cast<float>(b));
+#endif
 }
 
 /**
@@ -1346,7 +1599,11 @@ __BF16_HOST_DEVICE_STATIC__ bool __hltu(const __hip_bfloat16 a, const __hip_bflo
  * \brief Compare two bfloat162 values - less than equal
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hle(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return (__bf16)a <= (__bf16)b;
+#else
+  return static_cast<float>(a) <= static_cast<float>(b);
+#endif
 }
 
 /**
@@ -1354,7 +1611,11 @@ __BF16_HOST_DEVICE_STATIC__ bool __hle(const __hip_bfloat16 a, const __hip_bfloa
  * \brief Compare two bfloat162 values - unordered less than equal
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hleu(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+#if defined(__HIP_BF16_NATIVE_TYPE__)
   return !((__bf16)a > (__bf16)b);
+#else
+  return !(static_cast<float>(a) > static_cast<float>(b));
+#endif
 }
 
 /**
