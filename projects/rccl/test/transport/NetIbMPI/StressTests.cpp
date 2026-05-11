@@ -447,5 +447,84 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
 
 // A3.  MemoryRegistrationStorm — register/deregister 512 unique buffers
 //      in various patterns to stress the MR cache.
+TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    ConnectionPair cp;
+    NetConnectionGuard guard(net_);
+    SetupConnectionWithGuard(0, cp, guard);
+
+    void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
+
+    static constexpr int kNumBufs = 512;
+    static constexpr size_t kBufSz = 4096;
+
+    // Allocate all buffers
+    std::vector<void*> bufs(kNumBufs);
+    for (int i = 0; i < kNumBufs; i++) {
+        bufs[i] = malloc(kBufSz);
+        ASSERT_NE(bufs[i], nullptr) << "malloc failed at buffer " << i;
+    }
+    auto bufCleanup = makeScopeGuard([&]() {
+        for (auto* p : bufs) free(p);
+    });
+
+    // Phase 1: register all forward
+    std::vector<void*> handles(kNumBufs, nullptr);
+    for (int i = 0; i < kNumBufs; i++) {
+        ASSERT_EQ(RegisterMemory(comm, bufs[i], kBufSz, NCCL_PTR_HOST, &handles[i]), ncclSuccess)
+            << "regMr failed at " << i;
+    }
+
+    // Phase 2: deregister in reverse
+    for (int i = kNumBufs - 1; i >= 0; i--) {
+        ASSERT_EQ(DeregisterMemory(comm, handles[i]), ncclSuccess)
+            << "deregMr (reverse) failed at " << i;
+        handles[i] = nullptr;
+    }
+
+    // Phase 3: re-register all forward
+    for (int i = 0; i < kNumBufs; i++) {
+        ASSERT_EQ(RegisterMemory(comm, bufs[i], kBufSz, NCCL_PTR_HOST, &handles[i]), ncclSuccess)
+            << "re-regMr failed at " << i;
+    }
+
+    // Phase 4: deregister in shuffled order (deterministic)
+    std::vector<int> order(kNumBufs);
+    for (int i = 0; i < kNumBufs; i++) order[i] = i;
+    // Simple deterministic shuffle (seed=42)
+    for (int i = kNumBufs - 1; i > 0; i--) {
+        int j = (i * 42 + 17) % (i + 1);
+        std::swap(order[i], order[j]);
+    }
+    for (int idx : order) {
+        ASSERT_EQ(DeregisterMemory(comm, handles[idx]), ncclSuccess)
+            << "deregMr (shuffled) failed at idx " << idx;
+        handles[idx] = nullptr;
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Phase 5: verify connection is still alive with one transfer
+    auto tbuf = makeHostBufferAutoGuard(malloc(kBufSz));
+    ASSERT_NE(tbuf.get(), nullptr);
+    void* mh = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, tbuf.get(), kBufSz, NCCL_PTR_HOST, &mh), ncclSuccess);
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+    DoSendRecv(cp.sendComm, cp.recvComm,
+               tbuf.get(), tbuf.get(), kBufSz,
+               /*tag=*/0, mh, mh, /*patternSeed=*/999);
+}
+
+// =====================================================================
+//  Group C: Connection concurrency (2-rank)
+// =====================================================================
+
+// C1.  ConcurrentMultiConnectionStress — 4 connections on same device,
+//      concurrent I/O with independent tag spaces.
 
 #endif /* MPI_TESTS_ENABLED */
