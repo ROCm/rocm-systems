@@ -149,6 +149,7 @@ endif()
 
 # Setup testing collateral
 
+option(INSTALL_TESTS "Build test suite" OFF)
 option(ENABLE_TESTS "Enable compilation of testing collateral" OFF)
 set(CMAKE_HIP_FLAGS_RELEASE "-O2")
 if(${ENABLE_TESTS})
@@ -252,6 +253,13 @@ option(
     "Skip building native counter collection tool library (for runtime compilation)"
     OFF
 )
+
+# -------------------
+# Setup tool library
+# -------------------
+if(NOT SKIP_NATIVE_TOOL_BUILD)
+    add_subdirectory(src/lib)
+endif()
 
 # ---------------------------
 # Profile mode import guard
@@ -671,6 +679,15 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+if(TARGET test-rocprofiler-compute-tool)
+    if(TEST_FROM_INSTALL)
+        set(_tool_test_cmd tests/test-rocprofiler-compute-tool)
+    else()
+        set(_tool_test_cmd $<TARGET_FILE:test-rocprofiler-compute-tool>)
+    endif()
+    add_test(NAME test-rocprofiler-compute-tool COMMAND ${_tool_test_cmd})
+endif()
+
 # -----------------------------------
 # Generate coverage tests
 # -----------------------------------
@@ -738,13 +755,6 @@ if(COMMAND apply_ctest_category_labels)
     endif()
 else()
     message(STATUS "Test categorization not available (TestCategories.cmake not found)")
-endif()
-
-# -------------------
-# Setup tool library
-# -------------------
-if(NOT SKIP_NATIVE_TOOL_BUILD)
-    add_subdirectory(src/lib)
 endif()
 
 # ---------
@@ -914,7 +924,6 @@ install(
 )
 
 # TEST collateral
-option(INSTALL_TESTS "Build test suite" OFF)
 if(INSTALL_TESTS)
     install(
         DIRECTORY tests

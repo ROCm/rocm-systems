@@ -18,7 +18,10 @@ target_link_libraries(
     PRIVATE rocprofiler-compute-tool gtest_main gmock gsl_assert fmt::fmt
 )
 
-add_test(NAME ${target} COMMAND ${target})
+set_target_properties(
+    ${target}
+    PROPERTIES INSTALL_RPATH "$ORIGIN/../../../${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}"
+)
 
 if(INSTALL_TESTS)
     install(
