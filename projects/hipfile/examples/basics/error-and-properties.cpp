@@ -100,13 +100,15 @@ configure_driver(void)
 
     hipfile_err = hipFileSetParameterSizeT(hipFileParamPropertiesMaxDeviceCacheSizeKB, EAP_CACHE_KB);
     if (hipFileSuccess != hipfile_err.err) {
-        fprintf(stderr, "Could not set max device cache size (%s)\n", hipFileGetOpErrorString(hipfile_err.err));
+        fprintf(stderr, "Could not set max device cache size (%s)\n",
+                hipFileGetOpErrorString(hipfile_err.err));
         return 1;
     }
 
     hipfile_err = hipFileSetParameterSizeT(hipFileParamPropertiesMaxDevicePinnedMemSizeKB, EAP_PINNED_KB);
     if (hipFileSuccess != hipfile_err.err) {
-        fprintf(stderr, "Could not set max device pinned mem size (%s)\n", hipFileGetOpErrorString(hipfile_err.err));
+        fprintf(stderr, "Could not set max device pinned mem size (%s)\n",
+                hipFileGetOpErrorString(hipfile_err.err));
         return 1;
     }
 
@@ -248,7 +250,8 @@ main(void)
         memset(&props, 0, sizeof(props));
         hipfile_err = hipFileDriverGetProperties(&props);
         if (hipFileSuccess != hipfile_err.err) {
-            fprintf(stderr, "hipFileDriverGetProperties failed (%s)\n", hipFileGetOpErrorString(hipfile_err.err));
+            fprintf(stderr, "hipFileDriverGetProperties failed (%s)\n",
+                    hipFileGetOpErrorString(hipfile_err.err));
             goto driver_close;
         }
         print_properties(&props);
