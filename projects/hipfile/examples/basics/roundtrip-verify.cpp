@@ -219,7 +219,7 @@ main(int argc, char *argv[])
 
     hipfile_err = hipFileBufRegister(devbuf, alloc_size, 0);
     if (hipFileSuccess != hipfile_err.err) {
-        fprintf(stderr, "Buffer register failed (%s)\n", HIPFILE_ERRSTR(hipfile_err.err));
+        fprintf(stderr, "Buffer register failed (%s)\n", hipFileGetOpErrorString(hipfile_err.err));
         goto free_devbuf;
     }
     buf_registered = true;
@@ -327,7 +327,7 @@ deregister_buf:
     if (buf_registered) {
         hipfile_err = hipFileBufDeregister(devbuf);
         if (hipFileSuccess != hipfile_err.err) {
-            fprintf(stderr, "Buffer deregister failed (%s)\n", HIPFILE_ERRSTR(hipfile_err.err));
+            fprintf(stderr, "Buffer deregister failed (%s)\n", hipFileGetOpErrorString(hipfile_err.err));
             exit_status = EXIT_FAILURE;
         }
     }
