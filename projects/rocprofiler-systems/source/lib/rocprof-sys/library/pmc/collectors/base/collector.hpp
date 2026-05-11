@@ -26,7 +26,8 @@ namespace rocprofsys::pmc::collectors::base
  * @tparam Config Configuration policy providing settings and output policies
  */
 template <typename Traits, typename DeviceProvider, typename Config>
-    requires valid_collector_traits<Traits>
+    requires valid_collector_traits<Traits> && device_provider<DeviceProvider> &&
+             valid_collector_config<Config>
 struct collector
 {
     // Type aliases from traits
