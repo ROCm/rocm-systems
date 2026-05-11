@@ -81,7 +81,7 @@ env:
 
 jobs:
   build-code-coverage:
-    name: Build Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    name: Build Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     permissions:
       contents: read
       id-token: write
@@ -136,7 +136,7 @@ jobs:
         { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule cache
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: |
           .git/modules
@@ -252,7 +252,7 @@ jobs:
 
     - name: Configure AWS Credentials
       if: ${{ always() && !github.event.pull_request.head.repo.fork }}
-      uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+      uses: aws-actions/configure-aws-credentials@v6.0.0
       with:
         aws-region: ${{ env.ROCPROFILER_SDK_ARTIFACT_REGION }}
         role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
@@ -266,8 +266,8 @@ jobs:
           --file "projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst" \
           --file "rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst"
 
-  code-coverage:
-    name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+  run-code-coverage:
+    name: Run Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     needs: build-code-coverage
     permissions:
       contents: write
@@ -340,7 +340,7 @@ jobs:
     - name: Load Existing XML Code Coverage
       if: github.event_name == 'pull_request'
       id: load-coverage
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         key: ${{ github.event.pull_request.base.sha }}-codecov
         path: projects/rocprofiler-sdk/.codecov/*.xml
@@ -426,7 +426,7 @@ jobs:
 
     - name: Save XML Code Coverage
       id: save-coverage
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v5
       with:
         key: ${{ github.sha }}-codecov
         path: |
@@ -528,7 +528,7 @@ jobs:
 
     - name: Archive Code Coverage Data
       if: ${{ github.event_name == 'workflow_dispatch' }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: code-coverage-details
         path: |

@@ -8,6 +8,7 @@ on:
     branches: [ develop ]
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
       - '.github/scripts/rocprofiler_sdk_s3_handoff.py'
       - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
       - '!**/*.md'
@@ -22,6 +23,7 @@ on:
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
       - '.github/scripts/rocprofiler_sdk_s3_handoff.py'
       - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
       - '!**/*.md'
@@ -151,7 +153,7 @@ jobs:
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Restore submodule cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .git/modules
@@ -322,7 +324,7 @@ jobs:
 
       - name: Configure AWS Credentials
         if: ${{ always() && !github.event.pull_request.head.repo.fork }}
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        uses: aws-actions/configure-aws-credentials@v6.0.0
         with:
           aws-region: ${{ env.ROCPROFILER_SDK_ARTIFACT_REGION }}
           role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
@@ -472,7 +474,7 @@ jobs:
 
       - name: Archive production artifacts
         if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: installers-deb
           path: |
@@ -538,7 +540,7 @@ jobs:
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Restore submodule cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .git/modules
@@ -640,7 +642,7 @@ jobs:
 
       - name: Configure AWS Credentials
         if: ${{ always() && !github.event.pull_request.head.repo.fork }}
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        uses: aws-actions/configure-aws-credentials@v6.0.0
         with:
           aws-region: ${{ env.ROCPROFILER_SDK_ARTIFACT_REGION }}
           role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
@@ -828,7 +830,7 @@ jobs:
         { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule cache
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: |
           .git/modules
@@ -917,7 +919,7 @@ jobs:
 
     - name: Configure AWS Credentials
       if: ${{ always() && !github.event.pull_request.head.repo.fork }}
-      uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+      uses: aws-actions/configure-aws-credentials@v6.0.0
       with:
         aws-region: ${{ env.ROCPROFILER_SDK_ARTIFACT_REGION }}
         role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
