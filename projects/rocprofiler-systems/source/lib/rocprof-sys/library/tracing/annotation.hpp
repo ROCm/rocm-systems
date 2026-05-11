@@ -53,13 +53,11 @@ ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_VOID_P, void*)
 #undef ROCPROFSYS_DEFINE_ANNOTATION_TYPE
 
 template <typename Np, typename Tp>
+    requires(!std::is_same<std::remove_pointer_t<concepts::unqualified_type_t<Np>>,
+                           rocprofsys_annotation_t>::value)
 auto
-add_perfetto_annotation(
-    perfetto_event_context_t& ctx, Np&& _name, Tp&& _val, std::int64_t _idx = -1,
-    std::enable_if_t<
-        !std::is_same<std::remove_pointer_t<concepts::unqualified_type_t<Np>>,
-                      rocprofsys_annotation_t>::value,
-        int> = 0)
+add_perfetto_annotation(perfetto_event_context_t& ctx, Np&& _name, Tp&& _val,
+                        std::int64_t _idx = -1)
 {
     using named_type = std::remove_reference_t<std::remove_cv_t<std::decay_t<Np>>>;
     using value_type = std::remove_reference_t<std::remove_cv_t<std::decay_t<Tp>>>;
