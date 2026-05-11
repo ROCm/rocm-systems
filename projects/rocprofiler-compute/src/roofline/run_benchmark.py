@@ -22,21 +22,21 @@ import importlib
 from pathlib import Path
 
 
-def run_roofline_benchmark(device_id: int, roofline_csv: Path) -> None:
+def run_roofline_benchmark(
+    device_id: int, roofline_csv: Path, cache_sizes: dict
+) -> None:
     """Load device benchmark, execute, and save results to CSV."""
-    bench = load_bench([device_id])
-    benchmark_metrics = bench.run_on_devices([device_id])
+    bench = load_bench(device_id, cache_sizes)
+    benchmark_metrics = bench.run_benchmark(device_id)
     bench.dump_csv(benchmark_metrics, str(roofline_csv))
 
 
-def load_bench(device_ids: list[str]) -> object:
+def load_bench(device_id: int, cache_sizes: dict) -> object:
     try:
         from utils.hip_interface import hipGetDeviceProperties
 
         # Get exact LLVM target name of the device
-        gfx_device = (hipGetDeviceProperties(int(device_ids[0])).gcnArchName).split(
-            ":", 1
-        )[0]
+        gfx_device = (hipGetDeviceProperties(device_id).gcnArchName).split(":", 1)[0]
 
         # Force gfx940 MI300A_A0 and gfx941 MI300X_A0 products
         # to use same class as gfx942 MI300_A1
@@ -54,10 +54,10 @@ def load_bench(device_ids: list[str]) -> object:
         # Get the bench class from the module
         bench_class = getattr(bench_module, f"Bench_{gfx_device}")
         # Instantiate and return the bench class
-        bench_instance = bench_class(device_ids)
+        bench_instance = bench_class(device_id, cache_sizes)
         return bench_instance
     except Exception as e:
         # Propagate error so users do not attempt to use a non-existent bench instance
         raise RuntimeError(
-            f"Failed to load benchmark for devices {device_ids}: {e}"
+            f"Failed to load benchmark for devices {device_id}: {e}"
         ) from e
