@@ -22,6 +22,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Post-run output summary during library finalization showing result file locations.
 - JSON schema file (`share/rocprofiler-systems/presets/schema.json`) for preset validation.
 - Documentation (`docs/how-to/instrumenting-rewriting-binary-application.rst`) describing what to do when Dyninst reports a "Failed to transform trace" error during instrumentation.
+- Progress bars during trace cache post-processing: perfetto generation (`sequential dispatch`) shows one bar per buffered_storage file in turn; rocpd generation (`multithreaded dispatch`) shows a single aggregate bar accumulating updates from all worker threads.
 
 ### Changed
 
