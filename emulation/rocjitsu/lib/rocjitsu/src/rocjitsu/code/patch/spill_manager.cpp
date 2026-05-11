@@ -3,6 +3,8 @@
 
 #include "rocjitsu/code/patch/spill_manager.h"
 
+#include "util/bit.h"
+
 #include <cassert>
 #include <cstddef>
 #include <limits>
@@ -11,14 +13,6 @@
 namespace rocjitsu {
 
 namespace {
-
-[[nodiscard]] constexpr uint32_t round_up(uint32_t value, uint32_t alignment) {
-  // Use uint64_t internally so (value + alignment - 1) cannot overflow when
-  // value is near UINT32_MAX. The result still fits in uint32_t for any
-  // realistic kernel scratch size.
-  const uint64_t bumped = static_cast<uint64_t>(value) + alignment - 1;
-  return static_cast<uint32_t>((bumped / alignment) * alignment);
-}
 
 /// Per-class hardware bound. Indices >= this are not representable in
 /// RegisterSet's bitsets and indicate either a programming error or a class
@@ -39,8 +33,8 @@ namespace {
 } // namespace
 
 SpillManager::SpillManager(uint32_t original_private_bytes, uint32_t per_lane_scratch_limit)
-    : base_offset_(round_up(original_private_bytes, kDbiZoneAlignment)), total_bytes_(base_offset_),
-      limit_(per_lane_scratch_limit), next_offset_(base_offset_) {}
+    : base_offset_(util::align_up(original_private_bytes, kDbiZoneAlignment)),
+      total_bytes_(base_offset_), limit_(per_lane_scratch_limit), next_offset_(base_offset_) {}
 
 std::optional<uint32_t> SpillManager::allocate_slot(RegisterRef reg) {
   // Reject indices past the per-class hardware bound (or unsupported classes

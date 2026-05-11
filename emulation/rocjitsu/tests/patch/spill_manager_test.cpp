@@ -561,10 +561,10 @@ TEST(SpillManager, IntegrationFromLiveBefore) {
   SpillManager m(kOrigPrivateBytes, /*limit=*/16384);
   EXPECT_TRUE(m.reserve(live));
 
-  // total = round_up(orig, 16) + kSlotBytes * |live|. round_up(100, 16) == 112.
-  constexpr uint32_t kExpectedBase = 112;
-  EXPECT_EQ(m.total_private_bytes(),
-            kExpectedBase + SpillManager::kSlotBytes * static_cast<uint32_t>(live.size()));
+  // total = align_up(orig, 16) + kSlotBytes * |live|. align_up(100, 16) == 112.
+  constexpr size_t kExpectedBase = 112;
+  EXPECT_EQ(static_cast<size_t>(m.total_private_bytes()),
+            kExpectedBase + SpillManager::kSlotBytes * live.size());
 
   // Every live register has an offset; collect them to check pairwise distinct.
   std::vector<uint32_t> offsets;

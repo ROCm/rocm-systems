@@ -9,9 +9,10 @@
 
 #include "rocjitsu/isa/register_set.h"
 
+#include <cstddef>
 #include <cstdint>
-#include <map>
 #include <optional>
+#include <unordered_map>
 #include <utility> // for std::pair
 
 namespace rocjitsu {
@@ -59,13 +60,15 @@ public:
   /// @returns Byte offset of the first slot, or nullopt on overflow or if
   ///          @p reg.index + @p width would exceed UINT16_MAX.
   /// @note width=2 is the common case (SGPR pair, 64-bit VGPR pair).
-  ///       On any sub-allocation failure, the manager is rolled back to its
-  ///       state at entry (no partial allocation is retained).
+  ///       On failure the manager is unchanged: the underlying @c reserve
+  ///       call performs an upfront capacity check before mutating, so a
+  ///       partially-completed allocation never becomes visible.
   [[nodiscard]] std::optional<uint32_t> allocate_slots(RegisterRef reg, unsigned width);
 
   /// @brief Allocate slots for every register in @p set.
-  /// @returns true on success. On failure, the manager is rolled back to its
-  ///          state at entry (no register from this call is retained).
+  /// @returns true on success. On failure the manager is unchanged — the
+  ///          capacity check runs upfront across all new registers, so no
+  ///          partial commit is possible.
   /// @note An empty set or a set whose registers are all already cached
   ///       returns true even on an over-limit manager — no new bytes are
   ///       requested, so no capacity check fires.
@@ -78,11 +81,19 @@ public:
   [[nodiscard]] std::optional<uint32_t> offset_for(RegisterRef reg) const;
 
 private:
-  uint32_t base_offset_; ///< First DBI slot. round_up(orig, 16).
+  /// Hash for (RegClass, register-index). RegClass fits in 8 bits and the
+  /// index in 16, so the combined key is collision-free in 32 bits.
+  struct RegKeyHash {
+    size_t operator()(const std::pair<RegClass, uint16_t> &k) const noexcept {
+      return (static_cast<size_t>(k.first) << 16) | k.second;
+    }
+  };
+
+  uint32_t base_offset_; ///< First DBI slot. align_up(orig, 16).
   uint32_t total_bytes_; ///< Bumped private_segment_fixed_size.
   uint32_t limit_;       ///< Hard per-lane scratch cap (inclusive: offset+kSlotBytes <= limit OK).
   uint32_t next_offset_; ///< Next free byte within DBI zone.
-  std::map<std::pair<RegClass, uint16_t>, uint32_t> reg_to_offset_;
+  std::unordered_map<std::pair<RegClass, uint16_t>, uint32_t, RegKeyHash> reg_to_offset_;
 };
 
 } // namespace rocjitsu
