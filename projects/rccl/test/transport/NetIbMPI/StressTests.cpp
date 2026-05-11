@@ -879,5 +879,53 @@ TEST_F(NetIbMPITest, MultiQpSplitDataStress) {
 
 // D2.  MultiQpNoSplitStress — QPS=4, SPLIT=0.
 //      Exercises the nDataQps path (net_ib.cc:2417).
+TEST_F(NetIbMPITest, MultiQpNoSplitStress) {
+    const char* qps  = getenv("NCCL_IB_QPS_PER_CONNECTION");
+    const char* split = getenv("NCCL_IB_SPLIT_DATA_ON_QPS");
+    if (!qps || atoi(qps) < 2 || !split || strcmp(split, "0") != 0) {
+        GTEST_SKIP() << "Requires NCCL_IB_QPS_PER_CONNECTION>=2, NCCL_IB_SPLIT_DATA_ON_QPS=0";
+    }
+
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    ConnectionPair cp;
+    NetConnectionGuard guard(net_);
+    SetupConnectionWithGuard(0, cp, guard);
+
+    const size_t maxSz = 1024 * 1024;
+    auto buf = makeHostBufferAutoGuard(malloc(maxSz));
+    ASSERT_NE(buf.get(), nullptr);
+
+    void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
+    void* mh = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf.get(), maxSz, NCCL_PTR_HOST, &mh), ncclSuccess);
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+    const size_t sizes[] = {
+        127, 128, 129, 255, 256, 257,
+        1023, 1024, 1025, 4095, 4096, 4097,
+        65535, 65536, 65537
+    };
+
+    static constexpr int kRepeats = 10;
+    int tag = 0;
+    for (size_t sz : sizes) {
+        for (int r = 0; r < kRepeats; r++) {
+            DoSendRecv(cp.sendComm, cp.recvComm,
+                       buf.get(), buf.get(), sz,
+                       tag, mh, mh, tag);
+            tag++;
+        }
+    }
+}
+
+// =====================================================================
+//  Group B: Multi-rank patterns (4 ranks)
+// =====================================================================
+
+// B1.  FanInStress — ranks 1,2,3 each send to rank 0, 100 iterations.
 
 #endif /* MPI_TESTS_ENABLED */
