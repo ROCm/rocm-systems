@@ -384,5 +384,68 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
 
 // A1.  RequestSlotExhaustion — post NCCL_NET_MAX_REQUESTS (32) irecvs,
 //      then drain all via matching sends, then verify slots are recycled.
+TEST_F(NetIbMPITest, RequestSlotExhaustion) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit));
+    int rank = MPIEnvironment::world_rank;
+    AssertInitAndGetDevices(nullptr);
+
+    ConnectionPair cp;
+    NetConnectionGuard guard(net_);
+    SetupConnectionWithGuard(0, cp, guard);
+
+    static constexpr int kMaxReqs = 32; // NCCL_NET_MAX_REQUESTS
+    const size_t sz = 256;
+    auto buf = makeHostBufferAutoGuard(malloc(sz * kMaxReqs));
+    ASSERT_NE(buf.get(), nullptr);
+
+    void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
+    void* mh = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf.get(), sz * kMaxReqs, NCCL_PTR_HOST, &mh), ncclSuccess);
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+    if (rank == 0) {
+        // Post all 32 irecvs
+        std::vector<void*> reqs(kMaxReqs, nullptr);
+        for (int i = 0; i < kMaxReqs; i++) {
+            char* p = static_cast<char*>(buf.get()) + i * sz;
+            PostSingleRecv(cp.recvComm, p, sz, /*tag=*/i, mh, &reqs[i]);
+        }
+        // Signal rank 1 that all recvs are posted
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Wait for all completions
+        for (int i = 0; i < kMaxReqs; i++) {
+            int rsz = 0;
+            ASSERT_EQ(WaitForCompletion(reqs[i], &rsz, kStressTimeoutMs), ncclSuccess)
+                << "Completion failed for recv " << i;
+        }
+    } else {
+        // Wait for rank 0 to post all recvs
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Send all 32
+        for (int i = 0; i < kMaxReqs; i++) {
+            char* p = static_cast<char*>(buf.get()) + i * sz;
+            fillHostBufferWithPattern<uint8_t>(p, sz, makeBytePattern(i));
+            void* req = nullptr;
+            PostSendWithRetry(cp.sendComm, p, sz, /*tag=*/i, mh, &req);
+            int rsz = 0;
+            ASSERT_EQ(WaitForCompletion(req, &rsz, kStressTimeoutMs), ncclSuccess)
+                << "Completion failed for send " << i;
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Verify recycling: post and drain one more round
+    for (int i = 0; i < 4; i++) {
+        DoSendRecv(cp.sendComm, cp.recvComm,
+                   buf.get(), buf.get(), sz,
+                   /*tag=*/100 + i, mh, mh, 100 + i);
+    }
+}
+
+// A3.  MemoryRegistrationStorm — register/deregister 512 unique buffers
+//      in various patterns to stress the MR cache.
 
 #endif /* MPI_TESTS_ENABLED */
