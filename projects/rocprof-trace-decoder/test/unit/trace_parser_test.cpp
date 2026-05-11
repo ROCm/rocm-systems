@@ -56,7 +56,9 @@ TEST(CppReturnInfoTest, DefaultConstruction)
 TEST(OccupancyInfoTest, ConstructorWithUint64WaveStart)
 {
     pcinfo_t pc{100, 5};
-    occupancy_info_t occ(pc, 1000, uint64_t(1), uint64_t(2), uint64_t(3), uint64_t(1));
+    occupancy_info_t occ(
+        pc, 1000, uint64_t(1), uint64_t(2), uint64_t(3), uint64_t(1), uint64_t(0), uint64_t(0), uint64_t(0), uint64_t(0)
+    );
 
     EXPECT_EQ(occ.pc.address, 100);
     EXPECT_EQ(occ.pc.code_object_id, 5);
@@ -70,7 +72,9 @@ TEST(OccupancyInfoTest, ConstructorWithUint64WaveStart)
 TEST(OccupancyInfoTest, ConstructorWithUint64WaveEnd)
 {
     pcinfo_t pc{100, 5};
-    occupancy_info_t occ(pc, 1000, uint64_t(1), uint64_t(2), uint64_t(3), uint64_t(0));
+    occupancy_info_t occ(
+        pc, 1000, uint64_t(1), uint64_t(2), uint64_t(3), uint64_t(0), uint64_t(0), uint64_t(0), uint64_t(0), uint64_t(0)
+    );
 
     EXPECT_EQ(occ.start, 0); // wave_end
 }
@@ -78,7 +82,9 @@ TEST(OccupancyInfoTest, ConstructorWithUint64WaveEnd)
 TEST(OccupancyInfoTest, ConstructorWithInt8)
 {
     pcinfo_t pc{200, 10};
-    occupancy_info_t occ(pc, 2000, int8_t(4), int8_t(1), int8_t(7), uint64_t(1));
+    occupancy_info_t occ(
+        pc, 2000, int8_t(4), int8_t(1), int8_t(7), uint64_t(1), uint64_t(0), uint64_t(0), uint64_t(0), uint64_t(0)
+    );
 
     EXPECT_EQ(occ.pc.address, 200);
     EXPECT_EQ(occ.pc.code_object_id, 10);

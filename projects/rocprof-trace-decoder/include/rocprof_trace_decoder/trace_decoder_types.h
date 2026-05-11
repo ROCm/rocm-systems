@@ -262,6 +262,7 @@ typedef struct rocprofiler_thread_trace_decoder_event_t
     uint8_t pipe_id;
     uint16_t reserved;
     uint64_t payload;
+    uint64_t byte_offset; ///< Byte offset within the trace data
 } rocprofiler_thread_trace_decoder_event_t;
 
 typedef enum rocprofiler_thread_trace_decoder_dispatch_flags_t
@@ -279,7 +280,6 @@ typedef struct rocprofiler_thread_trace_decoder_dispatch_t
 {
     uint64_t size; ///< Size of this struct
     int64_t time;  ///< Time of event. Note: Behaves differently for quick_scan
-    rocprofiler_thread_trace_decoder_pc_t entry_point;
     uint8_t me_id;
     uint8_t pipe_id;
     uint16_t user_sgprs;
@@ -291,6 +291,8 @@ typedef struct rocprofiler_thread_trace_decoder_dispatch_t
     uint32_t thread_dim_y;
     uint32_t thread_dim_z;
     uint64_t dispatch_pkt_addr;
+    uint64_t byte_offset; ///< Byte offset within the trace data
+    rocprofiler_thread_trace_decoder_pc_t entry_point;
 } rocprofiler_thread_trace_decoder_dispatch_t;
 
 /**

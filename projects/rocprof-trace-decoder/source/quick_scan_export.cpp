@@ -28,6 +28,7 @@
 #include "rocprof_trace_decoder/trace_decoder_instrument.h"
 
 #include "gfx9/quick_scan.h"
+#include "handle.hpp"
 #include "trace_parser.hpp" // CSRegisterHandler, sqtt_token_reg_t, sqtt_event_type_t
 
 namespace
@@ -155,20 +156,25 @@ rocprofiler_thread_trace_decoder_status_t quick_scan_gfx9(
 
 extern "C" __attribute__((visibility("default"))) rocprofiler_thread_trace_decoder_status_t
 rocprof_trace_decoder_quick_scan(
-    rocprof_trace_decoder_gfx9_header_t header,
+    rocprof_trace_decoder_handle_t handle,
+    uint64_t chunk_index,
     const void* data,
     uint64_t data_size,
     rocprof_trace_decoder_trace_callback_t trace_callback,
-    void* userdata,
-    int flags
+    void* userdata
 )
 {
-    if (!data || data_size == 0 || !trace_callback)
+    if (!data || data_size < 8 || !trace_callback)
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    auto decoder = Handle::get_handle_data(handle);
+    if (!decoder) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if (decoder->header.raw == 0 || chunk_index == 0) decoder->header.raw = static_cast<const uint64_t*>(data)[0];
 
     const uint8_t* buf = static_cast<const uint8_t*>(data);
 
-    if (is_gfx9_header(header)) return quick_scan_gfx9(buf, data_size, trace_callback, userdata);
+    if (is_gfx9_header(decoder->header)) return quick_scan_gfx9(buf, data_size, trace_callback, userdata);
 
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 }
