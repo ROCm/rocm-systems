@@ -3481,6 +3481,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
                                 this_func,
                                 signo);
 
+    bool         chained_handler_invoked = false;
     static auto _once = std::once_flag{};
     std::call_once(_once, [&]() {
         auto get_children = [&this_pid]() {
@@ -3576,6 +3577,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
                         this_func,
                         signo);
                     _chained.action->sa_sigaction(signo, info, ucontext);
+                    chained_handler_invoked = true;
                 }
                 else if((_chained.action->sa_flags & SA_SIGINFO) != SA_SIGINFO &&
                         _chained.action->sa_handler &&
@@ -3590,6 +3592,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
                         this_func,
                         signo);
                     _chained.action->sa_handler(signo);
+                    chained_handler_invoked = true;
                 }
             }
             else
@@ -3605,6 +3608,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
                         this_func,
                         signo);
                     _chained.handler(signo);
+                    chained_handler_invoked = true;
                 }
             }
         }
@@ -3612,7 +3616,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
 
     // below is for testing purposes. re-raising the signal causes CTest to ignore WILL_FAIL ON
     if(signal_handler_exit) ::quick_exit(signo);
-    ::raise(signo);
+    if(!chained_handler_invoked) ::raise(signo);
 }
 
 int
@@ -3758,6 +3762,9 @@ rocprofv3_sigaction(int signum,
     if((act->sa_flags & SA_SIGINFO) == SA_SIGINFO &&
        act->sa_sigaction != &rocprofv3_error_signal_handler)
         get_chained_signals().at(signum) = chained_siginfo{signum, nullptr, *act};
+    else if((act->sa_flags & SA_SIGINFO) != SA_SIGINFO && act->sa_handler &&
+            act->sa_handler != SIG_DFL && act->sa_handler != SIG_IGN)
+        get_chained_signals().at(signum) = chained_siginfo{signum, act->sa_handler, std::nullopt};
 
     struct sigaction _upd_act = *act;
     _upd_act.sa_flags |= (SA_SIGINFO | SA_RESETHAND | SA_NOCLDSTOP);
