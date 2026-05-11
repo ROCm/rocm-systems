@@ -217,8 +217,12 @@ CodeFile::~CodeFile()
                     break;
             }
 
-            jfuncmap.push_back(
-                {cid, entry_ptr->id, kind_str, entry_ptr->name, entry_ptr->source_loc});
+            jfuncmap.push_back({cid,
+                                entry_ptr->id,
+                                kind_str,
+                                entry_ptr->name,
+                                entry_ptr->source_loc,
+                                entry_ptr->vaddr});
         }
     }
     json["sqtt_funcmap"] = std::move(jfuncmap);
