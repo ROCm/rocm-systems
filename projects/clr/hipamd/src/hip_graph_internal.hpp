@@ -2573,10 +2573,12 @@ class GraphMemsetNode : public GraphNode {
         }
       } else {
         // 2D - hipGraphMemsetNodeSetParams returns invalid value if new width or new height is
-        // greter than actual allocation.
+        // greater than actual allocation. userData extents are only populated for hipMallocPitch /
+        // hipMalloc3D; for plain hipMalloc (and similar flat allocators) they are 0, in which case
+        // the size-based check in ihipMemset3D_validate below is authoritative.
         size_t discardOffset = 0;
         amd::Memory* memObj = getMemoryObject(params->dst, discardOffset);
-        if (memObj != nullptr) {
+        if (memObj != nullptr && memObj->getUserData().width_ != 0) {
           if (params->width * params->elementSize > memObj->getUserData().width_ ||
               params->height > memObj->getUserData().height_ ||
               depth > memObj->getUserData().depth_) {
@@ -2609,7 +2611,7 @@ class GraphMemsetNode : public GraphNode {
 
   hipError_t SetParams(GraphNode* node) override {
     const GraphMemsetNode* memsetNode = static_cast<GraphMemsetNode const*>(node);
-    return SetParams(&memsetNode->memsetParams_, false, memsetNode->depth_);
+    return SetParams(&memsetNode->memsetParams_, true, memsetNode->depth_);
   }
 };
 
