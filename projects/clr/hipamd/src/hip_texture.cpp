@@ -48,6 +48,13 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
                             const size_t imageSlicePitch, const uint32_t numMipLevels,
                             const size_t offset, amd::Memory* buffer, hipError_t& status);
 
+static bool ValidateDevicePointer(const void* ptr) {
+  amd::Device* curDev = hip::getCurrentDevice()->devices()[0];
+  // host pointers can be GPU accessible on APUs but should be denied for texture APIs as they
+  // aren't valid device pointers
+  return amd::MemObjMap::FindMemObj(ptr, nullptr, curDev) != nullptr;
+}
+
 hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipResourceDesc* pResDesc,
                                    const hipTextureDesc* pTexDesc,
                                    const hipResourceViewDesc* pResViewDesc) {
@@ -325,11 +332,17 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
           hip::getArrayFormat(pResDesc->res.pitch2D.desc), pTexDesc->readMode);
       const amd::Image::Format imageFormat({channelOrder, channelType});
       const cl_mem_object_type imageType = hip::getCLMemObjectType(pResDesc->resType);
-      const size_t imageSizeInBytes =
-          pResDesc->res.pitch2D.width * imageFormat.getElementSize() +
-          pResDesc->res.pitch2D.pitchInBytes * (pResDesc->res.pitch2D.height - 1);
+      // Guard against unsigned underflow when height is 0
+      const size_t imageSizeInBytes = (pResDesc->res.pitch2D.height > 0)
+          ? pResDesc->res.pitch2D.width * imageFormat.getElementSize() +
+            pResDesc->res.pitch2D.pitchInBytes * (pResDesc->res.pitch2D.height - 1)
+          : pResDesc->res.pitch2D.width * imageFormat.getElementSize();
+      if (!ValidateDevicePointer(pResDesc->res.pitch2D.devPtr)) {
+        return hipErrorInvalidValue;
+      }
       amd::Memory* buffer =
           getMemoryObjectWithOffset(pResDesc->res.pitch2D.devPtr, imageSizeInBytes);
+
       hipError_t status = hipSuccess;
       image = ihipImageCreate(channelOrder, channelType, imageType,
                               pResDesc->res.pitch2D.width,        /* imageWidth */

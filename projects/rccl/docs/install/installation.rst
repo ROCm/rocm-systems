@@ -58,10 +58,7 @@ The RCCL build and installation helper script options are as follows:
        --debug-fast            Build debug library with lto optimization disabled (fast build times)
        --enable_backtrace      Build with custom backtrace support
        --disable-colltrace     Build without collective trace
-       --enable-msccl-kernel   Build with MSCCL kernels
        --dump-asm              Disassemble code and dump assembly with inline code
-       --enable-mscclpp        Build with MSCCL++ support
-       --enable-mscclpp-clip   Build MSCCL++ with clip wrapper on bfloat16 and half addition routines
        --disable-roctx         Build without ROCTX logging
     -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)
     -h|--help                  Prints this help message
@@ -91,9 +88,6 @@ The RCCL build and installation helper script options are as follows:
 
   Available RCCL-specific CMake options for --cmake-options:
     -DBUILD_EXT_EXAMPLES=ON               Build ext-{net,tuner,profiler} example plugins (default: OFF)
-    -DENABLE_MSCCLPP_EXECUTOR=ON          Enable MSCCL++ Executor (default: OFF)
-    -DENABLE_MSCCLPP_FORMAT_CHECKS=ON     Enable formatting checks in MSCCL++ (default: OFF)
-    -DMSCCLPP_APPLY_PATCHES=OFF           Disable source code patches for MSCCL++ (default: ON)
     -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)
     -DPROFILE=ON                          Enable profiling (default: OFF)
     -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)

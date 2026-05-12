@@ -9,59 +9,36 @@ set(PY_CLI_INSTALL_DIR "${CMAKE_INSTALL_LIBEXECDIR}" CACHE STRING "CLI tool inst
 # populate version string
 configure_file(_version.py.in ${PY_PACKAGE_DIR}/_version.py @ONLY)
 
-# copy only if files are different
-add_custom_command(
-    OUTPUT
-        ${PY_PACKAGE_DIR}/__init__.py
-        ${PY_PACKAGE_DIR}/amdsmi_cli.py
-        ${PY_PACKAGE_DIR}/amdsmi_commands.py
-        ${PY_PACKAGE_DIR}/amdsmi_helpers.py
-        ${PY_PACKAGE_DIR}/amdsmi_init.py
-        ${PY_PACKAGE_DIR}/amdsmi_logger.py
-        ${PY_PACKAGE_DIR}/amdsmi_parser.py
-        ${PY_PACKAGE_DIR}/amdsmi_cli_exceptions.py
-        ${PY_PACKAGE_DIR}/amdsmi_rocm_smi_compat.py
-        ${PY_PACKAGE_DIR}/BDF.py
-        ${PY_PACKAGE_DIR}/README.md
-        ${PY_PACKAGE_DIR}/Release_Notes.md
-    DEPENDS amdsmi_cli
-    COMMAND mkdir -p ${PY_PACKAGE_DIR}/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py ${PY_PACKAGE_DIR}/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_cli.py ${PY_PACKAGE_DIR}/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_commands.py ${PY_PACKAGE_DIR}/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_helpers.py ${PY_PACKAGE_DIR}/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_init.py ${PY_PACKAGE_DIR}/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_logger.py ${PY_PACKAGE_DIR}/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_parser.py ${PY_PACKAGE_DIR}/
-    COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_cli_exceptions.py ${PY_PACKAGE_DIR}/
-    COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_rocm_smi_compat.py ${PY_PACKAGE_DIR}/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/BDF.py ${PY_PACKAGE_DIR}/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/README.md ${PY_PACKAGE_DIR}/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/Release_Notes.md ${PY_PACKAGE_DIR}/
+set(CLI_FILES
+    __init__.py
+    amdsmi_cli.py
+    amdsmi_commands.py
+    amdsmi_helpers.py
+    amdsmi_init.py
+    amdsmi_logger.py
+    amdsmi_parser.py
+    amdsmi_cli_exceptions.py
+    amdsmi_rocm_smi_compat.py
+    BDF.py
+    README.md
+    Release_Notes.md
 )
 
+set(CLI_OUTPUTS "")
+foreach(file ${CLI_FILES})
+    set(src ${CMAKE_CURRENT_SOURCE_DIR}/${file})
+    set(dst ${PY_PACKAGE_DIR}/${file})
+    add_custom_command(
+        OUTPUT ${dst}
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${src} ${dst}
+        COMMAND ${CMAKE_COMMAND} -E touch_nocreate ${dst}
+        DEPENDS ${src}
+    )
+    list(APPEND CLI_OUTPUTS ${dst})
+endforeach()
+
 # The CLI requires the python amdsmi wrapper to be installed
-add_custom_target(
-    amdsmi_cli
-    ALL
-    DEPENDS
-        python_package
-        ${PY_PACKAGE_DIR}/__init__.py
-        ${PY_PACKAGE_DIR}/_version.py
-        ${PY_PACKAGE_DIR}/amdsmi_cli.py
-        ${PY_PACKAGE_DIR}/amdsmi_commands.py
-        ${PY_PACKAGE_DIR}/amdsmi_helpers.py
-        ${PY_PACKAGE_DIR}/amdsmi_init.py
-        ${PY_PACKAGE_DIR}/amdsmi_logger.py
-        ${PY_PACKAGE_DIR}/amdsmi_parser.py
-        ${PY_PACKAGE_DIR}/amdsmi_cli_exceptions.py
-        ${PY_PACKAGE_DIR}/amdsmi_rocm_smi_compat.py
-        ${PY_PACKAGE_DIR}/BDF.py
-        ${PY_PACKAGE_DIR}/README.md
-        ${PY_PACKAGE_DIR}/Release_Notes.md
-)
+add_custom_target(amdsmi_cli ALL DEPENDS python_package ${PY_PACKAGE_DIR}/_version.py ${CLI_OUTPUTS})
 
 install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR} DESTINATION ${PY_CLI_INSTALL_DIR} COMPONENT dev)
 

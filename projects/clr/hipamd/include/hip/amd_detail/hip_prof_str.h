@@ -483,7 +483,9 @@ enum hip_api_id_t {
   HIP_API_ID_hipKernelSetAttribute = 458,
   HIP_API_ID_hipKernelGetFunction = 459,
   HIP_API_ID_hipMemPrefetchBatchAsync = 460,
-  HIP_API_ID_LAST = 460,
+  HIP_API_ID_hipOccupancyMaxActiveClusters = 461,
+  HIP_API_ID_hipOccupancyMaxPotentialClusterSize = 462,
+  HIP_API_ID_LAST = 462,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -903,7 +905,9 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipOccupancyAvailableDynamicSMemPerBlock: return "hipOccupancyAvailableDynamicSMemPerBlock";
     case HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessor: return "hipOccupancyMaxActiveBlocksPerMultiprocessor";
     case HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags: return "hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags";
+    case HIP_API_ID_hipOccupancyMaxActiveClusters: return "hipOccupancyMaxActiveClusters";
     case HIP_API_ID_hipOccupancyMaxPotentialBlockSize: return "hipOccupancyMaxPotentialBlockSize";
+    case HIP_API_ID_hipOccupancyMaxPotentialClusterSize: return "hipOccupancyMaxPotentialClusterSize";
     case HIP_API_ID_hipPeekAtLastError: return "hipPeekAtLastError";
     case HIP_API_ID_hipPointerGetAttribute: return "hipPointerGetAttribute";
     case HIP_API_ID_hipPointerGetAttributes: return "hipPointerGetAttributes";
@@ -1357,7 +1361,9 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipOccupancyAvailableDynamicSMemPerBlock", name) == 0) return HIP_API_ID_hipOccupancyAvailableDynamicSMemPerBlock;
   if (strcmp("hipOccupancyMaxActiveBlocksPerMultiprocessor", name) == 0) return HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessor;
   if (strcmp("hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags", name) == 0) return HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags;
+  if (strcmp("hipOccupancyMaxActiveClusters", name) == 0) return HIP_API_ID_hipOccupancyMaxActiveClusters;
   if (strcmp("hipOccupancyMaxPotentialBlockSize", name) == 0) return HIP_API_ID_hipOccupancyMaxPotentialBlockSize;
+  if (strcmp("hipOccupancyMaxPotentialClusterSize", name) == 0) return HIP_API_ID_hipOccupancyMaxPotentialClusterSize;
   if (strcmp("hipPeekAtLastError", name) == 0) return HIP_API_ID_hipPeekAtLastError;
   if (strcmp("hipPointerGetAttribute", name) == 0) return HIP_API_ID_hipPointerGetAttribute;
   if (strcmp("hipPointerGetAttributes", name) == 0) return HIP_API_ID_hipPointerGetAttributes;
@@ -3787,6 +3793,13 @@ typedef struct hip_api_data_s {
       unsigned int flags;
     } hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags;
     struct {
+      int* numClusters;
+      int numClusters__val;
+      const void* f;
+      const hipLaunchConfig_t* config;
+      hipLaunchConfig_t config__val;
+    } hipOccupancyMaxActiveClusters;
+    struct {
       int* gridSize;
       int gridSize__val;
       int* blockSize;
@@ -3795,6 +3808,13 @@ typedef struct hip_api_data_s {
       size_t dynSharedMemPerBlk;
       int blockSizeLimit;
     } hipOccupancyMaxPotentialBlockSize;
+    struct {
+      int* clusterSize;
+      int clusterSize__val;
+      const void* f;
+      const hipLaunchConfig_t* config;
+      hipLaunchConfig_t config__val;
+    } hipOccupancyMaxPotentialClusterSize;
     struct {
       void* data;
       hipPointer_attribute attribute;
@@ -6532,6 +6552,12 @@ typedef struct hip_api_data_s {
   cb_data.args.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.dynamicSMemSize = (size_t)dynamicSMemSize; \
   cb_data.args.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.flags = (unsigned int)flags; \
 };
+// hipOccupancyMaxActiveClusters[('int*', 'numClusters'), ('const void*', 'f'), ('const hipLaunchConfig_t*', 'config')]
+#define INIT_hipOccupancyMaxActiveClusters_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipOccupancyMaxActiveClusters.numClusters = (int*)numClusters; \
+  cb_data.args.hipOccupancyMaxActiveClusters.f = (const void*)f; \
+  cb_data.args.hipOccupancyMaxActiveClusters.config = (const hipLaunchConfig_t*)config; \
+};
 // hipOccupancyMaxPotentialBlockSize[('int*', 'gridSize'), ('int*', 'blockSize'), ('const void*', 'f'), ('size_t', 'dynSharedMemPerBlk'), ('int', 'blockSizeLimit')]
 #define INIT_hipOccupancyMaxPotentialBlockSize_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipOccupancyMaxPotentialBlockSize.gridSize = (int*)gridSize; \
@@ -6539,6 +6565,12 @@ typedef struct hip_api_data_s {
   cb_data.args.hipOccupancyMaxPotentialBlockSize.f = (const void*)f; \
   cb_data.args.hipOccupancyMaxPotentialBlockSize.dynSharedMemPerBlk = (size_t)dynSharedMemPerBlk; \
   cb_data.args.hipOccupancyMaxPotentialBlockSize.blockSizeLimit = (int)blockSizeLimit; \
+};
+// hipOccupancyMaxPotentialClusterSize[('int*', 'clusterSize'), ('const void*', 'f'), ('const hipLaunchConfig_t*', 'config')]
+#define INIT_hipOccupancyMaxPotentialClusterSize_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipOccupancyMaxPotentialClusterSize.clusterSize = (int*)clusterSize; \
+  cb_data.args.hipOccupancyMaxPotentialClusterSize.f = (const void*)f; \
+  cb_data.args.hipOccupancyMaxPotentialClusterSize.config = (const hipLaunchConfig_t*)config; \
 };
 // hipPeekAtLastError[]
 #define INIT_hipPeekAtLastError_CB_ARGS_DATA(cb_data) { \
@@ -8463,10 +8495,20 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags:
       if (data->args.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.numBlocks) data->args.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.numBlocks__val = *(data->args.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.numBlocks);
       break;
+// hipOccupancyMaxActiveClusters[('int*', 'numClusters'), ('const void*', 'f'), ('const hipLaunchConfig_t*', 'config')]
+    case HIP_API_ID_hipOccupancyMaxActiveClusters:
+      if (data->args.hipOccupancyMaxActiveClusters.numClusters) data->args.hipOccupancyMaxActiveClusters.numClusters__val = *(data->args.hipOccupancyMaxActiveClusters.numClusters);
+      if (data->args.hipOccupancyMaxActiveClusters.config) data->args.hipOccupancyMaxActiveClusters.config__val = *(data->args.hipOccupancyMaxActiveClusters.config);
+      break;
 // hipOccupancyMaxPotentialBlockSize[('int*', 'gridSize'), ('int*', 'blockSize'), ('const void*', 'f'), ('size_t', 'dynSharedMemPerBlk'), ('int', 'blockSizeLimit')]
     case HIP_API_ID_hipOccupancyMaxPotentialBlockSize:
       if (data->args.hipOccupancyMaxPotentialBlockSize.gridSize) data->args.hipOccupancyMaxPotentialBlockSize.gridSize__val = *(data->args.hipOccupancyMaxPotentialBlockSize.gridSize);
       if (data->args.hipOccupancyMaxPotentialBlockSize.blockSize) data->args.hipOccupancyMaxPotentialBlockSize.blockSize__val = *(data->args.hipOccupancyMaxPotentialBlockSize.blockSize);
+      break;
+// hipOccupancyMaxPotentialClusterSize[('int*', 'clusterSize'), ('const void*', 'f'), ('const hipLaunchConfig_t*', 'config')]
+    case HIP_API_ID_hipOccupancyMaxPotentialClusterSize:
+      if (data->args.hipOccupancyMaxPotentialClusterSize.clusterSize) data->args.hipOccupancyMaxPotentialClusterSize.clusterSize__val = *(data->args.hipOccupancyMaxPotentialClusterSize.clusterSize);
+      if (data->args.hipOccupancyMaxPotentialClusterSize.config) data->args.hipOccupancyMaxPotentialClusterSize.config__val = *(data->args.hipOccupancyMaxPotentialClusterSize.config);
       break;
 // hipPeekAtLastError[]
     case HIP_API_ID_hipPeekAtLastError:
@@ -11869,6 +11911,15 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.flags);
       oss << ")";
     break;
+    case HIP_API_ID_hipOccupancyMaxActiveClusters:
+      oss << "hipOccupancyMaxActiveClusters(";
+      if (data->args.hipOccupancyMaxActiveClusters.numClusters == NULL) oss << "numClusters=NULL";
+      else { oss << "numClusters="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxActiveClusters.numClusters__val); }
+      oss << ", f="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxActiveClusters.f);
+      if (data->args.hipOccupancyMaxActiveClusters.config == NULL) oss << ", config=NULL";
+      else { oss << ", config="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxActiveClusters.config__val); }
+      oss << ")";
+    break;
     case HIP_API_ID_hipOccupancyMaxPotentialBlockSize:
       oss << "hipOccupancyMaxPotentialBlockSize(";
       if (data->args.hipOccupancyMaxPotentialBlockSize.gridSize == NULL) oss << "gridSize=NULL";
@@ -11878,6 +11929,15 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", f="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxPotentialBlockSize.f);
       oss << ", dynSharedMemPerBlk="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxPotentialBlockSize.dynSharedMemPerBlk);
       oss << ", blockSizeLimit="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxPotentialBlockSize.blockSizeLimit);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipOccupancyMaxPotentialClusterSize:
+      oss << "hipOccupancyMaxPotentialClusterSize(";
+      if (data->args.hipOccupancyMaxPotentialClusterSize.clusterSize == NULL) oss << "clusterSize=NULL";
+      else { oss << "clusterSize="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxPotentialClusterSize.clusterSize__val); }
+      oss << ", f="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxPotentialClusterSize.f);
+      if (data->args.hipOccupancyMaxPotentialClusterSize.config == NULL) oss << ", config=NULL";
+      else { oss << ", config="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyMaxPotentialClusterSize.config__val); }
       oss << ")";
     break;
     case HIP_API_ID_hipPeekAtLastError:

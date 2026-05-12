@@ -596,24 +596,31 @@ static inline struct hipExtent make_hipExtent(size_t w, size_t h, size_t d) {
   e.depth = d;
   return e;
 }
+
 typedef enum hipFunction_attribute {
-  HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK,  ///< The maximum number of threads per block. Depends
-                                             ///< on function and device.
-  HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES,  ///< The statically allocated shared memory size in bytes
-                                         ///< per block required by the function.
-  HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES,   ///< The user-allocated constant memory by the function in
-                                         ///< bytes.
-  HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES,   ///< The local memory usage of each thread by this function
-                                         ///< in bytes.
-  HIP_FUNC_ATTRIBUTE_NUM_REGS,  ///< The number of registers used by each thread of this function.
-  HIP_FUNC_ATTRIBUTE_PTX_VERSION,                       ///< PTX version
-  HIP_FUNC_ATTRIBUTE_BINARY_VERSION,                    ///< Binary version
-  HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA,                     ///< Cache mode
-  HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,     ///< The maximum dynamic shared memory per
-                                                        ///< block for this function in bytes.
-  HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT,  ///< The shared memory carveout preference
-                                                        ///< in percent of the maximum shared
-                                                        ///< memory.
+  HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK,                 ///< The maximum number of threads per block. Depends
+                                                            ///< on function and device.
+  HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES,                     ///< The statically allocated shared memory size in bytes
+                                                            ///< per block required by the function.
+  HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES,                      ///< The user-allocated constant memory by the function in
+                                                            ///< bytes.
+  HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES,                      ///< The local memory usage of each thread by this function
+                                                            ///< in bytes.
+  HIP_FUNC_ATTRIBUTE_NUM_REGS,                              ///< The number of registers used by each thread of this function.
+  HIP_FUNC_ATTRIBUTE_PTX_VERSION,                           ///< PTX version
+  HIP_FUNC_ATTRIBUTE_BINARY_VERSION,                        ///< Binary version
+  HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA,                         ///< Cache mode
+  HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,         ///< The maximum dynamic shared memory per
+                                                            ///< block for this function in bytes.
+  HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT,      ///< The shared memory carveout preference
+                                                            ///< in percent of the maximum shared
+                                                            ///< memory.
+  HIP_FUNC_ATTRIBUTE_CLUSTER_DIM_MUST_BE_SET,               ///< the kernel must launch with a valid cluster size specified.
+  HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH,                ///< The required cluster width in blocks
+  HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT,               ///< The required cluster height in blocks
+  HIP_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH,                ///< The required cluster depth in blocks
+  HIP_FUNC_ATTRIBUTE_NON_PORTABLE_CLUSTER_SIZE_ALLOWED,     ///< Is the function allowed to launch with non-portable cluster size.
+  HIP_FUNC_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE,  ///< The block scheduling policy of a function.
   HIP_FUNC_ATTRIBUTE_MAX
 } hipFunction_attribute;
 

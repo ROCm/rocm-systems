@@ -43,10 +43,13 @@ $(PLUGIN_SO): $(VERSION_FILE) $(SOURCES)
 
 # Rule to generate version.cc
 $(VERSION_FILE):
-	@GIT_INFO=$$(./utils/extract_git_version.sh); \
+	@RCCL_HASH=$$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown'); \
+	RCCL_BRANCH=$$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown'); \
+	INSP_HASH=$$(git log -1 --format=%h -- . 2>/dev/null || echo 'unknown'); \
+	GIT_INFO="rccl:$$RCCL_BRANCH@$$RCCL_HASH/inspector:$$INSP_HASH"; \
 	echo '#include "version.h"' > $(VERSION_FILE).tmp; \
 	echo 'const char* get_git_version_info() { return "'$$GIT_INFO'"; }' >> $(VERSION_FILE).tmp; \
-	if ! cmp $(VERSION_FILE).tmp $(VERSION_FILE); then \
+	if ! cmp -s $(VERSION_FILE).tmp $(VERSION_FILE) 2>/dev/null; then \
 		echo "updating ${VERSION_FILE} file -> $$GIT_INFO"; \
 		mv $(VERSION_FILE).tmp $(VERSION_FILE); \
 	else \

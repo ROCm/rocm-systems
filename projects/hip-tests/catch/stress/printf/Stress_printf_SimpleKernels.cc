@@ -5,9 +5,7 @@
  */
 
 #include <hip/hip_runtime.h>
-#ifdef __linux__
 #include "printf_common.h"
-#endif
 #include <hip_test_common.hh>
 
 #define BLOCK_SIZE 512
@@ -578,6 +576,7 @@ bool test_synchronized_printf(uint32_t num_blocks, uint32_t threads_per_block,
 }  // namespace hipPrintfStressTest
 
 HIP_TEST_CASE(Stress_printf_ConstStr) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_ConstStr\n");
   bool TestPassed = true;
@@ -594,6 +593,7 @@ HIP_TEST_CASE(Stress_printf_ConstStr) {
 }
 
 HIP_TEST_CASE(Stress_printf_IfElseConditionalStr) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_IfElseConditionalStr\n");
   bool TestPassed = true;
@@ -610,6 +610,7 @@ HIP_TEST_CASE(Stress_printf_IfElseConditionalStr) {
 }
 
 HIP_TEST_CASE(Stress_printf_IfConditionalStr) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_IfConditionalStr\n");
   bool TestPassed = true;
@@ -626,6 +627,7 @@ HIP_TEST_CASE(Stress_printf_IfConditionalStr) {
 }
 
 HIP_TEST_CASE(Stress_printf_VariableStr) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_VariableStr\n");
   bool TestPassed = true;
@@ -641,6 +643,7 @@ HIP_TEST_CASE(Stress_printf_VariableStr) {
 }
 
 HIP_TEST_CASE(Stress_printf_DependentCalc) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_DependentCalc\n");
   bool TestPassed = true;
@@ -656,6 +659,7 @@ HIP_TEST_CASE(Stress_printf_DependentCalc) {
 }
 
 HIP_TEST_CASE(Stress_printf_DecimalStr) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_DecimalStr\n");
   bool TestPassed = true;
@@ -671,6 +675,7 @@ HIP_TEST_CASE(Stress_printf_DecimalStr) {
 }
 
 HIP_TEST_CASE(Stress_printf_SharedMem) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_SharedMem\n");
   bool TestPassed = true;
@@ -686,6 +691,7 @@ HIP_TEST_CASE(Stress_printf_SharedMem) {
 }
 
 HIP_TEST_CASE(Stress_printf_SynchronizedPrintf) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_SynchronizedPrintf\n");
   bool TestPassed = true;
@@ -700,6 +706,7 @@ HIP_TEST_CASE(Stress_printf_SynchronizedPrintf) {
 }
 
 HIP_TEST_CASE(Stress_printf_AtomicCalc) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_AtomicCalc\n");
   bool TestPassed = true;

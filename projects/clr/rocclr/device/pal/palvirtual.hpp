@@ -349,13 +349,6 @@ class VirtualGPU : public device::VirtualDevice {
 
   void HiddenHeapInit() {}
 
-  //! Dispatches multiple AQL packets in a single batch operation
-  bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
-                              const std::vector<const std::string*>& kernelNames,
-                              amd::AccumulateCommand* vcmd = nullptr, bool attach_signal = false) {
-    return false;
-  }
-
   void resetFenceDirty() {}
 
   //! Returns GPU device object associated with this kernel

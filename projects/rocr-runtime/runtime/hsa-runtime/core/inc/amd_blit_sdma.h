@@ -81,6 +81,17 @@ class BlitSdmaBase : public core::Blit {
       std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal) = 0;
 
+  /// @brief Submit back-to-back linear copy commands for all destinations from a
+  /// shared source in a single SDMA ring submission (linearB2BCopy path).
+  /// Unlike broadcast, each destination gets one or more standard
+  /// SDMA_PKT_COPY_LINEAR packets (chunked when size exceeds the per-packet
+  /// limit); the compactness comes from batching all of them into one
+  /// SubmitCommand call.
+  virtual hsa_status_t SubmitLinearCopyB2BCommand(
+      const std::vector<void*>& dsts, const void* src, size_t size,
+      std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) = 0;
+
   virtual bool BroadcastSupported() const = 0;
   virtual bool PlatformAtomicSupport() const = 0;
 
@@ -111,7 +122,7 @@ class BlitSdmaBase : public core::Blit {
   virtual bool SwapSupported() const = 0;
 };
 
-template <bool useGCR> class BlitSdma : public BlitSdmaBase {
+template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
  public:
   BlitSdma();
 
@@ -177,6 +188,11 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
   /// @param dep_signals Arrays of dependent signal.
   /// @param out_signal Output signal.
   hsa_status_t SubmitLinearCopyBroadcastCommand(
+      const std::vector<void*>& dsts, const void* src, size_t size,
+      std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) override;
+
+  hsa_status_t SubmitLinearCopyB2BCommand(
       const std::vector<void*>& dsts, const void* src, size_t size,
       std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal) override;
@@ -296,7 +312,8 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
 
   hsa_status_t SubmitCommand(const void* cmds, size_t cmd_size, uint64_t size,
                              const std::vector<core::Signal*>& dep_signals,
-                             core::Signal& out_signal, std::vector<core::Signal*>& gang_signals);
+                             core::Signal& out_signal,
+                             std::vector<core::Signal*>& gang_signals) override;
 
   hsa_status_t SubmitBlockingCommand(const void* cmds, size_t cmd_size, uint64_t size);
 
@@ -365,7 +382,7 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
 
   static const uint32_t trap_command_size_;
 
-  static const uint32_t gcr_command_size_;
+  uint32_t gcr_command_size();
 
   // Max copy size of a single linear copy command packet.
   size_t max_single_linear_copy_size_;
@@ -415,10 +432,16 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
 };
 
 
-typedef BlitSdma<false> BlitSdmaV4;
+typedef BlitSdma<false, false> BlitSdmaV4;
 
 // SDMA is connected to gL2.
-typedef BlitSdma<true> BlitSdmaV5;
+typedef BlitSdma<true, false> BlitSdmaV5;
+
+// SDMA ops are done by DACC Backend so LINEAR_COPY and CONSTANT_FILL ops are
+// not cached in GL2.
+// SDMA ops support NPD field (no prior dependency)
+// SDMA OSS v7.1
+typedef BlitSdma<true, true> BlitSdmaV6;
 
 }  // namespace amd
 }  // namespace rocr

@@ -5687,31 +5687,40 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
 
 
 @mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_error")
 @mock.patch("utils.utils_profile.console_debug")
 def test_pc_sampling_prof_subprocess_fails(
-    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
+    mock_console_debug, mock_capture_subprocess, tmp_path, monkeypatch
 ):
     """
     Edge Case: The capture_subprocess_output returns success=False.
     This should trigger the console_error("PC sampling failed.").
     """
+    console_error_calls = []
+
+    def mock_console_error(msg, exit=True):
+        console_error_calls.append(msg)
+        if exit:
+            raise RuntimeError("console_error called")
+
+    monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
+
     with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
         method = "stochastic"
         interval = 5000
         workload_dir = str(tmp_path)
         options = ["another_app"]
-        rocprofiler_sdk_tool_path = "/some/path/librocprofiler_sdk.so"  # noqa: F841
 
-        mock_capture_subprocess.return_value = (False, "Error output from subprocess")
+        with pytest.raises(RuntimeError, match="console_error called"):
+            utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
 
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        mock_capture_subprocess.assert_called_once()
-        mock_console_error.assert_called_once_with("PC sampling failed.")
+        mock_capture_subprocess.assert_not_called()
+        assert console_error_calls == [
+            "APP_CMD, the workload's executable must be provided "
+            "when not in live attach mode"
+        ]
 
     mock_capture_subprocess.reset_mock()
-    mock_console_error.reset_mock()
+    console_error_calls.clear()
     with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
         options = {"APP_CMD": "another_app"}
         sdk_lib_dir = tmp_path / "rocm_sdk_fail" / "lib"
@@ -5728,10 +5737,11 @@ def test_pc_sampling_prof_subprocess_fails(
             "Error output from SDK subprocess",
         )
 
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
+        with pytest.raises(RuntimeError, match="console_error called"):
+            utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
 
         mock_capture_subprocess.assert_called_once()
-        mock_console_error.assert_called_once_with("PC sampling failed.")
+        assert console_error_calls == ["PC sampling failed."]
 
 
 @mock.patch("utils.utils_profile.capture_subprocess_output")
@@ -5779,6 +5789,31 @@ def test_pc_sampling_prof_empty_appcmd(
 
         assert mock_capture_subprocess.called
         assert mock_capture_subprocess.call_args[0][0] == ""
+        mock_console_error.assert_not_called()
+
+
+@mock.patch("utils.utils_profile.capture_subprocess_output")
+@mock.patch("utils.utils_profile.console_error")
+@mock.patch("utils.utils_profile.console_debug")
+def test_pc_sampling_prof_multiarg_appcmd(
+    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
+):
+    """All arguments after '--' in profiler_options must appear
+    in the subprocess call."""
+    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
+        method = "host_trap"
+        interval = 100
+        workload_dir = str(tmp_path)
+        options = ["--kernel-trace", "--", "./myapp", "arg1", "arg2"]
+
+        mock_capture_subprocess.return_value = (True, "Success")
+
+        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
+
+        assert mock_capture_subprocess.called
+        options_list = mock_capture_subprocess.call_args[0][0]
+        separator_index = options_list.index("--")
+        assert options_list[separator_index:] == ["--", "./myapp", "arg1", "arg2"]
         mock_console_error.assert_not_called()
 
 

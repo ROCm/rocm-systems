@@ -2700,19 +2700,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
-  CHECK_IMAGE_SUPPORT
   void* hipMemcpy2D_ptr = nullptr;
   void* hipMemcpy2DAsync_ptr = nullptr;
   void* hipMemcpyParam2D_ptr = nullptr;
   void* hipMemcpyParam2DAsync_ptr = nullptr;
-  void* hipMemcpy2DToArray_ptr = nullptr;
-  void* hipMemcpy2DToArrayAsync_ptr = nullptr;
-  void* hipMemcpy2DFromArray_ptr = nullptr;
-  void* hipMemcpy2DFromArrayAsync_ptr = nullptr;
-  void* hipMemcpyToArray_ptr = nullptr;
-  void* hipMemcpyFromArray_ptr = nullptr;
-  void* hipMemcpyAtoH_ptr = nullptr;
-  void* hipMemcpyHtoA_ptr = nullptr;
 
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
@@ -2724,20 +2715,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       hipGetProcAddress("hipMemcpyParam2D", &hipMemcpyParam2D_ptr, currentHipVersion, 0, nullptr));
   HIP_CHECK(hipGetProcAddress("hipMemcpyParam2DAsync", &hipMemcpyParam2DAsync_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpy2DToArray", &hipMemcpy2DToArray_ptr, currentHipVersion, 0,
-                              nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpy2DToArrayAsync", &hipMemcpy2DToArrayAsync_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpy2DFromArray", &hipMemcpy2DFromArray_ptr, currentHipVersion,
-                              0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpy2DFromArrayAsync", &hipMemcpy2DFromArrayAsync_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(
-      hipGetProcAddress("hipMemcpyToArray", &hipMemcpyToArray_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpyFromArray", &hipMemcpyFromArray_ptr, currentHipVersion, 0,
-                              nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpyAtoH", &hipMemcpyAtoH_ptr, currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemcpyHtoA", &hipMemcpyHtoA_ptr, currentHipVersion, 0, nullptr));
 
   hipError_t (*dyn_hipMemcpy2D_ptr)(void*, size_t, const void*, size_t, size_t, size_t,
                                     hipMemcpyKind) =
@@ -2751,36 +2728,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       reinterpret_cast<hipError_t (*)(const hip_Memcpy2D*)>(hipMemcpyParam2D_ptr);
   hipError_t (*dyn_hipMemcpyParam2DAsync_ptr)(const hip_Memcpy2D*, hipStream_t) =
       reinterpret_cast<hipError_t (*)(const hip_Memcpy2D*, hipStream_t)>(hipMemcpyParam2DAsync_ptr);
-  hipError_t (*dyn_hipMemcpy2DToArray_ptr)(hipArray_t, size_t, size_t, const void* src, size_t,
-                                           size_t, size_t, hipMemcpyKind) =
-      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, size_t, const void* src, size_t, size_t,
-                                      size_t, hipMemcpyKind)>(hipMemcpy2DToArray_ptr);
-  hipError_t (*dyn_hipMemcpy2DToArrayAsync_ptr)(hipArray_t, size_t, size_t, const void* src, size_t,
-                                                size_t, size_t, hipMemcpyKind, hipStream_t) =
-      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, size_t, const void* src, size_t, size_t,
-                                      size_t, hipMemcpyKind, hipStream_t)>(
-          hipMemcpy2DToArrayAsync_ptr);
-  hipError_t (*dyn_hipMemcpy2DFromArray_ptr)(void*, size_t, hipArray_const_t, size_t, size_t,
-                                             size_t, size_t, hipMemcpyKind) =
-      reinterpret_cast<hipError_t (*)(void*, size_t, hipArray_const_t, size_t, size_t, size_t,
-                                      size_t, hipMemcpyKind)>(hipMemcpy2DFromArray_ptr);
-  hipError_t (*dyn_hipMemcpy2DFromArrayAsync_ptr)(void*, size_t, hipArray_const_t, size_t, size_t,
-                                                  size_t, size_t, hipMemcpyKind, hipStream_t) =
-      reinterpret_cast<hipError_t (*)(void*, size_t, hipArray_const_t, size_t, size_t, size_t,
-                                      size_t, hipMemcpyKind, hipStream_t)>(
-          hipMemcpy2DFromArrayAsync_ptr);
-  hipError_t (*dyn_hipMemcpyToArray_ptr)(hipArray_t, size_t, size_t, const void*, size_t,
-                                         hipMemcpyKind) =
-      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, size_t, const void*, size_t,
-                                      hipMemcpyKind)>(hipMemcpyToArray_ptr);
-  hipError_t (*dyn_hipMemcpyFromArray_ptr)(void*, hipArray_const_t, size_t, size_t, size_t,
-                                           hipMemcpyKind) =
-      reinterpret_cast<hipError_t (*)(void*, hipArray_const_t, size_t, size_t, size_t,
-                                      hipMemcpyKind)>(hipMemcpyFromArray_ptr);
-  hipError_t (*dyn_hipMemcpyAtoH_ptr)(void*, hipArray_t, size_t, size_t) =
-      reinterpret_cast<hipError_t (*)(void*, hipArray_t, size_t, size_t)>(hipMemcpyAtoH_ptr);
-  hipError_t (*dyn_hipMemcpyHtoA_ptr)(hipArray_t, size_t, const void*, size_t) =
-      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, const void*, size_t)>(hipMemcpyHtoA_ptr);
 
   // Validating hipMemcpy2D API
   {
@@ -3509,6 +3456,68 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
       }
     }
   }
+
+}
+
+HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array) {
+  CHECK_IMAGE_SUPPORT
+  void* hipMemcpy2DToArray_ptr = nullptr;
+  void* hipMemcpy2DToArrayAsync_ptr = nullptr;
+  void* hipMemcpy2DFromArray_ptr = nullptr;
+  void* hipMemcpy2DFromArrayAsync_ptr = nullptr;
+  void* hipMemcpyToArray_ptr = nullptr;
+  void* hipMemcpyFromArray_ptr = nullptr;
+  void* hipMemcpyAtoH_ptr = nullptr;
+  void* hipMemcpyHtoA_ptr = nullptr;
+
+  int currentHipVersion = 0;
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+
+  HIP_CHECK(hipGetProcAddress("hipMemcpy2DToArray", &hipMemcpy2DToArray_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpy2DToArrayAsync", &hipMemcpy2DToArrayAsync_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpy2DFromArray", &hipMemcpy2DFromArray_ptr, currentHipVersion,
+                              0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpy2DFromArrayAsync", &hipMemcpy2DFromArrayAsync_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(
+      hipGetProcAddress("hipMemcpyToArray", &hipMemcpyToArray_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpyFromArray", &hipMemcpyFromArray_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpyAtoH", &hipMemcpyAtoH_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemcpyHtoA", &hipMemcpyHtoA_ptr, currentHipVersion, 0, nullptr));
+
+  hipError_t (*dyn_hipMemcpy2DToArray_ptr)(hipArray_t, size_t, size_t, const void* src, size_t,
+                                           size_t, size_t, hipMemcpyKind) =
+      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, size_t, const void* src, size_t, size_t,
+                                      size_t, hipMemcpyKind)>(hipMemcpy2DToArray_ptr);
+  hipError_t (*dyn_hipMemcpy2DToArrayAsync_ptr)(hipArray_t, size_t, size_t, const void* src, size_t,
+                                                size_t, size_t, hipMemcpyKind, hipStream_t) =
+      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, size_t, const void* src, size_t, size_t,
+                                      size_t, hipMemcpyKind, hipStream_t)>(
+          hipMemcpy2DToArrayAsync_ptr);
+  hipError_t (*dyn_hipMemcpy2DFromArray_ptr)(void*, size_t, hipArray_const_t, size_t, size_t,
+                                             size_t, size_t, hipMemcpyKind) =
+      reinterpret_cast<hipError_t (*)(void*, size_t, hipArray_const_t, size_t, size_t, size_t,
+                                      size_t, hipMemcpyKind)>(hipMemcpy2DFromArray_ptr);
+  hipError_t (*dyn_hipMemcpy2DFromArrayAsync_ptr)(void*, size_t, hipArray_const_t, size_t, size_t,
+                                                  size_t, size_t, hipMemcpyKind, hipStream_t) =
+      reinterpret_cast<hipError_t (*)(void*, size_t, hipArray_const_t, size_t, size_t, size_t,
+                                      size_t, hipMemcpyKind, hipStream_t)>(
+          hipMemcpy2DFromArrayAsync_ptr);
+  hipError_t (*dyn_hipMemcpyToArray_ptr)(hipArray_t, size_t, size_t, const void*, size_t,
+                                         hipMemcpyKind) =
+      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, size_t, const void*, size_t,
+                                      hipMemcpyKind)>(hipMemcpyToArray_ptr);
+  hipError_t (*dyn_hipMemcpyFromArray_ptr)(void*, hipArray_const_t, size_t, size_t, size_t,
+                                           hipMemcpyKind) =
+      reinterpret_cast<hipError_t (*)(void*, hipArray_const_t, size_t, size_t, size_t,
+                                      hipMemcpyKind)>(hipMemcpyFromArray_ptr);
+  hipError_t (*dyn_hipMemcpyAtoH_ptr)(void*, hipArray_t, size_t, size_t) =
+      reinterpret_cast<hipError_t (*)(void*, hipArray_t, size_t, size_t)>(hipMemcpyAtoH_ptr);
+  hipError_t (*dyn_hipMemcpyHtoA_ptr)(hipArray_t, size_t, const void*, size_t) =
+      reinterpret_cast<hipError_t (*)(hipArray_t, size_t, const void*, size_t)>(hipMemcpyHtoA_ptr);
 
   // Validating hipMemcpy2DToArray API
   {

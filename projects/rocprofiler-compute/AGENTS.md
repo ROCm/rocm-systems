@@ -10,3 +10,11 @@ nesting, and code organization.
 
 All code in `src/` must pass Ruff checks. Read **[`.ai/rules/ruff-tooling.md`](.ai/rules/ruff-tooling.md)**
 for enforced rules including type annotations, f-strings, and `pathlib` usage.
+
+## Git Workflows
+
+When asked to commit changes, follow **[`.ai/rules/commit-workflow.md`](.ai/rules/commit-workflow.md)**
+for staging, commit message conventions, pre-commit hook handling, and branch safety.
+
+When asked to create a pull request, follow **[`.ai/rules/pr-workflow.md`](.ai/rules/pr-workflow.md)**
+for PR template inference, JIRA handling, formatting, and repo identification.

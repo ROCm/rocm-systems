@@ -119,8 +119,6 @@ HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Positive_Basic) {
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters) {
-  CHECK_IMAGE_SUPPORT
-
   using namespace std::placeholders;
 
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};

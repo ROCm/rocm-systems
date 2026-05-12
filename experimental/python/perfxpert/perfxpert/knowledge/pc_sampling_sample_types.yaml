@@ -1,0 +1,20 @@
+# PC sampling sample types (GFX9SampleResults).
+# Source: llm-reference-guide.md §"Three Sample Types" (lines 940-949).
+
+- name: ISSUED
+  wave_issued: 1
+  meaning: "Wave successfully issued an instruction this cycle"
+  interpretation: "Counts toward useful work — do NOT interpret stall reasons for ISSUED samples"
+  actionable: false
+
+- name: LATENCY
+  wave_issued: 0
+  meaning: "Wave was ready but stalled — see issue_reason for root cause"
+  interpretation: "Most actionable sample type; LATENCY samples carry stall reasons worth acting on"
+  actionable: true
+
+- name: INDETERMINATE
+  wave_issued: 0
+  meaning: "Wave lost arbitration to another wave; both wanted to issue simultaneously"
+  interpretation: "Indicates resource contention / scheduling imbalance — not a stall per se"
+  actionable: false

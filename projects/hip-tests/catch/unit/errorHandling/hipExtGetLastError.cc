@@ -178,8 +178,6 @@ HIP_TEST_CASE(Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync) {
  *  - HIP_VERSION >= 6.4
  */
 HIP_TEST_CASE(Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync) {
-  CHECK_IMAGE_SUPPORT
-
   float *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr};
   size_t pitch_A;
   size_t width{WIDTH * sizeof(float)};
@@ -436,8 +434,6 @@ HIP_TEST_CASE(Unit_hipExtGetLastError_with_hipMemPrefetchAsync) {
  */
 
 HIP_TEST_CASE(Unit_hipExtGetLastError_with_hipMemcpy2DAsync) {
-  CHECK_IMAGE_SUPPORT
-
   int *A_h{nullptr}, *A_d{nullptr};
   size_t pitch_A;
   size_t width{WIDTH * sizeof(int)};

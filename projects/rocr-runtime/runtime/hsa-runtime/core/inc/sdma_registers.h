@@ -69,12 +69,20 @@ const unsigned int SDMA_SUBOP_TIMESTAMP_GET_GLOBAL = 2;
 const unsigned int SDMA_SUBOP_USER_GCR = 1;
 const unsigned int SDMA_ATOMIC_ADD64 = 47;
 
+const unsigned int SDMA_MEMORY_SCOPE_CU = 0;  /* workgroup scope */
+const unsigned int SDMA_MEMORY_SCOPE_SE = 1;  /* super-group/group-of-group */
+const unsigned int SDMA_MEMORY_SCOPE_DEV = 2; /* device scope */
+const unsigned int SDMA_MEMORY_SCOPE_SYS = 3; /* system scope */
+
+// clang-format off
 typedef struct SDMA_PKT_COPY_LINEAR_TAG {
   union {
     struct {
       unsigned int op : 8;
       unsigned int sub_op : 8;
-      unsigned int extra_info : 16;
+      unsigned int reserved_0 : 12;
+      unsigned int npd : 1;
+      unsigned int reserved_1 : 3;
     };
     unsigned int DW_0_DATA;
   } HEADER_UNION;
@@ -93,11 +101,13 @@ typedef struct SDMA_PKT_COPY_LINEAR_TAG {
 
   union {
     struct {
-      unsigned int reserved_0 : 16;
-      unsigned int dst_swap : 2;
-      unsigned int reserved_1 : 6;
-      unsigned int src_swap : 2;
-      unsigned int reserved_2 : 6;
+      unsigned int reserved_0 : 18;
+      unsigned int dst_scope : 2;
+      unsigned int dst_temporal_hint : 3;
+      unsigned int reserved_1 : 3;
+      unsigned int src_scope : 2;
+      unsigned int src_temporal_hint : 3;
+      unsigned int reserved_2 : 1;
     };
     unsigned int DW_2_DATA;
   } PARAMETER_UNION;
@@ -427,7 +437,8 @@ typedef struct SDMA_PKT_COPY_LINEAR_RECT_TAG_GFX12 {
     struct {
       unsigned int op       :  8;
       unsigned int sub_op   :  8;
-      unsigned int reserved : 13;
+      unsigned int reserved : 12;
+      unsigned int npd      :  1;
       unsigned int element  :  3;
     };
     unsigned int DW_0_DATA;
@@ -525,7 +536,17 @@ typedef struct SDMA_PKT_COPY_LINEAR_RECT_TAG_GFX12 {
       unsigned int reserved_2       : 5;
       unsigned int src_cache_policy : 3;
       unsigned int reserved_3       : 1;
-    };
+    } gfx12;
+    struct {
+      unsigned int rect_z           : rect_z_bits;
+      unsigned int reserved_1       : 4;
+      unsigned int dst_scope        : 2;
+      unsigned int dst_temporal_hint: 3;
+      unsigned int reserved_2       : 3;
+      unsigned int src_scope        : 2;
+      unsigned int src_temporal_hint: 3;
+      unsigned int reserved_3       : 1;
+    } gfx1250;
     unsigned int DW_12_DATA;
   } RECT_PARAMETER_2_UNION;
 
@@ -534,11 +555,18 @@ typedef struct SDMA_PKT_COPY_LINEAR_RECT_TAG_GFX12 {
 typedef struct SDMA_PKT_CONSTANT_FILL_TAG {
   union {
     struct {
-      unsigned int op : 8;
-      unsigned int sub_op : 8;
-      unsigned int sw : 2;
-      unsigned int reserved_0 : 12;
-      unsigned int fillsize : 2;
+      unsigned int op           : 8;
+      unsigned int sub_op       : 8;
+      unsigned int mtype        : 2;  /* gfx1250*/
+      unsigned int reserved_0   : 2;
+      unsigned int sys          : 1;  /* gfx1250*/
+      unsigned int reserved_1   : 1;
+      unsigned int snp          : 1;  /* gfx1250*/
+      unsigned int gpa          : 1;  /* gfx1250*/
+      unsigned int scope        : 2;  /* gfx1250*/
+      unsigned int temporal_hint: 3;  /* gfx1250*/
+      unsigned int npd          : 1;  /* gfx1250*/
+      unsigned int fillsize     : 2;
     };
     unsigned int DW_0_DATA;
   } HEADER_UNION;
@@ -614,16 +642,56 @@ typedef struct SDMA_PKT_FENCE_TAG {
   } DATA_UNION;
 } SDMA_PKT_FENCE;
 
+typedef struct SDMA_PKT_FENCE_TAG_GFX12 {
+  union {
+    struct {
+      unsigned int op           : 8;
+      unsigned int sub_op       : 8;
+      unsigned int mtype        : 2;
+      unsigned int pad1         : 2;
+      unsigned int sys          : 1;
+      unsigned int pad2         : 1;
+      unsigned int snp          : 1;
+      unsigned int gpa          : 1;
+      unsigned int scope        : 2;
+      unsigned int temporal_hint: 3;
+      unsigned int reserved_0   : 3;
+    };
+    unsigned int DW_0_DATA;
+  } HEADER_UNION;
+
+  union {
+    struct {
+      unsigned int addr_31_0 : 32;
+    };
+    unsigned int DW_1_DATA;
+  } ADDR_LO_UNION;
+
+  union {
+    struct {
+      unsigned int addr_63_32 : 32;
+    };
+    unsigned int DW_2_DATA;
+  } ADDR_HI_UNION;
+
+  union {
+    struct {
+      unsigned int data : 32;
+    };
+    unsigned int DW_3_DATA;
+  } DATA_UNION;
+} SDMA_PKT_FENCE_GFX12;
+
 typedef struct SDMA_PKT_POLL_REGMEM_TAG {
   union {
     struct {
-      unsigned int op : 8;
-      unsigned int sub_op : 8;
+      unsigned int op         : 8;
+      unsigned int sub_op     : 8;
       unsigned int reserved_0 : 10;
-      unsigned int hdp_flush : 1;
+      unsigned int hdp_flush  : 1;
       unsigned int reserved_1 : 1;
-      unsigned int func : 3;
-      unsigned int mem_poll : 1;
+      unsigned int func       : 3;
+      unsigned int mem_poll   : 1;
     };
     unsigned int DW_0_DATA;
   } HEADER_UNION;
@@ -658,9 +726,10 @@ typedef struct SDMA_PKT_POLL_REGMEM_TAG {
 
   union {
     struct {
-      unsigned int interval : 16;
-      unsigned int retry_count : 12;
-      unsigned int reserved_0 : 4;
+      unsigned int interval     : 16;
+      unsigned int retry_count  : 12;
+      unsigned int scope        : 2;
+      unsigned int reserved_0   : 2;
     };
     unsigned int DW_5_DATA;
   } DW5_UNION;
@@ -669,11 +738,15 @@ typedef struct SDMA_PKT_POLL_REGMEM_TAG {
 typedef struct SDMA_PKT_ATOMIC_TAG {
   union {
     struct {
-      unsigned int op : 8;
-      unsigned int sub_op : 8;
-      unsigned int l : 1;
-      unsigned int reserved_0 : 8;
-      unsigned int operation : 7;
+      unsigned int op           : 8;
+      unsigned int sub_op       : 8;
+      unsigned int l            : 1;
+      unsigned int reserved_0   : 1;
+      unsigned int tmz          : 1;
+      unsigned int reserved_1   : 1;
+      unsigned int scope        : 2;
+      unsigned int temporal_hint: 3;
+      unsigned int operation    : 7;
     };
     unsigned int DW_0_DATA;
   } HEADER_UNION;
@@ -722,8 +795,8 @@ typedef struct SDMA_PKT_ATOMIC_TAG {
 
   union {
     struct {
-      unsigned int loop_interval : 13;
-      unsigned int reserved_0 : 19;
+      unsigned int loop_interval  : 13;
+      unsigned int reserved_0     : 19;
     };
     unsigned int DW_7_DATA;
   } LOOP_UNION;
@@ -732,9 +805,12 @@ typedef struct SDMA_PKT_ATOMIC_TAG {
 typedef struct SDMA_PKT_TIMESTAMP_TAG {
   union {
     struct {
-      unsigned int op : 8;
-      unsigned int sub_op : 8;
-      unsigned int reserved_0 : 16;
+      unsigned int op           : 8;
+      unsigned int sub_op       : 8;
+      unsigned int reserved     : 8;
+      unsigned int scope        : 2;
+      unsigned int temporal_hint: 3;
+      unsigned int reserved_0   : 3;
     };
     unsigned int DW_0_DATA;
   } HEADER_UNION;
@@ -808,44 +884,112 @@ typedef struct SDMA_PKT_GCR_TAG {
 
   union {
     struct {
-      unsigned int BaseVA_HI : 16;
-      unsigned int GCR_CONTROL_GLI_INV : 2;
-      unsigned int GCR_CONTROL_GL1_RANGE : 2;
-      unsigned int GCR_CONTROL_GLM_WB : 1;
-      unsigned int GCR_CONTROL_GLM_INV : 1;
-      unsigned int GCR_CONTROL_GLK_WB : 1;
-      unsigned int GCR_CONTROL_GLK_INV : 1;
-      unsigned int GCR_CONTROL_GLV_INV : 1;
-      unsigned int GCR_CONTROL_GL1_INV : 1;
-      unsigned int GCR_CONTROL_GL2_US : 1;
-      unsigned int GCR_CONTROL_GL2_RANGE : 2;
-      unsigned int GCR_CONTROL_GL2_DISCARD : 1;
-      unsigned int GCR_CONTROL_GL2_INV : 1;
-      unsigned int GCR_CONTROL_GL2_WB : 1;
+      unsigned int BaseVA_HI              : 16;
+      unsigned int GCR_CONTROL_GLI_INV    : 2;
+      unsigned int GCR_CONTROL_GL1_RANGE  : 2;
+      unsigned int GCR_CONTROL_GLM_WB     : 1;
+      unsigned int GCR_CONTROL_GLM_INV    : 1;
+      unsigned int GCR_CONTROL_GLK_WB     : 1;
+      unsigned int GCR_CONTROL_GLK_INV    : 1;
+      unsigned int GCR_CONTROL_GLV_INV    : 1;
+      unsigned int GCR_CONTROL_GL1_INV    : 1;
+      unsigned int GCR_CONTROL_GL2_US     : 1;
+      unsigned int GCR_CONTROL_GL2_RANGE  : 2;
+      unsigned int GCR_CONTROL_GL2_DISCARD: 1;
+      unsigned int GCR_CONTROL_GL2_INV    : 1;
+      unsigned int GCR_CONTROL_GL2_WB     : 1;
     };
     unsigned int DW_2_DATA;
   } WORD2_UNION;
 
   union {
     struct {
-      unsigned int GCR_CONTROL_RANGE_IS_PA : 1;
-      unsigned int GCR_CONTROL_SEQ : 2;
-      unsigned int : 4;
-      unsigned int LimitVA_LO : 25;
+      unsigned int GCR_CONTROL_RANGE_IS_PA  : 1;
+      unsigned int GCR_CONTROL_SEQ          : 2;
+      unsigned int                          : 4;
+      unsigned int LimitVA_LO               : 25;
     };
     unsigned int DW_3_DATA;
   } WORD3_UNION;
 
   union {
     struct {
-      unsigned int LimitVA_HI : 16;
-      unsigned int : 8;
-      unsigned int VMID : 4;
-      unsigned int : 4;
+      unsigned int LimitVA_HI               : 16;
+      unsigned int                          : 8;
+      unsigned int VMID                     : 4;
+      unsigned int                          : 4;
     };
     unsigned int DW_4_DATA;
   } WORD4_UNION;
 } SDMA_PKT_GCR;
+
+typedef struct SDMA_PKT_GCR_TAG_GFX1250 {
+  union {
+    struct {
+      unsigned int op : 8;
+      unsigned int sub_op : 8;
+      unsigned int : 16;
+    };
+    unsigned int DW_0_DATA;
+  } HEADER_UNION;
+
+  union {
+    struct {
+      unsigned int : 7;
+      unsigned int BaseVA_LO : 25;
+    };
+    unsigned int DW_1_DATA;
+  } WORD1_UNION;
+
+  union {
+    struct {
+      unsigned int BaseVA_HI                : 25;
+      unsigned int                          : 7;
+    };
+    unsigned int DW_2_DATA;
+  } WORD2_UNION;
+
+  union {
+    struct {
+      unsigned int GCR_CONTROL_GLI_INV      : 2;
+      unsigned int GCR_CONTROL_GL1_RANGE    : 2;
+      unsigned int GCR_CONTROL_GL2_SCOPE    : 2;
+      unsigned int GCR_CONTROL_GLV_WB       : 1;
+      unsigned int GCR_CONTROL_GLK_INV      : 1;
+      unsigned int GCR_CONTROL_GLV_INV      : 1;
+      unsigned int                          : 1;
+      unsigned int GCR_CONTROL_GL2_US       : 1;
+      unsigned int GCR_CONTROL_GL2_RANGE    : 2;
+      unsigned int GCR_CONTROL_GL2_DISCARD  : 1;
+      unsigned int GCR_CONTROL_GL2_INV      : 1;
+      unsigned int GCR_CONTROL_GL2_WB       : 1;
+      unsigned int GCR_CONTROL_SEQ          : 2;
+      unsigned int GCR_CONTROL_RANGE_IS_PA  : 1;
+      unsigned int                          : 4;
+      unsigned int LimitVA_LO               : 9;
+    };
+    unsigned int DW_3_DATA;
+  } WORD3_UNION;
+
+  union {
+    struct {
+      unsigned int LimitVA_MID              : 32;
+    };
+    unsigned int DW_4_DATA;
+  } WORD4_UNION;
+
+  union {
+    struct {
+      unsigned int LimitVA_HI               : 9;
+      unsigned int                          : 17;
+      unsigned int VMID                     : 4;
+      unsigned int                          : 2;
+    };
+    unsigned int DW_5_DATA;
+  } WORD5_UNION;
+} SDMA_PKT_GCR_GFX1250;
+
+// clang-format on
 
 }  // namespace amd
 }  // namespace rocr

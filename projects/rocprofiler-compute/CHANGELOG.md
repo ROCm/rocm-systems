@@ -2,20 +2,6 @@
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
-## Unreleased
-
-### Added
-
-### Changed
-
-### Removed
-
-### Optimized
-
-### Resolved issues
-
-### Upcoming changes
-
 ## ROCm Compute Profiler 3.6.0 for ROCm 7.13.0
 
 ### Added
@@ -58,9 +44,13 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed roofline benchmark MFMA FP16/BF16/INT8 peaks for MI 350
 
+* Fixed issue where pc sampling profiling fails with multi-argument commands and live process attachment
+
 ### Upcoming changes
 
-* `--path` and `--subpath` options will be removed as they are already deprecated
+* `--path` and `--subpath` options are deprecated and will be removed in a future release.
+* Intermediate CSV generation (`results_*.csv`) from rocpd databases during profiling is deprecated and will be removed in a future release. The analyze step will read `.db` files directly.
+* `--retain-rocpd-output` is deprecated and will be removed in a future release. `.db` files will be retained by default.
 
 ### Known issues
 

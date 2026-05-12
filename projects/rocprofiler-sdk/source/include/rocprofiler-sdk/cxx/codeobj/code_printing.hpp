@@ -174,7 +174,12 @@ public:
             Dwarf_Off next_offset{};
             size_t    header_size{};
 
-            std::map<Dwarf_Addr, std::string>                       line_addrs{};
+            struct LineEntry
+            {
+                Dwarf_Addr  end_addr;
+                std::string text;
+            };
+            std::map<Dwarf_Addr, LineEntry>                         line_addrs{};
             std::unordered_map<Dwarf_Off, std::unique_ptr<DIEInfo>> diemap{};
 
             while(
@@ -197,53 +202,76 @@ public:
                     continue;
                 }
 
-                for(size_t i = 0; i < line_count; ++i)
+                // Each row in the DWARF line table covers [addr, next_row_addr).
+                // The terminator of a contiguous code sequence is a row with the
+                // end_sequence flag set — its address is one past the last
+                // instruction in the sequence. Using the next row's address
+                // (rather than the next *kept* row's address, or codeobj_size)
+                // ensures that ranges never extend across gaps in DWARF
+                // coverage or past the end of an end_sequence boundary.
+                for(size_t i = 0; i + 1 < line_count; ++i)
                 {
-                    Dwarf_Addr  addr;
-                    int         line_number;
-                    Dwarf_Line* line = dwarf_onesrcline(lines, i);
+                    Dwarf_Addr  addr{};
+                    Dwarf_Addr  end_addr{};
+                    int         line_number{};
+                    bool        end_sequence = false;
+                    Dwarf_Line* line         = dwarf_onesrcline(lines, i);
+                    Dwarf_Line* next_line    = dwarf_onesrcline(lines, i + 1);
 
-                    if(line && dwarf_lineaddr(line, &addr) == 0 &&
-                       dwarf_lineno(line, &line_number) == 0 && line_number != 0)
+                    if(line == nullptr || next_line == nullptr) continue;
+                    if(dwarf_lineaddr(line, &addr) != 0) continue;
+                    if(dwarf_lineaddr(next_line, &end_addr) != 0) continue;
+                    if(end_addr <= addr) continue;
+
+                    // Skip end_sequence rows — they only mark the end boundary
+                    // of the previous row, they aren't a real source location.
+                    if(dwarf_lineendsequence(line, &end_sequence) == 0 && end_sequence) continue;
+
+                    // line_number == 0 is a valid DWARF row meaning "this address
+                    // belongs to this source file but has no specific line"
+                    // (typically compiler-synthesized code, prologue/epilogue,
+                    // or optimizer-merged blocks). addr2line renders these as
+                    // "<file>:?" — keep them with the same convention so they
+                    // are not silently dropped.
+                    if(dwarf_lineno(line, &line_number) != 0) continue;
+
+                    const char* src_cstr = dwarf_linesrc(line, nullptr, nullptr);
+                    if(src_cstr == nullptr) continue;
+
+                    std::string src        = src_cstr;
+                    auto        dwarf_line = src + ':';
+                    if(line_number != 0)
+                        dwarf_line += std::to_string(line_number);
+                    else
+                        dwarf_line += '?';
+
+                    std::vector<std::string> call_stack_info{};
+
+                    auto& die_ptr = diemap[dwarf_dieoffset(&die)];
+                    if(die_ptr == nullptr) die_ptr = std::make_unique<DIEInfo>(&die);
+                    die_ptr->getCallStackRecursive(addr, call_stack_info);
+
+                    size_t capacity =
+                        dwarf_line.size() + Instruction::separator.size() * call_stack_info.size();
+                    for(const auto& call : call_stack_info)
+                        capacity += call.size();
+
+                    dwarf_line.reserve(capacity);
+                    for(const auto& call : call_stack_info)
                     {
-                        std::string src        = dwarf_linesrc(line, nullptr, nullptr);
-                        auto        dwarf_line = src + ':' + std::to_string(line_number);
-
-                        std::vector<std::string> call_stack_info{};
-
-                        auto& die_ptr = diemap[dwarf_dieoffset(&die)];
-                        if(die_ptr == nullptr) die_ptr = std::make_unique<DIEInfo>(&die);
-                        die_ptr->getCallStackRecursive(addr, call_stack_info);
-
-                        size_t capacity = dwarf_line.size() +
-                                          Instruction::separator.size() * call_stack_info.size();
-                        for(const auto& call : call_stack_info)
-                            capacity += call.size();
-
-                        dwarf_line.reserve(capacity);
-                        for(const auto& call : call_stack_info)
-                        {
-                            dwarf_line += Instruction::separator;
-                            dwarf_line += call;
-                        }
-                        line_addrs[addr] = std::move(dwarf_line);
+                        dwarf_line += Instruction::separator;
+                        dwarf_line += call;
                     }
+                    line_addrs[addr] = LineEntry{end_addr, std::move(dwarf_line)};
                 }
                 cu_offset = next_offset;
             }
 
-            auto it = line_addrs.begin();
-            if(it != line_addrs.end())
+            for(auto& [addr, entry] : line_addrs)
             {
-                while(std::next(it) != line_addrs.end())
-                {
-                    uint64_t delta   = std::next(it)->first - it->first;
-                    auto     segment = segment::address_range_t{it->first, delta, 0};
-                    m_line_number_map.emplace(segment, std::move(it->second));
-                    it++;
-                }
-                auto segment = segment::address_range_t{it->first, codeobj_size - it->first, 0};
-                m_line_number_map.emplace(segment, std::move(it->second));
+                if(entry.end_addr <= addr) continue;
+                auto segment = segment::address_range_t{addr, entry.end_addr - addr, 0};
+                m_line_number_map.emplace(segment, std::move(entry.text));
             }
         }
 
@@ -553,30 +581,30 @@ inline DIEInfo::DIEInfo(Dwarf_Die* die)
         Dwarf_Word      call_line{};
 
         // Get the file and line number where this function was called/inlined
-
-        if(!dwarf_attr(die, DW_AT_call_file, &call_file_attr) ||
-           !dwarf_attr(die, DW_AT_call_line, &call_line_attr) ||
-           dwarf_formudata(&call_file_attr, &call_file) != 0 ||
-           dwarf_formudata(&call_line_attr, &call_line) != 0)
-            return;  // No call site information available
-
-        // Get the compilation unit to resolve file names
-        Dwarf_Die cu_die{};
-        if(!dwarf_diecu(die, &cu_die, nullptr, nullptr)) return;
-
-        // Get the source files table for this compilation unit
-        Dwarf_Files* files{};
-        size_t       nfiles{};
-        if(dwarf_getsrcfiles(&cu_die, &files, &nfiles) == 0 && call_file < nfiles)
+        // Do not return early - children must always be traversed for nested inlining
+        if(dwarf_attr(die, DW_AT_call_file, &call_file_attr) &&
+           dwarf_attr(die, DW_AT_call_line, &call_line_attr) &&
+           dwarf_formudata(&call_file_attr, &call_file) == 0 &&
+           dwarf_formudata(&call_line_attr, &call_line) == 0)
         {
-            if(const char* filename = dwarf_filesrc(files, call_file, nullptr, nullptr))
+            // Get the compilation unit to resolve file names
+            Dwarf_Die cu_die{};
+            if(dwarf_diecu(die, &cu_die, nullptr, nullptr))
             {
-                // Add "filename:line" to call stack showing where this function was inlined
-                file_and_line = std::string(filename) + ":" + std::to_string(call_line);
-                return;
+                // Get the source files table for this compilation unit
+                Dwarf_Files* files{};
+                size_t       nfiles{};
+                if(dwarf_getsrcfiles(&cu_die, &files, &nfiles) == 0 && call_file < nfiles)
+                {
+                    if(const char* filename = dwarf_filesrc(files, call_file, nullptr, nullptr))
+                    {
+                        file_and_line = std::string(filename) + ":" + std::to_string(call_line);
+                    }
+                }
             }
         }
 
+        // Always include this node's range so parents can find it via children_range
         children_range = total_range;
     }
 

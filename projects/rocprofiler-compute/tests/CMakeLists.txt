@@ -1,6 +1,8 @@
 find_package(MPI COMPONENTS CXX)
 
-set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler" FORCE)
+if(NOT CMAKE_HIP_COMPILER)
+    set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler")
+endif()
 if(CMAKE_HIP_COMPILER_ID STREQUAL "Clang" OR CMAKE_HIP_COMPILER_ID STREQUAL "ROCMClang")
     message(STATUS "Using ${CMAKE_HIP_COMPILER} to build for amdgpu backend")
 else()

@@ -5,9 +5,7 @@
  */
 
 #include <hip/hip_runtime.h>
-#ifdef __linux__
 #include "printf_common.h"
-#endif
 #include <hip_test_common.hh>
 
 #define MAX_BLOCK_SIZE 523
@@ -382,6 +380,7 @@ bool testPrintfMultGPU(int numOfGPUs, uint32_t num_blocks, uint32_t threads_per_
 }  // namespace hipPrintfStressTest
 
 HIP_TEST_CASE(Stress_printf_ComplexKernelMultStream) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test - Stress_printf_ComplexKernelMultStream start\n");
   bool TestPassed = true;
@@ -404,6 +403,7 @@ HIP_TEST_CASE(Stress_printf_ComplexKernelMultStream) {
 }
 
 HIP_TEST_CASE(Stress_printf_ComplexKernelMultStreamMultGpu) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test - Stress_printf_ComplexKernelMultStreamMultGpu start \n");
   bool TestPassed = true;

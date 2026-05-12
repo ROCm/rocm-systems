@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -206,14 +207,14 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
     CHECK(queue);
     _callback_cache.wlock([&](auto& callbacks) {
         _queues.wlock([&](auto& map) {
-            const auto agent_id = queue->get_agent().get_rocp_agent()->id.handle;
+            const auto agent_id = queue->get_agent().get_rocp_agent()->id;
             map[id]             = std::move(queue);
-            for(const auto& [cbid, cb_tuple] : callbacks)
+            for(const auto& [cbid, cb_data] : callbacks)
             {
-                auto& [agent, qcb, ccb] = cb_tuple;
-                if(agent.id.handle == default_agent.id.handle || agent.id.handle == agent_id)
+                auto& [agent, cb] = cb_data;
+                if(agent.id == default_agent.id || agent.id == agent_id)
                 {
-                    map[id]->register_callback(cbid, qcb, ccb);
+                    map[id]->register_callback(cbid, cb);
                 }
             }
         });
@@ -240,21 +241,19 @@ QueueController::destroy_queue(hsa_queue_t* id)
 }
 
 ClientID
-QueueController::add_callback(std::optional<rocprofiler_agent_t> agent,
-                              Queue::queue_cb_t                  qcb,
-                              Queue::completed_cb_t              ccb)
+QueueController::add_callback(std::optional<rocprofiler_agent_t> agent, queue_callbacks_t callbacks)
 {
-    static std::atomic<ClientID> client_id = 1;
-    ClientID                     return_id;
+    static auto client_id = std::atomic<ClientID>{1};
+    ClientID    return_id = -1;
     _callback_cache.wlock([&](auto& cb_cache) {
         return_id = client_id;
         if(agent)
         {
-            cb_cache[client_id] = std::tuple(*agent, qcb, ccb);
+            cb_cache[client_id] = std::make_tuple(*agent, callbacks);
         }
         else
         {
-            cb_cache[client_id] = std::tuple(default_agent, qcb, ccb);
+            cb_cache[client_id] = std::make_tuple(default_agent, callbacks);
         }
         client_id++;
 
@@ -263,7 +262,7 @@ QueueController::add_callback(std::optional<rocprofiler_agent_t> agent,
             {
                 if(!agent || queue->get_agent().get_rocp_agent()->id.handle == agent->id.handle)
                 {
-                    queue->register_callback(return_id, qcb, ccb);
+                    queue->register_callback(return_id, callbacks);
                 }
             }
         });
@@ -517,7 +516,7 @@ enable_queue_intercept()
         bool has_scratch_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 
-        if(itr->counter_collection || itr->pc_sampler || has_kernel_tracing ||
+        if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
            has_scratch_reporting || itr->device_counter_collection || itr->device_thread_trace ||
            itr->dispatch_thread_trace)
             return true;
@@ -530,6 +529,8 @@ void
 queue_controller_init(HsaApiTable* table)
 {
     CHECK_NOTNULL(get_queue_controller())->init(*table->core_, *table->amd_ext_);
+
+    if(enable_queue_intercept()) queue_init();
 }
 
 void
@@ -544,6 +545,9 @@ queue_controller_fini()
 {
     if(get_queue_controller())
         get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
+
+    // finalize queue data (e.g. clean up signal pool)
+    if(enable_queue_intercept()) queue_fini();
 }
 
 void
@@ -559,6 +563,8 @@ queue_controller_init(RocAttachDispatchTable* attach_table)
                "may not be instrumented correctly.";
     }
     *(get_attach_table()) = attach_table;
+
+    if(enable_queue_intercept()) queue_init();
 }
 
 }  // namespace hsa
