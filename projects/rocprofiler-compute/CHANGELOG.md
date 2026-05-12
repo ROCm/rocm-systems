@@ -22,6 +22,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Profile mode `--format-rocprof-output rocpd` (default) no longer writes intermediate `results_*.csv` files. Each pass produces a single `<workload>/<fbase>.db` at the workload root (per-host outputs are merged via SQLite ATTACH+INSERT, the intermediate `out/` directory is removed) and `rocprof-compute analyze` reads them directly via SQL. `--format-rocprof-output csv` remains a fully supported alternative for environments without rocpd (e.g. ROCm <7) and is also used internally for PC sampling.
 
+* Unified accumulator handling across profile and analyze so each `_ACCUM`-suffixed counter is preserved instead of collapsing to `SQ_ACCUM_PREV_HIRES`
+
 ### Removed
 
 * ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
@@ -31,6 +33,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed `--retain-rocpd-output` profile-mode option. `.db` files are now retained by default on the rocpd path.
 
 ### Optimized
+
+* Flattened the analyze-mode PMC dataframe to a single-index frame.
 
 ### Resolved issues
 

@@ -14,7 +14,7 @@ import pandas as pd
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from utils import rocpd_data, schema, utils_analysis
+from utils import rocpd_data, utils_analysis
 from utils.analysis_orm import Database, get_views
 from utils.file_io import process_pc_sampling_kernel_trace
 from utils.logger import (
@@ -305,25 +305,18 @@ class db_analysis(OmniAnalyze_Base):
                 continue
 
             pmc_df = utils_analysis.process_rocpd_csv(long_df)
-            raw_pmc = pd.concat(
-                [pmc_df],
-                keys=[schema.PMC_PERF_FILE_PREFIX],
-                axis=1,
-                join="inner",
-                copy=False,
-            )
 
             if args.spatial_multiplexing:
-                raw_pmc = self.spatial_multiplex_merge_counters(raw_pmc)
+                pmc_df = self.spatial_multiplex_merge_counters(pmc_df)
 
             if self._profiling_config.get("iteration_multiplexing") is not None:
-                raw_pmc = self.iteration_multiplex_impute_counters(
-                    raw_pmc,
+                pmc_df = self.iteration_multiplex_impute_counters(
+                    pmc_df,
                     policy=self._profiling_config["iteration_multiplexing"],
                     workload_dir=Path(workload_path),
                 )
 
-            pmc_df_per_workload[workload_path] = raw_pmc["pmc_perf"]
+            pmc_df_per_workload[workload_path] = pmc_df
 
         if pmc_df_per_workload:
             console_debug("Collected dispatch data")
@@ -497,7 +490,7 @@ class db_analysis(OmniAnalyze_Base):
             value = value.replace("raw_pmc_df", "pmc_df")
             value = value.replace("pmc_df['sys_info']", "sys_info")
         else:
-            value = value.replace("raw_pmc_df['pmc_perf']", "pmc_df")
+            value = value.replace("raw_pmc_df", "pmc_df")
             value = re.sub(
                 "ammolite__([0-9A-Za-z_]+)",
                 lambda m: f'sys_info["{m.group(1)}"]',
@@ -662,7 +655,6 @@ class db_analysis(OmniAnalyze_Base):
                 "Channel",
                 "Unit",
                 "Description",
-                "coll_level",
                 "Type",
                 "Xfer",
                 "Coherency",

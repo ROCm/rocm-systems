@@ -150,7 +150,6 @@ class OmniAnalyze_Base:
     @demarcate
     def load_options(self, normalization_filter: Optional[str]) -> None:
         args = self.get_args()
-        profiling_config = self.get_profiling_config()
         target_filter = normalization_filter or args.normal_unit
 
         for arch_config in self._arch_configs.values():
@@ -158,7 +157,6 @@ class OmniAnalyze_Base:
                 arch_config.dfs,
                 arch_config.dfs_type,
                 target_filter,
-                profiling_config,
             )
         # Error checking for multiple runs and multiple kernel filters
         if args.gpu_kernel and (len(args.path) != len(args.gpu_kernel)):
@@ -414,7 +412,7 @@ class OmniAnalyze_Base:
         # Collect files to process - normalize to Path objects
         files: list[Path] = []
 
-        csv_patterns = ["pmc_perf_*.csv", "SQ_*.csv", "SQC_*.csv"]
+        csv_patterns = ["results_pmc_perf_*.csv", "SQ_*.csv", "SQC_*.csv"]
         files = [
             file for pattern in csv_patterns for file in workload_dir.glob(pattern)
         ]
@@ -431,6 +429,19 @@ class OmniAnalyze_Base:
             if current_df.empty:
                 console_warning("join_prof", f"Empty dataframe from {file}")
                 continue
+
+            # rocprof writes the accumulator column as SQ_ACCUM_PREV_HIRES
+            # regardless of which *_ACCUM counter was requested. Recover the
+            # requested name from the file stem so downstream YAML formulas
+            # can reference it directly. Done before the merge so per-bucket
+            # values do not collide and get pandas-suffixed.
+            if (
+                file.name.startswith("results_pmc_perf_")
+                and file.stem.endswith("_ACCUM")
+                and "SQ_ACCUM_PREV_HIRES" in current_df.columns
+            ):
+                target = file.stem[len("results_pmc_perf_") :]
+                current_df = current_df.rename(columns={"SQ_ACCUM_PREV_HIRES": target})
 
             if join_type == "kernel":
                 key = current_df.groupby("Kernel_Name").cumcount()
@@ -516,6 +527,7 @@ class OmniAnalyze_Base:
             "Accum_VGPR_",
             "SGPR_",
             "Dispatch_ID_",
+            "Kernel_ID_",
             "Queue_ID",
             "Queue_Index",
             "PID",
@@ -620,18 +632,18 @@ class OmniAnalyze_Base:
                 return
 
             pmc_perf = directory / "pmc_perf.csv"
-            pmc_perf_files = list(directory.glob("pmc_perf_*.csv"))
+            results_files = list(directory.glob("results_*.csv"))
 
             if pmc_perf.exists():
                 console_debug(f"Using existing {pmc_perf}")
-            elif pmc_perf_files:
-                console_log(f"Joining pmc_perf_*.csv for {directory}...")
+            elif results_files:
+                console_log(f"Joining results_*.csv for {directory}...")
                 self.join_prof(directory, out=str(pmc_perf))
                 console_log(f"Created {pmc_perf}")
             else:
                 console_error(
                     f"No profiling data found in {directory}.\n"
-                    f"Expected: pmc_perf.csv or pmc_perf_*.csv\n"
+                    f"Expected: pmc_perf.csv or results_*.csv\n"
                     f"Please run 'rocprof-compute profile' first."
                 )
 
@@ -688,7 +700,7 @@ class OmniAnalyze_Base:
                 setattr(self._runs[path_info[0]], attr_name, filter_value)
 
         if not self.pc_sampling_only():
-            # Join pmc_perf_*.csv files if needed
+            # Join results_*.csv source files into pmc_perf.csv if needed
             for path_info in args.path:
                 workload_dir = Path(path_info[0])
                 self.join_workload_csvs(workload_dir)

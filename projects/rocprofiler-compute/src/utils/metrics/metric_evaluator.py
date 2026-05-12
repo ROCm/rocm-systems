@@ -32,7 +32,7 @@ class MetricEvaluator:
 
     def __init__(
         self,
-        raw_pmc_df: pd.DataFrame | dict,
+        raw_pmc_df: pd.DataFrame,
         sys_vars: dict[str, Any],
         empirical_peaks: dict[str, Any],
     ) -> None:

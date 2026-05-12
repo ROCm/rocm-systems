@@ -3,14 +3,16 @@
 
 import os
 import shutil
+from argparse import Namespace
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import common
 import numpy as np
 import pandas as pd
 import pytest
 
+from rocprof_compute_analyze.analysis_cli import cli_analysis
 from utils.metrics.expression import build_eval_string
 from utils.metrics.metric_evaluator import MetricEvaluator
 
@@ -1269,17 +1271,16 @@ def test_apply_filters_direct():
     class MockWorkload:
         def __init__(self):
             self.raw_pmc = pd.DataFrame({
-                ("pmc_perf", "GPU_ID"): [0, 0, 1, 1],
-                ("pmc_perf", "Kernel_Name"): [
+                "GPU_ID": [0, 0, 1, 1],
+                "Kernel_Name": [
                     "vecCopy",
                     "vecAdd",
                     "vecCopy",
                     "vecMul",
                 ],
-                ("pmc_perf", "Dispatch_ID"): [0, 1, 2, 3],
-                ("pmc_perf", "Node"): ["node0", "node0", "node1", "node1"],
+                "Dispatch_ID": [0, 1, 2, 3],
+                "Node": ["node0", "node0", "node1", "node1"],
             })
-            self.raw_pmc.columns = pd.MultiIndex.from_tuples(self.raw_pmc.columns)
 
         filter_nodes = None
         filter_gpu_ids = None
@@ -1380,15 +1381,14 @@ class TestMetricEvaluatorDivisionByZero:
 
     @staticmethod
     def _make_evaluator(columns, sys_vars=None):
-        """Build a MetricEvaluator with the given pmc_perf columns."""
-        pmc_perf_df = pd.DataFrame(columns)
-        raw_pmc_df = {"pmc_perf": pmc_perf_df}
+        """Build a MetricEvaluator with the given counter columns."""
+        raw_pmc_df = pd.DataFrame(columns)
         return MetricEvaluator(raw_pmc_df, sys_vars or {}, {})
 
     @staticmethod
     def _to_eval_str(equation):
         """Transform a YAML-style equation through the full pipeline."""
-        return build_eval_string(equation, "pmc_perf", config={})
+        return build_eval_string(equation)
 
     def test_all_zero_denominator_returns_na(self):
         """Division by all-zero denominator produces inf, caught as N/A."""
@@ -1801,16 +1801,14 @@ def test_list_torch_operators_no_trace_data(
 
 @pytest.fixture
 def mock_raw_pmc_for_kernel_top():
-    """Create raw_pmc dict with pmc_perf DF for create_df_kernel_top_stats tests."""
-    return {
-        "pmc_perf": pd.DataFrame({
-            "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a", "kernel_c"],
-            "GPU_ID": [0, 0, 1, 0],
-            "Dispatch_ID": [1, 2, 3, 4],
-            "Start_Timestamp": [1000, 2000, 3000, 4000],
-            "End_Timestamp": [1500, 2800, 3400, 4200],
-        })
-    }
+    """Create flat raw_pmc DataFrame for create_df_kernel_top_stats tests."""
+    return pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a", "kernel_c"],
+        "GPU_ID": [0, 0, 1, 0],
+        "Dispatch_ID": [1, 2, 3, 4],
+        "Start_Timestamp": [1000, 2000, 3000, 4000],
+        "End_Timestamp": [1500, 2800, 3400, 4200],
+    })
 
 
 @pytest.fixture
@@ -1940,16 +1938,14 @@ def test_create_df_kernel_top_stats_filters():
     from utils.file_io import create_df_kernel_top_stats
 
     # Create test data with Node column for node filtering
-    raw_pmc_with_node = {
-        "pmc_perf": pd.DataFrame({
-            "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a", "kernel_c"],
-            "GPU_ID": [0, 0, 1, 0],
-            "Node": ["node0", "node0", "node1", "node0"],
-            "Dispatch_ID": [1, 2, 3, 4],
-            "Start_Timestamp": [1000, 2000, 3000, 4000],
-            "End_Timestamp": [1500, 2800, 3400, 4200],
-        })
-    }
+    raw_pmc_with_node = pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a", "kernel_c"],
+        "GPU_ID": [0, 0, 1, 0],
+        "Node": ["node0", "node0", "node1", "node0"],
+        "Dispatch_ID": [1, 2, 3, 4],
+        "Start_Timestamp": [1000, 2000, 3000, 4000],
+        "End_Timestamp": [1500, 2800, 3400, 4200],
+    })
 
     with tempfile.TemporaryDirectory() as temp_dir:
         # Test GPU ID filter
@@ -2005,15 +2001,13 @@ def test_create_df_kernel_top_stats_filters():
         assert dispatch_df.iloc[0]["Kernel_Name"] == "kernel_a"
 
         # Test empty input handling
-        empty_raw_pmc = {
-            "pmc_perf": pd.DataFrame({
-                "Kernel_Name": [],
-                "GPU_ID": [],
-                "Dispatch_ID": [],
-                "Start_Timestamp": [],
-                "End_Timestamp": [],
-            })
-        }
+        empty_raw_pmc = pd.DataFrame({
+            "Kernel_Name": [],
+            "GPU_ID": [],
+            "Dispatch_ID": [],
+            "Start_Timestamp": [],
+            "End_Timestamp": [],
+        })
         kernel_top_df, dispatch_df = create_df_kernel_top_stats(
             df_in=empty_raw_pmc,
             raw_data_dir=temp_dir,
@@ -2032,21 +2026,19 @@ def test_apply_kernel_filter_integer_ids(mock_workload_for_filter):
     """Test integer kernel ID filtering, Selected marker,
     uses workload.dfs[1], invalid ID error."""
 
-    from utils import schema
     from utils.parser import apply_kernel_filter
 
-    # Create multi-indexed DataFrame similar to real raw_pmc
+    # Flat single-index raw_pmc DataFrame
     raw_df = pd.DataFrame({
-        (schema.PMC_PERF_FILE_PREFIX, "Kernel_Name"): [
+        "Kernel_Name": [
             "kernel_a",
             "kernel_b",
             "kernel_a",
             "kernel_c",
         ],
-        (schema.PMC_PERF_FILE_PREFIX, "GPU_ID"): [0, 0, 1, 0],
-        (schema.PMC_PERF_FILE_PREFIX, "Dispatch_ID"): [1, 2, 3, 4],
+        "GPU_ID": [0, 0, 1, 0],
+        "Dispatch_ID": [1, 2, 3, 4],
     })
-    raw_df.columns = pd.MultiIndex.from_tuples(raw_df.columns)
 
     # Test integer kernel ID filtering
     mock_workload_for_filter.filter_kernel_ids = [0]  # Select first kernel (kernel_a)
@@ -2054,7 +2046,7 @@ def test_apply_kernel_filter_integer_ids(mock_workload_for_filter):
 
     # Should only contain rows with kernel_a
     assert len(result_df) == 2  # kernel_a appears twice
-    assert all(result_df[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"] == "kernel_a")
+    assert all(result_df["Kernel_Name"] == "kernel_a")
 
     # Test that Selected marker is added
     assert mock_workload_for_filter.dfs[1].loc[0, "Selected"] == "*"
@@ -2082,41 +2074,36 @@ def test_apply_kernel_filter_integer_ids(mock_workload_for_filter):
 def test_apply_kernel_filter_string_names(mock_workload_for_filter):
     """Test string kernel name filtering and partial match."""
 
-    from utils import schema
     from utils.parser import apply_kernel_filter
 
-    # Create multi-indexed DataFrame
+    # Flat single-index raw_pmc DataFrame
     raw_df = pd.DataFrame({
-        (schema.PMC_PERF_FILE_PREFIX, "Kernel_Name"): [
+        "Kernel_Name": [
             "kernel_a",
             "kernel_b",
             "kernel_a",
             "kernel_c",
         ],
-        (schema.PMC_PERF_FILE_PREFIX, "GPU_ID"): [0, 0, 1, 0],
-        (schema.PMC_PERF_FILE_PREFIX, "Dispatch_ID"): [1, 2, 3, 4],
+        "GPU_ID": [0, 0, 1, 0],
+        "Dispatch_ID": [1, 2, 3, 4],
     })
-    raw_df.columns = pd.MultiIndex.from_tuples(raw_df.columns)
 
     # Test string kernel name filtering - exact match
     mock_workload_for_filter.filter_kernel_ids = ["kernel_b"]
     result_df = apply_kernel_filter(raw_df, mock_workload_for_filter)
     assert len(result_df) == 1
-    assert result_df[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"].iloc[0] == "kernel_b"
+    assert result_df["Kernel_Name"].iloc[0] == "kernel_b"
 
     # Test filtering with whitespace in kernel names (should be stripped)
     raw_df_with_whitespace = pd.DataFrame({
-        (schema.PMC_PERF_FILE_PREFIX, "Kernel_Name"): [
+        "Kernel_Name": [
             " kernel_a ",
             "kernel_b",
             "kernel_a",
         ],
-        (schema.PMC_PERF_FILE_PREFIX, "GPU_ID"): [0, 0, 1],
-        (schema.PMC_PERF_FILE_PREFIX, "Dispatch_ID"): [1, 2, 3],
+        "GPU_ID": [0, 0, 1],
+        "Dispatch_ID": [1, 2, 3],
     })
-    raw_df_with_whitespace.columns = pd.MultiIndex.from_tuples(
-        raw_df_with_whitespace.columns
-    )
 
     mock_workload_for_filter.filter_kernel_ids = ["kernel_a"]
     result_df = apply_kernel_filter(raw_df_with_whitespace, mock_workload_for_filter)
@@ -2186,3 +2173,56 @@ def test_pc_sampling_single_kernel_uses_workload_dfs():
                 call_kwargs = mock_per_kernel.call_args
                 # The kernel_name argument should be "kernel_b"
                 assert "kernel_b" in str(call_kwargs)
+
+
+# =============================================================================
+# join_prof unit test
+# =============================================================================
+
+
+def test_join_prof_renames_sq_accum_prev_hires_to_bucket_target(tmp_path):
+    """
+    results_pmc_perf_<bucket>_ACCUM.csv files whose body uses rocprof's
+    generic SQ_ACCUM_PREV_HIRES column must have that column renamed to the
+    bucket target derived from the file stem before the merge.
+    """
+    (tmp_path / "profiling_config.yaml").write_text(
+        "format_rocprof_output: csv\njoin_type: kernel\n"
+    )
+
+    header = (
+        "GPU_ID,Kernel_Name,Dispatch_ID,Grid_Size,Workgroup_Size,"
+        "LDS_Per_Workgroup,Scratch_Per_Workitem,SGPR,vgpr,{counter}\n"
+    )
+    acc = tmp_path / "results_pmc_perf_SQ_LEVEL_WAVES_ACCUM.csv"
+    acc.write_text(
+        header.format(counter="SQ_ACCUM_PREV_HIRES")
+        + "0,kernel_a,0,1024,64,32,0,8,4,100\n"
+        + "0,kernel_a,1,1024,64,32,0,8,4,200\n"
+    )
+    other = tmp_path / "results_pmc_perf_0.csv"
+    other.write_text(
+        header.format(counter="SQ_WAVES")
+        + "0,kernel_a,0,1024,64,32,0,8,4,10\n"
+        + "0,kernel_a,1,1024,64,32,0,8,4,20\n"
+    )
+
+    inst = cli_analysis.__new__(cli_analysis)
+    args = Namespace(
+        path=[[str(tmp_path)]],
+        nodes=None,
+        spatial_multiplexing=False,
+        join_type="kernel",
+        kokkos_trace=False,
+    )
+    inst.get_args = MagicMock(return_value=args)
+    inst._arch_configs = {}
+    inst._runs = {}
+
+    inst.join_prof(tmp_path, out=str(tmp_path / "pmc_perf.csv"))
+    merged = pd.read_csv(tmp_path / "pmc_perf.csv")
+
+    assert "SQ_LEVEL_WAVES_ACCUM" in merged.columns
+    assert "SQ_ACCUM_PREV_HIRES" not in merged.columns
+    assert set(merged["SQ_LEVEL_WAVES_ACCUM"].tolist()) == {100, 200}
+    assert "SQ_WAVES" in merged.columns
