@@ -349,6 +349,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "scratch_memory",
         "rocm",
         "kfd",
+        "unified_memory",
         "selective_regions",
     ]
     for label in non_functional_markers + generic_functional_markers:

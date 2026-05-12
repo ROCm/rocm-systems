@@ -123,12 +123,6 @@ class TestKFD(RocprofsysTest):
             rules_files=kfd_rules,
         )
 
-        self.assert_unified_memory_output(
-            result,
-            subtest_name="Unified-memory output validation",
-            pass_regex=["All validation checks passed"],
-        )
-
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("kfd_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
