@@ -1,5 +1,5 @@
 ---
-name: AMD SMI Output Correctness Verification
+name: amdsmi-output-verification
 description: A checklist for verifying whether AMD SMI is reporting GPU information correctly.
 ---
 

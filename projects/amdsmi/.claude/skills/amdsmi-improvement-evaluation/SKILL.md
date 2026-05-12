@@ -1,5 +1,5 @@
 ---
-name: AMD SMI Improvement Evaluation
+name: amdsmi-improvement-evaluation
 description: A structured approach to evaluating AMD SMI's current state and identifying improvement opportunities.
 ---
 
