@@ -21,6 +21,7 @@ set(SRC_FILES
   commDump.cc
   debug.cc
   dev_runtime.cc
+  enhcompat.cc
   enqueue.cc
   group.cc
   init.cc
@@ -31,6 +32,7 @@ set(SRC_FILES
   sym_kernels.cc
   transport.cc
   device/all_gather.h
+  device/all_gather_v.h
   device/all_reduce.h
   device/alltoall_pivot.h
   device/alltoall_gda.h
@@ -62,8 +64,9 @@ set(SRC_FILES
   device/symmetric/gin_scratch__types.h
   device/symmetric/kernel.cuh
   device/symmetric/primitives.cuh
-  device/symmetric/reduce_scatter.cuh
   device/symmetric/reduce_scatter_gin.cuh
+  device/symmetric/reduce_scatter.cuh
+  device/symmetric/tma_ptx.cuh
   graph/connect.cc
   graph/paths.cc
   graph/rings.cc
@@ -95,7 +98,6 @@ set(SRC_FILES
   include/checks.h
   include/collectives.h
   include/coll_net.h
-  include/cudawrap.h
   include/comm.h
   include/compiler.h
   include/compiler/gcc.h
@@ -124,13 +126,25 @@ set(SRC_FILES
   include/mnnvl.h
   include/nccl_common.h
   include/nccl_device.h
-  include/nccl_device/net_device.h
+  include/nccl_device/barrier.h
+  include/net_device.h
   include/net.h
-  include/net_ib_cast_inspect.h
+  include/nccl_device/gin.h
+  include/nccl_device/gin/gdaki/gin_gdaki.h
+  include/nccl_device/gin/gdaki/gin_gdaki_device_host_common.h
+  include/nccl_device/gin/gin_device_api.h
+  include/nccl_device/gin/gin_device_common.h
+  include/nccl_device/gin/gin_device_host_common.h
+  include/nccl_device/gin/proxy/gin_proxy.h
+  include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
+  include/nccl_device/gin_barrier.h
   include/nvmlwrap.h
   include/nvtx.h
   include/nvtx_payload_schemas.h
   include/nvtx_stub.h
+  include/os.h
+  include/os/linux.h
+  include/os/windows.h
   include/p2p.h
   include/param.h
   include/profiler.h
@@ -165,18 +179,10 @@ set(SRC_FILES
   include/nccl_device/comm.h
   include/nccl_device/coop.h
   include/nccl_device/core.h
-  include/nccl_device/barrier.h
-  include/nccl_device/gin.h
-  include/nccl_device/gin_barrier.h
-  include/nccl_device/gin/gdaki/gin_gdaki.h
-  include/nccl_device/gin/gdaki/gin_gdaki_device_host_common.h
-  include/nccl_device/gin/gin_device_api.h
-  include/nccl_device/gin/gin_device_common.h
-  include/nccl_device/gin/gin_device_host_common.h
-  include/nccl_device/gin/proxy/gin_proxy.h
-  include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
   include/nccl_device/ll_a2a.h
   include/nccl_device/lsa_barrier.h
+  include/nccl_device/mem_barrier.h
+  include/nccl_device/net_device.h
   include/nccl_device/ptr.h
   include/nccl_device/rccl_ptr.h
   include/nccl_device/utility.h
@@ -194,6 +200,8 @@ set(SRC_FILES
   include/nccl_device/impl/ll_a2a__types.h
   include/nccl_device/impl/lsa_barrier__funcs.h
   include/nccl_device/impl/lsa_barrier__types.h
+  include/nccl_device/impl/mem_barrier__funcs.h
+  include/nccl_device/impl/mem_barrier__types.h
   include/nccl_device/impl/ptr__funcs.h
   include/nccl_device/impl/ptr__types.h
   include/nccl_device/impl/multimem__funcs.h
@@ -244,7 +252,6 @@ set(SRC_FILES
   include/plugin/nccl_net.h
   include/plugin/nccl_profiler.h
   include/plugin/nccl_tuner.h
-  include/plugin/nccl_env.h
   include/plugin/env/env_v1.h
   include/plugin/plugin.h
   include/plugin/net/net_v6.h
@@ -253,6 +260,7 @@ set(SRC_FILES
   include/plugin/net/net_v9.h
   include/plugin/net/net_v10.h
   include/plugin/net/net_v11.h
+  include/plugin/net/net_v12.h
   include/plugin/profiler/net_ib_v1.h
   include/plugin/profiler/net_ib.h
   include/plugin/profiler/net_socket_v1.h
@@ -267,9 +275,11 @@ set(SRC_FILES
   include/plugin/tuner/tuner_v3.h
   include/plugin/tuner/tuner_v4.h
   include/plugin/tuner/tuner_v5.h
+  include/plugin/tuner/tuner_v6.h
   include/plugin/nccl_gin.h
   include/plugin/gin/gin_v11.h
   include/plugin/gin/gin_v12.h
+  include/plugin/gin/gin_v13.h
   misc/alt_rsmi.cc
   misc/archinfo.cc
   misc/argcheck.cc
@@ -282,6 +292,7 @@ set(SRC_FILES
   misc/ipcsocket.cc
   misc/mlx5dvsymbols.cc
   misc/mlx5dvwrap.cc
+  misc/merge_compat_stubs.cc
   misc/ionicdvsymbols.cc
   misc/ionicdvwrap.cc
   misc/npkit.cc
@@ -299,13 +310,14 @@ set(SRC_FILES
   misc/proxy_trace/proxy_trace.cc
   nccl_device/core.cc
   nccl_device/gin_barrier.cc
+  nccl_device/gin_scratch.cc
   nccl_device/ll_a2a.cc
   nccl_device/lsa_barrier.cc
+  nccl_device/mem_barrier.cc
   os/linux.cc
-  include/os.h
-  rma/rma.cc
-  rma/rma_ce.cc
-  rma/rma_proxy.cc
+  # rma/rma.cc             # RCCL_COMPAT_STUB: NCCL RMA path not wired through RCCL on AMD
+  # rma/rma_ce.cc          # RCCL_COMPAT_STUB: NCCL RMA CE path depends on CUDA-only state
+  # rma/rma_proxy.cc       # RCCL_COMPAT_STUB: NCCL RMA proxy path depends on unsupported RMA plumbing
   include/rma/rma.h
   include/rma/rma_ce.h
   include/rma/rma_proxy.h
@@ -313,7 +325,8 @@ set(SRC_FILES
   plugin/env.cc
   plugin/env/env_v1.cc
   plugin/plugin_open.cc
-  plugin/profiler.cc
+  # plugin/profiler.cc     # RCCL_COMPAT_STUB: NCCL profiler bindings disabled on AMD; use profiler_stub.cc
+  plugin/profiler_stub.cc
   plugin/tuner.cc
   plugin/net/net_v6.cc
   plugin/net/net_v7.cc
@@ -321,6 +334,7 @@ set(SRC_FILES
   plugin/net/net_v9.cc
   plugin/net/net_v10.cc
   plugin/net/net_v11.cc
+  plugin/net/net_v12.cc
   plugin/profiler/profiler_v1.cc
   plugin/profiler/profiler_v2.cc
   plugin/profiler/profiler_v3.cc
@@ -331,10 +345,12 @@ set(SRC_FILES
   plugin/tuner/tuner_v3.cc
   plugin/tuner/tuner_v4.cc
   plugin/tuner/tuner_v5.cc
+  plugin/tuner/tuner_v6.cc
   plugin/tuner/csv_tuner.cc
-  plugin/gin.cc
+  # plugin/gin.cc          # RCCL_COMPAT_STUB: NCCL plugin GIN bindings disabled on AMD
   plugin/gin/gin_v11.cc
   plugin/gin/gin_v12.cc
+  plugin/gin/gin_v13.cc
   ras/client.cc
   ras/client_support.cc
   ras/collectives.cc
@@ -345,7 +361,7 @@ set(SRC_FILES
   register/coll_reg.cc
   register/register.cc
   register/sendrecv_reg.cc
-  scheduler/symmetric_sched.cc
+  # scheduler/symmetric_sched.cc # RCCL_COMPAT_STUB: NCCL symmetric scheduler depends on merge-incomplete task fields
   transport/coll_net.cc
   transport/generic.cc
   transport/net.cc
@@ -359,8 +375,8 @@ set(SRC_FILES
   transport/p2p.cc
   transport/profiler.cc
   transport/shm.cc
-  gin/gin_host.cc
-  gin/gin_host_proxy.cc
+  # gin/gin_host.cc          # RCCL_COMPAT_STUB: NCCL GIN host code disabled on AMD; stubs provided separately
+  # gin/gin_host_proxy.cc    # RCCL_COMPAT_STUB: NCCL GIN host code disabled on AMD; stubs provided separately
   transport/net_ib/gdaki/gin_host_gdaki.h
   include/latency_profiler/CollTrace.h
   include/latency_profiler/CollTraceEvent.h
@@ -385,8 +401,6 @@ if(USE_AMDSMI)
   )
 else()
   set(SMI_SOURCES
-    src/include/amdsmi_wrap.h
-    src/misc/amdsmi_wrap.cc
     src/include/rocm_smi_wrap.h
     src/misc/rocm_smi_wrap.cc
   )
