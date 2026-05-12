@@ -45,19 +45,19 @@ This includes the ROCm runtime and system dependencies.
 
    .. code-block:: shell-session
 
-      amdrocm-decode<rocm_version>-<dev/devel>
+      amdrocm-decode-<dev/devel><rocm_version>
 
    Where:
 
-   * ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
-     suffix to install the latest available version.
-
-   * ``<dev/devel>`` specifies whether to the install library files and
+   * ``<dev/devel>`` specifies whether to install library files and
      headers. Omit this suffix to only install runtime packages.
 
      * ``-dev`` is used on Debian-based distributions, including Ubuntu.
 
      * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
+
+   * ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
+     suffix to install the latest available version.
 
    For example, to install the latest ROCm video decode package release for
    supported GPU architectures:
