@@ -13,7 +13,7 @@ RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
 extern int64_t ncclParamIbCastGdrFlushDisable();
 // AMD AINIC
 RCCL_PARAM(IbCastCtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
-RCCL_PARAM(IbCastP2pDisableCts, "IB_P2P_DISABLE_CTS", 0);
+RCCL_PARAM(IbCastP2pDisableCts, "IB_P2P_DISABLE_CTS", 1);
 
 bool IbCastAinicRoce = 0;
 bool IbCastOffloadEnabled = 0;

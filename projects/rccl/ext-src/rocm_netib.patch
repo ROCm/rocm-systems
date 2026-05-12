@@ -51,7 +51,7 @@
 +
 +// AMD AINIC
 +RCCL_PARAM(CtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
-+RCCL_PARAM(IbP2pDisableCts, "IB_P2P_DISABLE_CTS", 0);
++RCCL_PARAM(IbP2pDisableCts, "IB_P2P_DISABLE_CTS", 1);
 +
 +extern int64_t rcclParamAinicRoce();
 +
