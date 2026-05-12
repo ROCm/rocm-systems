@@ -1986,10 +1986,10 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 unsafeAtomicAdd(__hip_bfloat16* address,
   return __high2bfloat16(out);
 }
 #endif  // defined(__clang__) && defined(__HIP__)
-#pragma pop_macro("MAYBE_UNDEF")
 #elif defined(__GNUC__) || defined(_MSC_VER)
 #if !defined(__HIPCC_RTC__)
 #include "amd_hip_bf16_gcc.h"
 #endif
 #endif
+#pragma pop_macro("MAYBE_UNDEF")
 #endif
