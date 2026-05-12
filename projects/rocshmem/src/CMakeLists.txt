@@ -91,7 +91,7 @@ set_property(
 ###############################################################################
 # ROCSHMEM TARGET FOR BACKENDS
 ###############################################################################
-if (USE_GDA)
+if (USE_GDA AND NUMA_FOUND)
 add_subdirectory(gda)
 endif()
 if (USE_RO)
