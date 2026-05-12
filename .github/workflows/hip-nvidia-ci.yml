@@ -80,7 +80,7 @@ jobs:
           repository: "ROCm/llvm-project"
           path: "llvm-project"
           ref: 43215c73116c407735c85a180d174f718798c328 # 2026-04-14 bump in TheRock
-          sparse-checkout:
+          sparse-checkout: |
             amd/hipcc
 
       - name: Install system dependencies
