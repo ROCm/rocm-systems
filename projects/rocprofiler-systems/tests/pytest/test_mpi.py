@@ -89,7 +89,8 @@ class TestMPI(RocprofsysTest):
         ]
         REWRITE_PASS_REGEX = [r"perfetto-trace-0\.proto", r"wall_clock-0\.txt"]
         REWRITE_FAIL_REGEX = [
-            r"Outputting.*(perfetto-trace|trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+.(json|txt|proto)"
+            r"Outputting.*(trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+\.(json|txt|proto)",
+            r"perfetto-trace-[0-9][0-9]+\.proto",
         ]
         ENV = {"ROCPROFSYS_VERBOSE": "1"}
 

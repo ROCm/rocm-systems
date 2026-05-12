@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <cstdint>
+#include <ctime>
 #include <timemory/log/color.hpp>
 //
 //  above should always be included first
@@ -21,6 +22,9 @@
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
+#include "core/output/process_tree_builder.hpp"
+#include "core/output/run_metadata.hpp"
+#include "core/output/summary_renderer.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/progress/bar.hpp"
@@ -82,6 +86,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <mutex>
 #include <pthread.h>
 #include <sstream>
@@ -105,6 +110,16 @@ setup() ROCPROFSYS_INTERNAL_API;
 
 namespace
 {
+// rocprofsys_init_library() warms it up so the timestamp reflects
+// library-init time, not finalize time. Used for the Output Summary
+// duration because metadata_registry's start/end fields are
+// std::uint32_t and lose precision for runs longer than ~4.29 s.
+const std::chrono::steady_clock::time_point&
+lib_load_steady_time()
+{
+    static const auto t = std::chrono::steady_clock::now();
+    return t;
+}
 std::atomic<bool>  rocprofsys_init_library_done{ false };
 std::atomic<pid_t> rocprofsys_init_tooling_done{ 0 };
 std::atomic<bool>  rocprofsys_finalization_done{ false };
@@ -481,6 +496,11 @@ rocprofsys_set_mpi_hidden(bool use, bool attached)
 extern "C" void
 rocprofsys_init_library_hidden()
 {
+    // Materialize the lib-load timestamp at the earliest call so the
+    // Output Summary's duration measures from library init, not from
+    // the first finalize-time read.
+    (void) lib_load_steady_time();
+
     auto _tid = threading::get_id();
     (void) _tid;
 
@@ -1129,7 +1149,7 @@ rocprofsys_finalize_hidden(void)
         sampling::post_process();
     }
 
-    auto _output_registry = output_file_registry{};
+    auto& _output_registry = rocprofsys::registry();
 
     if(get_use_causal())
     {
@@ -1138,9 +1158,9 @@ rocprofsys_finalize_hidden(void)
 
         auto _base = config::get_causal_output_filename();
         _output_registry.register_file(fmt::format("{}.json", _base),
-                                       output_format::causal_json);
+                                       output_format::causal_json, getpid());
         _output_registry.register_file(fmt::format("{}.txt", _base),
-                                       output_format::causal_text);
+                                       output_format::causal_text, getpid());
     }
 
     if(get_use_process_sampling())
@@ -1231,6 +1251,18 @@ rocprofsys_finalize_hidden(void)
         _timemory_manager->write_metadata(settings::get_global_output_prefix(),
                                           "rocprofsys", _cfg);
 
+        // Register the metadata.json + functions.json that timemory's
+        // internal_write_metadata just produced
+        for(const auto& _meta_name : { "metadata", "functions" })
+        {
+            auto _path = settings::compose_output_filename(_meta_name, "json", _cfg);
+            if(std::filesystem::exists(_path))
+            {
+                _output_registry.register_file(std::move(_path), output_format::json,
+                                               _meta_name, getpid());
+            }
+        }
+
         if(config::get_use_timemory())
         {
             auto _components =
@@ -1243,15 +1275,46 @@ rocprofsys_finalize_hidden(void)
 
                 _output_registry.register_file(
                     settings::compose_output_filename(_comp_name, "txt", _cfg),
-                    output_format::text, _comp_name);
+                    output_format::text, _comp_name, getpid());
                 _output_registry.register_file(
                     settings::compose_output_filename(_comp_name, "json", _cfg),
-                    output_format::json, _comp_name);
+                    output_format::json, _comp_name, getpid());
             }
         }
     }
 
-    _output_registry.print_summary();
+    {
+        // Ensure the parent appears at the root of the tree even when
+        // its per-PID metadata file isn't loaded by cache_manager.
+        rocprofsys::output::process_metadata _self{};
+        _self.pid     = getpid();
+        _self.ppid    = getppid();
+        _self.command = config::get_exe_name();
+        _output_registry.record_process(std::move(_self));
+    }
+
+    {
+        rocprofsys::output::run_metadata _meta{};
+
+        const auto _now = std::chrono::system_clock::now();
+        const auto _t   = std::chrono::system_clock::to_time_t(_now);
+        std::tm    _tm{};
+        if(::gmtime_r(&_t, &_tm) != nullptr)
+        {
+            char _buf[32];
+            if(std::strftime(_buf, sizeof(_buf), "%Y-%m-%dT%H:%M:%SZ", &_tm) > 0)
+                _meta.run_label = _buf;
+        }
+
+        _meta.duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - lib_load_steady_time());
+
+        // output_dir_abs left empty: the renderer derives it from a
+        // registered row's parent_path. settings::get_global_output_prefix()
+        // returns the unresolved %tag%/%timestamp% template.
+
+        rocprofsys::output::print_summary(std::cout, _output_registry, _meta);
+    }
 
     categories::shutdown();
 

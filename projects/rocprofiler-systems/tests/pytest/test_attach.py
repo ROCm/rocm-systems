@@ -37,7 +37,9 @@ def attach_env(rocprof_config) -> dict[str, str]:
 
 class TestAttach(RocprofsysTest):
     PASS_REGEX = [
-        r"Outputting.*(perfetto-trace.proto).*Outputting.*(wall_clock.txt)",
+        r"Output Summary",
+        r"perfetto-trace\.proto",
+        r"wall_clock\.txt",
     ]
     FAIL_REGEX = [
         r"Dyninst was unable to attach to the specified process",

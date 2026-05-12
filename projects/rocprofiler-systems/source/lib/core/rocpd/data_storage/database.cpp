@@ -148,7 +148,7 @@ database::database(int pid, int ppid, std::string output_path)
 : m_path(std::move(output_path))
 {
     create_directory_for_database_file(m_path);
-    LOG_INFO("Database: {}", m_path);
+    LOG_DEBUG("Database: {}", m_path);
 
     validate_sqlite3_result(sqlite3_open(":memory:", &_sqlite3_db_temp), "",
                             "database open failed!");

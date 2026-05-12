@@ -9,6 +9,7 @@
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
+#include "core/output/perfetto_log_filter.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto.hpp"
 #include "core/utility.hpp"
@@ -457,6 +458,8 @@ perfetto_processor_t::perfetto_processor_t(
 void
 perfetto_processor_t::initialize_perfetto()
 {
+    rocprofsys::output::perfetto_log_filter::install();
+
     static std::once_flag init_flag;
     std::call_once(init_flag, []() {
         LOG_DEBUG("Initializing perfetto tracing backend");
@@ -613,26 +616,19 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
 
     if(!trace_data.empty())
     {
-        operation::file_output_message<tim::project::rocprofsys> _fom{};
-        // Write the trace into a file.
-        if(config::get_verbose() >= 0)
-            _fom(_filename, std::string{ "perfetto" },
-                 " (%.2f KB / %.2f MB / %.2f GB)... ",
-                 static_cast<double>(trace_data.size()) / units::KB,
-                 static_cast<double>(trace_data.size()) / units::MB,
-                 static_cast<double>(trace_data.size()) / units::GB);
         std::ofstream ofs{};
         if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
         {
-            _fom.append("Error opening '%s'...", _filename.c_str());
+            LOG_ERROR("Error opening perfetto trace file '{}' for pid={}", _filename,
+                      m_process_id);
             _perfetto_output_error = true;
         }
         else
         {
             // Write the trace into a file.
             ofs.write(trace_data.data(), trace_data.size());
-            if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
-            m_output_registry.register_file(_filename, output_format::perfetto);
+            m_output_registry.register_file(_filename, output_format::perfetto,
+                                            static_cast<pid_t>(m_process_id));
         }
         ofs.close();
     }

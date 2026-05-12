@@ -11,6 +11,8 @@
 
 #include "trace_cache/sample_type.hpp"
 
+#include <sys/types.h>
+
 namespace rocprofsys
 {
 namespace trace_cache
@@ -51,6 +53,7 @@ private:
     std::shared_ptr<rocpd::data_processor> m_data_processor;
     output_file_registry&                  m_output_registry;
     std::string                            m_db_output_path;
+    pid_t                                  m_pid;
 };
 
 }  // namespace trace_cache

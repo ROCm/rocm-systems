@@ -719,6 +719,7 @@ rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& m
 , m_agent_manager(agent_mngr)
 , m_output_registry(output_registry)
 , m_db_output_path(generate_db_output_path(pid))
+, m_pid(pid)
 {
     m_data_processor = std::make_shared<rocpd::data_processor>(
         std::make_shared<rocpd::data_storage::database>(pid, ppid, m_db_output_path));
@@ -738,7 +739,7 @@ rocpd_processor_t::finalize_processing()
     LOG_DEBUG("Finalizing rocpd processor");
     m_data_processor->flush();
 
-    m_output_registry.register_file(m_db_output_path, output_format::rocpd);
+    m_output_registry.register_file(m_db_output_path, output_format::rocpd, m_pid);
 
     LOG_INFO("Rocpd processor finalized successfully");
 }

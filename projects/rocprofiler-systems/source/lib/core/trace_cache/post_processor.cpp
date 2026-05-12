@@ -5,6 +5,7 @@
 
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
+#include "core/output/process_tree_builder.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
@@ -55,6 +56,28 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinat
                      const data::enabled_formats_t&                   _formats,
                      output_file_registry&                            _registry)
 {
+    // Per-PID metadata into the registry so the Output Summary tree
+    // builder gets parent/child structure and the role classifier
+    // can fire the *gpu* hint for PIDs that registered GPU agents.
+    if(_config->_metadata_registry)
+    {
+        const auto info = _config->_metadata_registry->get_process_info();
+        rocprofsys::output::process_metadata proc_meta{};
+        proc_meta.pid     = info.pid;
+        proc_meta.ppid    = info.ppid;
+        proc_meta.command = info.command;
+        if(_config->_agent_manager)
+        {
+            for(const auto& gpu_agent :
+                _config->_agent_manager->get_agents_by_type(agent_type::GPU))
+            {
+                if(gpu_agent)
+                    proc_meta.gpu_ids.push_back(gpu_agent->logical_node_type_id);
+            }
+        }
+        _registry.record_process(std::move(proc_meta));
+    }
+
     data::processor_storage_t storage;
     if(_formats.is_rocpd_enabled())
     {

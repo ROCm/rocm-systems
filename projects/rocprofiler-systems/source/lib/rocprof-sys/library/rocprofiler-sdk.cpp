@@ -2933,11 +2933,12 @@ tool_attach_fini(void* /* tool_data */)
     // Flush any pending region cache entries
     rocprofsys_flush_pending_region_cache_hidden();
 
-    // Write Perfetto trace output
+    // Register into the singleton so the rows survive into
+    // rocprofsys_finalize_hidden's print_summary().
     if(get_use_perfetto())
     {
-        bool                             _perfetto_output_error = false;
-        rocprofsys::output_file_registry _output_registry{};
+        bool  _perfetto_output_error = false;
+        auto& _output_registry       = rocprofsys::registry();
         ::rocprofsys::perfetto::post_process(nullptr, _perfetto_output_error,
                                              _output_registry);
         if(_perfetto_output_error)
@@ -2954,6 +2955,12 @@ tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
 {
     static std::atomic<int> attach_count{ 0 };
     auto                    current_count = attach_count.fetch_add(1);
+
+    // Bump unconditionally so each attach (including the first) owns
+    // a unique session id; bump_session() compacts prior-session rows.
+    const auto _attach_session_id = rocprofsys::registry().bump_session();
+    LOG_DEBUG("Output registry bumped to session {} for attach (pid={})",
+              _attach_session_id, getpid());
 
     if(current_count > 0)
     {

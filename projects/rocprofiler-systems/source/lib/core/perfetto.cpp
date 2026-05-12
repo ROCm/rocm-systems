@@ -4,6 +4,7 @@
 #include "perfetto.hpp"
 #include "config.hpp"
 #include "library/runtime.hpp"
+#include "output/perfetto_log_filter.hpp"
 #include "output_file_registry.hpp"
 #include "perfetto_fwd.hpp"
 #include "utility.hpp"
@@ -52,6 +53,8 @@ get_session(pid_t _pid = process::get_id())
 void
 setup()
 {
+    rocprofsys::output::perfetto_log_filter::install();
+
     auto  args            = ::perfetto::TracingInitArgs{};
     auto  track_event_cfg = ::perfetto::protos::gen::TrackEventConfig{};
     auto& cfg             = get_config();
@@ -233,28 +236,20 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
         // after the gather, so only rank 0 writes and registers the file.
         if(!trace_data.empty())
         {
-            operation::file_output_message<tim::project::rocprofsys> _fom{};
-            // Write the trace into a file.
-            if(config::get_verbose() >= 0)
-                _fom(_filename, std::string{ "perfetto" },
-                     " (%.2f KB / %.2f MB / %.2f GB)... ",
-                     static_cast<double>(trace_data.size()) / units::KB,
-                     static_cast<double>(trace_data.size()) / units::MB,
-                     static_cast<double>(trace_data.size()) / units::GB);
             std::ofstream ofs{};
             if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
             {
-                _fom.append("Error opening '%s'...", _filename.c_str());
+                LOG_ERROR("Error opening perfetto trace file '{}'", _filename);
                 _perfetto_output_error = true;
             }
             else
             {
                 // Write the trace into a file.
                 ofs.write(trace_data.data(), trace_data.size());
-                if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
                 if(_timemory_manager)
                     _timemory_manager->add_file_output("protobuf", "perfetto", _filename);
-                _output_registry.register_file(_filename, output_format::perfetto);
+                _output_registry.register_file(_filename, output_format::perfetto,
+                                               getpid());
             }
             ofs.close();
         }

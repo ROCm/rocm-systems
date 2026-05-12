@@ -1,0 +1,96 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "output/helper_collapser.hpp"
+
+#include <algorithm>
+#include <utility>
+
+namespace rocprofsys::output
+{
+
+namespace
+{
+bool
+is_helper(const process_node& node)
+{
+    if(!node.meta.gpu_ids.empty()) return false;
+    if(node.collapsed.has_value()) return false;
+    if(node.rows.empty()) return true;
+
+    std::uintmax_t max_size  = 0;
+    bool           any_known = false;
+    for(const auto& r : node.rows)
+    {
+        if(r.size_bytes)
+        {
+            any_known = true;
+            if(*r.size_bytes > max_size) max_size = *r.size_bytes;
+        }
+    }
+    // Unknown size -> not a helper, so a transient try_file_size
+    // failure can't silently demote a large output into a helper.
+    if(!any_known) return false;
+    return max_size < HELPER_SIZE_THRESHOLD_BYTES;
+}
+
+process_node
+make_range_node(const std::vector<process_node>& group)
+{
+    process_node node{};
+    helper_range range{};
+    range.count   = group.size();
+    range.min_pid = group.front().meta.pid;
+    range.max_pid = group.front().meta.pid;
+    for(const auto& g : group)
+    {
+        if(g.meta.pid < range.min_pid) range.min_pid = g.meta.pid;
+        if(g.meta.pid > range.max_pid) range.max_pid = g.meta.pid;
+    }
+    node.collapsed = range;
+    return node;
+}
+
+std::vector<process_node>
+collapse_siblings(std::vector<process_node> siblings)
+{
+    for(auto& s : siblings)
+        s.children = collapse_siblings(std::move(s.children));
+
+    std::vector<process_node> kept_non_helpers;
+    std::vector<process_node> helper_pool;
+    kept_non_helpers.reserve(siblings.size());
+
+    for(auto& s : siblings)
+    {
+        if(is_helper(s))
+            helper_pool.push_back(std::move(s));
+        else
+            kept_non_helpers.push_back(std::move(s));
+    }
+
+    std::vector<process_node> out;
+    out.reserve(kept_non_helpers.size() + 1);
+    for(auto& k : kept_non_helpers)
+        out.push_back(std::move(k));
+
+    if(helper_pool.size() >= 2)
+    {
+        out.push_back(make_range_node(helper_pool));
+    }
+    else if(helper_pool.size() == 1)
+    {
+        out.push_back(std::move(helper_pool.front()));
+    }
+
+    return out;
+}
+}  // namespace
+
+std::vector<process_node>
+collapse_helpers(std::vector<process_node> roots)
+{
+    return collapse_siblings(std::move(roots));
+}
+
+}  // namespace rocprofsys::output
