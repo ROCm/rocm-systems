@@ -107,8 +107,9 @@ namespace tool
 {
 namespace
 {
-namespace fs          = ::rocprofiler::common::filesystem;
-using function_args_t = std::vector<argument_info>;
+namespace fs           = ::rocprofiler::common::filesystem;
+namespace writer_types = ::rocpdsna::writer_types;
+using function_args_t  = std::vector<argument_info>;
 
 struct sql_insert_value
 {
@@ -1010,6 +1011,21 @@ construct_kfd_pmc_event(const metadata& tool_metadata, const RecordT& record)
     return data;
 }
 
+std::optional<std::string_view>
+agent_type_to_sv(rocprofiler_agent_type_t type)
+{
+    if(type == ROCPROFILER_AGENT_TYPE_CPU) return std::string_view{"CPU"};
+    if(type == ROCPROFILER_AGENT_TYPE_GPU) return std::string_view{"GPU"};
+    return std::nullopt;
+}
+
+writer_types::agent_unique_id_t
+make_agent_unique_id(const agent_info& agent)
+{
+    return writer_types::agent_unique_id_t{agent_type_to_sv(agent.type),
+                                           static_cast<size_t>(agent.logical_node_type_id)};
+}
+
 void
 write_rocpd_via_sna(
     const output_config&                                                    cfg,
@@ -1027,9 +1043,6 @@ write_rocpd_via_sna(
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<tool_counter_record_t>&                                 counter_collection_gen)
 {
-    (void) cfg;
-    (void) tool_metadata;
-    (void) agent_data;
     (void) hip_api_gen;
     (void) hsa_api_gen;
     (void) kernel_dispatch_gen;
@@ -1041,7 +1054,206 @@ write_rocpd_via_sna(
     (void) rccl_api_gen;
     (void) rocdecode_api_gen;
     (void) counter_collection_gen;
-    ROCP_WARNING << "rocpdsna writer path: not yet implemented (stub)";
+
+    auto node_hash =
+        get_hash_id(tool_metadata.node_data.machine_id) % std::numeric_limits<int64_t>::max();
+    auto node_id = node_hash % std::numeric_limits<uint32_t>::max();
+
+    const uint64_t this_pid         = tool_metadata.process_id;
+    const uint64_t this_pid_init_ns = tool_metadata.process_start_ns;
+    const uint64_t this_ppid        = tool_metadata.parent_process_id;
+    const uint64_t this_nid         = node_id;
+
+    const auto& mach_id   = tool_metadata.node_data.machine_id;
+    const auto  ticks     = common::get_process_start_ticks_since_boot(this_pid);
+    const auto  seed      = common::compute_system_seed(mach_id, this_pid, this_ppid, ticks);
+    const auto  uuid_v7   = common::generate_uuid_v7(this_pid_init_ns, seed);
+    const auto  db_guid   = fmt::format("{}", uuid_v7);
+    auto        output_db = get_output_filename(cfg, "results", "db");
+    if(fs::exists(output_db)) fs::remove(output_db);
+
+    ROCP_WARNING << fmt::format(
+        "writing rocpdsna database for process {} on node {}", this_pid, this_nid);
+    ROCP_ERROR << fmt::format("Opened result file: {} (UUID={})", output_db, uuid_v7);
+
+    auto storage = std::make_unique<rocpdsna::storage_t>(output_db, db_guid);
+    auto writer  = rocpdsna::writer_t{std::move(storage)};
+
+    auto _metadata = metadata{};
+    add_string_entry(_metadata, "");
+
+    for(const auto& itr : agent_data)
+        add_string_entry(_metadata, itr.name, itr.vendor_name, itr.product_name, itr.model_name);
+
+    for(const auto& itr : tool_metadata.buffer_names)
+    {
+        add_string_entry(_metadata, itr.name);
+        for(const auto& iitr : itr.operations)
+            add_string_entry(_metadata, iitr);
+    }
+
+    for(const auto& itr : tool_metadata.callback_names)
+    {
+        add_string_entry(_metadata, itr.name);
+        for(const auto& iitr : itr.operations)
+            add_string_entry(_metadata, iitr);
+    }
+
+    for(const auto& itr : tool_metadata.marker_messages.get())
+    {
+        add_string_entry(_metadata, itr.second);
+    }
+
+    for(const auto& itr : tool_metadata.get_kernel_symbols())
+        add_string_entry(_metadata,
+                         itr.kernel_name,
+                         itr.formatted_kernel_name,
+                         itr.demangled_kernel_name,
+                         itr.truncated_kernel_name);
+
+    for(const auto& itr : tool_metadata.kernel_rename_map.get())
+    {
+        add_string_entry(_metadata, itr.first);
+    }
+
+    for(const auto& itr : tool_metadata.get_code_objects())
+        if(itr.uri != nullptr) add_string_entry(_metadata, itr.uri);
+
+    for(const auto& itr : tool_metadata.get_counter_info())
+    {
+        add_string_entry(_metadata, itr.name);
+        for(const auto& ditr : itr.dimensions)
+            add_string_entry(_metadata, ditr.name);
+    }
+
+    for(const auto& itr : tool_metadata.get_counter_dimension_info())
+        add_string_entry(_metadata, itr.name);
+
+    for(const auto& itr : _metadata.get_string_entries())
+    {
+        writer.register_string(itr.first);
+    }
+
+    {
+        const auto& info = tool_metadata.node_data;
+        writer.register_node_info(writer_types::node_info_t{
+            this_nid,
+            static_cast<size_t>(node_hash),
+            info.machine_id,
+            info.system_name,
+            info.hostname,
+            info.release,
+            info.version,
+            info.hardware_name,
+            info.domain_name,
+        });
+    }
+
+    {
+        auto json_cfg = get_json_string([&cfg](auto& ar) { cfg.save(ar); });
+        auto json_env = get_json_string([](auto& ar) {
+            size_t i = 0;
+            while(true)
+            {
+                const char* itr = environ[i++];
+                if(!itr) break;
+                if(auto pos = std::string_view{itr}.find('='); pos != std::string_view::npos)
+                {
+                    auto evar = std::string{itr}.substr(0, pos);
+                    auto eval = std::string{itr}.substr(pos + 1);
+                    if(eval.find(';') != std::string::npos)
+                    {
+                        ROCP_INFO << fmt::format(
+                            "Env variable {} was sanitized due to semi-colon in the value", evar);
+                    }
+                    else if(!evar.empty())
+                    {
+                        ar(cereal::make_nvp(evar.c_str(), eval));
+                    }
+                }
+            }
+        });
+        auto command  = fmt::format(
+            "{}",
+            fmt::join(tool_metadata.command_line.begin(), tool_metadata.command_line.end(), " "));
+
+        auto process_info        = writer_types::process_info_t{};
+        process_info.ppid        = this_ppid;
+        process_info.pid         = this_pid;
+        process_info.init        = tool_metadata.process_start_ns;
+        process_info.fini        = tool_metadata.process_end_ns;
+        process_info.start       = tool_metadata.process_start_ns;
+        process_info.end         = tool_metadata.process_end_ns;
+        process_info.command     = command;
+        process_info.environment = json_env;
+        process_info.extdata     = json_cfg;
+        process_info.node_id     = this_nid;
+        writer.register_process_info(process_info);
+    }
+
+    for(const auto& itr : tool_metadata.agents)
+    {
+        auto json_info = get_json_string([&itr](auto& ar) { cereal::save(ar, itr); });
+
+        auto agent_info_record           = writer_types::agent_info_t{};
+        agent_info_record.unique_id      = make_agent_unique_id(itr);
+        agent_info_record.absolute_index = itr.node_id;
+        agent_info_record.logical_index  = itr.logical_node_id;
+        agent_info_record.uuid           = itr.device_id;
+        agent_info_record.name           = std::string_view{itr.name};
+        agent_info_record.model_name     = std::string_view{itr.model_name};
+        agent_info_record.vendor_name    = std::string_view{itr.vendor_name};
+        agent_info_record.product_name   = std::string_view{itr.product_name};
+        agent_info_record.user_name      = std::string_view{itr.product_name};
+        agent_info_record.extdata        = json_info;
+        agent_info_record.node_id        = this_nid;
+        agent_info_record.process_id     = this_pid;
+        writer.register_agent_info(agent_info_record);
+    }
+
+    auto registered_threads = std::unordered_set<rocprofiler_thread_id_t>{};
+    auto registered_streams = std::unordered_set<rocprofiler_stream_id_t>{};
+    auto registered_queues  = std::unordered_set<rocprofiler_queue_id_t>{};
+
+    auto ensure_thread = [&](rocprofiler_thread_id_t tid) {
+        if(!registered_threads.insert(tid).second) return;
+        auto thread_info              = writer_types::thread_info_t{};
+        thread_info.parent_process_id = this_ppid;
+        thread_info.thread_id         = tid;
+        thread_info.node_id           = this_nid;
+        thread_info.process_id        = this_pid;
+        writer.register_thread_info(thread_info);
+    };
+    (void) ensure_thread;
+
+    auto ensure_stream = [&](rocprofiler_stream_id_t sid) {
+        if(!registered_streams.insert(sid).second) return;
+        auto name              = (sid.handle == 0) ? std::string{"Default Stream"}
+                                                   : fmt::format("Stream {}", registered_streams.size() - 2);
+        auto stream_info       = writer_types::stream_info_t{};
+        stream_info.stream_id  = sid.handle;
+        stream_info.name       = name;
+        stream_info.node_id    = this_nid;
+        stream_info.process_id = this_pid;
+        writer.register_stream_info(stream_info);
+    };
+
+    auto ensure_queue = [&](rocprofiler_queue_id_t qid) {
+        if(!registered_queues.insert(qid).second) return;
+        auto name             = (qid.handle == 0) ? std::string{"Default Queue"}
+                                                  : fmt::format("Queue {}", registered_queues.size() - 2);
+        auto queue_info       = writer_types::queue_info_t{};
+        queue_info.queue_id   = qid.handle;
+        queue_info.name       = name;
+        queue_info.node_id    = this_nid;
+        queue_info.process_id = this_pid;
+        writer.register_queue_info(queue_info);
+    };
+
+    ensure_stream(rocprofiler_stream_id_t{.handle = 0});
+    ensure_queue(rocprofiler_queue_id_t{.handle = 0});
+    (void) ensure_stream;
+    (void) ensure_queue;
 }
 }  // namespace
 
