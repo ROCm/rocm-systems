@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -92,7 +94,7 @@ TEST(diagnostic_format_exception_test, FormatsRuntimeErrorWithMessage)
     } catch(const std::exception& e)
     {
         auto s = format_exception(e, plain_opts());
-        EXPECT_NE(s.find("error:"), std::string::npos);
+        EXPECT_NE(s.find("error"), std::string::npos);
         EXPECT_NE(s.find("value out of range"), std::string::npos);
         EXPECT_NE(s.find("#0 "), std::string::npos);
     }
@@ -107,7 +109,7 @@ TEST(diagnostic_format_exception_test, FormatsOutOfRangeWithMessage)
     } catch(const std::exception& e)
     {
         auto s = format_exception(e, plain_opts());
-        EXPECT_NE(s.find("error:"), std::string::npos);
+        EXPECT_NE(s.find("error"), std::string::npos);
         EXPECT_NE(s.find("index 9 of 5"), std::string::npos);
     }
 }
@@ -146,7 +148,6 @@ TEST(diagnostic_format_exception_test, HeaderHasSingleLineWhat)
     } catch(const std::exception& e)
     {
         auto s = format_exception(e, plain_opts());
-        // Header (the box) must end before the first blank line.
         // The trimmed second-line text must not appear anywhere in the
         // formatted block since `what()` is single-line-trimmed.
         EXPECT_EQ(s.find("second line"), std::string::npos)
@@ -186,61 +187,162 @@ TEST(diagnostic_format_exception_test, ExplicitColorOverridesNoColorEnv)
     }
 }
 
-TEST(diagnostic_format_exception_test, BoxPresentDefault)
+// Collect lines from a rendered block; trailing empty line (after final '\n')
+// is dropped so callers can iterate "real" lines only.
+std::vector<std::string>
+split_lines(const std::string& s)
+{
+    std::vector<std::string> out;
+    std::string              cur;
+    for(char c : s)
+    {
+        if(c == '\n')
+        {
+            out.push_back(std::move(cur));
+            cur.clear();
+        }
+        else
+        {
+            cur.push_back(c);
+        }
+    }
+    if(!cur.empty())
+    {
+        out.push_back(std::move(cur));
+    }
+    return out;
+}
+
+TEST(diagnostic_format_exception_test, header_line_present_default)
 {
     try
     {
         exception_test_throw_runtime();
     } catch(const std::exception& e)
     {
-        // Default (with color) -> UTF-8 box-drawing top-left corner.
-        auto s = format_exception(e);
-        // U+250C top-left corner.
-        EXPECT_NE(s.find("\xe2\x94\x8c"), std::string::npos)
-            << "expected UTF-8 box-drawing corner; output was:\n"
-            << s;
+        auto s     = format_exception(e);
+        auto lines = split_lines(s);
+        ASSERT_FALSE(lines.empty());
+        // First line opens the side-bar: `┌─` (U+250C U+2500) + ` error`.
+        const std::string utf8_lead = "\xe2\x94\x8c\xe2\x94\x80";
+        EXPECT_NE(lines.front().find(utf8_lead), std::string::npos)
+            << "expected UTF-8 side-bar lead-in; first line was:\n"
+            << lines.front();
+        EXPECT_NE(lines.front().find("error"), std::string::npos);
     }
 }
 
-TEST(diagnostic_format_exception_test, BoxPresentAsciiWhenNoColor)
+TEST(diagnostic_format_exception_test, header_line_ascii_when_no_color)
 {
     try
     {
         exception_test_throw_runtime();
     } catch(const std::exception& e)
     {
-        auto s = format_exception(e, plain_opts());
-        // First character of the framed block is `+`.
-        ASSERT_FALSE(s.empty());
-        EXPECT_EQ(s[0], '+') << "expected ASCII box corner; output was:\n" << s;
-        EXPECT_NE(s.find("|"), std::string::npos);
-        EXPECT_NE(s.find("+--"), std::string::npos);
+        auto s     = format_exception(e, plain_opts());
+        auto lines = split_lines(s);
+        ASSERT_FALSE(lines.empty());
+        EXPECT_EQ(lines.front(), std::string{ "+- error" })
+            << "ASCII header must be `+- error`; first line was:\n"
+            << lines.front();
     }
 }
 
-TEST(diagnostic_format_exception_test, ErrorInsideBoxWithRedWhenColored)
+TEST(diagnostic_format_exception_test, error_label_red_when_colored)
 {
     try
     {
         exception_test_throw_runtime();
     } catch(const std::exception& e)
     {
-        auto s = format_exception(e);
-        // The `error:` keyword must be styled bright-red bold.
-        // Composite escape used by color::error_kw is `\033[1;91m`.
-        auto err_pos = s.find("error:");
+        auto s       = format_exception(e);
+        auto err_pos = s.find("error");
         ASSERT_NE(err_pos, std::string::npos);
-        // The bright-red bold escape must precede the keyword.
+        // Bright-red bold escape must appear immediately before the label.
         const std::string red_bold = "\033[1;91m";
         auto              red_pos  = s.rfind(red_bold, err_pos);
-        EXPECT_NE(red_pos, std::string::npos)
-            << "error: keyword must be bright-red bold; output was:\n"
+        ASSERT_NE(red_pos, std::string::npos)
+            << "expected bright-red-bold prefix; output was:\n"
             << s;
-        // The line carrying `error:` must be wrapped in vertical box borders
-        // (UTF-8 U+2502).
-        const std::string line_start = "\xe2\x94\x82";  // |
-        auto              before     = s.rfind(line_start, err_pos);
-        EXPECT_NE(before, std::string::npos)
-            << "error: keyword must sit inside a vertical box border";
+        // No content between the escape and the label other than the reset
+        // following the bar glyph - the `error` token sits directly after the
+        // composite escape.
+        EXPECT_EQ(s.compare(red_pos + red_bold.size(), 5, "error"), 0)
+            << "expected `error` immediately after red-bold escape";
+    }
+}
+
+TEST(diagnostic_format_exception_test, closing_line_present)
+{
+    try
+    {
+        exception_test_throw_runtime();
+    } catch(const std::exception& e)
+    {
+        // Colored output: last line (after splitting on '\n') must contain
+        // the UTF-8 bottom-left + horizontal lead-in. The line itself is
+        // wrapped in border-color + reset escapes when colored.
+        auto s_color = format_exception(e);
+        auto lines_c = split_lines(s_color);
+        ASSERT_FALSE(lines_c.empty());
+        const std::string utf8_close = "\xe2\x94\x94\xe2\x94\x80";
+        EXPECT_NE(lines_c.back().find(utf8_close), std::string::npos)
+            << "expected UTF-8 closer on last line; was:\n"
+            << lines_c.back();
+
+        // Plain output: last line is exactly `+-`.
+        auto s_plain = format_exception(e, plain_opts());
+        auto lines_p = split_lines(s_plain);
+        ASSERT_FALSE(lines_p.empty());
+        EXPECT_EQ(lines_p.back(), std::string{ "+-" })
+            << "expected `+-` on last line; was:\n"
+            << lines_p.back();
+    }
+}
+
+TEST(diagnostic_format_exception_test, every_content_line_has_left_bar)
+{
+    try
+    {
+        exception_test_throw_runtime();
+    } catch(const std::exception& e)
+    {
+        auto s     = format_exception(e, plain_opts());
+        auto lines = split_lines(s);
+        ASSERT_GE(lines.size(), 3u);  // header + at least one body + closer
+        // Lines between the first (header) and last (closer) must start with
+        // `|` (a `| ` for content lines, bare `|` for the blank separator).
+        for(std::size_t i = 1; i + 1 < lines.size(); ++i)
+        {
+            const auto& line = lines[i];
+            ASSERT_FALSE(line.empty()) << "line " << i << " was empty";
+            EXPECT_EQ(line[0], '|') << "line " << i << " missing left-bar; was:\n"
+                                    << line;
+        }
+    }
+}
+
+TEST(diagnostic_format_exception_test, frames_inside_bar)
+{
+    try
+    {
+        exception_test_throw_runtime();
+    } catch(const std::exception& e)
+    {
+        auto s           = format_exception(e, plain_opts());
+        auto lines       = split_lines(s);
+        bool found_frame = false;
+        for(std::size_t i = 1; i + 1 < lines.size(); ++i)
+        {
+            const auto& line = lines[i];
+            if(line.find("#0") != std::string::npos)
+            {
+                ASSERT_FALSE(line.empty());
+                EXPECT_EQ(line[0], '|') << "frame `#0` line missing left-bar";
+                found_frame = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(found_frame) << "expected a `#0` frame line in:\n" << s;
     }
 }

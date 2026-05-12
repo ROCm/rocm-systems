@@ -33,8 +33,8 @@ struct exception_format_options
     bool capture_trace_at_call_site = true;
 };
 
-/// Render an exception as a framed `error: <what>` message followed by a
-/// stacktrace, per the format spec.
+/// Render an exception (`what()` + stacktrace) wrapped in a side-bar block
+/// labeled `error`, per the format spec.
 std::string
 format_exception(const std::exception& e, exception_format_options opt = {});
 

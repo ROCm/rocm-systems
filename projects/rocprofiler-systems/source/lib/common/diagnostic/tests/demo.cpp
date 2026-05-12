@@ -3,11 +3,11 @@
 
 // Demo program for the rocprofsys diagnostic format.
 //
-// Throws an exception from a deep call chain and renders the framed
-// gdb-style output in the two supported modes:
+// Throws an exception from a deep call chain and renders the side-bar
+// wrapped gdb-style output in the two supported modes:
 //
-//   1. Default (with color)
-//   2. No color (plain ASCII box)
+//   1. Default (with color, UTF-8 side-bar)
+//   2. No color (ASCII side-bar)
 
 #include "common/diagnostic/format_exception.hpp"
 #include "common/diagnostic/stacktrace.hpp"
@@ -70,8 +70,8 @@ main()
         library_initialize("bad_metric");
     } catch(const std::exception& e)
     {
-        section(e, /*color_on=*/true, "gdb-style boxed (default - with color)");
-        section(e, /*color_on=*/false, "gdb-style boxed (no color)");
+        section(e, /*color_on=*/true, "side-bar wrap (default - with color)");
+        section(e, /*color_on=*/false, "side-bar wrap (no color)");
     }
     return 0;
 }
