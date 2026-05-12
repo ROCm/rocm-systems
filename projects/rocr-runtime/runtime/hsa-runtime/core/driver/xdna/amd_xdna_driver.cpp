@@ -52,7 +52,7 @@
 #include <string_view>
 #include <utility>
 
-#include <drm/drm.h>
+#include <libdrm/drm.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
