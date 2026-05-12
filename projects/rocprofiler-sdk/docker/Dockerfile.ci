@@ -73,6 +73,10 @@ RUN set -euo pipefail; \
     if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
         echo -e "[ROCm-latest]\nname=ROCm\nbaseurl=https://repo.radeon.com/rocm/zyp/latest/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/rocm.repo; \
         echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/latest/sle/15.7/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/amdgpu.repo; \
+        # TODO: remove once the SLES base image stops shipping the broken
+        # openSUSE multimedia_libs repo (its metadata URL 404s and causes
+        # `zypper refresh` to exit 4, failing the build under `set -e`).
+        zypper --non-interactive modifyrepo --disable multimedia_libs || true; \
         zypper --gpg-auto-import-keys refresh; \
         zypper --non-interactive install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel python3-pip libdrm-devel; \
         python3 -m venv rocprofiler-sdk; \
