@@ -44,6 +44,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::common-library>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
         $<BUILD_INTERFACE:Threads::Threads>
+    PRIVATE rocprofiler-systems::rocprofiler-systems-diagnostic
 )
 
 add_target_cxx_flag_if_avail(rocprofiler-systems-dl-library "-ftls-model=global-dynamic")
