@@ -273,6 +273,7 @@ class TestSplitCopyComputeHWQueues(RocprofsysTest):
         env = hpc_hip_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,hsa_api,kernel_dispatch,memory_copy"
         env["ROCPROFSYS_COUT_OUTPUT"] = "OFF"
+        env["ROCPROFSYS_ROCM_GROUP_BY_QUEUE"] = "ON"
 
         result = self.run_test(
             mode,

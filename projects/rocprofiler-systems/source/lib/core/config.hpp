@@ -226,6 +226,9 @@ bool
 get_use_ompt();
 
 bool
+get_group_by_queue();
+
+bool
 get_use_code_coverage();
 
 bool

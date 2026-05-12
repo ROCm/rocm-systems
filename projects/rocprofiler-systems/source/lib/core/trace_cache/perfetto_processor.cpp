@@ -321,6 +321,36 @@ dispatch_in_time_sample(size_t category_enum_id, const in_time_sample& _sample,
         category_enum_id, _sample, use_annotations,
         rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
 }
+
+inline std::string
+hip_activity_stream_track_desc(std::uint64_t _stream_id_v)
+{
+    return fmt::format("HIP Activity Stream {}", _stream_id_v);
+}
+
+template <typename QueueCategory, typename QueueTrackFactory, typename Annotate>
+void
+emit_grouped_event(bool group_by_queue, QueueCategory queue_cat,
+                   QueueTrackFactory&& make_queue_track, std::uint64_t stream_id,
+                   const char* push_name, const char* pop_name, std::uint64_t beg_ts,
+                   std::uint64_t end_ts, std::uint64_t corr_id, const Annotate& annotate)
+{
+    const auto _flow = ::perfetto::Flow::ProcessScoped(corr_id);
+    if(group_by_queue)
+    {
+        const auto _track = std::forward<QueueTrackFactory>(make_queue_track)();
+        tracing::push_perfetto(queue_cat, push_name, _track, beg_ts, _flow, annotate);
+        tracing::pop_perfetto(queue_cat, pop_name, _track, end_ts);
+    }
+    else
+    {
+        const auto _track = tracing::get_perfetto_track(
+            category::rocm_hip_stream{}, hip_activity_stream_track_desc, stream_id);
+        tracing::push_perfetto(category::rocm_hip_stream{}, push_name, _track, beg_ts,
+                               _flow, annotate);
+        tracing::pop_perfetto(category::rocm_hip_stream{}, pop_name, _track, end_ts);
+    }
+}
 }  // namespace
 
 perfetto_processor_t::perfetto_processor_t(
@@ -335,6 +365,7 @@ perfetto_processor_t::perfetto_processor_t(
 , m_tmp_file(nullptr)
 , m_tracing_session(nullptr)
 , m_use_annotations(config::get_perfetto_annotations())
+, m_default_group_by_queue(config::get_group_by_queue())
 , m_output_registry(output_registry)
 {}
 
@@ -563,6 +594,19 @@ perfetto_processor_t::finalize_processing()
     }
 }
 
+template <typename CategoryT, typename FuncT, typename... Args>
+::perfetto::Track
+perfetto_processor_t::get_or_create_track(CategoryT, FuncT&& desc_gen, Args&&... args)
+{
+    const auto _uuid = tracing::get_perfetto_category_uuid<CategoryT>(args...);
+    auto       it    = m_track_cache.find(_uuid);
+    if(it != m_track_cache.end()) return it->second;
+    auto _track = tracing::get_perfetto_track(CategoryT{}, std::forward<FuncT>(desc_gen),
+                                              std::forward<Args>(args)...);
+    m_track_cache.emplace(_uuid, _track);
+    return _track;
+}
+
 void
 perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
 {
@@ -587,9 +631,8 @@ perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
 
     auto kernel_name = rocprofsys::utility::demangle(kernel_symbol->kernel_name);
 
-    const auto _track =
-        tracing::get_perfetto_track(category::rocm_kernel_dispatch{}, _track_desc,
-                                    _agent_device_id, _queue_id_handle);
+    // Force queue grouping when sample is not associated with a HIP stream
+    const bool _group_by_queue = m_default_group_by_queue || _stream_handle == 0;
 
     auto add_annotations = [&](::perfetto::EventContext ctx) {
         if(!m_use_annotations) return;
@@ -611,12 +654,13 @@ perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
                                               _kds.grid_size_y, _kds.grid_size_z) } });
     };
 
-    tracing::push_perfetto(category::rocm_kernel_dispatch{}, kernel_name.c_str(), _track,
-                           _beg_ts, ::perfetto::Flow::ProcessScoped(_corr_id),
-                           add_annotations);
-
-    tracing::pop_perfetto(category::rocm_kernel_dispatch{}, kernel_name.c_str(), _track,
-                          _end_ts);
+    auto _make_queue_track = [&] {
+        return get_or_create_track(category::rocm_kernel_dispatch{}, _track_desc,
+                                   _agent_device_id, _queue_id_handle);
+    };
+    emit_grouped_event(_group_by_queue, category::rocm_kernel_dispatch{},
+                       _make_queue_track, _stream_handle, kernel_name.c_str(),
+                       kernel_name.c_str(), _beg_ts, _end_ts, _corr_id, add_annotations);
 }
 
 void
@@ -660,8 +704,8 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
         return fmt::format("GPU Scratch Memory Events Thread {}", _thread_id_sequent);
     };
 
-    const auto _track =
-        tracing::get_perfetto_track(category::rocm_scratch_memory{}, _track_desc_events);
+    // Force queue grouping when sample is not associated with a HIP stream
+    const bool _group_by_queue = m_default_group_by_queue || _stream_id == 0;
 
     auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
         if(!m_use_annotations) return;
@@ -677,10 +721,12 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
                                  { "flags", _sms.flags } });
     };
 
-    tracing::push_perfetto(category::rocm_scratch_memory{}, _name.c_str(), _track,
-                           _beg_ts, ::perfetto::Flow::ProcessScoped(_corr_id),
-                           add_perfetto_annotations);
-    tracing::pop_perfetto(category::rocm_scratch_memory{}, "", _track, _end_ts);
+    auto _make_queue_track = [&] {
+        return get_or_create_track(category::rocm_scratch_memory{}, _track_desc_events);
+    };
+    emit_grouped_event(_group_by_queue, category::rocm_scratch_memory{},
+                       _make_queue_track, _stream_id, _name.c_str(), "", _beg_ts, _end_ts,
+                       _corr_id, add_perfetto_annotations);
 }
 
 void
@@ -706,8 +752,8 @@ perfetto_processor_t::handle(const memory_copy_sample& _mcs)
                            _tid_v->index_data->sequent_value);
     };
 
-    const auto _track = tracing::get_perfetto_track(
-        category::rocm_memory_copy{}, _track_desc, _dst_agent_log_node_id, _thrd_id);
+    // Force queue grouping when sample is not associated with a HIP stream
+    const bool _group_by_queue = m_default_group_by_queue || _stream_id == 0;
 
     auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
         if(!m_use_annotations) return;
@@ -724,10 +770,13 @@ perfetto_processor_t::handle(const memory_copy_sample& _mcs)
                                  { "dst_address", _mcs.dst_address_value } });
     };
 
-    tracing::push_perfetto(category::rocm_memory_copy{}, _name.c_str(), _track, _beg_ts,
-                           ::perfetto::Flow::ProcessScoped(_corr_id),
-                           add_perfetto_annotations);
-    tracing::pop_perfetto(category::rocm_memory_copy{}, "", _track, _end_ts);
+    auto _make_queue_track = [&] {
+        return get_or_create_track(category::rocm_memory_copy{}, _track_desc,
+                                   _dst_agent_log_node_id, _thrd_id);
+    };
+    emit_grouped_event(_group_by_queue, category::rocm_memory_copy{}, _make_queue_track,
+                       _stream_id, _name.c_str(), "", _beg_ts, _end_ts, _corr_id,
+                       add_perfetto_annotations);
 }
 
 void

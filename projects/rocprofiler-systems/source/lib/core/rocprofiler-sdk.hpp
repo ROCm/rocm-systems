@@ -47,9 +47,6 @@ get_operations(rocprofiler_buffer_tracing_kind_t kindv);
 std::vector<std::string>
 get_rocm_events();
 
-bool
-get_group_by_queue();
-
 std::unordered_set<std::int32_t>
 get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv);
 

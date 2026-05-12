@@ -1694,7 +1694,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
         return fmt::format("HIP Activity Stream {}", _stream_id);
     };
 
-    const bool _default_group_by_queue = get_group_by_queue();
+    const bool _default_group_by_queue = config::get_group_by_queue();
 
     static auto _mtx = std::mutex{};
     auto        _lk  = std::unique_lock<std::mutex>{ _mtx };
