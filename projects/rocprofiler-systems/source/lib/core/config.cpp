@@ -327,8 +327,10 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(
         bool, "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING",
-        "Enable unified memory profiling (requires HSA_XNACK=1 and KFD tracing)", false,
-        "backend", "unified_memory", "kfd");
+        "Enable unified memory profiling reports from KFD page fault and migration "
+        "events (requires HSA_XNACK=1 on a supported GPU; required KFD tracing is "
+        "enabled automatically)",
+        false, "backend", "unified_memory", "kfd");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_AMD_SMI",
                               "Enable sampling GPU power, temp, utilization, "

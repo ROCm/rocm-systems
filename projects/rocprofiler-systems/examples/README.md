@@ -9,6 +9,7 @@ This directory contains example applications demonstrating various profiling sce
 | Example | Description | Dependencies |
 | --------- | ------------- | -------------- |
 | [transpose](transpose/) | Tiled matrix transpose on GPU with multi-threaded stream execution | HIP |
+| [unified-memory](unified-memory/) | Managed-memory workload that triggers KFD page fault and migration events and emits unified-memory profiling reports | HIP, XNACK-capable Instinct GPU |
 | [scratch-memory](scratch-memory/) | GPU scratch memory allocation stress test across primary and overflow slots | HIP, HSA |
 | [sdma_test](sdma_test/) | SDMA engine bandwidth benchmark for H2D, D2D, and D2H transfers | HIP |
 | [transferBench](transferBench/) | All-to-all transfer benchmark across CPU, GPU, SDMA, and NIC executors | HIP, HSA |
@@ -69,10 +70,11 @@ This directory contains example applications demonstrating various profiling sce
 ## Building All Examples
 
 - The examples are built as part of the `rocprofiler-systems` CMake project.
-- There is an option to build them also as a **standalone** applications or as a part of **examples suite**
-- The following commands will focus on a building a whole **examples suite**:
+- They can also be built as **standalone** applications or as part of the full
+  **examples suite**.
+- The following commands build the full **examples suite**.
 
-- From `examples` directory run:
+From the `examples` directory run:
 
 ```bash
 cmake -B <build_dir> \
@@ -83,7 +85,7 @@ cmake -B <build_dir> \
 cmake --build <build_dir> --parallel
 ```
 
-- Or from the repository root:
+Or from the repository root:
 
 ```bash
 cmake -B <build_dir> \
@@ -93,7 +95,7 @@ cmake -B <build_dir> \
 cmake --build <build_dir> --parallel
 ```
 
-- Individual examples can be built by specifying the target:
+Individual examples can be built by specifying the target:
 
 ```bash
 cmake --build <build_dir> --target <example_name>
@@ -131,3 +133,27 @@ rocprofiler-systems supports several instrumentation modes:
 | `ROCPROFSYS_TIME_OUTPUT` | Timestamp output subdirectories | `true` |
 | `ROCPROFSYS_ROCM_DOMAINS` | ROCm API domains to trace | all |
 | `ROCPROFSYS_USE_MPIP` | Enable MPI profiling interposition | `false` |
+
+### Unified Memory Profiling
+
+The `unified-memory` example exercises `hipMallocManaged` access patterns that trigger
+KFD page fault and page migration events. When unified-memory profiling is enabled,
+rocprofiler-systems generates `unified_memory.txt` and `unified_memory.json` alongside
+the usual Perfetto and optional ROCpd outputs.
+
+Requirements:
+
+- XNACK-capable Instinct GPU
+- `HSA_XNACK=1`
+- `ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON`
+
+The required KFD page fault and page migration tracing domains are enabled
+automatically when unified-memory profiling is turned on.
+
+Example:
+
+```bash
+HSA_XNACK=1 \
+ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
+rocprof-sys-run -- ./unified-memory -s 32 -p 256 -i 4
+```

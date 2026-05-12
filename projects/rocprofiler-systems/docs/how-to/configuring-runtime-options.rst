@@ -323,6 +323,30 @@ or on the command line. For example:
 
    ROCPROFSYS_ROCM_DOMAINS=kfd_events
 
+ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enables generation of unified-memory profiling reports from KFD page-fault and
+page-migration events. Two files are written alongside the usual Perfetto and
+ROCpd outputs:
+
+* ``unified_memory.txt`` -- human-readable per-GPU summary with fault counts,
+  trigger breakdown (``gpu_page_fault``, ``cpu_page_fault``, ``prefetch``), and
+  host-to-device / device-to-host migration bandwidth.
+* ``unified_memory.json`` -- machine-readable equivalent with the same fields
+  plus an ``xnack`` flag and an always-present ``device_to_device`` direction
+  bucket for schema stability.
+
+Requires an XNACK-capable Instinct GPU with ``HSA_XNACK=1``. The KFD tracing
+domains (``kfd_page_fault``, ``kfd_page_migrate``) are enabled automatically
+when this setting is on -- you do not need to add ``kfd_events`` to
+``ROCPROFSYS_ROCM_DOMAINS`` separately.
+
+.. code-block:: shell
+
+   export HSA_XNACK=1
+   export ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON
+
 ROCPROFSYS_SELECTED_REGIONS
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
