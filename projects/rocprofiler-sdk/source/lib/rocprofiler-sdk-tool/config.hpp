@@ -137,7 +137,8 @@ struct config : output_config
     bool   advanced_thread_trace         = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
     bool   att_serialize_all             = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
     bool   enable_signal_handlers        = get_env("ROCPROF_SIGNAL_HANDLERS", true);
-    bool   enable_wait_for_children      = get_env("ROCPROF_WAIT_FOR_CHILDREN", true);
+    bool   disable_wait_for_children     = get_env("ROCPROF_DISABLE_WAIT_FOR_CHILDREN", false);
+    bool   skip_reraise_after_chain      = get_env("ROCPROF_SKIP_RERAISE", false);
     bool   enable_process_sync           = get_env("ROCPROF_PROCESS_SYNC", false);
     bool   selected_regions              = get_env("ROCPROF_SELECTED_REGIONS", false);
     bool   selected_regions_ref_count    = get_env("ROCPROF_SELECTED_REGIONS_REF_COUNT", false);
@@ -297,7 +298,8 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(truncate);
     CFG_SERIALIZE_MEMBER(minimum_output_bytes);
     CFG_SERIALIZE_MEMBER(enable_signal_handlers);
-    CFG_SERIALIZE_MEMBER(enable_wait_for_children);
+    CFG_SERIALIZE_MEMBER(disable_wait_for_children);
+    CFG_SERIALIZE_MEMBER(skip_reraise_after_chain);
     CFG_SERIALIZE_MEMBER(enable_process_sync);
     CFG_SERIALIZE_MEMBER(selected_regions);
     CFG_SERIALIZE_MEMBER(selected_regions_ref_count);

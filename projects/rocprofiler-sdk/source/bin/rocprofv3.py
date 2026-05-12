@@ -907,6 +907,17 @@ For attachment profiling of running processes:
 
     add_parser_bool_argument(
         advanced_options,
+        "--skip-reraise",
+        help="""After rocprofv3 finalization, skip re-raising the signal when a chained
+        signal handler was invoked. Useful when profiling Python processes where the
+        chained handler (e.g. Python's SIGINT handler) is designed to return without
+        terminating the process. Without this flag, rocprofv3 re-raises the signal
+        after the chained handler returns, which kills the process before Python can
+        act on its pending KeyboardInterrupt.""",
+    )
+
+    add_parser_bool_argument(
+        advanced_options,
         "--process-sync",
         help="""Enables the process synchronization in the rocprofv3 tool finalization stage.
         When --process-sync is set to true,
@@ -1967,7 +1978,10 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_SIGNAL_HANDLERS", not args.disable_signal_handlers)
 
     if args.disable_wait_for_children is not None:
-        update_env("ROCPROF_WAIT_FOR_CHILDREN", not args.disable_wait_for_children)
+        update_env("ROCPROF_DISABLE_WAIT_FOR_CHILDREN", args.disable_wait_for_children)
+
+    if args.skip_reraise is not None:
+        update_env("ROCPROF_SKIP_RERAISE", args.skip_reraise)
 
     if args.process_sync is not None:
         update_env("ROCPROF_PROCESS_SYNC", args.process_sync)

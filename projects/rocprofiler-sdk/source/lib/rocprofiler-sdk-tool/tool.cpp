@@ -3481,8 +3481,8 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
                                 this_func,
                                 signo);
 
-    bool         chained_handler_invoked = false;
-    static auto _once = std::once_flag{};
+    bool        chained_handler_invoked = false;
+    static auto _once                   = std::once_flag{};
     std::call_once(_once, [&]() {
         auto get_children = [&this_pid]() {
             auto fname    = fmt::format("/proc/{}/task/{}/children", this_pid, this_pid);
@@ -3498,7 +3498,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
         };
 
         auto _children = get_children();
-        if(tool::get_config().enable_wait_for_children)
+        if(!tool::get_config().disable_wait_for_children)
         {
             ROCP_WARNING << fmt::format(
                 "[PPID={}][PID={}][TID={}][{}] rocprofv3 will wait for {} children to exit",
@@ -3518,7 +3518,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
         {
             ROCP_INFO << fmt::format(
                 "[PPID={}][PID={}][TID={}][{}] rocprofv3 skipping wait for {} children "
-                "(ROCPROF_WAIT_FOR_CHILDREN=0)",
+                "(ROCPROF_DISABLE_WAIT_FOR_CHILDREN=1)",
                 this_ppid,
                 this_pid,
                 this_tid,
@@ -3616,7 +3616,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
 
     // below is for testing purposes. re-raising the signal causes CTest to ignore WILL_FAIL ON
     if(signal_handler_exit) ::quick_exit(signo);
-    if(!chained_handler_invoked) ::raise(signo);
+    if(!chained_handler_invoked || !tool::get_config().skip_reraise_after_chain) ::raise(signo);
 }
 
 int
