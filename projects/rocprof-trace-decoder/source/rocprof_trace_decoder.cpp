@@ -278,18 +278,6 @@ rocprof_trace_decoder_create_handle(rocprof_trace_decoder_handle_t* handle)
 }
 
 PUBLIC_API rocprofiler_thread_trace_decoder_status_t
-rocprof_trace_decoder_flush_chunk(rocprof_trace_decoder_handle_t handle, uint64_t chunk_index)
-{
-    auto hd = HandleData::get_write_handle(handle);
-    if (!hd.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    if (hd->pipestate.erase(chunk_index + 1) == 0)
-        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
-}
-
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t
 rocprof_trace_decoder_destroy_handle(rocprof_trace_decoder_handle_t handle)
 {
     std::lock_guard<std::mutex> lock(HandleData::get_map_mutex());
