@@ -31,7 +31,8 @@ endif()
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FULL_VERSION_STRING LIMIT_COUNT 1)
 string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
 string(
-    REGEX REPLACE "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)"
+    REGEX REPLACE
+    "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)"
     "\\1.\\2.\\3"
     ROCPROFSYS_VERSION
     "${FULL_VERSION_STRING}"

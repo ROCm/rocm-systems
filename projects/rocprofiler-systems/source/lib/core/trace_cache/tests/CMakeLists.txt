@@ -13,6 +13,7 @@ set(trace_cache_tests_sources
     test_rocpd_xcp_output.cpp
     test_enabled_formats.cpp
     test_discovery.cpp
+    test_rocpd_processor.cpp
 )
 
 add_library(trace-cache-tests OBJECT ${trace_cache_tests_sources})
@@ -22,6 +23,7 @@ target_link_libraries(
     PRIVATE
         rocprofiler-systems-googletest-library
         rocprofiler-systems-core-library
+        rocprofiler-systems-rocpdsna
         rocprofiler-systems-logger
 )
 

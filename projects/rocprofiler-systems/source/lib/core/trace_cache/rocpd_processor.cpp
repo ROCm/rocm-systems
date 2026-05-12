@@ -10,6 +10,7 @@
 #include "core/node_info.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
+#include "core/trace_cache/rocpd_helpers.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
@@ -35,6 +36,13 @@ namespace trace_cache
 namespace
 {
 
+using rocpd_helpers::make_agent_uid;
+using rocpd_helpers::make_event;
+using rocpd_helpers::make_trace_env;
+using rocpd_helpers::make_trace_env_with_agent;
+using rocpd_helpers::make_trace_env_with_agent_queue_stream;
+using rocpd_helpers::parse_memory_operation_name;
+
 auto
 get_handle_from_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
@@ -54,94 +62,6 @@ generate_db_output_path(int pid)
     return rocprofsys::get_database_absolute_path(db_name, _tag);
 }
 
-rocpdsna::writer_types::agent_unique_id_t
-make_agent_uid(const agent& a)
-{
-    const auto type_to_string = [](agent_type type) -> std::optional<std::string_view> {
-        switch(type)
-        {
-            case agent_type::GPU: return "GPU";
-            case agent_type::CPU: return "CPU";
-            default: return std::nullopt;
-        }
-    };
-
-    rocpdsna::writer_types::agent_unique_id_t uid;
-    uid.agent_type = type_to_string(a.type);
-    uid.type_index = a.device_type_index;
-    return uid;
-}
-
-rocpdsna::writer_types::trace_environment_t
-make_trace_env(size_t node_id, size_t process_id, size_t thread_id)
-{
-    rocpdsna::writer_types::trace_environment_t env;
-    env.node_id    = node_id;
-    env.process_id = process_id;
-    env.thread_id  = thread_id;
-    return env;
-}
-
-rocpdsna::writer_types::trace_environment_t
-make_trace_env_with_agent(size_t node_id, size_t process_id, size_t thread_id,
-                          const agent& a)
-{
-    auto env     = make_trace_env(node_id, process_id, thread_id);
-    env.agent_id = make_agent_uid(a);
-    return env;
-}
-
-rocpdsna::writer_types::trace_environment_t
-make_trace_env_with_agent_queue_stream(size_t node_id, size_t process_id,
-                                       size_t thread_id, const agent& a, size_t queue_id,
-                                       size_t stream_id)
-{
-    auto env      = make_trace_env_with_agent(node_id, process_id, thread_id, a);
-    env.queue_id  = queue_id;
-    env.stream_id = stream_id;
-    return env;
-}
-
-rocpdsna::writer_types::event_data_t
-make_event(size_t stack_id, size_t parent_stack_id, size_t correlation_id,
-           const char* category)
-{
-    rocpdsna::writer_types::event_data_t ev;
-    ev.stack_id        = stack_id;
-    ev.parent_stack_id = parent_stack_id;
-    ev.correlation_id  = correlation_id;
-    ev.event_category  = category;
-    return ev;
-}
-
-using memory_operation = std::string;
-using memory_type      = std::string;
-std::pair<memory_operation, memory_type>
-parse_memory_operation_name(std::string_view memory_operation_name)
-{
-    static const std::unordered_map<std::string_view,
-                                    std::pair<memory_operation, memory_type>>
-        parsing_map{
-            { "MEMORY_ALLOCATION_NONE", { "NONE", "REAL" } },
-            { "MEMORY_ALLOCATION_ALLOCATE", { "ALLOC", "REAL" } },
-            { "MEMORY_ALLOCATION_VMEM_ALLOCATE", { "ALLOC", "VIRTUAL" } },
-            { "MEMORY_ALLOCATION_FREE", { "FREE", "REAL" } },
-            { "MEMORY_ALLOCATION_VMEM_FREE", { "FREE", "VIRTUAL" } },
-            { "SCRATCH_MEMORY_NONE", { "NONE", "SCRATCH" } },
-            { "SCRATCH_MEMORY_ALLOC", { "ALLOC", "SCRATCH" } },
-            { "SCRATCH_MEMORY_FREE", { "FREE", "SCRATCH" } },
-            { "SCRATCH_MEMORY_ASYNC_RECLAIM", { "ASYNC_RECLAIM", "SCRATCH" } },
-        };
-
-    auto item = parsing_map.find(memory_operation_name);
-    if(item == parsing_map.end())
-    {
-        LOG_WARNING("Unknown memory operation name: {}", memory_operation_name);
-        return { "UNKNOWN", "UNKNOWN" };
-    }
-
-    return item->second;
-}
 }  // namespace
 
 void
@@ -593,7 +513,7 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
     auto ev = make_event(0, 0, 0, _name);
 
     auto insert_event_and_sample = [&](bool is_enabled, const char* pmc_name,
-                                       const char* track_name, uint64_t value) {
+                                       const char* track_name, std::uint64_t value) {
         if(!is_enabled) return;
 
         LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}", pmc_name,
@@ -937,15 +857,17 @@ rocpd_processor_t::post_process_metadata()
     // Register process info
     auto                                   process_info = m_metadata->get_process_info();
     rocpdsna::writer_types::process_info_t proc;
-    proc.ppid        = process_info.ppid;
-    proc.pid         = process_info.pid;
-    proc.init        = 0;
-    proc.fini        = 0;
-    proc.start       = process_info.start;
-    proc.end         = process_info.end;
-    proc.command     = process_info.command.c_str();
-    proc.environment = "{}";
-    proc.node_id     = n_info.id;
+    proc.ppid    = process_info.ppid;
+    proc.pid     = process_info.pid;
+    proc.init    = 0;
+    proc.fini    = 0;
+    proc.start   = process_info.start;
+    proc.end     = process_info.end;
+    proc.command = process_info.command.c_str();
+    proc.environment =
+        process_info.environment.empty() ? "{}" : process_info.environment.c_str();
+    proc.extdata = process_info.extdata.empty() ? "{}" : process_info.extdata.c_str();
+    proc.node_id = n_info.id;
     m_writer->register_process_info(proc);
 
     // Register agents

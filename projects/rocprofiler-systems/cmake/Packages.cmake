@@ -269,14 +269,16 @@ if(EXISTS "${_AMDSMI_HEADER}")
     file(READ "${_AMDSMI_HEADER}" _AMDSMI_HEADER_CONTENTS)
 
     string(
-        REGEX MATCH "#define AMDSMI_LIB_VERSION_MAJOR ([0-9]+)"
+        REGEX MATCH
+        "#define AMDSMI_LIB_VERSION_MAJOR ([0-9]+)"
         _
         "${_AMDSMI_HEADER_CONTENTS}"
     )
     set(ROCPROFSYS_AMDSMI_VERSION_MAJOR "${CMAKE_MATCH_1}")
 
     string(
-        REGEX MATCH "#define AMDSMI_LIB_VERSION_MINOR ([0-9]+)"
+        REGEX MATCH
+        "#define AMDSMI_LIB_VERSION_MINOR ([0-9]+)"
         _
         "${_AMDSMI_HEADER_CONTENTS}"
     )

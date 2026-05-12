@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 include_guard(GLOBAL)
 
 # ------------------------------------------------------------------------------
@@ -16,7 +19,7 @@ set(ROCPROFSYS_ROCPDSNA_GIT_REPOSITORY
     "Git repository URL for rocpdsna (leave empty to use local path)"
 )
 
-set(ROCPROFSYS_ROCPDSNA_GIT_TAG "develop" CACHE STRING "Git tag/branch for rocpdsna")
+set(ROCPROFSYS_ROCPDSNA_GIT_TAG "sna-develop" CACHE STRING "Git tag/branch for rocpdsna")
 
 set(ROCPROFSYS_ROCPDSNA_SOURCE_DIR
     "${PROJECT_SOURCE_DIR}/../rocpdsna"
@@ -56,9 +59,25 @@ else()
             SOURCE_DIR
             ${PROJECT_BINARY_DIR}/external/rocpdsna/src
         )
-    else()
+    elseif(EXISTS "${ROCPROFSYS_ROCPDSNA_SOURCE_DIR}/CMakeLists.txt")
         message(STATUS "[rocpdsna] Using local source: ${ROCPROFSYS_ROCPDSNA_SOURCE_DIR}")
         set(_ROCPDSNA_SOURCE_ARGS SOURCE_DIR ${ROCPROFSYS_ROCPDSNA_SOURCE_DIR})
+    else()
+        set(_ROCPDSNA_FALLBACK_REPO "https://github.com/ROCm/rocm-systems.git")
+        message(
+            STATUS
+            "[rocpdsna] Local source not found at ${ROCPROFSYS_ROCPDSNA_SOURCE_DIR}, falling back to git: ${_ROCPDSNA_FALLBACK_REPO} (${ROCPROFSYS_ROCPDSNA_GIT_TAG})"
+        )
+        set(_ROCPDSNA_SOURCE_ARGS
+            GIT_REPOSITORY
+            ${_ROCPDSNA_FALLBACK_REPO}
+            GIT_TAG
+            ${ROCPROFSYS_ROCPDSNA_GIT_TAG}
+            SOURCE_DIR
+            ${PROJECT_BINARY_DIR}/external/rocpdsna/src
+            SOURCE_SUBDIR
+            projects/rocpdsna
+        )
     endif()
 
     FetchContent_Declare(
