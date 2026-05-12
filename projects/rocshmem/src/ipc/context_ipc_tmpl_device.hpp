@@ -1188,186 +1188,186 @@ __device__ inline int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src
 
 // Collective Allgather
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_allgather(src_tensor_t src, dst_tensor_t dst,
-                                          tuple_t start_coord, tuple_t boundary,
-                                          rocshmem_team_t team, uint64_t flags) {
+__device__ inline int IPCContext::tile_allgather([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                          [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                          [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_allgather_wave(src_tensor_t src, dst_tensor_t dst,
-                                               tuple_t start_coord, tuple_t boundary,
-                                               rocshmem_team_t team, uint64_t flags) {
+__device__ inline int IPCContext::tile_allgather_wave([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                               [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                               [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_allgather_wg(src_tensor_t src, dst_tensor_t dst,
-                                             tuple_t start_coord, tuple_t boundary,
-                                             rocshmem_team_t team, uint64_t flags) {
+__device__ inline int IPCContext::tile_allgather_wg([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                             [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                             [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 // Collective Broadcast
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_broadcast(src_tensor_t src, dst_tensor_t dst,
-                                          tuple_t start_coord, tuple_t boundary,
-                                          int pe_root, rocshmem_team_t team,
-                                          uint64_t flags) {
+__device__ inline int IPCContext::tile_broadcast([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                          [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                          [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+                                          [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_broadcast_wave(src_tensor_t src, dst_tensor_t dst,
-                                               tuple_t start_coord, tuple_t boundary,
-                                               int pe_root, rocshmem_team_t team,
-                                               uint64_t flags) {
+__device__ inline int IPCContext::tile_broadcast_wave([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                               [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                               [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+                                               [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_broadcast_wg(src_tensor_t src, dst_tensor_t dst,
-                                             tuple_t start_coord, tuple_t boundary,
-                                             int pe_root, rocshmem_team_t team,
-                                             uint64_t flags) {
+__device__ inline int IPCContext::tile_broadcast_wg([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                             [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                             [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+                                             [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 // SUM Reductions
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_sum_reduce(src_tensor_t src, dst_tensor_t dst,
-                                           tuple_t start_coord, tuple_t boundary,
-                                           rocshmem_team_t team, uint64_t flags) {
+__device__ inline int IPCContext::tile_sum_reduce([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                           [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                           [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_sum_reduce_wave(src_tensor_t src, dst_tensor_t dst,
-                                                tuple_t start_coord, tuple_t boundary,
-                                                rocshmem_team_t team, uint64_t flags) {
+__device__ inline int IPCContext::tile_sum_reduce_wave([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                                [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                                [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_sum_reduce_wg(src_tensor_t src, dst_tensor_t dst,
-                                              tuple_t start_coord, tuple_t boundary,
-                                              rocshmem_team_t team, uint64_t flags) {
+__device__ inline int IPCContext::tile_sum_reduce_wg([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                              [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                              [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_sum_rooted_reduce(src_tensor_t src, dst_tensor_t dst,
-                                                  tuple_t start_coord, tuple_t boundary,
-                                                  int pe_root, rocshmem_team_t team,
-                                                  uint64_t flags) {
+__device__ inline int IPCContext::tile_sum_rooted_reduce([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                                  [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                                  [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+                                                  [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_sum_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
-                                                       tuple_t start_coord, tuple_t boundary,
-                                                       int pe_root, rocshmem_team_t team,
-                                                       uint64_t flags) {
+__device__ inline int IPCContext::tile_sum_rooted_reduce_wave([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                                       [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                                       [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+                                                       [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_sum_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
-                                                     tuple_t start_coord, tuple_t boundary,
-                                                     int pe_root, rocshmem_team_t team,
-                                                     uint64_t flags) {
+__device__ inline int IPCContext::tile_sum_rooted_reduce_wg([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                                     [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                                     [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+                                                     [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 // MAX Reductions
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_max_reduce(src_tensor_t src, dst_tensor_t dst,
-                                           tuple_t start_coord, tuple_t boundary,
-                                           rocshmem_team_t team, uint64_t flags) {
+__device__ inline int IPCContext::tile_max_reduce([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                           [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                           [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_max_reduce_wave(src_tensor_t src, dst_tensor_t dst,
-                                                tuple_t start_coord, tuple_t boundary,
-                                                rocshmem_team_t team, uint64_t flags) {
+__device__ inline int IPCContext::tile_max_reduce_wave([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                                [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                                [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_max_reduce_wg(src_tensor_t src, dst_tensor_t dst,
-                                              tuple_t start_coord, tuple_t boundary,
-                                              rocshmem_team_t team, uint64_t flags) {
+__device__ inline int IPCContext::tile_max_reduce_wg([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                              [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                              [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_max_rooted_reduce(src_tensor_t src, dst_tensor_t dst,
-                                                  tuple_t start_coord, tuple_t boundary,
-                                                  int pe_root, rocshmem_team_t team,
-                                                  uint64_t flags) {
+__device__ inline int IPCContext::tile_max_rooted_reduce([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                                  [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                                  [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+                                                  [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_max_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
-                                                       tuple_t start_coord, tuple_t boundary,
-                                                       int pe_root, rocshmem_team_t team,
-                                                       uint64_t flags) {
+__device__ inline int IPCContext::tile_max_rooted_reduce_wave([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                                       [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                                       [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+                                                       [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_max_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
-                                                     tuple_t start_coord, tuple_t boundary,
-                                                     int pe_root, rocshmem_team_t team,
-                                                     uint64_t flags) {
+__device__ inline int IPCContext::tile_max_rooted_reduce_wg([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                                     [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                                     [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+                                                     [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 // MIN Reductions
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_min_reduce(src_tensor_t src, dst_tensor_t dst,
-                                           tuple_t start_coord, tuple_t boundary,
-                                           rocshmem_team_t team, uint64_t flags) {
+__device__ inline int IPCContext::tile_min_reduce([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                           [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                           [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_min_reduce_wave(src_tensor_t src, dst_tensor_t dst,
-                                                tuple_t start_coord, tuple_t boundary,
-                                                rocshmem_team_t team, uint64_t flags) {
+__device__ inline int IPCContext::tile_min_reduce_wave([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                                [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                                [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_min_reduce_wg(src_tensor_t src, dst_tensor_t dst,
-                                              tuple_t start_coord, tuple_t boundary,
-                                              rocshmem_team_t team, uint64_t flags) {
+__device__ inline int IPCContext::tile_min_reduce_wg([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                              [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                              [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_min_rooted_reduce(src_tensor_t src, dst_tensor_t dst,
-                                                  tuple_t start_coord, tuple_t boundary,
-                                                  int pe_root, rocshmem_team_t team,
-                                                  uint64_t flags) {
+__device__ inline int IPCContext::tile_min_rooted_reduce([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                                  [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                                  [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+                                                  [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_min_rooted_reduce_wave(src_tensor_t src, dst_tensor_t dst,
-                                                       tuple_t start_coord, tuple_t boundary,
-                                                       int pe_root, rocshmem_team_t team,
-                                                       uint64_t flags) {
+__device__ inline int IPCContext::tile_min_rooted_reduce_wave([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                                       [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                                       [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+                                                       [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_min_rooted_reduce_wg(src_tensor_t src, dst_tensor_t dst,
-                                                     tuple_t start_coord, tuple_t boundary,
-                                                     int pe_root, rocshmem_team_t team,
-                                                     uint64_t flags) {
+__device__ inline int IPCContext::tile_min_rooted_reduce_wg([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+                                                     [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                                     [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+                                                     [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 

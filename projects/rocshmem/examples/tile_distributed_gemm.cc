@@ -43,11 +43,8 @@
 
 #include <hip/hip_runtime.h>
 #include <rocshmem/rocshmem.hpp>
-
-// For device code using Tile API
 #ifdef __HIP_DEVICE_COMPILE__
-#include "../../src/context_incl.hpp"
-#include <rocshmem/rocshmem_TILE_impl.hpp>
+#include <rocshmem/rocshmem_device.hpp>
 #endif
 
 #include <iostream>
@@ -196,7 +193,7 @@ __global__ void tile_exchange_kernel(Tensor2D<int> local_tensor,
  * @param remote_pe PE ID to fetch from
  */
 __global__ void tile_get_kernel(Tensor2D<int> local_buffer,
-                                Tensor2D<int> remote_tensor,
+                                Tensor2D<int> tensor,
                                 int tile_row, int tile_col,
                                 int tile_rows, int tile_cols,
                                 int remote_pe) {
@@ -207,7 +204,7 @@ __global__ void tile_get_kernel(Tensor2D<int> local_buffer,
 
     // Fetch tile using Tile API
     // Note: tile_get uses (dst, src) parameter order
-    rocshmem_tile_get(local_buffer, remote_tensor, start, boundary,
+    rocshmem_tile_get(local_buffer, tensor, start, boundary,
                      remote_pe, 0);
   }
 }
@@ -228,10 +225,10 @@ void init_matrix(std::vector<int>& mat, int rows, int cols,
                  int row_offset, int pe_id) {
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols; j++) {
-      // Use global row index and PE ID to make each PE's data unique
-      // Format: (global_row * 1000) + col + (PE_ID * 100000)
-      int global_row = row_offset + i;
-      mat[i * cols + j] = (global_row * 1000) + j + (pe_id * 100000);
+      // Small values to avoid integer overflow in GEMM
+      // Format: (row % 10) + (col % 10) + 1
+      // This keeps values in range [1, 19] for easy verification
+      mat[i * cols + j] = ((row_offset + i) % 10) + (j % 10) + 1;
     }
   }
 }
@@ -321,8 +318,6 @@ int main(int argc, char* argv[]) {
   }
 
   // Allocate symmetric heap for matrices
-  // WORKAROUND: Allocate a dummy buffer first to avoid the first-allocation issue
-  int* dummy = (int*)rocshmem_malloc(32);  // 32 bytes dummy allocation
   int* d_A_local = (int*)rocshmem_malloc(M_local * K * sizeof(int));
   int* d_B = (int*)rocshmem_malloc(K * N * sizeof(int));
   int* d_C_local = (int*)rocshmem_malloc(M_local * N * sizeof(int));
@@ -334,9 +329,10 @@ int main(int argc, char* argv[]) {
   }
 
   // Copy data to device
-  hipMemcpy(d_A_local, h_A_local.data(), M_local * K * sizeof(int),
-           hipMemcpyHostToDevice);
-  hipMemcpy(d_B, h_B.data(), K * N * sizeof(int), hipMemcpyHostToDevice);
+  CHECK_HIP(hipMemcpy(d_A_local, h_A_local.data(), M_local * K * sizeof(int),
+                      hipMemcpyHostToDevice));
+  CHECK_HIP(hipMemcpy(d_B, h_B.data(), K * N * sizeof(int), hipMemcpyHostToDevice));
+  // CHECK_HIP(hipStreamSynchronize(0));
 
   // Ensure all PEs have initialized their data
   rocshmem_barrier_all();
@@ -353,14 +349,15 @@ int main(int argc, char* argv[]) {
   hipLaunchKernelGGL(gemm_kernel, grid, block, 0, 0,
                     A_tensor, B_tensor, C_tensor);
 
-  hipDeviceSynchronize();
+  CHECK_HIP(hipDeviceSynchronize());
 
   // Synchronize all PEs
   rocshmem_barrier_all();
 
   // Copy result back to host
-  hipMemcpy(h_C_local.data(), d_C_local, M_local * N * sizeof(int),
-           hipMemcpyDeviceToHost);
+  CHECK_HIP(hipMemcpy(h_C_local.data(), d_C_local, M_local * N * sizeof(int),
+                      hipMemcpyDeviceToHost));
+  CHECK_HIP(hipStreamSynchronize(0));  // Ensure data is visible before verification
 
   // Verify result
   bool success = verify_result(h_C_local, h_A_local, h_B, M_local, K, N);
@@ -373,118 +370,46 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  // Example: Demonstrate Tile API for sending data to remote PE
-  // (Not needed for this GEMM, but shows usage)
-  if (n_pes > 1) {
-    // Allocate buffer for tile on both PEs
-    int* d_tile_buffer = (int*)rocshmem_malloc(16 * sizeof(int));
+  // Demonstrate tile_get API
+  // Allocate buffer for fetched tile (4×4 = 16 elements) - COLLECTIVE
+  int* d_tile_buffer_get = (int*)rocshmem_malloc(16 * sizeof(int));
 
-    if (my_pe == 1) {
-      // PE 1 sends a 4×4 tile to PE 0
-      std::cout << "\n--- Tile API Demo ---" << std::endl;
-      std::cout << "PE 1 sending a 4×4 tile to PE 0's buffer..." << std::endl;
-      std::cout << "PE 1's d_A_local = " << d_A_local << std::endl;
-      std::cout << "PE 1's d_B = " << d_B << std::endl;
-      std::cout << "PE 1's d_C_local = " << d_C_local << std::endl;
-
-      if (M_local >= 4 && K >= 4) {
-        // Create tensor descriptors
-        Tensor2D<int> local_A(d_A_local, M_local, K);  // PE 1's A matrix
-        Tensor2D<int> tile_buf(d_tile_buffer, 4, 4);   // 4×4 tile buffer on PE 0
-
-        // Send tile to PE 0 (rows 0-3, cols 0-3 of local matrix)
-        hipLaunchKernelGGL(tile_exchange_kernel, 1, 1, 0, 0,
-                          local_A, tile_buf, 0, 0, 4, 4, 0);
-        hipDeviceSynchronize();
-      }
-    }
-
-    rocshmem_barrier_all();
-
-    if (my_pe == 0) {
-      std::cout << "PE 0 receiving tile from PE 1..." << std::endl;
-
-      // Copy tile back to host for verification
-      std::vector<int> h_tile_buffer(16);
-      hipMemcpy(h_tile_buffer.data(), d_tile_buffer, 16 * sizeof(int),
-               hipMemcpyDeviceToHost);
-
-      // Verify: the tile should match PE 1's A matrix values
-      // PE 1's global row offset is M_local
-      int pe1_row_offset = 1 * M_local;
-      int pe1_id = 1;
-
-      bool tile_correct = true;
-      std::cout << "\nExpected vs Actual values for 4×4 tile:" << std::endl;
-      for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 4; j++) {
-          // Expected value from PE 1's initialization
-          // Using same formula as init_matrix: (global_row * 1000) + col + (PE_ID * 100000)
-          int global_row = pe1_row_offset + i;
-          int expected = (global_row * 1000) + j + (pe1_id * 100000);
-          int actual = h_tile_buffer[i * 4 + j];
-
-          std::cout << "  [" << i << "," << j << "] expected=" << expected
-                    << " actual=" << actual;
-          if (expected != actual) {
-            std::cout << " ✗ MISMATCH";
-            tile_correct = false;
-          } else {
-            std::cout << " ✓";
-          }
-          std::cout << std::endl;
-        }
-      }
-
-      if (tile_correct) {
-        std::cout << "✓ Tile data verification PASSED" << std::endl;
-        std::cout << "  Successfully received correct 4×4 region from PE 1" << std::endl;
-      } else {
-        std::cout << "✗ Tile data verification FAILED" << std::endl;
-      }
-    }
-
-    rocshmem_free(d_tile_buffer);
-  }
-
-  // Example 2: Demonstrate tile_get API
   if (n_pes > 1 && my_pe == 0) {
     std::cout << "\n--- Tile API Demo (tile_get) ---" << std::endl;
-    std::cout << "PE 0 fetching a 5×5 tile from PE 1's matrix A..." << std::endl;
+    std::cout << "PE 0 fetching 4×4 tile from PE 1's matrix A..." << std::endl;
     std::cout << "PE 0's d_A_local = " << d_A_local << std::endl;
     std::cout << "PE 0's d_B = " << d_B << std::endl;
     std::cout << "PE 0's d_C_local = " << d_C_local << std::endl;
 
-    // Allocate buffer for fetched tile (5×5 = 25 elements)
-    int* d_tile_buffer_get = (int*)rocshmem_malloc(25 * sizeof(int));
-    std::vector<int> h_tile_buffer_get(25);
+    std::vector<int> h_tile_buffer_get(16);
 
-    if (M_local >= 5 && K >= 5) {
+    if (M_local >= 4 && K >= 4) {
+      // Zero out the destination buffer to distinguish between garbage and no transfer
+      CHECK_HIP(hipMemset(d_tile_buffer_get, 0, 16 * sizeof(int)));
+      CHECK_HIP(hipStreamSynchronize(0));
+
       // Create tensor descriptors
-      // Now test with d_A_local after dummy allocation
-      Tensor2D<int> remote_A(d_A_local, M_local, K);  // PE 1's A matrix (symmetric heap)
-      Tensor2D<int> tile_buf(d_tile_buffer_get, 5, 5);   // 5×5 tile buffer
+      Tensor2D<int> tile_buf(d_tile_buffer_get, 4, 4);   // 4×4 tile buffer
 
-      // Fetch tile from PE 1 (rows 0-4, cols 0-4) from A matrix
+      // Fetch 4×4 tile from PE 1 (starting at row 0, col 0) from A matrix
       hipLaunchKernelGGL(tile_get_kernel, 1, 1, 0, 0,
-                        tile_buf, remote_A, 0, 0, 5, 5, 1);
-      hipDeviceSynchronize();
+                        tile_buf, A_tensor, 0, 0, 4, 4, 1);
+      CHECK_HIP(hipStreamSynchronize(0));
 
       // Copy tile back to host for verification
-      hipMemcpy(h_tile_buffer_get.data(), d_tile_buffer_get, 25 * sizeof(int),
-               hipMemcpyDeviceToHost);
+      CHECK_HIP(hipMemcpy(h_tile_buffer_get.data(), d_tile_buffer_get, 16 * sizeof(int),
+                          hipMemcpyDeviceToHost));
 
       // Verify: the tile should match PE 1's A matrix values
       int pe1_row_offset = 1 * M_local;
-      int pe1_id = 1;
 
       bool tile_correct = true;
-      std::cout << "\nExpected vs Actual values for 5×5 tile (tile_get from A matrix [0-4, 0-4] with dummy workaround):" << std::endl;
-      for (int i = 0; i < 5; i++) {
-        for (int j = 0; j < 5; j++) {
+      std::cout << "\nExpected vs Actual values for 4×4 tile (tile_get from A matrix):" << std::endl;
+      for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
           int global_row = pe1_row_offset + i;
-          int expected = (global_row * 1000) + j + (pe1_id * 100000);
-          int actual = h_tile_buffer_get[i * 5 + j];
+          int expected = (global_row % 10) + (j % 10) + 1;
+          int actual = h_tile_buffer_get[i * 4 + j];
 
           std::cout << "  [" << i << "," << j << "] expected=" << expected
                     << " actual=" << actual;
@@ -505,16 +430,17 @@ int main(int argc, char* argv[]) {
         std::cout << "✗ Tile_get verification FAILED" << std::endl;
       }
     }
-
-    rocshmem_free(d_tile_buffer_get);
   }
 
-  // Cleanup
+  rocshmem_barrier_all();
+  rocshmem_barrier_all();
+
+  // Cleanup - all collective operations
+  rocshmem_free(d_tile_buffer_get);
   rocshmem_free(d_A_local);
   rocshmem_free(d_B);
   rocshmem_free(d_C_local);
 
   rocshmem_finalize();
-
   return success ? 0 : 1;
 }
