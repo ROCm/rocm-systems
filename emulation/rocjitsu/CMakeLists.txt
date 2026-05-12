@@ -27,8 +27,6 @@ find_package(Threads REQUIRED)
 # HSA/KFD headers (local copies from rocr-runtime).
 set(HSA_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers")
 
-option(RJ_BUILD_GUI "Build the simulation GUI (requires OpenGL)" ON)
-
 include(rj_log)
 
 # Sanitizer and static analysis options.
@@ -138,80 +136,6 @@ endforeach()
 
 add_custom_target(flatbuffers_schemas DEPENDS ${GENERATED_HEADERS})
 
-# GUI dependencies (conditional).
-if(RJ_BUILD_GUI)
-    find_package(OpenGL QUIET)
-    if(NOT OpenGL_FOUND)
-        message(WARNING "OpenGL not found - disabling GUI build")
-        set(RJ_BUILD_GUI OFF)
-    endif()
-endif()
-
-if(RJ_BUILD_GUI)
-    # GLFW - cross-platform windowing.
-    FetchContent_Declare(
-        glfw
-        GIT_REPOSITORY https://github.com/glfw/glfw.git
-        GIT_TAG 3.4
-    )
-    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(glfw)
-
-    # Dear ImGui - immediate-mode GUI.
-    FetchContent_Declare(
-        imgui
-        GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG v1.91.8
-    )
-    FetchContent_MakeAvailable(imgui)
-
-    add_library(imgui_lib STATIC
-        ${imgui_SOURCE_DIR}/imgui.cpp
-        ${imgui_SOURCE_DIR}/imgui_demo.cpp
-        ${imgui_SOURCE_DIR}/imgui_draw.cpp
-        ${imgui_SOURCE_DIR}/imgui_tables.cpp
-        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
-    )
-    target_include_directories(imgui_lib PUBLIC
-        ${imgui_SOURCE_DIR}
-        ${imgui_SOURCE_DIR}/backends
-    )
-    target_compile_definitions(imgui_lib PUBLIC IMGUI_DEFINE_MATH_OPERATORS)
-    target_link_libraries(imgui_lib PUBLIC glfw OpenGL::GL)
-
-    # imnodes - node editor for topology visualization.
-    FetchContent_Declare(
-        imnodes
-        GIT_REPOSITORY https://github.com/Nelarius/imnodes.git
-        GIT_TAG v0.5
-    )
-    FetchContent_MakeAvailable(imnodes)
-
-    add_library(imnodes_lib STATIC ${imnodes_SOURCE_DIR}/imnodes.cpp)
-    target_include_directories(imnodes_lib PUBLIC ${imnodes_SOURCE_DIR})
-    target_link_libraries(imnodes_lib PUBLIC imgui_lib)
-
-    # ImPlot - plotting for timeline visualization.
-    FetchContent_Declare(
-        implot
-        GIT_REPOSITORY https://github.com/epezent/implot.git
-        GIT_TAG v0.16
-    )
-    FetchContent_MakeAvailable(implot)
-
-    add_library(implot_lib STATIC
-        ${implot_SOURCE_DIR}/implot.cpp
-        ${implot_SOURCE_DIR}/implot_items.cpp
-    )
-    target_include_directories(implot_lib PUBLIC ${implot_SOURCE_DIR})
-    target_link_libraries(implot_lib PUBLIC imgui_lib)
-endif()
-
 # Libraries
 add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
@@ -236,11 +160,6 @@ target_link_libraries(rocjitsu_shared PRIVATE
 )
 target_include_directories(rocjitsu_shared PRIVATE ${GENERATED_DIR})
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
-
-# Tools
-if(RJ_BUILD_GUI)
-    add_subdirectory(tools/simgui)
-endif()
 
 # Tests and scaling tools.
 if(BUILD_TESTING)
