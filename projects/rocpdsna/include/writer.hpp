@@ -101,6 +101,22 @@ struct writer_t
                             const writer_types::trace_environment_t& trace_environment);
 
     /***
+     * @brief Insert sample data into rocpd
+     *
+     * Use this when emitting an instantaneous (point-in-time) event with no
+     * duration. For events with a duration, use insert_region_data instead -
+     * it creates both a region row and a sample row when track_name is set.
+     *
+     * The track referenced by sample_data.track must already be registered via
+     * register_track_info.
+     *
+     * @param sample_data Sample data with timestamp and track info
+     * @param event_data Event metadata (correlation, stack ids, category)
+     */
+    void insert_sample_data(const writer_types::sample_data_t& sample_data,
+                            const writer_types::event_data_t&  event_data);
+
+    /***
      * @brief Insert pmc event data into rocpd
      * @param pmc_event_data Pmc event data which will be inserted into rocpd
      * @param pmc_unique_id Pmc unique id which will uniquely identify the pmc

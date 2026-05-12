@@ -3035,3 +3035,85 @@ TEST_F(writer_test, transaction_rollback_on_exception_reverts_inserts)
     ASSERT_EQ(region_result.rows.size(), 1);
     EXPECT_EQ(region_result.rows[0][0], "successful_region");
 }
+
+// --------------------- Sample Data Tests ---------------------
+
+TEST_F(writer_test, insert_sample_data_with_registered_track_inserts_sample_only)
+{
+    register_base_dependencies(*m_writer, 1, 1000, 100);
+
+    auto track = create_test_track_info(1, 1000, 100, "MARKER_TRACK");
+    m_writer->register_track_info(track);
+
+    const rocpdsna::writer_types::sample_data_t sample{ .timestamp = 1234567,
+                                                        .track     = track,
+                                                        .extdata   = "{}" };
+    const rocpdsna::writer_types::event_data_t  event{ .stack_id        = std::nullopt,
+                                                       .parent_stack_id = std::nullopt,
+                                                       .correlation_id  = 42,
+                                                       .call_stack      = {},
+                                                       .line_info_list  = {},
+                                                       .event_category  = "MARKER",
+                                                       .extdata         = "{}" };
+
+    m_writer->insert_sample_data(sample, event);
+    m_writer->flush_in_memory_data_to_disk();
+
+    auto sample_result =
+        query_database(m_database_path, "SELECT timestamp FROM rocpd_sample_" + m_uuid);
+    ASSERT_EQ(sample_result.rows.size(), 1);
+    EXPECT_EQ(sample_result.rows[0][0], "1234567");
+
+    auto region_count = count_rows(m_database_path, "rocpd_region", m_uuid);
+    EXPECT_EQ(region_count, 0)
+        << "insert_sample_data must not create any rocpd_region row";
+
+    auto event_count = count_rows(m_database_path, "rocpd_event", m_uuid);
+    EXPECT_EQ(event_count, 1) << "insert_sample_data must create exactly one event";
+}
+
+TEST_F(writer_test, insert_sample_data_links_sample_to_event)
+{
+    register_base_dependencies(*m_writer, 1, 1000, 100);
+
+    auto track = create_test_track_info(1, 1000, 100, "LINK_TRACK");
+    m_writer->register_track_info(track);
+
+    const rocpdsna::writer_types::sample_data_t sample{ .timestamp = 7654321,
+                                                        .track     = track,
+                                                        .extdata   = "{}" };
+    const rocpdsna::writer_types::event_data_t  event{ .stack_id        = std::nullopt,
+                                                       .parent_stack_id = std::nullopt,
+                                                       .correlation_id  = 99,
+                                                       .call_stack      = {},
+                                                       .line_info_list  = {},
+                                                       .event_category  = "MARKER",
+                                                       .extdata         = "{}" };
+
+    m_writer->insert_sample_data(sample, event);
+    m_writer->flush_in_memory_data_to_disk();
+
+    auto join_result = query_database(m_database_path,
+                                      "SELECT s.timestamp, e.correlation_id "
+                                      "FROM rocpd_sample_" +
+                                          m_uuid +
+                                          " s "
+                                          "JOIN rocpd_event_" +
+                                          m_uuid + " e ON s.event_id = e.id");
+    ASSERT_EQ(join_result.rows.size(), 1);
+    EXPECT_EQ(join_result.rows[0][0], "7654321");
+    EXPECT_EQ(join_result.rows[0][1], "99");
+}
+
+TEST_F(writer_test, insert_sample_data_with_unregistered_track_throws)
+{
+    register_base_dependencies(*m_writer, 1, 1000, 100);
+
+    auto unregistered_track = create_test_track_info(1, 1000, 100, "MISSING_TRACK");
+    const rocpdsna::writer_types::sample_data_t sample{ .timestamp = 1000,
+                                                        .track     = unregistered_track,
+                                                        .extdata   = "{}" };
+    const rocpdsna::writer_types::event_data_t  event{};
+
+    EXPECT_THROW(m_writer->insert_sample_data(sample, event), std::runtime_error);
+}

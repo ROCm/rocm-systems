@@ -94,6 +94,13 @@ writer_t::insert_region_data(const writer_types::region_data_t&       region_dat
 }
 
 void
+writer_t::insert_sample_data(const writer_types::sample_data_t& sample_data,
+                             const writer_types::event_data_t&  event_data)
+{
+    m_impl->insert_sample_data(sample_data, event_data);
+}
+
+void
 writer_t::insert_pmc_event_data(const writer_types::pmc_event_data_t&     pmc_event_data,
                                 const writer_types::pmc_info_unique_id_t& pmc_unique_id)
 {
