@@ -53,11 +53,11 @@ constexpr auto perfetto_shmem_size_hint_kb = 64;
 
 struct output_config
 {
-    output_config()                         = default;
-    ~output_config()                        = default;
-    output_config(const output_config&)     = default;
-    output_config(output_config&&) noexcept = default;
-    output_config& operator=(const output_config&) = default;
+    output_config()                                    = default;
+    ~output_config()                                   = default;
+    output_config(const output_config&)                = default;
+    output_config(output_config&&) noexcept            = default;
+    output_config& operator=(const output_config&)     = default;
     output_config& operator=(output_config&&) noexcept = default;
 
     bool                     stats                       = false;
@@ -74,6 +74,7 @@ struct output_config
     bool                     annotate_args               = false;
     bool                     annotate_kfd                = false;
     bool                     annotate_pmc                = false;
+    bool                     use_rocpdsna_writer         = false;
     uint64_t                 stats_summary_unit_value    = 1;
     size_t                   perfetto_shmem_size_hint    = defaults::perfetto_shmem_size_hint_kb;
     size_t                   perfetto_buffer_size        = defaults::perfetto_buffer_size_kb;

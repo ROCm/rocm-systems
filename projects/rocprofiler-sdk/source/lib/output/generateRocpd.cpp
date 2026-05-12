@@ -54,6 +54,10 @@
 #include <rocprofiler-sdk-rocpd/sql.h>
 #include <rocprofiler-sdk-rocpd/types.h>
 
+#include <rocpdsna/storage.hpp>
+#include <rocpdsna/writer.hpp>
+#include <rocpdsna/writer_types.hpp>
+
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <sqlite3.h>
@@ -136,10 +140,10 @@ struct rocpd_db
 
     rocpd_db() = default;
     ~rocpd_db();
-    rocpd_db(const rocpd_db&) = delete;
+    rocpd_db(const rocpd_db&)            = delete;
     rocpd_db& operator=(const rocpd_db&) = delete;
     rocpd_db(rocpd_db&&)                 = delete;
-    rocpd_db& operator=(rocpd_db&&) = delete;
+    rocpd_db& operator=(rocpd_db&&)      = delete;
 
     sqlite3*            conn                = nullptr;
     std::string         uuid                = {};
@@ -884,7 +888,7 @@ extract_flags_field(const Tp& _data)
 
 #define GENERATE_FIELD_ACCESSOR(FUNC_NAME, FIELD_NAME, DATA_TYPE, ...)                             \
     template <typename Tp, typename Up = Tp>                                                       \
-    auto FUNC_NAME(const Tp& _data, int)->decltype(std::declval<Up>().FIELD_NAME, DATA_TYPE{})     \
+    auto FUNC_NAME(const Tp& _data, int) -> decltype(std::declval<Up>().FIELD_NAME, DATA_TYPE{})   \
     {                                                                                              \
         return _data.FIELD_NAME;                                                                   \
     }                                                                                              \
@@ -1005,6 +1009,40 @@ construct_kfd_pmc_event(const metadata& tool_metadata, const RecordT& record)
 
     return data;
 }
+
+void
+write_rocpd_via_sna(
+    const output_config&                                                    cfg,
+    const metadata&                                                         tool_metadata,
+    const std::vector<agent_info>&                                          agent_data,
+    const generator<tool_buffer_tracing_hip_api_ext_record_t>&              hip_api_gen,
+    const generator<rocprofiler_buffer_tracing_hsa_api_record_t>&           hsa_api_gen,
+    const generator<tool_buffer_tracing_kernel_dispatch_ext_record_t>&      kernel_dispatch_gen,
+    const generator<tool_buffer_tracing_memory_copy_ext_record_t>&          memory_copy_gen,
+    const generator<rocprofiler_buffer_tracing_marker_api_record_t>&        marker_api_gen,
+    const generator<tool_buffer_tracing_memory_allocation_ext_record_t>&    memory_alloc_gen,
+    const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>&    scratch_memory_gen,
+    const generator<tool_buffer_tracing_kfd_record_t>&                      kfd_gen,
+    const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
+    const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
+    const generator<tool_counter_record_t>&                                 counter_collection_gen)
+{
+    (void) cfg;
+    (void) tool_metadata;
+    (void) agent_data;
+    (void) hip_api_gen;
+    (void) hsa_api_gen;
+    (void) kernel_dispatch_gen;
+    (void) memory_copy_gen;
+    (void) marker_api_gen;
+    (void) memory_alloc_gen;
+    (void) scratch_memory_gen;
+    (void) kfd_gen;
+    (void) rccl_api_gen;
+    (void) rocdecode_api_gen;
+    (void) counter_collection_gen;
+    ROCP_WARNING << "rocpdsna writer path: not yet implemented (stub)";
+}
 }  // namespace
 
 void
@@ -1024,6 +1062,25 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<tool_counter_record_t>&                                 counter_collection_gen)
 {
+    if(cfg.use_rocpdsna_writer)
+    {
+        write_rocpd_via_sna(cfg,
+                            tool_metadata,
+                            agent_data,
+                            hip_api_gen,
+                            hsa_api_gen,
+                            kernel_dispatch_gen,
+                            memory_copy_gen,
+                            marker_api_gen,
+                            memory_alloc_gen,
+                            scratch_memory_gen,
+                            kfd_gen,
+                            rccl_api_gen,
+                            rocdecode_api_gen,
+                            counter_collection_gen);
+        return;
+    }
+
     static auto get_simple_timer = [](std::string_view label) {
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
     };
