@@ -1043,12 +1043,10 @@ write_rocpd_via_sna(
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<tool_counter_record_t>&                                 counter_collection_gen)
 {
-    (void) kernel_dispatch_gen;
     (void) memory_copy_gen;
     (void) memory_alloc_gen;
     (void) scratch_memory_gen;
     (void) kfd_gen;
-    (void) counter_collection_gen;
 
     auto node_hash =
         get_hash_id(tool_metadata.node_data.machine_id) % std::numeric_limits<int64_t>::max();
@@ -1535,6 +1533,174 @@ write_rocpd_via_sna(
         process_api_records(marker_api_gen);
         process_api_records(rccl_api_gen);
         process_api_records(rocdecode_api_gen);
+
+        // PMC events reference a counter by (name, agent_unique_id). The
+        // tool_counter_record_t carries only rocprofiler_counter_id_t.handle,
+        // so build a lookup table once before iterating PMC records.
+        struct pmc_lookup_entry_t
+        {
+            std::string_view                name;
+            writer_types::agent_unique_id_t agent_uid;
+        };
+        auto pmc_by_counter_id = std::unordered_map<uint64_t, pmc_lookup_entry_t>{};
+        for(const auto& itr : tool_metadata.agent_counter_info)
+        {
+            const auto* agent = tool_metadata.get_agent(itr.first);
+            if(agent == nullptr) continue;
+            auto agent_uid = make_agent_unique_id(*agent);
+            for(const auto& aitr : itr.second)
+            {
+                pmc_by_counter_id.emplace(
+                    aitr.id.handle, pmc_lookup_entry_t{std::string_view{aitr.name}, agent_uid});
+            }
+        }
+
+        constexpr auto kernel_dispatch_track = std::string_view{"KERNEL_DISPATCH"};
+        constexpr auto pmc_track             = std::string_view{"PMC"};
+
+        // Emit a single kernel_dispatch row from a (record-derived) dispatch view.
+        // Bundles thread / queue / track registration so the call site stays flat.
+        auto emit_kernel_dispatch = [&](const rocprofiler_kernel_dispatch_info_t& info,
+                                        const rocprofiler_async_correlation_id_t& corr_id,
+                                        rocprofiler_buffer_tracing_kind_t         kind,
+                                        rocprofiler_thread_id_t                   thread_id,
+                                        rocprofiler_stream_id_t                   stream_id,
+                                        uint64_t                                  start_ts,
+                                        uint64_t                                  end_ts) {
+            ensure_thread(thread_id);
+            ensure_stream(stream_id);
+            ensure_queue(info.queue_id);
+            ensure_track(kernel_dispatch_track, thread_id);
+
+            const auto* agent = tool_metadata.get_agent(info.agent_id);
+
+            auto category = tool_metadata.buffer_names.at(kind);
+
+            auto kernel_name =
+                (info.kernel_id > 0)
+                    ? tool_metadata.get_kernel_symbol(info.kernel_id)->formatted_kernel_name
+                    : std::string{"unknown_kernel"};
+
+            auto event_data            = writer_types::event_data_t{};
+            event_data.stack_id        = corr_id.internal;
+            event_data.parent_stack_id = corr_id.internal;
+            event_data.correlation_id  = corr_id.external.value;
+            event_data.event_category  = category;
+
+            auto trace_env       = writer_types::trace_environment_t{};
+            trace_env.node_id    = this_nid;
+            trace_env.process_id = this_pid;
+            trace_env.thread_id  = thread_id;
+            if(agent != nullptr) trace_env.agent_id = make_agent_unique_id(*agent);
+            trace_env.stream_id  = stream_id.handle;
+            trace_env.queue_id   = info.queue_id.handle;
+            trace_env.track_name = kernel_dispatch_track;
+
+            auto dispatch             = writer_types::kernel_dispatch_data_t{};
+            dispatch.event            = event_data;
+            dispatch.dispatch_id      = info.dispatch_id;
+            dispatch.start_timestamp  = start_ts;
+            dispatch.end_timestamp    = end_ts;
+            dispatch.kernel_symbol_id = info.kernel_id;
+            dispatch.code_object_id =
+                (info.kernel_id > 0)
+                    ? tool_metadata.get_kernel_symbol(info.kernel_id)->code_object_id
+                    : 0;
+            dispatch.private_segment_size = info.private_segment_size;
+            dispatch.group_segment_size   = info.group_segment_size;
+            dispatch.workgroup_size_x     = info.workgroup_size.x;
+            dispatch.workgroup_size_y     = info.workgroup_size.y;
+            dispatch.workgroup_size_z     = info.workgroup_size.z;
+            dispatch.grid_size_x          = info.grid_size.x;
+            dispatch.grid_size_y          = info.grid_size.y;
+            dispatch.grid_size_z          = info.grid_size.z;
+            dispatch.name                 = std::string_view{kernel_name};
+
+            writer.insert_kernel_dispatch_data(dispatch, trace_env);
+        };
+
+        // Mirror legacy: when kernel_dispatch_gen is empty (counter-collection-only
+        // run), reconstruct dispatch rows from the counter records' dispatch_data.
+        // Otherwise iterate kernel_dispatch_gen directly.
+        const auto kernel_dispatch_kind = static_cast<rocprofiler_buffer_tracing_kind_t>(
+            ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
+
+        if(kernel_dispatch_gen.empty())
+        {
+            for(auto pctr : counter_collection_gen)
+            {
+                for(const auto& record : counter_collection_gen.get(pctr))
+                {
+                    const auto& dispatch_data = record.dispatch_data;
+                    emit_kernel_dispatch(dispatch_data.dispatch_info,
+                                         dispatch_data.correlation_id,
+                                         kernel_dispatch_kind,
+                                         record.thread_id,
+                                         record.stream_id,
+                                         dispatch_data.start_timestamp,
+                                         dispatch_data.end_timestamp);
+                }
+            }
+        }
+        else
+        {
+            for(auto pitr : kernel_dispatch_gen)
+            {
+                for(const auto& itr : kernel_dispatch_gen.get(pitr))
+                {
+                    emit_kernel_dispatch(itr.dispatch_info,
+                                         itr.correlation_id,
+                                         itr.kind,
+                                         itr.thread_id,
+                                         itr.stream_id,
+                                         itr.start_timestamp,
+                                         itr.end_timestamp);
+                }
+            }
+        }
+
+        // PMC events. Each counter_collection_gen record carries one or more
+        // (counter_id, value) pairs via record.read(). Each pair becomes a
+        // rocpd_pmc_event row + a rocpd_sample row on the PMC track.
+        for(auto ditr : counter_collection_gen)
+        {
+            for(const auto& record : counter_collection_gen.get(ditr))
+            {
+                auto thread_id = record.thread_id;
+                ensure_thread(thread_id);
+                ensure_track(pmc_track, thread_id);
+
+                for(const auto& count : record.read())
+                {
+                    auto lookup_it = pmc_by_counter_id.find(count.id.handle);
+                    if(lookup_it == pmc_by_counter_id.end()) continue;
+
+                    auto event_data            = writer_types::event_data_t{};
+                    event_data.stack_id        = record.dispatch_data.correlation_id.internal;
+                    event_data.parent_stack_id = record.dispatch_data.correlation_id.internal;
+                    event_data.correlation_id  = record.dispatch_data.correlation_id.external.value;
+
+                    auto sample_track       = writer_types::track_info_t{};
+                    sample_track.name       = pmc_track;
+                    sample_track.node_id    = this_nid;
+                    sample_track.process_id = this_pid;
+                    sample_track.thread_id  = thread_id;
+
+                    auto sample      = writer_types::sample_data_t{};
+                    sample.timestamp = record.dispatch_data.end_timestamp;
+                    sample.track     = sample_track;
+
+                    auto pmc_event   = writer_types::pmc_event_data_t{};
+                    pmc_event.event  = event_data;
+                    pmc_event.value  = count.value;
+                    pmc_event.sample = sample;
+
+                    auto pmc_id = writer_types::pmc_info_unique_id_t{lookup_it->second.name,
+                                                                     lookup_it->second.agent_uid};
+                    writer.insert_pmc_event_data(pmc_event, pmc_id);
+                }
+            }
+        }
 
         writer.flush_in_memory_data_to_disk();
     } catch(const std::exception& e)
