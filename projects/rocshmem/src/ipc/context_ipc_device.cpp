@@ -308,8 +308,8 @@ __device__ uint64_t IPCContext::signal_fetch_wave(const uint64_t *sig_addr) {
  ******************** TILE API STUB IMPLEMENTATION ****************************
  *****************************************************************************/
 
-__device__ int IPCContext::tile_collective_wait(rocshmem_team_t team,
-                                                uint64_t flags) {
+__device__ int IPCContext::tile_collective_wait([[maybe_unused]] rocshmem_team_t team,
+                                                [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 

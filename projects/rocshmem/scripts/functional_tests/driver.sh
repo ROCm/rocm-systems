@@ -652,6 +652,23 @@ TestOther() {
   else echo "Skip:   fence_* (AIROCSHMEM-418: fence tests not supported on RO)"; fi
 }
 
+TestTiles() {
+  ##############################################################################
+  #       | Name                      | Ranks | Workgroups | Threads | Max Message Size #
+  ##############################################################################
+  ExecTest  "tile_put_contiguous"       2       1            1
+  ExecTest  "tile_put_rowmajor"         2       1            1
+  ExecTest  "tile_put_colmajor"         2       1            1
+  ExecTest  "tile_put_arbitrary"        2       1            1
+  ExecTest  "tile_put_wave_contiguous"  2       1            64
+  ExecTest  "tile_put_wg_contiguous"    2       1            1024
+  ExecTest  "tile_get_contiguous"       2       1            1
+  ExecTest  "tile_get_wg_contiguous"    2       1            1024
+  ExecTest  "tile_put_1d"               2       1            1
+  ExecTest  "tile_get_1d"               2       1            1
+  ExecTest  "tile_get_wave_contiguous"  2       1            64
+}
+
 TestHeatMapRMA() {
   NOTIMEOUT=1
   NOVERIF=1
@@ -835,6 +852,10 @@ case $TEST in
     TestColl
     TestOther
     TestOnStream
+    # Tile tests are only supported on IPC backend
+    if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
+      TestTiles
+    fi
     ;;
   *"rma")
     TestRMA
@@ -859,6 +880,9 @@ case $TEST in
     ;;
   *"other")
     TestOther
+    ;;
+  *"tiles")
+    TestTiles
     ;;
   *)
     #######################################################################################

@@ -85,15 +85,21 @@ struct Tensor2D {
   static constexpr int ndim = 2;
 
   T* data;
-  int stride_0;
-  int stride_1;
+  int rows;
+  int cols;
+  int row_stride;
+  int col_stride;
 
-  __device__ Tensor2D(T* data_, int stride_0_, int stride_1_)
-      : data(data_), stride_0(stride_0_), stride_1(stride_1_) {}
+  __device__ Tensor2D(T* data_, int rows_, int cols_,
+                      int row_stride_ = -1, int col_stride_ = 1)
+      : data(data_), rows(rows_), cols(cols_), col_stride(col_stride_) {
+    // Default row_stride is cols (contiguous row-major layout)
+    row_stride = (row_stride_ == -1) ? cols : row_stride_;
+  }
 
   __device__ T* data_handle() const { return data; }
   __device__ int stride(int dim) const {
-    return (dim == 0) ? stride_0 : stride_1;
+    return (dim == 0) ? row_stride : col_stride;
   }
 };
 
@@ -145,9 +151,28 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
 
   __shared__ long long int wf_start_time[32];
 
-  // Calculate base offset for this thread's data region
+  // Calculate base offset for this thread/wave/wg's data region
   int matrix_size = tile_extent_0 * tile_extent_1;
-  int offset = matrix_size * get_flat_id();
+  int offset;
+
+  // For collective operations, all threads in the collective share the same tile
+  // For thread-level operations, each thread has its own tile
+  switch (test_type) {
+    case TilePutWaveContiguousTestType:
+    case TileGetWaveContiguousTestType:
+      // Wave-collective: all threads in wave use same offset (wave ID)
+      offset = matrix_size * (get_flat_id() / wf_size);
+      break;
+    case TilePutWGContiguousTestType:
+    case TileGetWGContiguousTestType:
+      // Workgroup-collective: all threads in wg use same offset (workgroup ID)
+      offset = matrix_size * get_flat_grid_id();
+      break;
+    default:
+      // Thread-level: each thread has its own offset
+      offset = matrix_size * get_flat_id();
+      break;
+  }
 
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip) {
@@ -161,36 +186,36 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
 
     switch (test_type) {
       case TilePutContiguousTestType: {
-        // Fully contiguous: stride = [tile_extent_1, 1]
-        Tensor2D<float> src_tensor(source + offset, tile_extent_1, 1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_1, 1);
+        // Fully contiguous: rows=tile_extent_0, cols=tile_extent_1, row_stride=tile_extent_1
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
         rocshmem_ctx_tile_put(ctx, src_tensor, dst_tensor, start, boundary, 1, 0);
         break;
       }
       case TilePutRowMajorTestType: {
-        // Row-major with gaps: stride = [2*tile_extent_1, 1]
-        Tensor2D<float> src_tensor(source + offset, 2 * tile_extent_1, 1);
-        Tensor2D<float> dst_tensor(dest + offset, 2 * tile_extent_1, 1);
+        // Row-major with gaps: rows=tile_extent_0, cols=tile_extent_1, row_stride=2*tile_extent_1
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
         rocshmem_ctx_tile_put(ctx, src_tensor, dst_tensor, start, boundary, 1, 0);
         break;
       }
       case TilePutColumnMajorTestType: {
-        // Column-major: stride = [1, tile_extent_0]
-        Tensor2D<float> src_tensor(source + offset, 1, tile_extent_0);
-        Tensor2D<float> dst_tensor(dest + offset, 1, tile_extent_0);
+        // Column-major: rows=tile_extent_0, cols=tile_extent_1, row_stride=1, col_stride=tile_extent_0
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
         rocshmem_ctx_tile_put(ctx, src_tensor, dst_tensor, start, boundary, 1, 0);
         break;
       }
       case TilePutArbitraryTestType: {
-        // Arbitrary strides: stride = [257, 3]
-        Tensor2D<float> src_tensor(source + offset, 257, 3);
-        Tensor2D<float> dst_tensor(dest + offset, 257, 3);
+        // Arbitrary strides: rows=tile_extent_0, cols=tile_extent_1, row_stride=257, col_stride=3
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 257, 3);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 257, 3);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
         rocshmem_ctx_tile_put(ctx, src_tensor, dst_tensor, start, boundary, 1, 0);
@@ -198,8 +223,8 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
       }
       case TilePutWaveContiguousTestType: {
         // Wave-collective with contiguous layout
-        Tensor2D<float> src_tensor(source + offset, tile_extent_1, 1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_1, 1);
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
         rocshmem_ctx_tile_put_wave(ctx, src_tensor, dst_tensor, start, boundary, 1, 0);
@@ -207,8 +232,8 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
       }
       case TilePutWGContiguousTestType: {
         // Workgroup-collective with contiguous layout
-        Tensor2D<float> src_tensor(source + offset, tile_extent_1, 1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_1, 1);
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
         rocshmem_ctx_tile_put_wg(ctx, src_tensor, dst_tensor, start, boundary, 1, 0);
@@ -216,8 +241,8 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
       }
       case TileGetContiguousTestType: {
         // Thread-level get with contiguous layout
-        Tensor2D<float> src_tensor(source + offset, tile_extent_1, 1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_1, 1);
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
         rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
@@ -225,8 +250,8 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
       }
       case TileGetWGContiguousTestType: {
         // Workgroup-collective get with contiguous layout
-        Tensor2D<float> src_tensor(source + offset, tile_extent_1, 1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_1, 1);
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
         rocshmem_ctx_tile_get_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
@@ -234,8 +259,8 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
       }
       case TileGetWaveContiguousTestType: {
         // Wave-collective get with contiguous layout
-        Tensor2D<float> src_tensor(source + offset, tile_extent_1, 1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_1, 1);
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
         rocshmem_ctx_tile_get_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
@@ -293,8 +318,34 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
 
 TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
   // Allocate buffers for 64x64 tile (default test size)
+  // For strided layouts, we need more space than just 64×64 elements
   size_t tile_size = 64 * 64;
-  size_t num_elements = tile_size * args.wg_size * args.num_wgs;
+  size_t buffer_elements_per_thread;
+
+  switch (_type) {
+    case TilePutRowMajorTestType:
+      // Row stride = 2*64 = 128, need 64 rows * 128 stride
+      buffer_elements_per_thread = 64 * 128;
+      break;
+    case TilePutColumnMajorTestType:
+      // Column-major: row_stride=1, col_stride=64
+      // Need 64 cols * 64 col_stride = 4096 (same as contiguous)
+      buffer_elements_per_thread = tile_size;
+      break;
+    case TilePutArbitraryTestType:
+      // Arbitrary strides: row_stride=257, col_stride=3
+      // Need 64 rows * 257 row_stride
+      buffer_elements_per_thread = 64 * 257;
+      break;
+    default:
+      // Contiguous and other cases: just 64×64
+      buffer_elements_per_thread = tile_size;
+      break;
+  }
+
+  // Total number of threads = num_wgs * num_threads
+  size_t total_threads = args.num_wgs * args.num_threads;
+  size_t num_elements = buffer_elements_per_thread * total_threads;
 
   // Allocate using rocshmem symmetric heap
   local_alloc = new rocshmemAllocation<float>();
@@ -330,8 +381,44 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
   }
 
   // Initialize source buffer with pattern
-  for (size_t i = 0; i < num_elements; i++) {
-    source[i] = static_cast<float>(i % 256);
+  // For strided layouts, we need to initialize the tile elements correctly
+  int tile_rows = 64;
+  int tile_cols = 64;
+  int row_stride, col_stride;
+
+  switch (_type) {
+    case TilePutRowMajorTestType:
+      row_stride = 2 * 64;  // 128
+      col_stride = 1;
+      break;
+    case TilePutColumnMajorTestType:
+      row_stride = 1;
+      col_stride = 64;
+      break;
+    case TilePutArbitraryTestType:
+      row_stride = 257;
+      col_stride = 3;
+      break;
+    default:
+      // Contiguous: row_stride = cols
+      row_stride = tile_cols;
+      col_stride = 1;
+      break;
+  }
+
+  // Initialize with strided pattern for all threads
+  for (size_t flat_id = 0; flat_id < total_threads; flat_id++) {
+    size_t base_offset = flat_id * buffer_elements_per_thread;
+
+    // Initialize each element in the 64×64 tile using stride pattern
+    for (int row = 0; row < tile_rows; row++) {
+      for (int col = 0; col < tile_cols; col++) {
+        size_t tile_linear_idx = row * tile_cols + col;
+        size_t buffer_idx = base_offset + row * row_stride + col * col_stride;
+
+        source[buffer_idx] = static_cast<float>(tile_linear_idx % 256);
+      }
+    }
   }
 }
 
@@ -347,8 +434,27 @@ TileRMATester::~TileRMATester() {
 }
 
 void TileRMATester::resetBuffers(size_t size) {
+  // Use the same buffer size calculation as constructor
   size_t tile_size = 64 * 64;
-  size_t buff_size = tile_size * args.wg_size * args.num_wgs * sizeof(float);
+  size_t buffer_elements_per_thread;
+
+  switch (_type) {
+    case TilePutRowMajorTestType:
+      buffer_elements_per_thread = 64 * 128;
+      break;
+    case TilePutColumnMajorTestType:
+      buffer_elements_per_thread = tile_size;
+      break;
+    case TilePutArbitraryTestType:
+      buffer_elements_per_thread = 64 * 257;
+      break;
+    default:
+      buffer_elements_per_thread = tile_size;
+      break;
+  }
+
+  size_t total_threads = args.num_wgs * args.num_threads;
+  size_t buff_size = buffer_elements_per_thread * total_threads * sizeof(float);
   memset(dest, 0, buff_size);
 }
 
@@ -386,17 +492,69 @@ void TileRMATester::verifyResults(size_t size) {
   }
 
   if (args.myid == check_id) {
-    size_t tile_size = 64 * 64;
-    size_t total_elements = tile_size * args.wg_size * args.num_wgs;
+    int tile_rows = 64;
+    int tile_cols = 64;
+    int row_stride, col_stride;
 
-    // Manual verification on host
-    for (size_t i = 0; i < total_elements; i++) {
-      float expected = static_cast<float>(i % 256);
-      if (dest[i] != expected) {
-        std::cerr << "Data validation error at idx " << i << std::endl;
-        std::cerr << " Got " << dest[i] << ", Expected " << expected
-                  << std::endl;
-        exit(-1);
+    // Determine strides based on test type
+    switch (_type) {
+      case TilePutRowMajorTestType:
+        row_stride = 2 * 64;  // 128
+        col_stride = 1;
+        break;
+      case TilePutColumnMajorTestType:
+        row_stride = 1;
+        col_stride = 64;
+        break;
+      case TilePutArbitraryTestType:
+        row_stride = 257;
+        col_stride = 3;
+        break;
+      default:
+        // Contiguous: row_stride = cols
+        row_stride = tile_cols;
+        col_stride = 1;
+        break;
+    }
+
+    // Verify tile elements (not entire buffer for strided layouts)
+    size_t total_threads = args.num_wgs * args.num_threads;
+    for (size_t flat_id = 0; flat_id < total_threads; flat_id++) {
+      // Calculate buffer offset for this thread
+      size_t buffer_elements_per_thread;
+      switch (_type) {
+        case TilePutRowMajorTestType:
+          buffer_elements_per_thread = 64 * 128;
+          break;
+        case TilePutColumnMajorTestType:
+          buffer_elements_per_thread = 64 * 64;
+          break;
+        case TilePutArbitraryTestType:
+          buffer_elements_per_thread = 64 * 257;
+          break;
+        default:
+          buffer_elements_per_thread = 64 * 64;
+          break;
+      }
+
+      size_t base_offset = flat_id * buffer_elements_per_thread;
+
+      // Verify each element in the 64×64 tile using stride pattern
+      for (int row = 0; row < tile_rows; row++) {
+        for (int col = 0; col < tile_cols; col++) {
+          size_t tile_linear_idx = row * tile_cols + col;
+          size_t buffer_idx = base_offset + row * row_stride + col * col_stride;
+
+          // Expected value based on source initialization
+          float expected = static_cast<float>(tile_linear_idx % 256);
+
+          if (dest[buffer_idx] != expected) {
+            std::cerr << "Data validation error at buffer idx " << buffer_idx
+                      << " (tile pos [" << row << "," << col << "], flat_id=" << flat_id << ")" << std::endl;
+            std::cerr << " Got " << dest[buffer_idx] << ", Expected " << expected << std::endl;
+            exit(-1);
+          }
+        }
       }
     }
   }
