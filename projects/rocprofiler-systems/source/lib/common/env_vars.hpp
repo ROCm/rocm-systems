@@ -152,17 +152,17 @@ constexpr std::string_view NETWORK_INTERFACE   = "ROCPROFSYS_NETWORK_INTERFACE";
 [[nodiscard]] inline int
 log_level_to_verbose(std::string_view level) noexcept
 {
-    auto eq = [](std::string_view a, std::string_view b) noexcept {
-        if(a.size() != b.size()) return false;
-        for(std::size_t i = 0; i < a.size(); ++i)
-            if(std::tolower(static_cast<unsigned char>(a[i])) !=
-               std::tolower(static_cast<unsigned char>(b[i])))
+    auto iequal = [](std::string_view lhs, std::string_view rhs) noexcept {
+        if(lhs.size() != rhs.size()) return false;
+        for(std::size_t idx = 0; idx < lhs.size(); ++idx)
+            if(std::tolower(static_cast<unsigned char>(lhs[idx])) !=
+               std::tolower(static_cast<unsigned char>(rhs[idx])))
                 return false;
         return true;
     };
-    if(eq(level, "trace")) return 2;
-    if(eq(level, "debug")) return 1;
-    if(eq(level, "info")) return 0;
+    if(iequal(level, "trace")) return 2;
+    if(iequal(level, "debug")) return 1;
+    if(iequal(level, "info")) return 0;
     return -1;
 }
 
