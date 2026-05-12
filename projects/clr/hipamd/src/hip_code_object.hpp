@@ -99,6 +99,12 @@ class DynCO : public CodeObject {
   hipError_t loadCodeObject(const char* fname, const void* image = nullptr);
   hipModule_t getModule() const { return module_; };
 
+  // Device the code object was loaded for at construction. Callers that key
+  // per-device caches (e.g., LibraryContainer::kernels_) must use this and
+  // not ihipGetDevice(): the active device may differ at use time, but the
+  // loaded module is single-device.
+  int getDeviceId() const { return device_id_; }
+
   // Gets GlobalVar/Functions from a dynamically loaded code object
   hipError_t getDynFunc(hipFunction_t* hfunc, const std::string& func_name);
   hipError_t getFuncCount(unsigned int* count);

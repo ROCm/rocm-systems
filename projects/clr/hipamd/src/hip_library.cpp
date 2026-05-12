@@ -28,13 +28,14 @@ void LibraryContainer::Register(const std::string &name, int device, hipKernel_t
 }
 
 hipError_t LibraryContainer::GetKernelName(const char** name, hipKernel_t kernel) {
+  std::scoped_lock<std::mutex> lock(lib_mutex_);
   if (kernels_.empty()) {
     return hipErrorInvalidValue;
   }
 
   for (const auto &it : kernels_) {
     if (it.second == kernel) {
-      *name = it.first.first.c_str(); 
+      *name = it.first.first.c_str();
       return hipSuccess;
     }
   }
@@ -58,15 +59,26 @@ hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKe
 }
 
 hipError_t LibraryContainer::Kernel(hipKernel_t* k, const std::string &name) {
-  auto device_id = hip::ihipGetDevice();
-  if (auto ki = kernels_.find(std::make_pair(name, device_id)); ki != kernels_.end()) {
-    *k = ki->second;
-    return hipSuccess;
+  // Use the device the underlying DynCO was loaded for, not ihipGetDevice():
+  // the caller may have switched devices since BuildIt(), but our module is
+  // single-device. Keying off the active device would mis-attribute cache
+  // entries across devices.
+  const int device_id = dynco_ ? dynco_->getDeviceId() : hip::ihipGetDevice();
+  {
+    // Cache hit fast path under lib_mutex_ — Register() writes kernels_
+    // under the same mutex, so unlocked reads would race.
+    std::scoped_lock<std::mutex> lock(lib_mutex_);
+    if (auto ki = kernels_.find(std::make_pair(name, device_id)); ki != kernels_.end()) {
+      *k = ki->second;
+      return hipSuccess;
+    }
   }
   hipFunction_t hfunc = nullptr;
   IHIP_RETURN_ONFAIL(dynco_->getDynFunc(&hfunc, name));
   *k = reinterpret_cast<hipKernel_t>(hfunc);
-  // Register it, basically make it available for query though the hip context.
+  // Register() re-takes lib_mutex_; its check-and-insert handles the benign
+  // TOCTOU window where a second concurrent caller misses the cache and we
+  // both arrive here with the same hfunc.
   Register(name, device_id, *k);
   return hipSuccess;
 }
@@ -92,6 +104,10 @@ LibraryContainer::LibraryContainer(const char* code_object) : image_(code_object
 LibraryContainer::LibraryContainer(const std::string &file_name) : filename_(file_name) {}
 
 LibraryContainer::~LibraryContainer() {
+  // No lock here on purpose: destruction is the user's responsibility to
+  // serialize against any in-flight Kernel/Enumerate/GetGlobal calls (same
+  // contract CUDA documents for cuLibraryUnload). Locking would falsely
+  // suggest safety while the mutex itself is about to be destroyed.
   for (const auto& k : kernels_) {
     (void)hip::PlatformState::Instance().UnregisterLibraryFunction(k.second);
   }
