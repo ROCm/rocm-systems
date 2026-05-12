@@ -36,10 +36,19 @@ namespace gfx9::quick_scan
 // `type` is a value of gfx9::sqtt_token_type_t (the low-nibble of the first
 // byte). Currently captured rare set: REG(2), REG_CS(5), EVENT(7),
 // EVENT_CS(8), REG_CS_PRIV(15).
+//
+// `offset` is the token's first-byte position within the buffer passed to
+// scan_gfx9 (i.e. post-header for chunk 0; callers that need an offset
+// relative to their original `data` buffer must add the header skip).
+// Packed as a 16:48 bitfield with `type` to keep sizeof at 16B. 48 bits of
+// offset covers chunks up to 256 TiB; placing `type` in the low bits lets
+// the consumer's hot dispatch (cmp tok.type, ...) fold the load+mask into
+// a single 16-bit compare against memory, saving a shift per access.
 struct QuickToken
 {
     uint64_t contents;
-    uint32_t type;
+    uint64_t type   : 16;
+    uint64_t offset : 48;
 };
 
 // Purpose-built fast scanner that walks a gfx9 SQTT token stream and

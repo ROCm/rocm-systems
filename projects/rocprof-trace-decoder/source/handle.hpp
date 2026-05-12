@@ -74,6 +74,13 @@ public:
     // quick_scan state data
     mutable std::condition_variable_any cv;
     int gfxip = 0;
+    // Raw 8-byte chunk-0 header captured by quick_scan. Used by
+    // build_standalone to prepend the original arch header to the rebuilt
+    // standalone buffer (so a downstream decoder can identify the arch).
+    // Currently only the gfx9 8-byte header is captured; future archs will
+    // either reuse this slot (if their header fits in 8 bytes) or extend the
+    // storage.
+    uint64_t gfx9_header = 0;
     std::unordered_map<uint64_t, std::shared_ptr<CSRegisterHandler>> pipestate{};
 
 #ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
