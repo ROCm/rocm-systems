@@ -15,7 +15,7 @@ You can access the rocminfo source code on `GitHub. <https://github.com/ROCm/roc
 
    .. grid-item-card:: Build
 
-      * :doc:`Install rocminfo <./install/build>`
+      * :doc:`Install rocminfo <./install/install>`
       * :doc:`Build from source <./install/build>`
 
    .. grid-item-card:: How to
