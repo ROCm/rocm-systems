@@ -114,63 +114,6 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   }
 };
 
-//! Graph-owned signal pool for per-launch signal allocation.
-//! Avoids runtime signal pool stalls (WaitCurrent/WaitNext) during graph execution.
-//! Two sub-pools: GPU-only signals (fast) and interrupt-capable signals (for host callbacks).
-struct GraphSignalPool {
-  ProfilingSignal* Acquire() {
-    size_t idx = next_idx_.fetch_add(1, std::memory_order_relaxed);
-    ProfilingSignal* ps;
-    if (idx < capacity_.load(std::memory_order_acquire)) {
-      ps = signals_[idx];
-    } else {
-      ps = GrowAndAcquire(idx);
-    }
-    if (ps) last_acquired_ = ps;
-    return ps;
-  }
-
-  ProfilingSignal* AcquireIrq(bool system_scope) {
-    size_t idx = irq_next_idx_.fetch_add(1, std::memory_order_relaxed);
-    ProfilingSignal* ps;
-    if (idx < irq_capacity_.load(std::memory_order_acquire)) {
-      ps = irq_signals_[idx];
-    } else {
-      ps = GrowAndAcquireIrq(idx, system_scope);
-    }
-    if (ps) last_acquired_ = ps;
-    return ps;
-  }
-
-  //! Returns the most recently acquired signal from a GPU dispatch (not pre-allocation)
-  ProfilingSignal* GetLastAcquired() const { return last_acquired_; }
-
-  //! Reset after pre-allocation so GetLastAcquired only reflects actual GPU dispatches
-  void ResetLastAcquired() { last_acquired_ = nullptr; }
-
-  bool Allocate(size_t count);
-  bool AllocateIrq(size_t count, bool system_scope);
-
-  size_t UsedCount() const { return next_idx_.load(std::memory_order_relaxed); }
-  size_t UsedIrqCount() const { return irq_next_idx_.load(std::memory_order_relaxed); }
-
-  ~GraphSignalPool();
-
- private:
-  std::vector<ProfilingSignal*> signals_;       //!< GPU-only signals
-  std::atomic<size_t> capacity_{0};             //!< Current GPU-only signal count (atomic to avoid race with growth)
-  std::atomic<size_t> next_idx_{0};             //!< Next GPU-only signal index
-  std::vector<ProfilingSignal*> irq_signals_;   //!< Interrupt-capable signals
-  std::atomic<size_t> irq_capacity_{0};         //!< Current interrupt signal count
-  std::atomic<size_t> irq_next_idx_{0};         //!< Next interrupt signal index
-  ProfilingSignal* last_acquired_ = nullptr;    //!< Most recently acquired signal
-  amd::Monitor lock_;                           //!< Protects growth of both vectors
-
-  static ProfilingSignal* AllocateOneSignal(bool interrupt, bool system_scope);
-  ProfilingSignal* GrowAndAcquire(size_t idx);
-  ProfilingSignal* GrowAndAcquireIrq(size_t idx, bool system_scope);
-};
-
 class Sampler : public device::Sampler {
  public:
   //! Constructor
@@ -545,10 +488,6 @@ class Device : public NullDevice {
   virtual uint8_t* CreateBarrierPacket() const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const override;
-  virtual GraphSignalPool* CreateGraphSignalPool(
-      size_t gpu_count, size_t irq_count,
-      size_t segment_count, std::vector<void*>& hw_events) const override;
-  virtual size_t GetGraphSignalPoolUsedCount(GraphSignalPool* pool) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 

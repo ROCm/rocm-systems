@@ -350,8 +350,11 @@ static hsa_status_t DestroyHwCtx(int fd, uint32_t hw_ctx_handle) {
 /// @param[in,out] kmq_metadata KMQ metadata to update with the hardware context handle and syncobj
 /// handle
 static hsa_status_t CreateHwCtx(int fd, uint32_t num_core_tiles, KmqMetadata* kmq_metadata) {
-  // Create the new hardware context; we do not leverage QoS information
+  // Create QoS information; we don't leverage any external Qos hints.
   amdxdna_qos_info qos_info = {};
+  qos_info.user_start_col = USER_START_COL_NOT_REQUESTED;
+
+  // Create the new hardware context.
   amdxdna_drm_create_hwctx create_hwctx_args = {};
   create_hwctx_args.qos_p = reinterpret_cast<uintptr_t>(&qos_info);
   create_hwctx_args.max_opc = 0x800;
@@ -362,7 +365,7 @@ static hsa_status_t CreateHwCtx(int fd, uint32_t num_core_tiles, KmqMetadata* km
     return err;
   }
 
-  // Create hardware context configuration
+  // Create hardware context configuration.
   const size_t num_cus = kmq_metadata->pdi_cache.empty() ? 1 : kmq_metadata->pdi_cache.size();
   const size_t config_cu_param_size =
       sizeof(amdxdna_hwctx_param_config_cu) + num_cus * sizeof(amdxdna_cu_config);
@@ -392,7 +395,7 @@ static hsa_status_t CreateHwCtx(int fd, uint32_t num_core_tiles, KmqMetadata* km
     xdna_config_cu_param->cu_configs[0].cu_func = default_cu_func;
   }
 
-  // Configure the new hardware context
+  // Configure the new hardware context.
   amdxdna_drm_config_hwctx config_hw_ctx_args = {};
   config_hw_ctx_args.handle = create_hwctx_args.handle;
   config_hw_ctx_args.param_type = DRM_AMDXDNA_HWCTX_CONFIG_CU;
