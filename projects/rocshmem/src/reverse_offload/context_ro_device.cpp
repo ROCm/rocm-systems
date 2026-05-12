@@ -775,8 +775,8 @@ __device__ volatile char *ROContext::get_status_flag() {
  **************** TILE API STUB IMPLEMENTATION (NOT IMPLEMENTED) **************
  *****************************************************************************/
 
-__device__ int ROContext::tile_collective_wait(rocshmem_team_t team,
-                                                uint64_t flags) {
+__device__ int ROContext::tile_collective_wait([[maybe_unused]] rocshmem_team_t team,
+                                                [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
