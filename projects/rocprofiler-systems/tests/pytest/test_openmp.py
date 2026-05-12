@@ -313,6 +313,7 @@ class TestOpenMPFortran(RocprofsysTest):
             env=env,
             rewrite_args=self.REWRITE_ARGS,
             runtime_args=self.RUNTIME_ARGS,
+            check_target_arch=True,
         )
         self.assert_regex(
             result,

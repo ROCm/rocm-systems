@@ -74,7 +74,7 @@ if(NOT AMDFLANG_FULL_VERSION)
 endif()
 
 if(AMDFLANG_VERSION_MAJOR LESS 20)
-    message(
+    rocprofiler_systems_message(
         WARNING
         "amdflang version ${AMDFLANG_FULL_VERSION} is less than the minimum required version 20 for OpenMP fortran examples"
     )
