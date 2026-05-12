@@ -39,6 +39,9 @@ __host__ IPCContext::IPCContext(Backend *b, unsigned int ctx_id)
   IPCBackend *backend{static_cast<IPCBackend *>(b)};
   ipcImpl_.ipc_bases = b->ipcImpl.ipc_bases;
   ipcImpl_.shm_size = b->ipcImpl.shm_size;
+  ipcImpl_.ipc_first_pe = b->ipcImpl.ipc_first_pe;
+  ipcImpl_.ipc_stride = b->ipcImpl.ipc_stride;
+
 
   barrier_sync = backend->barrier_sync;
   fence_pool = backend->fence_pool;

@@ -63,6 +63,9 @@ __host__ ROContext::ROContext(Backend *b,
   ipcImpl_.shm_size = b->ipcImpl.shm_size;
   ipcImpl_.shm_rank = b->ipcImpl.shm_rank;
   ipcImpl_.pes_with_ipc_avail = b->ipcImpl.pes_with_ipc_avail;
+  ipcImpl_.ipc_first_pe = b->ipcImpl.ipc_first_pe;
+  ipcImpl_.ipc_stride = b->ipcImpl.ipc_stride;
+
 }
 
 __device__ void ROContext::putmem(void *dest, const void *source, size_t nelems,
