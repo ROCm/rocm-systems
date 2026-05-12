@@ -36,6 +36,7 @@ set(ROCPROFILER_HEADER_FILES
     registration.h
     rocdecode.h
     rocjpeg.h
+    rocshmem.h
     spm.h
     ${CMAKE_CURRENT_BINARY_DIR}/version.h
     ${CMAKE_CURRENT_BINARY_DIR}/ext_version.h)
@@ -52,6 +53,7 @@ add_subdirectory(ompt)
 add_subdirectory(rccl)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
+add_subdirectory(rocshmem)
 add_subdirectory(cxx)
 add_subdirectory(kfd)
 add_subdirectory(experimental)
