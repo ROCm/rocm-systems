@@ -29,11 +29,7 @@
 #include <sys/prctl.h>
 #include <sys/resource.h>
 
-#include <link.h>
 #include <time.h>
-#ifndef DT_GNU_HASH
-#define DT_GNU_HASH 0x6ffffef5
-#endif  // DT_GNU_HASH
 #include <atomic>
 #include <vector>
 #include <string>
@@ -371,34 +367,195 @@ bool Os::isThreadAlive(const Thread& thread) {
   return ::pthread_kill((pthread_t)thread.handle(), 0) == 0;
 }
 
-static size_t tlsSize = 0;
+// Bytes of the pthread stacksize consumed by static TLS, the TCB, and
+// MINIMAL_REST_STACK; added to the caller's request to preserve usable stack.
+// Measured once (helper-thread probe, or EINVAL probe under ASan).
+static size_t perThreadOverhead = 0;
 
-// Try to guess the size of TLS (plus some frames)
-void* guessTlsSizeThread(void* param) {
+namespace {
+// Accounts for GLIBC implementation-reserved TLS space, alignment padding, and a few extra frames.
+[[maybe_unused]] void* measureThreadOverheadHelper(void* arg) {
+  size_t* out = static_cast<size_t*>(arg);
   address stackBase;
-  address currentFrame;
   size_t stackSize;
   Os::currentStackInfo(&stackBase, &stackSize);
-  currentFrame = reinterpret_cast<address>(&stackSize);
-  tlsSize = stackBase - currentFrame;
-  // align up to page boundary
-  tlsSize = alignUp(tlsSize, amd::Os::pageSize());
-  return NULL;
+  const address currentFrame = reinterpret_cast<address>(&stackSize);
+  *out = amd::alignUp(static_cast<size_t>(stackBase - currentFrame), amd::Os::pageSize());
+  return nullptr;
 }
 
-static void guessTlsSize(void) {
-  int retval;
+[[maybe_unused]] size_t measureThreadOverhead() {
   pthread_t handle;
   pthread_attr_t threadAttr;
+  size_t result = 0;
 
   ::pthread_attr_init(&threadAttr);
-  retval = ::pthread_create(&handle, &threadAttr, guessTlsSizeThread, NULL);
-  if (retval == 0) {
-    pthread_join(handle, NULL);
+  if (::pthread_create(&handle, &threadAttr, measureThreadOverheadHelper, &result) == 0) {
+    ::pthread_join(handle, nullptr);
   } else {
     fatal("pthread_create() failed with default stack size");
   }
   ::pthread_attr_destroy(&threadAttr);
+  return result;
+}
+
+#if defined(__clang__)
+#if __has_feature(address_sanitizer)
+
+
+// Given that the default stack size is 8MiB, the 64 MiB limit upper bound 
+// is not expected to be reached in a well behaved application.
+constexpr size_t kAsanProbeCeiling = 64 * Mi;
+
+void* asanProbeThreadEntry(void*) { return nullptr; }
+
+// Attempts to call pthread_create with requestSize bytes of stack and reports
+// glibc return. EINVAL means we're below the threshold; 0 means we're at
+// or above it; anything else is a real failure.
+int tryAsanProbe(pthread_attr_t* attr, size_t requestSize) {
+  if (::pthread_attr_setstacksize(attr, requestSize) != 0) {
+    fatal("pthread_attr_setstacksize() failed during ASan thread-overhead measurement");
+  }
+  pthread_t probe = 0;
+  const int rc = ::pthread_create(&probe, attr, asanProbeThreadEntry, nullptr);
+  if (rc == 0) {
+    ::pthread_join(probe, nullptr);
+  } else if (rc != EINVAL) {
+    fatal("pthread_create() failed during ASan thread-overhead measurement");
+  }
+  return rc;
+}
+
+// Exponential search bracket: double the offset above PTHREAD_STACK_MIN until
+// pthread_create accepts it, or the offset would exceed kAsanProbeCeiling.
+// Then binary-search the [low, high] bracket down to page granularity.
+// pthread_create rejects undersized stacks with EINVAL before allocation, so
+// we bracket the threshold directly via exponential search + binary search
+// (~log2 probes each, ~27 worst case at a 4 KiB page). 
+size_t measureAsanThreadOverhead() {
+  pthread_attr_t attr;
+  if (::pthread_attr_init(&attr) != 0) {
+    fatal("pthread_attr_init() failed during ASan thread-overhead measurement");
+  }
+  
+  const size_t baseStack = static_cast<size_t>(PTHREAD_STACK_MIN);
+  const size_t step = amd::Os::pageSize();
+
+  size_t low = 0;        // last offset known to return EINVAL
+  size_t high = step;    // candidate offset that pthread_create accepts
+  while (true) {
+    if (high > kAsanProbeCeiling) {
+      fatal("ASan thread-overhead measurement exceeded ceiling without finding a workable stacksize");
+    }
+    if (tryAsanProbe(&attr, baseStack + high) == 0) break;
+    low = high;
+    high *= 2;
+  }
+
+  while (high - low > step) {
+    const size_t mid = low + (((high - low) / 2 + step - 1) / step) * step;
+    if (mid <= low || mid >= high) break;
+    if (tryAsanProbe(&attr, baseStack + mid) == 0) {
+      high = mid;
+    } else {
+      low = mid;
+    }
+  }
+
+  ::pthread_attr_destroy(&attr);
+  return baseStack + high;
+}
+
+// --- Diagnostic: AMD_LOG_TLS_COMPARE ---------------------------------------
+// ASan-only, opt-in via env var. Prints the new overhead vs the broken
+// (stack_top - &local) heuristic; does not affect stack sizing.
+
+size_t legacyTlsSize = 0;
+address legacyStackBase = nullptr;
+address legacyCurrentFrame = nullptr;
+size_t legacyStackSize = 0;
+int legacyMeasurementError = 0;  // pthread_create errno, 0 if ok.
+
+// Diagnostic mirror of captureThreadOverhead writing into legacy* globals.
+// Value is expected to be garbage under ASan; not used for stack sizing.
+void* captureLegacyThreadOverhead(void*) {
+  address stackBase;
+  size_t stackSize;
+  Os::currentStackInfo(&stackBase, &stackSize);
+  address currentFrame = reinterpret_cast<address>(&stackSize);
+  legacyStackBase = stackBase;
+  legacyCurrentFrame = currentFrame;
+  legacyStackSize = stackSize;
+  legacyTlsSize = stackBase - currentFrame;
+  legacyTlsSize = amd::alignUp(legacyTlsSize, amd::Os::pageSize());
+  return nullptr;
+}
+
+void measureLegacyThreadOverhead() {
+  pthread_t handle;
+  pthread_attr_t threadAttr;
+  ::pthread_attr_init(&threadAttr);
+  const int err =
+      ::pthread_create(&handle, &threadAttr, captureLegacyThreadOverhead, nullptr);
+  if (err == 0) {
+    ::pthread_join(handle, nullptr);
+  } else {
+    legacyMeasurementError = err;
+    // Diagnostic-only: report and continue rather than fatal().
+    std::fprintf(stderr,
+                 "[TLS compare] legacy measurement pthread_create failed: %d (%s)\n",
+                 err, ::strerror(err));
+  }
+  ::pthread_attr_destroy(&threadAttr);
+}
+
+// Emits one AMD_LOG_TLS_COMPARE line per thread creation. No-op when the
+// env var is unset/"0". Only defined under ASan.
+void maybeLogTlsComparison(amd::Thread* thread, size_t guardsize, size_t newRequest) {
+  static const bool kLogTlsCompare = []() {
+    const char* v = std::getenv("AMD_LOG_TLS_COMPARE");
+    return v != nullptr && v[0] != '\0' && v[0] != '0';
+  }();
+  if (!kLogTlsCompare) return;
+
+  const size_t threadStack = thread->stackSize();
+  const size_t legacyRequest = threadStack + guardsize + legacyTlsSize;
+  // Unsigned delta: legacyTlsSize is often ~16 EiB wrapped under ASan.
+  const bool legacyLarger = legacyRequest > newRequest;
+  const size_t absDiff =
+      legacyLarger ? legacyRequest - newRequest : newRequest - legacyRequest;
+  std::fprintf(
+      stderr,
+      "[TLS compare] thread='%s' stack=%zu guard=%zu | "
+      "new(probe): overhead=%zu request=%zu | "
+      "legacy(stack_top-&local): overhead=%zu request=%zu "
+      "stackBase=%p frame=%p stackSize=%zu err=%d | "
+      "diff(new-legacy)=%c%zu\n",
+      thread->name().c_str(),
+      threadStack, guardsize,
+      perThreadOverhead, newRequest,
+      legacyTlsSize, legacyRequest,
+      static_cast<void*>(legacyStackBase),
+      static_cast<void*>(legacyCurrentFrame),
+      legacyStackSize, legacyMeasurementError,
+      legacyLarger ? '-' : '+', absDiff);
+}
+
+#endif  // __has_feature(address_sanitizer)
+#endif  // __clang__
+
+}  // namespace
+
+static void initPerThreadOverhead(void) {
+#if defined(__clang__)
+#if __has_feature(address_sanitizer)
+  perThreadOverhead = measureAsanThreadOverhead();
+  // Debug-compare scaffolding for AMD_LOG_TLS_COMPARE.
+  measureLegacyThreadOverhead();
+  return;
+#endif
+#endif
+  perThreadOverhead = measureThreadOverhead();
 }
 
 const void* Os::createOsThread(amd::Thread* thread) {
@@ -412,8 +569,15 @@ const void* Os::createOsThread(amd::Thread* thread) {
     }
 
     static std::once_flag initOnce;
-    std::call_once(initOnce, guessTlsSize);
-    ::pthread_attr_setstacksize(&threadAttr, thread->stackSize_ + guardsize + tlsSize);
+    std::call_once(initOnce, initPerThreadOverhead);
+
+#if defined(__clang__)
+#if __has_feature(address_sanitizer)
+    maybeLogTlsComparison(thread, guardsize, thread->stackSize_ + guardsize + perThreadOverhead);
+#endif
+#endif
+
+    ::pthread_attr_setstacksize(&threadAttr, thread->stackSize_ + guardsize + perThreadOverhead);
   }
 
   // We never plan the use join, so free the resources now.

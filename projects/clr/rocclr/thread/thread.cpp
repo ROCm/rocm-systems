@@ -7,6 +7,7 @@
 #include "thread/thread.hpp"
 #include "thread/monitor.hpp"
 #include "os/os.hpp"
+#include <iostream>
 
 #if defined(_WIN32) || defined(__CYGWIN__)
 #include <windows.h>
@@ -80,6 +81,7 @@ void* Thread::main() {
 }
 
 bool Thread::start(void* data) {
+  std::cout << "Starting thread1" << std::endl;
   if (state() != INITIALIZED) {
     return false;
   }
@@ -93,6 +95,7 @@ bool Thread::start(void* data) {
     selfSuspendLock_->notify();
   }
 
+  std::cout << "Starting thread2" << std::endl;
   return true;
 }
 
