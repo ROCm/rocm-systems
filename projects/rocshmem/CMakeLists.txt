@@ -200,6 +200,25 @@ if (NOT BUILD_TESTS_ONLY)
   #############################################################################
   # PACKAGE DEPENDENCIES
   #############################################################################
+  # GDA Requires libnuma
+  if(USE_GDA)
+    find_path(NUMA_INCLUDE_DIR NAMES numa.h)
+    find_library(NUMA_LIBRARY NAMES numa)
+
+    include(FindPackageHandleStandardArgs)
+    find_package_handle_standard_args(NUMA DEFAULT_MSG NUMA_LIBRARY NUMA_INCLUDE_DIR)
+
+    # Usually you would have to add libnuma to target but we use dlopen
+
+    if (NOT NUMA_FOUND)
+      message(STATUS "libnuma not found. Unable to build GDA")
+      set(USE_GDA OFF)
+      set(GDA_IONIC OFF)
+      set(GDA_BNXT OFF)
+      set(GDA_MLX5 OFF)
+    endif()
+  endif()
+
   if (NOT USE_EXTERNAL_MPI STREQUAL "OFF")
     find_package(MPI)
   else()
