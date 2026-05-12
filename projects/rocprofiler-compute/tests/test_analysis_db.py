@@ -358,9 +358,9 @@ def test_calc_expressions_noise_clamp():
             emit_variance_warnings=True,
         )
         variance_warning_calls = [
-            c
-            for c in console_warning_mock.call_args_list
-            if "Variance corrected for metric: direct_test" in c.args[0]
+            warning_call
+            for warning_call in console_warning_mock.call_args_list
+            if "Variance corrected for metric: direct_test" in warning_call.args[0]
         ]
         assert len(variance_warning_calls) == 1
         assert get_noise_clamp_warnings()["count"] >= 1
@@ -378,9 +378,9 @@ def test_calc_expressions_noise_clamp():
         )
         assert get_noise_clamp_warnings()["count"] >= 1
         variance_warning_calls = [
-            c
-            for c in console_warning_mock.call_args_list
-            if "Variance corrected for metric:" in c.args[0]
+            warning_call
+            for warning_call in console_warning_mock.call_args_list
+            if "Variance corrected for metric:" in warning_call.args[0]
         ]
         assert variance_warning_calls == []
 
@@ -398,9 +398,9 @@ def test_calc_expressions_noise_clamp():
         analyzer.calc_expressions()
 
     variance_warning_calls = [
-        c
-        for c in console_warning_mock.call_args_list
-        if "Variance corrected for metric:" in c.args[0]
+        warning_call
+        for warning_call in console_warning_mock.call_args_list
+        if "Variance corrected for metric:" in warning_call.args[0]
     ]
     assert len(variance_warning_calls) == 1
     assert "1.1 - clamped" in variance_warning_calls[0].args[0]
