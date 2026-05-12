@@ -112,7 +112,9 @@ lookup_queue_state_by_doorbell(hsa_signal_t signal, bool create_if_missing = fal
  * @return Previous value of virtual_wptr
  */
 uint64_t
-add_write_index_impl(QueueState* state, uint64_t value);
+add_write_index_impl(QueueState*       state,
+                     uint64_t          value,
+                     std::memory_order order = std::memory_order_relaxed);
 
 /**
  * @brief Store a new value to virtual write pointer
@@ -124,7 +126,9 @@ add_write_index_impl(QueueState* state, uint64_t value);
  * @param value New value to store
  */
 void
-store_write_index_impl(QueueState* state, uint64_t value);
+store_write_index_impl(QueueState*       state,
+                       uint64_t          value,
+                       std::memory_order order = std::memory_order_relaxed);
 
 /**
  * @brief Compare-and-swap on virtual write pointer
@@ -138,7 +142,10 @@ store_write_index_impl(QueueState* state, uint64_t value);
  * @return Previous value of virtual_wptr
  */
 uint64_t
-cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value);
+cas_write_index_impl(QueueState*       state,
+                     uint64_t          expected,
+                     uint64_t          value,
+                     std::memory_order order = std::memory_order_relaxed);
 
 /**
  * @brief Load virtual write pointer
@@ -149,7 +156,7 @@ cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value);
  * @return Current value of virtual_wptr
  */
 uint64_t
-load_write_index_impl(const QueueState* state);
+load_write_index_impl(const QueueState* state, std::memory_order order = std::memory_order_relaxed);
 
 /// Type alias for doorbell function callback
 using doorbell_fn_t = std::function<void(hsa_signal_t, hsa_signal_value_t)>;

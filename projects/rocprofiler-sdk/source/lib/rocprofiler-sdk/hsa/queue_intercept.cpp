@@ -45,6 +45,7 @@
 #include <hsa/hsa_api_trace.h>
 #include <pthread.h>
 
+#include <atomic>
 #include <cstring>
 #include <thread>
 #include <vector>
@@ -130,29 +131,29 @@ lookup_queue_state_by_doorbell(hsa_signal_t signal, bool create_if_missing)
 }
 
 uint64_t
-add_write_index_impl(QueueState* state, uint64_t value)
+add_write_index_impl(QueueState* state, uint64_t value, std::memory_order order)
 {
-    return state->virtual_wptr.fetch_add(value, std::memory_order_relaxed);
+    return state->virtual_wptr.fetch_add(value, order);
 }
 
 void
-store_write_index_impl(QueueState* state, uint64_t value)
+store_write_index_impl(QueueState* state, uint64_t value, std::memory_order order)
 {
-    state->virtual_wptr.store(value, std::memory_order_relaxed);
+    state->virtual_wptr.store(value, order);
 }
 
 uint64_t
-cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value)
+cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value, std::memory_order order)
 {
     uint64_t prev = expected;
-    state->virtual_wptr.compare_exchange_strong(prev, value, std::memory_order_relaxed);
+    state->virtual_wptr.compare_exchange_strong(prev, value, order);
     return prev;
 }
 
 uint64_t
-load_write_index_impl(const QueueState* state)
+load_write_index_impl(const QueueState* state, std::memory_order order)
 {
-    return state->virtual_wptr.load(std::memory_order_relaxed);
+    return state->virtual_wptr.load(order);
 }
 
 namespace
@@ -265,10 +266,11 @@ async_signal_handler(hsa_signal_t                            completion_signal,
 {
     constexpr auto timeout_hint =
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::microseconds{10});
+    constexpr auto max_iterations = (1UL << 20);  // cap at ~1M iterations to prevent infinit loop
 
     auto signal_value = starting_value;
     auto niterations  = uint64_t{0};
-    while(true)
+    while(niterations < max_iterations)
     {
         signal_value = get_core_table()->hsa_signal_wait_relaxed_fn(completion_signal,
                                                                     HSA_SIGNAL_CONDITION_LT,
@@ -279,7 +281,6 @@ async_signal_handler(hsa_signal_t                            completion_signal,
         if(signal_value < starting_value || registration::get_fini_status() != 0) break;
         ++niterations;
     }
-    // auto signal_value = get_core_table()->hsa_signal_load_relaxed_fn(completion_signal);
 
     ROCP_INFO << fmt::format("Async signal handler invoked for signal {{.handle={} / {:3}}} with "
                              "value {} (original value={}, iterations={})",
@@ -304,7 +305,7 @@ async_signal_handler(hsa_signal_t                            completion_signal,
         {
             // if the signal was not from the pool, we need to decrement the signal value to clean
             // up the signal for the application
-            get_core_table()->hsa_signal_add_relaxed_fn(packet.completion_signal, -1);
+            get_core_table()->hsa_signal_subtract_relaxed_fn(packet.completion_signal, 1);
         }
 
         // we need to decrement this reference count at the end of the functions
@@ -628,12 +629,51 @@ process_doorbell_impl(const queue_state_ptr_t& state,
 
     const uint64_t pkt_count = scan_end - scan_pos;
 
+    ROCP_INFO << fmt::format("{} :: pkt_count={} (scan_pos={}, scan_end={})",
+                             __FUNCTION__,
+                             pkt_count,
+                             scan_pos,
+                             scan_end);
+
+    // Snapshot each slot, but wait for its header to be committed first.
+    //
+    // The AQL specification requires packet writers to store the header field *last* using
+    // release semantics (ROCR enforces this in amd_aql_queue.cpp).  An acquire load of the
+    // header here pairs with that release store and ensures the complete packet body is
+    // visible before we copy it.
+    //
+    // The type field occupies bits [7:0] of the 16-bit header.  While the slot is "empty"
+    // (not yet written by the current generation's producer) the type equals
+    // HSA_PACKET_TYPE_INVALID (== 1):
+    //   - On queue creation ROCR initialises every slot to INVALID.
+    //   - After we snapshot a slot we reset its header back to INVALID (see below) so that
+    //     wrap-around reuse of the same ring slot is detectable for subsequent generations.
+    //
+    // Without this wait the interceptor can copy stale/unwritten data into the GPU ring,
+    // causing the GPU's Command Processor to process garbage packets.  The application thread
+    // that owns the slot cannot write to it until we release gate_lock (it needs no lock to
+    // write the body) so this spin terminates once the writer completes its memcpy + header
+    // store, with no risk of deadlock.
     std::vector<char> source_snapshot(pkt_count * state_ptr->pkt_size);
     for(uint64_t i = 0; i < pkt_count; ++i)
     {
-        const auto* src = static_cast<const char*>(state_ptr->ring_buf) +
-                          (((scan_pos + i) & state_ptr->ring_mask) * state_ptr->pkt_size);
-        memcpy(source_snapshot.data() + (i * state_ptr->pkt_size), src, state_ptr->pkt_size);
+        const auto  ring_slot = (scan_pos + i) & state_ptr->ring_mask;
+        char* const slot_base =
+            static_cast<char*>(state_ptr->ring_buf) + (ring_slot * state_ptr->pkt_size);
+        auto* const hdr_ptr = reinterpret_cast<volatile uint16_t*>(slot_base);
+
+        // Spin until the producer commits the header (type field != INVALID).
+        while((__atomic_load_n(hdr_ptr, __ATOMIC_ACQUIRE) & 0xFFu) ==
+              static_cast<unsigned>(HSA_PACKET_TYPE_INVALID))
+        {
+            std::this_thread::yield();
+        }
+
+        ::memcpy(
+            source_snapshot.data() + (i * state_ptr->pkt_size), slot_base, state_ptr->pkt_size);
+
+        // Reset the header to INVALID so the next ring-buffer generation can be detected.
+        __atomic_store_n(hdr_ptr, static_cast<uint16_t>(HSA_PACKET_TYPE_INVALID), __ATOMIC_RELEASE);
     }
 
     tls_state                     = state_ptr;
@@ -759,7 +799,7 @@ queue_add_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
         return get_next_table()->hsa_queue_add_write_index_relaxed_fn(q, v);
 
     if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s)
-        return add_write_index_impl(s.get(), v);
+        return add_write_index_impl(s.get(), v, std::memory_order_relaxed);
 
     return get_next_table()->hsa_queue_add_write_index_relaxed_fn(q, v);
 }
@@ -771,7 +811,7 @@ queue_add_write_index_scacq_screl(const hsa_queue_t* q, uint64_t v)
         return get_next_table()->hsa_queue_add_write_index_scacq_screl_fn(q, v);
 
     if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s)
-        return add_write_index_impl(s.get(), v);
+        return add_write_index_impl(s.get(), v, std::memory_order_acq_rel);
 
     return get_next_table()->hsa_queue_add_write_index_scacq_screl_fn(q, v);
 }
@@ -783,7 +823,7 @@ queue_add_write_index_scacquire(const hsa_queue_t* q, uint64_t v)
         return get_next_table()->hsa_queue_add_write_index_scacquire_fn(q, v);
 
     if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s)
-        return add_write_index_impl(s.get(), v);
+        return add_write_index_impl(s.get(), v, std::memory_order_acquire);
 
     return get_next_table()->hsa_queue_add_write_index_scacquire_fn(q, v);
 }
@@ -795,7 +835,7 @@ queue_add_write_index_screlease(const hsa_queue_t* q, uint64_t v)
         return get_next_table()->hsa_queue_add_write_index_screlease_fn(q, v);
 
     if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s)
-        return add_write_index_impl(s.get(), v);
+        return add_write_index_impl(s.get(), v, std::memory_order_release);
 
     return get_next_table()->hsa_queue_add_write_index_screlease_fn(q, v);
 }
@@ -813,7 +853,7 @@ queue_store_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
 
     if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s)
     {
-        store_write_index_impl(s.get(), v);
+        store_write_index_impl(s.get(), v, std::memory_order_relaxed);
         return;
     }
 
@@ -831,7 +871,7 @@ queue_store_write_index_screlease(const hsa_queue_t* q, uint64_t v)
 
     if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s)
     {
-        store_write_index_impl(s.get(), v);
+        store_write_index_impl(s.get(), v, std::memory_order_release);
         return;
     }
 
@@ -847,7 +887,7 @@ queue_cas_write_index_relaxed(const hsa_queue_t* q, uint64_t expected, uint64_t 
         return get_next_table()->hsa_queue_cas_write_index_relaxed_fn(q, expected, value);
 
     if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s)
-        return cas_write_index_impl(s.get(), expected, value);
+        return cas_write_index_impl(s.get(), expected, value, std::memory_order_relaxed);
 
     return get_next_table()->hsa_queue_cas_write_index_relaxed_fn(q, expected, value);
 }
@@ -859,7 +899,7 @@ queue_cas_write_index_scacq_screl(const hsa_queue_t* q, uint64_t expected, uint6
         return get_next_table()->hsa_queue_cas_write_index_scacq_screl_fn(q, expected, value);
 
     if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s)
-        return cas_write_index_impl(s.get(), expected, value);
+        return cas_write_index_impl(s.get(), expected, value, std::memory_order_acq_rel);
 
     return get_next_table()->hsa_queue_cas_write_index_scacq_screl_fn(q, expected, value);
 }
@@ -871,7 +911,7 @@ queue_cas_write_index_scacquire(const hsa_queue_t* q, uint64_t expected, uint64_
         return get_next_table()->hsa_queue_cas_write_index_scacquire_fn(q, expected, value);
 
     if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s)
-        return cas_write_index_impl(s.get(), expected, value);
+        return cas_write_index_impl(s.get(), expected, value, std::memory_order_acquire);
 
     return get_next_table()->hsa_queue_cas_write_index_scacquire_fn(q, expected, value);
 }
@@ -883,7 +923,7 @@ queue_cas_write_index_screlease(const hsa_queue_t* q, uint64_t expected, uint64_
         return get_next_table()->hsa_queue_cas_write_index_screlease_fn(q, expected, value);
 
     if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s)
-        return cas_write_index_impl(s.get(), expected, value);
+        return cas_write_index_impl(s.get(), expected, value, std::memory_order_release);
 
     return get_next_table()->hsa_queue_cas_write_index_screlease_fn(q, expected, value);
 }
@@ -897,7 +937,7 @@ queue_load_write_index_relaxed(const hsa_queue_t* q)
         return get_next_table()->hsa_queue_load_write_index_relaxed_fn(q);
 
     if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s)
-        return load_write_index_impl(s.get());
+        return load_write_index_impl(s.get(), std::memory_order_relaxed);
 
     return get_next_table()->hsa_queue_load_write_index_relaxed_fn(q);
 }
@@ -909,12 +949,12 @@ queue_load_write_index_scacquire(const hsa_queue_t* q)
         return get_next_table()->hsa_queue_load_write_index_scacquire_fn(q);
 
     if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s)
-        return load_write_index_impl(s.get());
+        return load_write_index_impl(s.get(), std::memory_order_acquire);
 
     return get_next_table()->hsa_queue_load_write_index_scacquire_fn(q);
 }
 
-// --- signal_store wrappers (2) ---
+// --- signal_store wrappers (4) ---
 
 void
 signal_store_relaxed(hsa_signal_t sig, hsa_signal_value_t val)
@@ -958,6 +998,50 @@ signal_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
     }
 
     get_next_table()->hsa_signal_store_screlease_fn(sig, val);
+}
+
+void
+signal_silent_store_relaxed(hsa_signal_t sig, hsa_signal_value_t val)
+{
+    if(should_bypass_inline_intercept())
+    {
+        get_next_table()->hsa_signal_silent_store_relaxed_fn(sig, val);
+        return;
+    }
+
+    // it is too late to create queue state at this point so do not create if missing.
+    constexpr auto create_if_missing = false;
+    if(auto s = lookup_queue_state_by_doorbell(sig, create_if_missing); s)
+    {
+        process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {
+            get_next_table()->hsa_signal_silent_store_relaxed_fn(db, v);
+        });
+        return;
+    }
+
+    get_next_table()->hsa_signal_silent_store_relaxed_fn(sig, val);
+}
+
+void
+signal_silent_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
+{
+    if(should_bypass_inline_intercept())
+    {
+        get_next_table()->hsa_signal_silent_store_screlease_fn(sig, val);
+        return;
+    }
+
+    // it is too late to create queue state at this point so do not create if missing.
+    constexpr auto create_if_missing = false;
+    if(auto s = lookup_queue_state_by_doorbell(sig, create_if_missing); s)
+    {
+        process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {
+            get_next_table()->hsa_signal_silent_store_screlease_fn(db, v);
+        });
+        return;
+    }
+
+    get_next_table()->hsa_signal_silent_store_screlease_fn(sig, val);
 }
 }  // namespace impl
 }  // namespace
@@ -1020,8 +1104,10 @@ intercept_init(CoreApiTable* core_table, bool enabled)
     core_table->hsa_queue_load_write_index_relaxed_fn   = impl::queue_load_write_index_relaxed;
     core_table->hsa_queue_load_write_index_scacquire_fn = impl::queue_load_write_index_scacquire;
 
-    core_table->hsa_signal_store_relaxed_fn   = impl::signal_store_relaxed;
-    core_table->hsa_signal_store_screlease_fn = impl::signal_store_screlease;
+    core_table->hsa_signal_store_relaxed_fn          = impl::signal_store_relaxed;
+    core_table->hsa_signal_store_screlease_fn        = impl::signal_store_screlease;
+    core_table->hsa_signal_silent_store_relaxed_fn   = impl::signal_silent_store_relaxed;
+    core_table->hsa_signal_silent_store_screlease_fn = impl::signal_silent_store_screlease;
 
     // mark that intercept has been activated
     s_intercept_active.store(enabled, std::memory_order_release);
