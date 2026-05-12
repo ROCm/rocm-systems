@@ -76,6 +76,7 @@ class SdmaImpl {
   //   effective_channel = (sdmaChannel + wf_id) % numChannels.
   //   When all WGs share one context, the offset spreads N*W wavefronts across
   //   W channels, reducing per-channel CAS contention from N*W to N.
+  template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ anvil::SdmaQueueDeviceHandle* sdmaCopy(void* dst, void* src,
                                                     size_t size, int local_pe) {
     int effective_channel = (sdmaChannel +
@@ -90,9 +91,13 @@ class SdmaImpl {
       // because SDMA probes GL2 via the coherence protocol on the same die.
       __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
       anvil::put(*handle, dst, src, size);
-      // Mark (local_pe, effective_channel) dirty so sdmaQuiet drains the right channel.
-      uint64_t bit = 1ULL << (local_pe * numChannels + effective_channel);
-      __hip_atomic_fetch_or(&sdmaDirty, bit, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      // Mark (local_pe, effective_channel) dirty so sdmaQuiet drains the right
+      // channel.  Blocking copies drain inline via quietAll, so the dirty bit
+      // is unnecessary and would only cause a redundant poll in a later fence.
+      if constexpr (!is_blocking(Kind)) {
+        uint64_t bit = 1ULL << (local_pe * numChannels + effective_channel);
+        __hip_atomic_fetch_or(&sdmaDirty, bit, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      }
     }
     return handle;
   }
