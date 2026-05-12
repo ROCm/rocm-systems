@@ -67,7 +67,7 @@ __device__ void validate_buffer_device(const char *buf, size_t size,
 // the destination buffer. Called by the SENDER wave.
 __device__ void wait_for_validated_ack(uint64_t *signal_validated, int wave_id, int iter) {
   if (is_thread_zero_in_wave()) {
-    while (rocshmem_signal_fetch(&signal_validated[wave_id]) < (uint64_t)iter) {}
+    rocshmem_uint64_wait_until(&signal_validated[wave_id], ROCSHMEM_CMP_GE, (uint64_t)iter);
   }
   __syncthreads();
 }
@@ -112,7 +112,7 @@ __global__ void FenceOrderPutWaveSignalKernel(
       wait_for_validated_ack(signal_validated, wave_id, i+1);
     } else {
       if (is_thread_zero_in_wave()) {
-        while (rocshmem_signal_fetch(&signal_ready[wave_id]) < (uint64_t)(i + 1)) {}
+        rocshmem_uint64_wait_until(&signal_ready[wave_id], ROCSHMEM_CMP_GE, (uint64_t)(i + 1));
       }
       validate_buffer_device(r_buf + wave_id * size, size, i, error_count, 0);
       __syncthreads();
