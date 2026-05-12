@@ -44,7 +44,7 @@ TEST_F(table_insert_query_test, simple_insert_with_single_column)
                             .set_columns("id")
                             .set_values(1)
                             .get_query_string();
-    EXPECT_EQ(query_string, "INSERT INTO test_table ( id ) VALUES ( 1 )");
+    EXPECT_EQ(query_string, "INSERT INTO `test_table` ( id ) VALUES ( 1 )");
 }
 
 TEST_F(table_insert_query_test, insert_with_multiple_columns_and_values)
@@ -54,7 +54,7 @@ TEST_F(table_insert_query_test, insert_with_multiple_columns_and_values)
                             .set_values(1, "Alice", 30)
                             .get_query_string();
     EXPECT_EQ(query_string,
-              "INSERT INTO users ( id, name, age ) VALUES ( 1, \"Alice\", 30 )");
+              "INSERT INTO `users` ( id, name, age ) VALUES ( 1, \"Alice\", 30 )");
 }
 
 TEST_F(table_insert_query_test, insert_with_string_values)
@@ -64,7 +64,7 @@ TEST_F(table_insert_query_test, insert_with_string_values)
                             .set_values("hello", "world")
                             .get_query_string();
     EXPECT_EQ(query_string,
-              "INSERT INTO strings ( col1, col2 ) VALUES ( \"hello\", \"world\" )");
+              "INSERT INTO `strings` ( col1, col2 ) VALUES ( \"hello\", \"world\" )");
 }
 
 TEST_F(table_insert_query_test, insert_with_numeric_values)
@@ -73,7 +73,7 @@ TEST_F(table_insert_query_test, insert_with_numeric_values)
                             .set_columns("int_col", "float_col", "big_int")
                             .set_values(42, 3.14159, int64_t{ 1234567890123LL })
                             .get_query_string();
-    EXPECT_TRUE(query_string.find("INSERT INTO numbers") != std::string::npos);
+    EXPECT_TRUE(query_string.find("INSERT INTO `numbers`") != std::string::npos);
     EXPECT_TRUE(query_string.find("42") != std::string::npos);
     EXPECT_TRUE(query_string.find("3.14159") != std::string::npos);
     EXPECT_TRUE(query_string.find("1234567890123") != std::string::npos);
@@ -87,7 +87,7 @@ TEST_F(table_insert_query_test, insert_with_optional_null_value)
                             .set_values(1, null_val)
                             .get_query_string();
     EXPECT_EQ(query_string,
-              "INSERT INTO nullable ( id, optional_col ) VALUES ( 1, NULL )");
+              "INSERT INTO `nullable` ( id, optional_col ) VALUES ( 1, NULL )");
 }
 
 TEST_F(table_insert_query_test, insert_with_optional_present_value)
@@ -97,7 +97,7 @@ TEST_F(table_insert_query_test, insert_with_optional_present_value)
                             .set_columns("id", "value")
                             .set_values(1, present_val)
                             .get_query_string();
-    EXPECT_EQ(query_string, "INSERT INTO optional_test ( id, value ) VALUES ( 1, 42 )");
+    EXPECT_EQ(query_string, "INSERT INTO `optional_test` ( id, value ) VALUES ( 1, 42 )");
 }
 
 TEST_F(table_insert_query_test, insert_with_mixed_optional_values)
@@ -108,7 +108,7 @@ TEST_F(table_insert_query_test, insert_with_mixed_optional_values)
                             .set_columns("a", "b", "c", "d")
                             .set_values(1, null_int, "text", present_double)
                             .get_query_string();
-    EXPECT_TRUE(query_string.find("INSERT INTO mixed") != std::string::npos);
+    EXPECT_TRUE(query_string.find("INSERT INTO `mixed`") != std::string::npos);
     EXPECT_TRUE(query_string.find("( a, b, c, d )") != std::string::npos);
     EXPECT_TRUE(query_string.find("1,") != std::string::npos);
     EXPECT_TRUE(query_string.find("NULL") != std::string::npos);
@@ -122,13 +122,13 @@ TEST_F(table_insert_query_test, reuse_query_builder_resets_content)
                       .set_columns("col1")
                       .set_values(100)
                       .get_query_string();
-    EXPECT_EQ(query1, "INSERT INTO table1 ( col1 ) VALUES ( 100 )");
+    EXPECT_EQ(query1, "INSERT INTO `table1` ( col1 ) VALUES ( 100 )");
 
     auto query2 = m_query.set_table_name("table2")
                       .set_columns("col2")
                       .set_values(200)
                       .get_query_string();
-    EXPECT_EQ(query2, "INSERT INTO table2 ( col2 ) VALUES ( 200 )");
+    EXPECT_EQ(query2, "INSERT INTO `table2` ( col2 ) VALUES ( 200 )");
 }
 
 TEST_F(table_insert_query_test, insert_with_many_columns)
@@ -138,7 +138,7 @@ TEST_F(table_insert_query_test, insert_with_many_columns)
                             .set_values(1, 2, 3, 4, 5)
                             .get_query_string();
     EXPECT_EQ(query_string,
-              "INSERT INTO wide_table ( c1, c2, c3, c4, c5 ) VALUES ( 1, 2, 3, 4, 5 )");
+              "INSERT INTO `wide_table` ( c1, c2, c3, c4, c5 ) VALUES ( 1, 2, 3, 4, 5 )");
 }
 
 TEST_F(table_insert_query_test, insert_with_negative_numbers)
@@ -148,7 +148,7 @@ TEST_F(table_insert_query_test, insert_with_negative_numbers)
                             .set_values(-42, 42)
                             .get_query_string();
     EXPECT_EQ(query_string,
-              "INSERT INTO signed_numbers ( negative, positive ) VALUES ( -42, 42 )");
+              "INSERT INTO `signed_numbers` ( negative, positive ) VALUES ( -42, 42 )");
 }
 
 TEST_F(table_insert_query_test, insert_with_zero_values)
@@ -157,7 +157,7 @@ TEST_F(table_insert_query_test, insert_with_zero_values)
                             .set_columns("int_zero", "float_zero")
                             .set_values(0, 0.0)
                             .get_query_string();
-    EXPECT_TRUE(query_string.find("INSERT INTO zeros") != std::string::npos);
+    EXPECT_TRUE(query_string.find("INSERT INTO `zeros`") != std::string::npos);
     EXPECT_TRUE(query_string.find("( int_zero, float_zero )") != std::string::npos);
 }
 

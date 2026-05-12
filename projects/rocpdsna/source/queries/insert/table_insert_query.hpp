@@ -4,6 +4,7 @@
 #pragma once
 
 #include "insert_query_builders.hpp"
+#include "queries/identifier.hpp"
 
 #include <sstream>
 #include <string>
@@ -20,7 +21,7 @@ struct table_insert_query
     query_columns_builder& set_table_name(const std::string& table_name)
     {
         m_ss.str("");
-        m_ss << "INSERT INTO " << table_name << " ";
+        m_ss << "INSERT INTO " << quote_identifier(table_name) << " ";
         return m_query_columns_builder;
     }
 

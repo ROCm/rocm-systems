@@ -5,6 +5,8 @@
 #include "rocpdsna/writer.hpp"
 #include "rocpdsna/writer_types.hpp"
 
+#include "insert/table_insert_query.hpp"
+
 #include <sqlite3.h>
 
 #include <gtest/gtest.h>
@@ -3116,4 +3118,61 @@ TEST_F(writer_test, insert_sample_data_with_unregistered_track_throws)
     const rocpdsna::writer_types::event_data_t  event{};
 
     EXPECT_THROW(m_writer->insert_sample_data(sample, event), std::runtime_error);
+}
+
+// ============================================================================
+// Group F: Identifier-quoting regression
+// ============================================================================
+
+// Reproduces the SDK crash where rocpdsna::storage_t was given a raw uuid_v7
+// (e.g. "00003fb7-adcb-7000-a000-000000000000"). SQLite parses the hyphens
+// in unquoted table names as the subtraction operator and raises
+// "near \"-\": syntax error" on the very first INSERT. Schema DDL was already
+// backtick-quoted so CREATE worked; the failure was in the INSERT/SELECT
+// builders. The fix backtick-quotes table names at the concatenation site.
+// Reproduces the SDK crash where rocpdsna::storage_t was given a raw uuid_v7
+// (e.g. "00003fb7-adcb-7000-a000-000000000000"). SQLite parsed the unquoted
+// hyphens in INSERT/SELECT table names as the subtraction operator and raised
+// "near \"-\": syntax error". Schema DDL was already backtick-quoted; the
+// INSERT/SELECT builders were not. The fix backtick-quotes table names at
+// the concatenation site in the builders. This regression exercises the
+// hyphen-bearing identifier through table_insert_query directly because the
+// vendored schema engine separately rejects hyphenated suffixes - the SDK-side
+// fix normalizes the uuid before reaching the writer.
+TEST(query_builder_hyphen_uuid_regression, insert_query_quotes_hyphen_bearing_table_name)
+{
+    rocpdsna::queries::insert::table_insert_query builder;
+    auto                                          query =
+        builder.set_table_name("rocpd_string_00003fb7-adcb-7000-a000-000000000000")
+            .set_columns("id", "string")
+            .set_values('?', '?')
+            .get_query_string();
+
+    EXPECT_NE(query.find("`rocpd_string_00003fb7-adcb-7000-a000-000000000000`"),
+              std::string::npos)
+        << "Hyphen-bearing table name must be backtick-quoted: " << query;
+
+    sqlite3* db = nullptr;
+    ASSERT_EQ(sqlite3_open(":memory:", &db), SQLITE_OK);
+    ASSERT_EQ(
+        sqlite3_exec(db,
+                     "CREATE TABLE `rocpd_string_00003fb7-adcb-7000-a000-000000000000` "
+                     "(id INTEGER PRIMARY KEY, string TEXT)",
+                     nullptr,
+                     nullptr,
+                     nullptr),
+        SQLITE_OK);
+
+    sqlite3_stmt* stmt = nullptr;
+    int           rc   = sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, nullptr);
+    EXPECT_EQ(rc, SQLITE_OK)
+        << "Builder-produced INSERT must prepare cleanly against a hyphenated "
+           "table name. sqlite3_errmsg: "
+        << sqlite3_errmsg(db);
+
+    if(stmt != nullptr)
+    {
+        sqlite3_finalize(stmt);
+    }
+    sqlite3_close(db);
 }

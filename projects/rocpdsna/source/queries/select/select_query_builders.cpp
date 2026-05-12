@@ -3,6 +3,8 @@
 
 #include "select_query_builders.hpp"
 
+#include "queries/identifier.hpp"
+
 namespace rocpdsna::queries::select
 {
 
@@ -204,7 +206,7 @@ join_clause_builder::join_clause_builder(std::stringstream& ss)
 join_clause_builder&
 join_clause_builder::inner_join(std::string_view table, std::string_view on_condition)
 {
-    m_stream << " INNER JOIN " << table << " ON " << on_condition;
+    m_stream << " INNER JOIN " << quote_identifier(table) << " ON " << on_condition;
     m_base_pos = m_stream.tellp();
     return *this;
 }
@@ -214,7 +216,8 @@ join_clause_builder::inner_join(std::string_view table,
                                 std::string_view alias,
                                 std::string_view on_condition)
 {
-    m_stream << " INNER JOIN " << table << " AS " << alias << " ON " << on_condition;
+    m_stream << " INNER JOIN " << quote_identifier(table) << " AS " << alias << " ON "
+             << on_condition;
     m_base_pos = m_stream.tellp();
     return *this;
 }
@@ -222,7 +225,7 @@ join_clause_builder::inner_join(std::string_view table,
 join_clause_builder&
 join_clause_builder::left_join(std::string_view table, std::string_view on_condition)
 {
-    m_stream << " LEFT JOIN " << table << " ON " << on_condition;
+    m_stream << " LEFT JOIN " << quote_identifier(table) << " ON " << on_condition;
     m_base_pos = m_stream.tellp();
     return *this;
 }
@@ -232,7 +235,8 @@ join_clause_builder::left_join(std::string_view table,
                                std::string_view alias,
                                std::string_view on_condition)
 {
-    m_stream << " LEFT JOIN " << table << " AS " << alias << " ON " << on_condition;
+    m_stream << " LEFT JOIN " << quote_identifier(table) << " AS " << alias << " ON "
+             << on_condition;
     m_base_pos = m_stream.tellp();
     return *this;
 }
@@ -240,7 +244,7 @@ join_clause_builder::left_join(std::string_view table,
 join_clause_builder&
 join_clause_builder::right_join(std::string_view table, std::string_view on_condition)
 {
-    m_stream << " RIGHT JOIN " << table << " ON " << on_condition;
+    m_stream << " RIGHT JOIN " << quote_identifier(table) << " ON " << on_condition;
     m_base_pos = m_stream.tellp();
     return *this;
 }
@@ -250,7 +254,8 @@ join_clause_builder::right_join(std::string_view table,
                                 std::string_view alias,
                                 std::string_view on_condition)
 {
-    m_stream << " RIGHT JOIN " << table << " AS " << alias << " ON " << on_condition;
+    m_stream << " RIGHT JOIN " << quote_identifier(table) << " AS " << alias << " ON "
+             << on_condition;
     m_base_pos = m_stream.tellp();
     return *this;
 }
@@ -339,7 +344,7 @@ from_clause_builder::from_clause_builder(std::stringstream& ss)
 join_clause_builder&
 from_clause_builder::from(std::string_view table)
 {
-    m_stream << " FROM " << table;
+    m_stream << " FROM " << quote_identifier(table);
     m_join_builder.m_base_pos = m_stream.tellp();
     return m_join_builder;
 }
@@ -347,7 +352,7 @@ from_clause_builder::from(std::string_view table)
 join_clause_builder&
 from_clause_builder::from(std::string_view table, std::string_view alias)
 {
-    m_stream << " FROM " << table << " " << alias;
+    m_stream << " FROM " << quote_identifier(table) << " " << alias;
     m_join_builder.m_base_pos = m_stream.tellp();
     return m_join_builder;
 }
