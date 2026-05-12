@@ -1302,7 +1302,7 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   // skipping the doorbell will not wake up the AQL worker thread
   uint32_t skip_limit = DEBUG_CLR_DOORBELL_SKIP;
   bool ring_doorbell = IS_LINUX || dev().IsPm4Emulation() || blocking ||
-                       (skippedDispatches_ >= skip_limit);
+                       (skippedDispatches_ >= skip_limit) || attach_signal;
   if (ring_doorbell) {
     Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
     skippedDispatches_ = 0;
