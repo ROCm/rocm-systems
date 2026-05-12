@@ -200,8 +200,6 @@ configure_settings(bool _init)
 
     if(is_ci_value && get_state() < State::Init)
     {
-        // Trace is captured by rocprofsys::config_error at construction; no
-        // need for a separate timemory_print_demangled_backtrace call here.
         throw rocprofsys::config_error{ fmt::format(
             "config::configure_settings() called before "
             "rocprofsys_init_library. state = {}",

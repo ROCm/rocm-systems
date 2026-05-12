@@ -58,10 +58,7 @@ ascii_chars()
     return { "+-", "+-", "|" };
 }
 
-// Wrap `body` (already-rendered, may be multi-line) in a side-bar block.
-// Every line gets the `<bar> ` prefix; blank lines get a bare `<bar>` (no
-// trailing space) so they stay clean. The header line opens the block and
-// labels it `error`; the closer line ends with the bar lead-in glyph.
+// Blank lines get a bare `<bar>` (no trailing space) so they stay clean.
 std::string
 wrap_in_sidebar(std::string_view body, bool color_on)
 {
@@ -72,10 +69,8 @@ wrap_in_sidebar(std::string_view body, bool color_on)
 
     std::ostringstream out;
 
-    // Header: `┌─ error` (border + glyph dim, `error` bold bright-red).
     out << border << chars.tl << reset << ' ' << err_kw << "error" << reset << '\n';
 
-    // Body: split on '\n' and prefix every line with the left bar.
     std::size_t i = 0;
     const auto  n = body.size();
     while(i <= n)
@@ -100,7 +95,6 @@ wrap_in_sidebar(std::string_view body, bool color_on)
         i = j + 1;
     }
 
-    // Closer.
     out << border << chars.bl << reset << '\n';
 
     return out.str();

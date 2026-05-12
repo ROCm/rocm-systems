@@ -1,14 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Demo program for the rocprofsys diagnostic format.
-//
-// Throws an exception from a deep call chain and renders the side-bar
-// wrapped gdb-style output in the two supported modes:
-//
-//   1. Default (with color, UTF-8 side-bar)
-//   2. No color (ASCII side-bar)
-
 #include "common/diagnostic/format_exception.hpp"
 #include "common/diagnostic/stacktrace.hpp"
 

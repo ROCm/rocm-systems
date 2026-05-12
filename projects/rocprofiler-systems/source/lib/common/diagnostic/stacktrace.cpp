@@ -36,10 +36,7 @@ namespace diagnostic
 {
 namespace
 {
-// ---------------------------------------------------------------------
-// Demangle cache. __cxa_demangle is hot enough on long traces that we
-// cache by mangled-string pointer (addresses are stable within a process).
-// ---------------------------------------------------------------------
+// __cxa_demangle is hot enough on long traces that we cache results.
 struct demangle_cache
 {
     std::mutex                                   mu;
@@ -109,11 +106,8 @@ demangle(const char* mangled)
     return result;
 }
 
-// ---------------------------------------------------------------------
-// Process-wide Dwfl session. dwfl_begin/end is heavy; we keep a singleton
-// guarded by a mutex for the lifetime of the process. dwfl_report_*
-// rebinds modules on each access in case dlopen happened.
-// ---------------------------------------------------------------------
+// dwfl_begin/end is heavy; keep a process-wide singleton guarded by a mutex.
+// dwfl_report_* rebinds modules on each access in case dlopen happened.
 struct dwfl_session
 {
     Dwfl*          handle = nullptr;
@@ -163,10 +157,7 @@ refresh_dwfl(Dwfl* handle)
     dwfl_report_end(handle, nullptr, nullptr);
 }
 
-// ---------------------------------------------------------------------
-// Resolve a single PC into 1+ frames (multiple if there's an inline chain).
-// Order of returned frames is outer->inner, matching the format spec.
-// ---------------------------------------------------------------------
+// Returned frames are ordered outer->inner.
 std::vector<stacktrace_frame>
 resolve_address(std::uintptr_t addr)
 {
@@ -194,7 +185,7 @@ resolve_address(std::uintptr_t addr)
         }
     }
 
-    // Build the outer frame from libdw (preferred) or dladdr (fallback).
+    // libdw preferred, dladdr fallback.
     stacktrace_frame outer{};
     outer.address = addr;
 
@@ -214,7 +205,6 @@ resolve_address(std::uintptr_t addr)
             outer.module = ::basename(const_cast<char*>(mn));
         }
 
-        // Function name + offset.
         GElf_Sym    sym{};
         const char* fn = dwfl_module_addrname(mod, addr);
         if(fn != nullptr)
@@ -274,10 +264,7 @@ resolve_address(std::uintptr_t addr)
     return frames;
 }
 
-// ---------------------------------------------------------------------
-// Per-process exe path cache, used to suppress the module suffix when
-// the frame's module is the main exe.
-// ---------------------------------------------------------------------
+// Used to suppress the module suffix when the frame's module is the main exe.
 const std::string&
 exe_basename()
 {
@@ -294,9 +281,6 @@ exe_basename()
     return name;
 }
 
-// ---------------------------------------------------------------------
-// Env-var driven runtime overrides.
-// ---------------------------------------------------------------------
 struct runtime_overrides
 {
     bool verbose   = false;
@@ -340,15 +324,13 @@ should_skip(const std::string& fn, const std::vector<std::string>& filters)
     return false;
 }
 
-// Try to render a path as project-relative. We don't have access to
-// PROJECT_SOURCE_DIR at this layer, so we fall back to "shorten common
-// prefixes" - drop leading "/" segment count over 3 with "..".
+// PROJECT_SOURCE_DIR is not available at this layer, so we relativize against
+// the process cwd instead.
 std::string
 display_path(const std::string& p)
 {
     if(p.empty()) return p;
 
-    // If the cwd is a strict prefix, render relative.
     char cwd[4096];
     if(::getcwd(cwd, sizeof(cwd)) != nullptr)
     {
@@ -361,7 +343,6 @@ display_path(const std::string& p)
     return p;
 }
 
-// Number of decimal digits needed to render `n` (minimum 1).
 std::size_t
 decimal_width(std::size_t n)
 {
@@ -492,13 +473,11 @@ stacktrace::frames() const
 std::string
 stacktrace::to_string(format_options opt) const
 {
-    // If caller didn't override, use defaults.
     if(opt.skip_substrings.empty())
     {
         opt.skip_substrings = default_skip_filters();
     }
 
-    // Apply env-driven overrides (verbose, no_filter).
     const auto& ov = get_overrides();
     if(ov.verbose)
     {
@@ -519,7 +498,6 @@ stacktrace::to_string(format_options opt) const
 
     const auto& fs = frames();
 
-    // Filter pass.
     std::vector<const stacktrace_frame*> visible;
     visible.reserve(fs.size());
     std::size_t skipped = 0;
@@ -536,9 +514,6 @@ stacktrace::to_string(format_options opt) const
     const std::size_t shown = std::min(visible.size(), opt.max_frames_shown);
     const std::size_t more  = visible.size() > shown ? visible.size() - shown : 0;
 
-    // Compute padding widths once. Frame index uses the largest index that
-    // will appear (shown - 1). Function-name column pads to the longest name
-    // among visible frames, capped by max_function_width.
     const std::size_t idx_width = (shown == 0) ? 1 : decimal_width(shown - 1);
 
     std::size_t fn_col_width = 0;
@@ -560,12 +535,10 @@ stacktrace::to_string(format_options opt) const
     {
         const auto& f = *visible[i];
 
-        // Frame index: "  #N  " with N right-padded to idx_width.
         char idx_buf[16];
         std::snprintf(idx_buf, sizeof(idx_buf), "#%-*zu", static_cast<int>(idx_width), i);
         out << "  " << col(color::frame_idx) << idx_buf << col(color::reset) << "  ";
 
-        // Function name (or hex address if unresolved).
         std::string fn_text;
         if(!f.function.empty())
         {
@@ -582,7 +555,6 @@ stacktrace::to_string(format_options opt) const
         const bool oversized = fn_text.size() > opt.max_function_width;
         if(oversized)
         {
-            // Don't pad oversized names; single space + `in ...` follows.
             out << col(color::fn_name) << fn_text << col(color::reset);
         }
         else
@@ -594,7 +566,6 @@ stacktrace::to_string(format_options opt) const
             }
         }
 
-        // Suffixes attached to function-name slot: offset + module tag.
         if(opt.with_offset && f.offset != 0)
         {
             char buf[32];
@@ -606,7 +577,6 @@ stacktrace::to_string(format_options opt) const
             out << ' ' << col(color::tag) << '(' << f.module << ')' << col(color::reset);
         }
 
-        // Location: `  in <file>:<line>` on the same line.
         if(opt.with_file_line && !f.file.empty())
         {
             const std::string p = display_path(f.file);

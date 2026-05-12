@@ -51,12 +51,9 @@ ci_timeout_backtrace(int)
     if(ci_timeout_backtrace_local_count >= ci_timeout_backtrace_global_count) return;
     ++ci_timeout_backtrace_local_count;
 
-    auto trace      = diagnostic::stacktrace::capture(/*skip_frames=*/0);
-    auto opts       = diagnostic::stacktrace::format_options{};
-    opts.with_color = !log::monochrome();
-    // Match the previous output: skip line info / proc maps. The stacktrace
-    // type already excludes proc/maps; line info is omitted by clearing the
-    // file/line column.
+    auto trace          = diagnostic::stacktrace::capture(/*skip_frames=*/0);
+    auto opts           = diagnostic::stacktrace::format_options{};
+    opts.with_color     = !log::monochrome();
     opts.with_file_line = false;
 
     static auto _mutex = locking::atomic_mutex{};
