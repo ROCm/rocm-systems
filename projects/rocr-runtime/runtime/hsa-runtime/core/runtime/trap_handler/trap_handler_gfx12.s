@@ -81,9 +81,8 @@
 .set SQ_WAVE_PC_HI_TRAP_ID_SIZE                    , 4
 .set SQ_WAVE_PC_HI_TRAP_ID_MASK                    , (((1 << SQ_WAVE_PC_HI_TRAP_ID_SIZE) - 1) << SQ_WAVE_PC_HI_TRAP_ID_SHIFT)
 
-.set SQ_WAVE_STATE_PRIV_HALT_BFE                   , (SQ_WAVE_STATE_PRIV_HALT_SHIFT | (1 << 16))
+.set SQ_WAVE_STATE_PRIV_SCC_SHIFT                  , 9
 .set SQ_WAVE_STATE_PRIV_HALT_SHIFT                 , 14
-.set SQ_WAVE_STATE_PRIV_BARRIER_COMPLETE_SHIFT     , 2
 
 .set TRAP_ID_ABORT                                 , 2
 .set TRAP_ID_DEBUGTRAP                             , 3
@@ -94,6 +93,7 @@
 .set TTMP6_SAVED_STATUS_HALT_MASK                  , (1 << TTMP6_SAVED_STATUS_HALT_SHIFT)
 .set TTMP6_SAVED_STATUS_HALT_SHIFT                 , 29
 .set TTMP6_WAVE_STOPPED_SHIFT                      , 30
+.set TTMP6_SCC_SHIFT                               , 31
 .if .amdgcn.gfx_generation_minor == 0
   .set TTMP6_SAVED_TRAP_ID_BFE                     , (TTMP6_SAVED_TRAP_ID_SHIFT | (TTMP6_SAVED_TRAP_ID_SIZE << 16))
   .set TTMP6_SAVED_TRAP_ID_MASK                    , (((1 << TTMP6_SAVED_TRAP_ID_SIZE) - 1) << TTMP6_SAVED_TRAP_ID_SHIFT)
@@ -209,6 +209,13 @@
     s_or_b32            ttmp11, ttmp11, ttmp2
   .endif
   s_mov_b32           ttmp3, 0                               // Clear ttmp3 as it will contain the exception code
+
+  // Move SQ_WAVE_STATE_PRIV.SCC bit from ttmp12[9] to ttmp6[31].
+  // This frees ttmp12 as a scratch register.
+  s_bfe_u32         ttmp2, ttmp12, (SQ_WAVE_STATE_PRIV_SCC_SHIFT | (1 << 16))
+  s_lshl_b32        ttmp2, ttmp2, TTMP6_SCC_SHIFT
+  s_bitset0_b32     ttmp6, TTMP6_SCC_SHIFT
+  s_or_b32          ttmp6, ttmp6, ttmp2
 
   // To avoid more overhead on the critical sample processing path, we decided to give a priority
   // to host-trap and perf_snapshot trap over the s_trap and halt.
@@ -423,15 +430,7 @@
   // NOTE: When in PRIV=1, scheduling happens as if SCHED_MODE[1:0] was 0 (normal mode)
   // so no need to save/restore SCHED_MODE bits.
 
-  // move 2 bits out of STATE_PRIV to ttmp0[1:0]
-  // TODO lsix, this can be a preambule of the trap handler all-together.
-  s_bfe_u32 ttmp2, ttmp12, (9 | (1<<16)) // SCC
-  s_or_b32 ttmp0, ttmp0, ttmp2
-  s_bfe_u32 ttmp2, ttmp12, (1 | (1<<16)) // SLEEP_WAKEUP
-  s_lshl_b32 ttmp2, ttmp2, 1
-  s_or_b32 ttmp0, ttmp0, ttmp2
-
-  // now ttmp12 is free, save xnack_mask in it
+  // save xnack_mask in ttmp12
   s_getreg_b32 ttmp12,  hwreg(HW_REG_XNACK_MASK)
 
 .if .amdgcn.gfx_generation_minor == 5
@@ -445,16 +444,15 @@
 .endif
 
 .else
-  // GFX12.0 -> save ttmp11 (contains SCHED_MODE[1:0] at bits [27:26]) into ttmp6 before overwriting with exec_hi
-  s_mov_b32 ttmp6, ttmp11
+  // GFX12.0 -> save ttmp11 (contains SCHED_MODE[1:0] at bits [27:26]) into ttmp12
+  // before overwriting ttmp11 with exec_hi. ttmp12 is free since SCC moved to ttmp6[31].
+  s_mov_b32 ttmp12, ttmp11
   s_mov_b32 ttmp11, exec_hi
 .endif
 
   // TTMP assignments for profiler
   //
-  // ttmp0 =
-  //      gfx12.0: PC[31:2], 0, 0
-  //   >= gfx12.5: PC[31:2], STATE_PRIV.SLEEP_WAKEUP, STATE_PRIV.SCC
+  // ttmp0 = PC[31:2], 0, 0
   // ttmp1 =
   //  gfx12.0: 
   //    ttmp1[31:26] = 0 (free to use),
@@ -466,8 +464,8 @@
   //    ttmp1[25]    = buff_id for PC sampling
   //    ttmp1[24: 0] = PC[56:32]
   // ttmp6 =
-  //      gfx12.0: ttmp6[27:26] = SCHED_MODE[1:0]
-  //   >= gfx12.5: 4b0 (free to use), cluster coordination
+  //      gfx12.0: STATE_PRIV.SCC, 30b0 (free to use)
+  //   >= gfx12.5: STATE_PRIV.SCC, 3b0 (free to use), cluster coordination
   // ttmp7 = WGP Y/Z
   // ttmp8 = 0 (unusable), yz valid, wave_in_wg, dispatch_idx
   // ttmp9 = WGP X
@@ -478,7 +476,7 @@
   //     ttmp11[22:14] = XNACK_STATE_PRIV[18, 16, 6:0]
   //     ttmp11[7:0]   = MODE.MSB[7:0]
   // ttmp12 = 
-  //      gfx12.0: free to use
+  //      gfx12.0: 4b0 (free to use), SCHED_MODE[1:0], 26b0 (free to use)
   //   >= gfx12.5: XNACK_MASK
   // ttmp14 = TMA_LO-ish
   // ttmp15 = TMA_HI-ish
@@ -1059,27 +1057,13 @@
   // Restore XNACK_MASK
   s_setreg_b32 hwreg(HW_REG_XNACK_MASK), ttmp12
 
-  // Restore EXEC
-  s_mov_b32         exec_lo, ttmp10                         // restore exec mask
-
-  // move SCC from ttmp0[0] to ttmp2[9]
-  s_bfe_u32 ttmp2, ttmp0, (0 | (1 << 16))
-  s_lshl_b32 ttmp2, ttmp2, 9
-
-  // move SLEEP_WAKEUP from ttmp0[1] to ttmp3[1]
-  s_bfe_u32 ttmp3, ttmp0, (1 | (1 << 16))
-  s_lshl_b32 ttmp3, ttmp3, 1
-
-  // Move SCC and SLEEP_WAKEUP to ttmp12
-  s_or_b32  ttmp12, ttmp2, ttmp3
-
-  // zero out ttmp0[1:0] as the PC is dword (32bit) aligned
-  s_and_b32 ttmp0, ttmp0, SQ_WAVE_PC_LO_ADDRESS_MASK
+  // Restore exec_lo
+  s_mov_b32         exec_lo, ttmp10                         // restore exec mask low bits
 .else
   // Restore exec on gfx12.0
   s_mov_b64         exec, ttmp[10:11]
-  // Restore ttmp11 from ttmp6 (SCHED_MODE[1:0] at bits [27:26], saved before exec_hi overwrite)
-  s_mov_b32         ttmp11, ttmp6
+  // Restore ttmp11 from ttmp12 (SCHED_MODE[1:0] at bits [27:26], saved before exec_hi overwrite)
+  s_mov_b32         ttmp11, ttmp12
 .endif
 
 .exit_pcs_trap:
@@ -1095,7 +1079,8 @@
   //      gfx12.0: 0..., SCHED_MOD[1:0], 0..., original PC
   //   >= gfx12.5: original PC (no trap_id)
   // ttmp[2:5] free
-  // ttmp10 is free (ttmp11 is free on gfx12.0)
+  // ttmp10 is free (ttmp11 is free on gfx12.5)
+  // ttmp12 is free
   // ttmp13 is free
   // ttmp[14:15] is free
   // EXEC=original user shader exec mask
@@ -1302,12 +1287,11 @@
   s_and_b64         exec, exec, exec                        // Restore STATUS.EXECZ, not writable by s_setreg_b32
   s_and_b64         vcc, vcc, vcc                           // Restore STATUS.VCCZ, not writable by s_setreg_b32
 
-  // Restore SQ_WAVE_STATE_PRIV: only SCC (bit 9) and SLEEP_WAKEUP (bit 1) need
-  // explicit software restore. The trap handler does not modify other STATE_PRIV bits
-  s_bfe_u32         ttmp2, ttmp12, (9 | (1 << 16))
-  s_bfe_u32         ttmp3, ttmp12, (1 | (1 << 16))
-  s_setreg_b32      hwreg(HW_REG_STATE_PRIV, 9, 1), ttmp2
-  s_setreg_b32      hwreg(HW_REG_STATE_PRIV, 1, 1), ttmp3
+  // Restore SQ_WAVE_STATE_PRIV: only SCC (bit 9), as the trap handler
+  // does not modify other SQ_WAVE_STATE_PRIV bits.
+  // SCC was saved in ttmp6[31] at trap entry.
+  s_lshr_b32        ttmp2, ttmp6, TTMP6_SCC_SHIFT
+  s_setreg_b32      hwreg(HW_REG_STATE_PRIV, SQ_WAVE_STATE_PRIV_SCC_SHIFT, 1), ttmp2
 
 .if .amdgcn.gfx_generation_minor == 0
   s_setreg_b32      hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2), ttmp2
