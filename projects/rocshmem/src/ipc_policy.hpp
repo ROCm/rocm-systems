@@ -104,13 +104,13 @@ class IpcOnImpl {
   }
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
   __device__ __forceinline__ void ipcFence() {
     detail::atomic::threadfence<scope, order>();
   }
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
   __device__ __forceinline__ void ipcFence([[maybe_unused]] int local_pe) {
     detail::atomic::threadfence<scope, order>();
   }
@@ -270,7 +270,7 @@ class IpcSdmaImpl : public IpcOnImpl {
   }
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
   __device__ __forceinline__ void ipcFence() {
     if (sdmaImpl_.sdmaEnabled &&
         __hip_atomic_load(&sdmaImpl_.sdmaDirty, __ATOMIC_RELAXED,
@@ -280,7 +280,7 @@ class IpcSdmaImpl : public IpcOnImpl {
   }
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
   __device__ __forceinline__ void ipcFence(int local_pe) {
     if (sdmaImpl_.sdmaEnabled) {
       uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
@@ -363,11 +363,11 @@ class IpcOffImpl {
   __device__ void ipcQuiet(int) {}
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
   __device__ __forceinline__ void ipcFence() {}
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
-            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_release>
   __device__ __forceinline__ void ipcFence(int) {}
 
   template <typename T>

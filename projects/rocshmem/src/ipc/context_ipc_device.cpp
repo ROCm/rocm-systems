@@ -77,8 +77,7 @@ __device__ void IPCContext::getmem_nbi(void *dest, const void *source,
 }
 
 __device__ void IPCContext::fence() {
-  ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
-                    detail::atomic::memory_order_release>();
+  ipcImpl_.ipcFence();
 }
 
 __device__ void IPCContext::fence(int pe) {
