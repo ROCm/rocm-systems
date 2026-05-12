@@ -1043,16 +1043,11 @@ write_rocpd_via_sna(
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<tool_counter_record_t>&                                 counter_collection_gen)
 {
-    (void) hip_api_gen;
-    (void) hsa_api_gen;
     (void) kernel_dispatch_gen;
     (void) memory_copy_gen;
-    (void) marker_api_gen;
     (void) memory_alloc_gen;
     (void) scratch_memory_gen;
     (void) kfd_gen;
-    (void) rccl_api_gen;
-    (void) rocdecode_api_gen;
     (void) counter_collection_gen;
 
     auto node_hash =
@@ -1233,7 +1228,6 @@ write_rocpd_via_sna(
             thread_info.process_id        = this_pid;
             writer.register_thread_info(thread_info);
         };
-        (void) ensure_thread;
 
         auto ensure_stream = [&](rocprofiler_stream_id_t sid) {
             if(!registered_streams.insert(sid).second) return;
@@ -1261,8 +1255,6 @@ write_rocpd_via_sna(
 
         ensure_stream(rocprofiler_stream_id_t{.handle = 0});
         ensure_queue(rocprofiler_queue_id_t{.handle = 0});
-        (void) ensure_stream;
-        (void) ensure_queue;
 
         for(const auto& itr : tool_metadata.get_code_objects())
         {
@@ -1415,6 +1407,134 @@ write_rocpd_via_sna(
                 }
             }
         }
+
+        // Tracks for sample insertion are keyed by (category, thread). The
+        // category is sourced from tool_metadata.buffer_names which owns the
+        // backing storage, so std::string_view is stable for the duration of
+        // the writer.
+        auto registered_tracks = std::set<std::pair<std::string_view, rocprofiler_thread_id_t>>{};
+        auto ensure_track      = [&](std::string_view category, rocprofiler_thread_id_t tid) {
+            if(!registered_tracks.emplace(category, tid).second) return;
+            auto track       = writer_types::track_info_t{};
+            track.name       = category;
+            track.node_id    = this_nid;
+            track.process_id = this_pid;
+            track.thread_id  = tid;
+            writer.register_track_info(track);
+        };
+
+        auto process_api_records = [&](const auto& gen) {
+            for(auto pitr : gen)
+            {
+                for(auto itr : gen.get(pitr))
+                {
+                    auto category = tool_metadata.buffer_names.at(itr.kind);
+                    auto name     = tool_metadata.buffer_names.at(itr.kind, itr.operation);
+
+                    auto msg = std::string{"{}"};
+                    if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API)
+                    {
+                        if(static_cast<rocprofiler_tracing_operation_t>(itr.operation) !=
+                           ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxGetThreadId)
+                        {
+                            auto message =
+                                tool_metadata.get_marker_message(itr.correlation_id.internal);
+                            if(!message.empty())
+                            {
+                                msg = get_json_string(
+                                    [](auto& ar, std::string_view _msg) {
+                                        ar(cereal::make_nvp("message", std::string{_msg}));
+                                    },
+                                    message);
+                            }
+                        }
+                        else
+                        {
+                            msg = get_json_string(
+                                [](auto& ar, std::string_view _msg) {
+                                    ar(cereal::make_nvp("message", std::string{_msg}));
+                                },
+                                name);
+                        }
+                    }
+
+                    auto args = function_args_t{};
+                    {
+                        auto _record = rocprofiler_record_header_t{
+                            .hash = rocprofiler_record_header_compute_hash(
+                                ROCPROFILER_BUFFER_CATEGORY_TRACING, itr.kind),
+                            .payload = &itr};
+
+                        rocprofiler_iterate_buffer_tracing_record_args(
+                            _record, iterate_args_callback, &args);
+                    }
+
+                    ensure_thread(itr.thread_id);
+                    ensure_track(category, itr.thread_id);
+
+                    auto event_data            = writer_types::event_data_t{};
+                    event_data.stack_id        = itr.correlation_id.internal;
+                    event_data.parent_stack_id = itr.correlation_id.ancestor;
+                    event_data.correlation_id  = itr.correlation_id.external.value;
+                    event_data.event_category  = category;
+                    event_data.extdata         = msg;
+
+                    auto trace_env       = writer_types::trace_environment_t{};
+                    trace_env.node_id    = this_nid;
+                    trace_env.process_id = this_pid;
+                    trace_env.thread_id  = itr.thread_id;
+                    trace_env.track_name = category;
+
+                    // arg_data_t holds non-owning string_views; the backing
+                    // strings live in `args` (function_args_t) for the
+                    // duration of the insert call.
+                    auto sna_args = std::vector<writer_types::arg_data_t>{};
+                    sna_args.reserve(args.size());
+                    for(const auto& arg : args)
+                    {
+                        // common_insert_operations.insert_arg rejects empty
+                        // type or name. Skip such args defensively.
+                        if(arg.arg_type.empty() || arg.arg_name.empty()) continue;
+                        auto entry     = writer_types::arg_data_t{};
+                        entry.position = arg.arg_number;
+                        entry.type     = arg.arg_type;
+                        entry.name     = arg.arg_name;
+                        if(!arg.arg_value.empty()) entry.value = std::string_view{arg.arg_value};
+                        sna_args.emplace_back(entry);
+                    }
+
+                    if(itr.start_timestamp != itr.end_timestamp)
+                    {
+                        auto region            = writer_types::region_data_t{};
+                        region.event           = event_data;
+                        region.start_timestamp = itr.start_timestamp;
+                        region.end_timestamp   = itr.end_timestamp;
+                        region.name            = name;
+                        region.args            = std::move(sna_args);
+                        writer.insert_region_data(region, trace_env);
+                    }
+                    else
+                    {
+                        auto track       = writer_types::track_info_t{};
+                        track.name       = category;
+                        track.node_id    = this_nid;
+                        track.process_id = this_pid;
+                        track.thread_id  = itr.thread_id;
+
+                        auto sample      = writer_types::sample_data_t{};
+                        sample.timestamp = itr.start_timestamp;
+                        sample.track     = track;
+                        writer.insert_sample_data(sample, event_data);
+                    }
+                }
+            }
+        };
+
+        process_api_records(hip_api_gen);
+        process_api_records(hsa_api_gen);
+        process_api_records(marker_api_gen);
+        process_api_records(rccl_api_gen);
+        process_api_records(rocdecode_api_gen);
 
         writer.flush_in_memory_data_to_disk();
     } catch(const std::exception& e)
