@@ -1349,6 +1349,74 @@ write_rocpd_via_sna(
                 }
             }
         }
+
+        {
+            // KFD synthetic PMC entries - mirror legacy generateRocpd.cpp
+            // insert_kfd_data. rocpdsna assigns its own ids, so the legacy
+            // 0x7000000000000000 collision-avoidance bit pattern is dropped.
+            // KFD events are not naturally tied to a single agent, but the
+            // SNA schema requires a non-null agent_id; tie all entries to the
+            // first GPU agent so the count matches legacy (one entry per kind).
+            struct kfd_pmc_info_t
+            {
+                rocprofiler_buffer_tracing_kind_t kind        = ROCPROFILER_BUFFER_TRACING_NONE;
+                std::string_view                  description = {};
+            };
+
+            constexpr auto kfd_info = std::array<kfd_pmc_info_t, 8>{
+                kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
+                               "KFD page migration events"},
+                kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+                               "KFD page fault events"},
+                kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+                               "KFD queue eviction/restore events"},
+                kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                               "KFD unmap from GPU events"},
+                kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+                               "KFD dropped_events events"},
+                kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                               "KFD page migration paired records"},
+                kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
+                               "KFD page fault paired records"},
+                kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
+                               "KFD queue eviction/restore paired records"}};
+
+            const agent_info* kfd_agent = nullptr;
+            for(const auto& itr : tool_metadata.agents)
+            {
+                if(itr.type == ROCPROFILER_AGENT_TYPE_GPU)
+                {
+                    kfd_agent = &itr;
+                    break;
+                }
+            }
+
+            if(kfd_agent != nullptr)
+            {
+                auto agent_uid = make_agent_unique_id(*kfd_agent);
+                for(const auto& info : kfd_info)
+                {
+                    auto name = tool_metadata.buffer_names.at(info.kind);
+
+                    auto pmc_info      = writer_types::pmc_info_t{};
+                    pmc_info.unique_id = writer_types::pmc_info_unique_id_t{
+                        name,
+                        agent_uid,
+                    };
+                    pmc_info.target_arch = std::string_view{"GPU"};
+                    pmc_info.symbol      = name;
+                    pmc_info.description = info.description;
+                    pmc_info.component   = std::string_view{"rocm"};
+                    pmc_info.value_type  = std::string_view{"ABS"};
+                    pmc_info.block       = std::string_view{"KFD"};
+                    pmc_info.node_id     = this_nid;
+                    pmc_info.process_id  = this_pid;
+                    writer.register_pmc_info(pmc_info);
+                }
+            }
+        }
+
+        writer.flush_in_memory_data_to_disk();
     } catch(const std::exception& e)
     {
         ROCP_ERROR << fmt::format("rocpdsna writer failed: {}", e.what());
