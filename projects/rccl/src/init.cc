@@ -430,6 +430,7 @@ void ncclCommPushFree(struct ncclComm* comm, void* obj) {
   struct ncclDestructor* dtor = ncclMemoryStackAlloc<struct ncclDestructor>(&comm->memPermanent);
   dtor->fn = ncclDestructorFnFree;
   dtor->obj = obj;
+  dtor->comm = comm;
   dtor->next = comm->destructorHead;
   comm->destructorHead = dtor;
 }
@@ -442,6 +443,7 @@ void ncclCommPushCudaFree(struct ncclComm* comm, void* obj) {
   struct ncclDestructor* dtor = ncclMemoryStackAlloc<struct ncclDestructor>(&comm->memPermanent);
   dtor->fn = ncclDestructorFnCudaFree;
   dtor->obj = obj;
+  dtor->comm = comm;
   dtor->next = comm->destructorHead;
   comm->destructorHead = dtor;
 }
@@ -454,6 +456,7 @@ void ncclCommPushCudaHostFree(struct ncclComm* comm, void* obj) {
   struct ncclDestructor* dtor = ncclMemoryStackAlloc<struct ncclDestructor>(&comm->memPermanent);
   dtor->fn = ncclDestructorFnCudaHostFree;
   dtor->obj = obj;
+  dtor->comm = comm;
   dtor->next = comm->destructorHead;
   comm->destructorHead = dtor;
 }
@@ -466,6 +469,7 @@ void ncclCommPushCudaGdrFree(struct ncclComm* comm, void* handle) {
   struct ncclDestructor* dtor = ncclMemoryStackAlloc<struct ncclDestructor>(&comm->memPermanent);
   dtor->fn = ncclDestructorFnCudaGdrFree;
   dtor->obj = handle;
+  dtor->comm = comm;
   dtor->next = comm->destructorHead;
   comm->destructorHead = dtor;
 }
@@ -516,6 +520,9 @@ static ncclResult_t commFree(ncclComm_t comm) {
       PTHREADCHECK(pthread_join(comm->proxyState->threadUDS, nullptr), "pthread_join");
     }
   }
+
+  // Destroy dynamic memory manager only after all proxy threads have been joined
+  NCCLCHECK(ncclMemManagerDestroy(comm));
 
   if (comm->memPool) CUDACHECK(cudaMemPoolDestroy(comm->memPool));
 
@@ -779,6 +786,18 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   comm->checkPointers = ncclParamCheckPointers() == 1 ? true : false;
   comm->dmaBufSupport = (dmaBufSupported(comm) == ncclSuccess) ? true : false;
+
+  // Initialize memory manager
+  if (parent && parent->shareResources && parent->memManager) {
+    // Share parent's memory manager
+    comm->memManager = parent->memManager;
+    ncclAtomicRefCountIncrement(&comm->memManager->refCount);
+    INFO(NCCL_INIT, "MemManager: Shared from parent, refCount=%d",
+         comm->memManager->refCount);
+  } else {
+    // Create new memory manager
+    NCCLCHECK(ncclMemManagerInit(comm));
+  }
 
 #ifdef ENABLE_COLLTRACE
   NCCLCHECK(ncclCudaHostCalloc(&comm->collTraceTail, MAXCHANNELS));

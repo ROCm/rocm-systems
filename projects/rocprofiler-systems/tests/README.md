@@ -46,7 +46,7 @@ For example, in a venv, passing `ROCPROFSYS_TEST_EXECUTABLE=$(which python3)` sh
 ### Environment Variables
 
 | Variable | Description | Default |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | `ROCPROFSYS_TEST_DIR` | Path to test package directory or .pyz file | Auto-detected |
 | `ROCPROFSYS_TEST_EXECUTABLE` | Python (install mode) or pytest (build mode) executable to use | Auto-detected |
 | `ROCPROFSYS_PYTHON_HINTS` | Additional search paths for versioned Python interpreters | Not set |
