@@ -51,16 +51,16 @@ __host__ IPCContext::IPCContext(Backend *b, unsigned int ctx_id)
 __device__ void IPCContext::putmem(void *dest, const void *source, size_t nelems,
                                   int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
-  ipcImpl_.ipcCopy<MemcpyKind::PutBlocking>(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source),
-                   nelems, pe);
+  ipcImpl_.ipcCopy<MemcpyKind::PutBlocking>(
+      ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem(void *dest, const void *source, size_t nelems,
                                   int pe) {
   const char *src_typed = reinterpret_cast<const char *>(source);
   uint64_t L_offset = const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[my_pe];
-  ipcImpl_.ipcCopy<MemcpyKind::GetBlocking>(dest, ipcImpl_.ipc_bases[pe] + L_offset,
-                   nelems, pe);
+  ipcImpl_.ipcCopy<MemcpyKind::GetBlocking>(
+      dest, ipcImpl_.ipc_bases[pe] + L_offset, nelems, pe);
 }
 
 __device__ void IPCContext::putmem_nbi(void *dest, const void *source,
@@ -104,8 +104,8 @@ __device__ void *IPCContext::shmem_ptr(const void *dest, int pe) {
 __device__ void IPCContext::putmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
-  ipcImpl_.ipcCopy_wg<MemcpyKind::PutBlocking>(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source),
-                      nelems, pe);
+  ipcImpl_.ipcCopy_wg<MemcpyKind::PutBlocking>(
+      ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
   __builtin_amdgcn_s_barrier();
 }
 
@@ -113,8 +113,8 @@ __device__ void IPCContext::getmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe) {
   const char *src_typed = reinterpret_cast<const char *>(source);
   uint64_t L_offset = const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[my_pe];
-  ipcImpl_.ipcCopy_wg<MemcpyKind::GetBlocking>(dest, ipcImpl_.ipc_bases[pe] + L_offset,
-                      nelems, pe);
+  ipcImpl_.ipcCopy_wg<MemcpyKind::GetBlocking>(
+      dest, ipcImpl_.ipc_bases[pe] + L_offset, nelems, pe);
   __builtin_amdgcn_s_barrier();
 }
 
@@ -134,16 +134,16 @@ __device__ void IPCContext::getmem_nbi_wg(void *dest, const void *source,
 __device__ void IPCContext::putmem_wave(void *dest, const void *source,
                                        size_t nelems, int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
-  ipcImpl_.ipcCopy_wave<MemcpyKind::PutBlocking>(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source),
-                        nelems, pe);
+  ipcImpl_.ipcCopy_wave<MemcpyKind::PutBlocking>(
+      ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem_wave(void *dest, const void *source,
                                        size_t nelems, int pe) {
   const char *src_typed = reinterpret_cast<const char *>(source);
   uint64_t L_offset = const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[my_pe];
-  ipcImpl_.ipcCopy_wave<MemcpyKind::GetBlocking>(dest, ipcImpl_.ipc_bases[pe] + L_offset,
-                        nelems, pe);
+  ipcImpl_.ipcCopy_wave<MemcpyKind::GetBlocking>(
+      dest, ipcImpl_.ipc_bases[pe] + L_offset, nelems, pe);
 }
 
 __device__ void IPCContext::putmem_nbi_wave(void *dest, const void *source,
