@@ -17,6 +17,10 @@ namespace amd {
 address VmHeap::ReserveAddressRange(address start, size_t size, size_t alignment) {
   // Reserve a virtual address range on the device
   void* ptr = device_->virtualAlloc(start, size, alignment);
+  if (ptr == nullptr) {
+    LogPrintfError("virtualAlloc failed(start=%p, size=%zu)\n", start, size);
+    return nullptr;
+  }
   // Save base memory object to accelerate access in the future
   base_memory_ = MemObjMap::FindVirtualMemObj(ptr);
   return reinterpret_cast<address>(ptr);

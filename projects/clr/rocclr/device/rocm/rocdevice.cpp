@@ -2413,7 +2413,8 @@ void* Device::virtualAlloc(void* req_addr, size_t size, size_t alignment) {
   constexpr bool kParent = true;
   amd::Memory* mem = CreateVirtualBuffer(context(), vptr, size, -1, -1, kParent);
   if (mem == nullptr) {
-    LogPrintfError("Cannot create Virtual Buffer for vptr: %p of size: %u", vptr, size);
+    LogPrintfError("Cannot create Virtual Buffer for vptr: %p of size: %zu", vptr, size);
+    return nullptr;
   }
 
   return mem->getSvmPtr();

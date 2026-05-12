@@ -798,6 +798,7 @@ class Graph {
                                                    dev_info.virtualMemAllocGranularityRecommended_);
     if (ptr == nullptr) {
       LogError("Failed to reserve Virtual Address");
+      return nullptr;
     }
 
     // Set Access to read write for all devices.

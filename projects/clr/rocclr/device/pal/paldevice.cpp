@@ -2446,7 +2446,10 @@ void* Device::virtualAlloc(void* addr, size_t size, size_t alignment) {
   constexpr bool kParent = true;
   constexpr bool kForceAlloc = true;
   amd::Memory* mem = CreateVirtualBuffer(context(), addr, size, -1, -1, kParent, kForceAlloc);
-  assert(mem != nullptr);
+  if (mem == nullptr) {
+    LogPrintfError("CreateVirtualBuffer failed(addr=%p, size=%zu)\n", addr, size);
+    return nullptr;
+  }
   return mem->getSvmPtr();
 }
 
