@@ -108,6 +108,8 @@ NCCL_PARAM(CollnetEnable, "COLLNET_ENABLE", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(CtaPolicy, "CTA_POLICY", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(NvlsChannels, "NVLS_NCHANNELS", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(SetCpuStackSize, "SET_CPU_STACK_SIZE", 1);
+// ROCM-21766 diagnostic: drain the device strong-stream before the final devCommSetup memcpy. Remove before merge.
+NCCL_PARAM(DrainFenceProbe, "DRAIN_FENCE_PROBE", 0);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
 
@@ -1006,6 +1008,10 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   tmpCommAndChans.comm.faults = comm->faults;
 #endif
 
+  // ROCM-21766 diagnostic: optionally drain in-flight device work before the final devCommAndChans copy. Remove before merge.
+  if (ncclParamDrainFenceProbe()) {
+    CUDACHECKGOTO(cudaStreamSynchronize(deviceStream), ret, fail);
+  }
   NCCLCHECKGOTO(ncclCudaMemcpyAsync(devCommAndChans, &tmpCommAndChans, 1, deviceStream), ret, fail);
 exit:
   NCCLCHECK(ncclStrongStreamRelease(ncclCudaGraphNone(), &comm->sharedRes->deviceStream, /*concurrent=*/false));
