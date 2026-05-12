@@ -1064,280 +1064,295 @@ write_rocpd_via_sna(
     const uint64_t this_ppid        = tool_metadata.parent_process_id;
     const uint64_t this_nid         = node_id;
 
-    const auto& mach_id   = tool_metadata.node_data.machine_id;
-    const auto  ticks     = common::get_process_start_ticks_since_boot(this_pid);
-    const auto  seed      = common::compute_system_seed(mach_id, this_pid, this_ppid, ticks);
-    const auto  uuid_v7   = common::generate_uuid_v7(this_pid_init_ns, seed);
-    const auto  db_guid   = fmt::format("{}", uuid_v7);
-    auto        output_db = get_output_filename(cfg, "results", "db");
+    const auto& mach_id = tool_metadata.node_data.machine_id;
+    const auto  ticks   = common::get_process_start_ticks_since_boot(this_pid);
+    const auto  seed    = common::compute_system_seed(mach_id, this_pid, this_ppid, ticks);
+    const auto  uuid_v7 = common::generate_uuid_v7(this_pid_init_ns, seed);
+    // SQLite parses '-' as the subtraction operator inside unquoted identifiers,
+    // and the rocpd schema engine rejects hyphenated uuid suffixes. Mirror the
+    // legacy generateRocpd path (see write_rocpd ~1409) and normalize hyphens
+    // to underscores before handing the uuid to rocpdsna::storage_t.
+    const auto db_guid   = replace_all(fmt::format("{}", uuid_v7), '-', "_");
+    auto       output_db = get_output_filename(cfg, "results", "db");
     if(fs::exists(output_db)) fs::remove(output_db);
 
     ROCP_WARNING << fmt::format(
         "writing rocpdsna database for process {} on node {}", this_pid, this_nid);
     ROCP_ERROR << fmt::format("Opened result file: {} (UUID={})", output_db, uuid_v7);
 
-    auto storage = std::make_unique<rocpdsna::storage_t>(output_db, db_guid);
-    auto writer  = rocpdsna::writer_t{std::move(storage)};
-
-    auto _metadata = metadata{};
-    add_string_entry(_metadata, "");
-
-    for(const auto& itr : agent_data)
-        add_string_entry(_metadata, itr.name, itr.vendor_name, itr.product_name, itr.model_name);
-
-    for(const auto& itr : tool_metadata.buffer_names)
+    try
     {
-        add_string_entry(_metadata, itr.name);
-        for(const auto& iitr : itr.operations)
-            add_string_entry(_metadata, iitr);
-    }
+        auto storage = std::make_unique<rocpdsna::storage_t>(output_db, db_guid);
+        auto writer  = rocpdsna::writer_t{std::move(storage)};
 
-    for(const auto& itr : tool_metadata.callback_names)
-    {
-        add_string_entry(_metadata, itr.name);
-        for(const auto& iitr : itr.operations)
-            add_string_entry(_metadata, iitr);
-    }
+        auto _metadata = metadata{};
+        add_string_entry(_metadata, "");
 
-    for(const auto& itr : tool_metadata.marker_messages.get())
-    {
-        add_string_entry(_metadata, itr.second);
-    }
+        for(const auto& itr : agent_data)
+            add_string_entry(
+                _metadata, itr.name, itr.vendor_name, itr.product_name, itr.model_name);
 
-    for(const auto& itr : tool_metadata.get_kernel_symbols())
-        add_string_entry(_metadata,
-                         itr.kernel_name,
-                         itr.formatted_kernel_name,
-                         itr.demangled_kernel_name,
-                         itr.truncated_kernel_name);
+        for(const auto& itr : tool_metadata.buffer_names)
+        {
+            add_string_entry(_metadata, itr.name);
+            for(const auto& iitr : itr.operations)
+                add_string_entry(_metadata, iitr);
+        }
 
-    for(const auto& itr : tool_metadata.kernel_rename_map.get())
-    {
-        add_string_entry(_metadata, itr.first);
-    }
+        for(const auto& itr : tool_metadata.callback_names)
+        {
+            add_string_entry(_metadata, itr.name);
+            for(const auto& iitr : itr.operations)
+                add_string_entry(_metadata, iitr);
+        }
 
-    for(const auto& itr : tool_metadata.get_code_objects())
-        if(itr.uri != nullptr) add_string_entry(_metadata, itr.uri);
+        for(const auto& itr : tool_metadata.marker_messages.get())
+        {
+            add_string_entry(_metadata, itr.second);
+        }
 
-    for(const auto& itr : tool_metadata.get_counter_info())
-    {
-        add_string_entry(_metadata, itr.name);
-        for(const auto& ditr : itr.dimensions)
-            add_string_entry(_metadata, ditr.name);
-    }
+        for(const auto& itr : tool_metadata.get_kernel_symbols())
+            add_string_entry(_metadata,
+                             itr.kernel_name,
+                             itr.formatted_kernel_name,
+                             itr.demangled_kernel_name,
+                             itr.truncated_kernel_name);
 
-    for(const auto& itr : tool_metadata.get_counter_dimension_info())
-        add_string_entry(_metadata, itr.name);
+        for(const auto& itr : tool_metadata.kernel_rename_map.get())
+        {
+            add_string_entry(_metadata, itr.first);
+        }
 
-    for(const auto& itr : _metadata.get_string_entries())
-    {
-        writer.register_string(itr.first);
-    }
+        for(const auto& itr : tool_metadata.get_code_objects())
+            if(itr.uri != nullptr) add_string_entry(_metadata, itr.uri);
 
-    {
-        const auto& info = tool_metadata.node_data;
-        writer.register_node_info(writer_types::node_info_t{
-            this_nid,
-            static_cast<size_t>(node_hash),
-            info.machine_id,
-            info.system_name,
-            info.hostname,
-            info.release,
-            info.version,
-            info.hardware_name,
-            info.domain_name,
-        });
-    }
+        for(const auto& itr : tool_metadata.get_counter_info())
+        {
+            add_string_entry(_metadata, itr.name);
+            for(const auto& ditr : itr.dimensions)
+                add_string_entry(_metadata, ditr.name);
+        }
 
-    {
-        auto json_cfg = get_json_string([&cfg](auto& ar) { cfg.save(ar); });
-        auto json_env = get_json_string([](auto& ar) {
-            size_t i = 0;
-            while(true)
-            {
-                const char* itr = environ[i++];
-                if(!itr) break;
-                if(auto pos = std::string_view{itr}.find('='); pos != std::string_view::npos)
+        for(const auto& itr : tool_metadata.get_counter_dimension_info())
+            add_string_entry(_metadata, itr.name);
+
+        for(const auto& itr : _metadata.get_string_entries())
+        {
+            writer.register_string(itr.first);
+        }
+
+        {
+            const auto& info = tool_metadata.node_data;
+            writer.register_node_info(writer_types::node_info_t{
+                this_nid,
+                static_cast<size_t>(node_hash),
+                info.machine_id,
+                info.system_name,
+                info.hostname,
+                info.release,
+                info.version,
+                info.hardware_name,
+                info.domain_name,
+            });
+        }
+
+        {
+            auto json_cfg = get_json_string([&cfg](auto& ar) { cfg.save(ar); });
+            auto json_env = get_json_string([](auto& ar) {
+                size_t i = 0;
+                while(true)
                 {
-                    auto evar = std::string{itr}.substr(0, pos);
-                    auto eval = std::string{itr}.substr(pos + 1);
-                    if(eval.find(';') != std::string::npos)
+                    const char* itr = environ[i++];
+                    if(!itr) break;
+                    if(auto pos = std::string_view{itr}.find('='); pos != std::string_view::npos)
                     {
-                        ROCP_INFO << fmt::format(
-                            "Env variable {} was sanitized due to semi-colon in the value", evar);
-                    }
-                    else if(!evar.empty())
-                    {
-                        ar(cereal::make_nvp(evar.c_str(), eval));
+                        auto evar = std::string{itr}.substr(0, pos);
+                        auto eval = std::string{itr}.substr(pos + 1);
+                        if(eval.find(';') != std::string::npos)
+                        {
+                            ROCP_INFO << fmt::format(
+                                "Env variable {} was sanitized due to semi-colon in the value",
+                                evar);
+                        }
+                        else if(!evar.empty())
+                        {
+                            ar(cereal::make_nvp(evar.c_str(), eval));
+                        }
                     }
                 }
-            }
-        });
-        auto command  = fmt::format(
-            "{}",
-            fmt::join(tool_metadata.command_line.begin(), tool_metadata.command_line.end(), " "));
+            });
+            auto command  = fmt::format(
+                "{}",
+                fmt::join(
+                    tool_metadata.command_line.begin(), tool_metadata.command_line.end(), " "));
 
-        auto process_info        = writer_types::process_info_t{};
-        process_info.ppid        = this_ppid;
-        process_info.pid         = this_pid;
-        process_info.init        = tool_metadata.process_start_ns;
-        process_info.fini        = tool_metadata.process_end_ns;
-        process_info.start       = tool_metadata.process_start_ns;
-        process_info.end         = tool_metadata.process_end_ns;
-        process_info.command     = command;
-        process_info.environment = json_env;
-        process_info.extdata     = json_cfg;
-        process_info.node_id     = this_nid;
-        writer.register_process_info(process_info);
-    }
+            auto process_info        = writer_types::process_info_t{};
+            process_info.ppid        = this_ppid;
+            process_info.pid         = this_pid;
+            process_info.init        = tool_metadata.process_start_ns;
+            process_info.fini        = tool_metadata.process_end_ns;
+            process_info.start       = tool_metadata.process_start_ns;
+            process_info.end         = tool_metadata.process_end_ns;
+            process_info.command     = command;
+            process_info.environment = json_env;
+            process_info.extdata     = json_cfg;
+            process_info.node_id     = this_nid;
+            writer.register_process_info(process_info);
+        }
 
-    for(const auto& itr : tool_metadata.agents)
-    {
-        auto json_info = get_json_string([&itr](auto& ar) { cereal::save(ar, itr); });
-
-        auto agent_info_record           = writer_types::agent_info_t{};
-        agent_info_record.unique_id      = make_agent_unique_id(itr);
-        agent_info_record.absolute_index = itr.node_id;
-        agent_info_record.logical_index  = itr.logical_node_id;
-        agent_info_record.uuid           = itr.device_id;
-        agent_info_record.name           = std::string_view{itr.name};
-        agent_info_record.model_name     = std::string_view{itr.model_name};
-        agent_info_record.vendor_name    = std::string_view{itr.vendor_name};
-        agent_info_record.product_name   = std::string_view{itr.product_name};
-        agent_info_record.user_name      = std::string_view{itr.product_name};
-        agent_info_record.extdata        = json_info;
-        agent_info_record.node_id        = this_nid;
-        agent_info_record.process_id     = this_pid;
-        writer.register_agent_info(agent_info_record);
-    }
-
-    auto registered_threads = std::unordered_set<rocprofiler_thread_id_t>{};
-    auto registered_streams = std::unordered_set<rocprofiler_stream_id_t>{};
-    auto registered_queues  = std::unordered_set<rocprofiler_queue_id_t>{};
-
-    auto ensure_thread = [&](rocprofiler_thread_id_t tid) {
-        if(!registered_threads.insert(tid).second) return;
-        auto thread_info              = writer_types::thread_info_t{};
-        thread_info.parent_process_id = this_ppid;
-        thread_info.thread_id         = tid;
-        thread_info.node_id           = this_nid;
-        thread_info.process_id        = this_pid;
-        writer.register_thread_info(thread_info);
-    };
-    (void) ensure_thread;
-
-    auto ensure_stream = [&](rocprofiler_stream_id_t sid) {
-        if(!registered_streams.insert(sid).second) return;
-        auto name              = (sid.handle == 0) ? std::string{"Default Stream"}
-                                                   : fmt::format("Stream {}", registered_streams.size() - 2);
-        auto stream_info       = writer_types::stream_info_t{};
-        stream_info.stream_id  = sid.handle;
-        stream_info.name       = name;
-        stream_info.node_id    = this_nid;
-        stream_info.process_id = this_pid;
-        writer.register_stream_info(stream_info);
-    };
-
-    auto ensure_queue = [&](rocprofiler_queue_id_t qid) {
-        if(!registered_queues.insert(qid).second) return;
-        auto name             = (qid.handle == 0) ? std::string{"Default Queue"}
-                                                  : fmt::format("Queue {}", registered_queues.size() - 2);
-        auto queue_info       = writer_types::queue_info_t{};
-        queue_info.queue_id   = qid.handle;
-        queue_info.name       = name;
-        queue_info.node_id    = this_nid;
-        queue_info.process_id = this_pid;
-        writer.register_queue_info(queue_info);
-    };
-
-    ensure_stream(rocprofiler_stream_id_t{.handle = 0});
-    ensure_queue(rocprofiler_queue_id_t{.handle = 0});
-    (void) ensure_stream;
-    (void) ensure_queue;
-
-    for(const auto& itr : tool_metadata.get_code_objects())
-    {
-        if(itr.size == 0) continue;
-
-        const auto* _agent = tool_metadata.get_agent(itr.rocp_agent);
-        auto        json_data =
-            get_json_string([](auto& ar, const auto oitr) { cereal::save(ar, oitr); }, itr);
-
-        auto code_object = writer_types::code_object_info_t{};
-        code_object.id   = itr.code_object_id;
-        code_object.uri =
-            (itr.uri != nullptr) ? std::optional<std::string_view>{itr.uri} : std::nullopt;
-        code_object.load_base  = itr.load_base;
-        code_object.load_size  = itr.load_size;
-        code_object.load_delta = static_cast<size_t>(itr.load_delta);
-        code_object.extdata    = json_data;
-        code_object.node_id    = this_nid;
-        code_object.process_id = this_pid;
-        if(_agent != nullptr) code_object.agent_id = make_agent_unique_id(*_agent);
-        writer.register_code_object_info(code_object);
-    }
-
-    for(const auto& itr : tool_metadata.get_kernel_symbols())
-    {
-        if(itr.kernel_id == 0 && itr.code_object_id == 0) continue;
-
-        auto json_data =
-            get_json_string([](auto& ar, const auto& oitr) { cereal::save(ar, oitr); }, itr);
-
-        auto kernel_symbol                      = writer_types::kernel_symbol_info_t{};
-        kernel_symbol.id                        = itr.kernel_id;
-        kernel_symbol.name                      = std::string_view{itr.kernel_name};
-        kernel_symbol.display_name              = std::string_view{itr.formatted_kernel_name};
-        kernel_symbol.kernel_object             = itr.kernel_object;
-        kernel_symbol.kernarg_segment_size      = itr.kernarg_segment_size;
-        kernel_symbol.kernarg_segment_alignment = itr.kernarg_segment_alignment;
-        kernel_symbol.group_segment_size        = itr.group_segment_size;
-        kernel_symbol.private_segment_size      = itr.private_segment_size;
-        kernel_symbol.sgpr_count                = itr.sgpr_count;
-        kernel_symbol.arch_vgpr_count           = itr.arch_vgpr_count;
-        kernel_symbol.accum_vgpr_count          = itr.accum_vgpr_count;
-        kernel_symbol.extdata                   = json_data;
-        kernel_symbol.node_id                   = this_nid;
-        kernel_symbol.process_id                = this_pid;
-        kernel_symbol.code_obj_id               = itr.code_object_id;
-        writer.register_kernel_symbol_info(kernel_symbol);
-    }
-
-    {
-        auto recorded = std::unordered_set<rocprofiler_counter_id_t>{};
-        for(const auto& itr : tool_metadata.agent_counter_info)
+        for(const auto& itr : tool_metadata.agents)
         {
-            const auto* agent = tool_metadata.get_agent(itr.first);
-            if(agent == nullptr) continue;
+            auto json_info = get_json_string([&itr](auto& ar) { cereal::save(ar, itr); });
 
-            auto agent_uid = make_agent_unique_id(*agent);
-            auto json_data = get_json_string([agent](auto& ar) { cereal::save(ar, *agent); });
+            auto agent_info_record           = writer_types::agent_info_t{};
+            agent_info_record.unique_id      = make_agent_unique_id(itr);
+            agent_info_record.absolute_index = itr.node_id;
+            agent_info_record.logical_index  = itr.logical_node_id;
+            agent_info_record.uuid           = itr.device_id;
+            agent_info_record.name           = std::string_view{itr.name};
+            agent_info_record.model_name     = std::string_view{itr.model_name};
+            agent_info_record.vendor_name    = std::string_view{itr.vendor_name};
+            agent_info_record.product_name   = std::string_view{itr.product_name};
+            agent_info_record.user_name      = std::string_view{itr.product_name};
+            agent_info_record.extdata        = json_info;
+            agent_info_record.node_id        = this_nid;
+            agent_info_record.process_id     = this_pid;
+            writer.register_agent_info(agent_info_record);
+        }
 
-            for(const auto& aitr : itr.second)
+        auto registered_threads = std::unordered_set<rocprofiler_thread_id_t>{};
+        auto registered_streams = std::unordered_set<rocprofiler_stream_id_t>{};
+        auto registered_queues  = std::unordered_set<rocprofiler_queue_id_t>{};
+
+        auto ensure_thread = [&](rocprofiler_thread_id_t tid) {
+            if(!registered_threads.insert(tid).second) return;
+            auto thread_info              = writer_types::thread_info_t{};
+            thread_info.parent_process_id = this_ppid;
+            thread_info.thread_id         = tid;
+            thread_info.node_id           = this_nid;
+            thread_info.process_id        = this_pid;
+            writer.register_thread_info(thread_info);
+        };
+        (void) ensure_thread;
+
+        auto ensure_stream = [&](rocprofiler_stream_id_t sid) {
+            if(!registered_streams.insert(sid).second) return;
+            auto name              = (sid.handle == 0) ? std::string{"Default Stream"}
+                                                       : fmt::format("Stream {}", registered_streams.size() - 2);
+            auto stream_info       = writer_types::stream_info_t{};
+            stream_info.stream_id  = sid.handle;
+            stream_info.name       = name;
+            stream_info.node_id    = this_nid;
+            stream_info.process_id = this_pid;
+            writer.register_stream_info(stream_info);
+        };
+
+        auto ensure_queue = [&](rocprofiler_queue_id_t qid) {
+            if(!registered_queues.insert(qid).second) return;
+            auto name             = (qid.handle == 0) ? std::string{"Default Queue"}
+                                                      : fmt::format("Queue {}", registered_queues.size() - 2);
+            auto queue_info       = writer_types::queue_info_t{};
+            queue_info.queue_id   = qid.handle;
+            queue_info.name       = name;
+            queue_info.node_id    = this_nid;
+            queue_info.process_id = this_pid;
+            writer.register_queue_info(queue_info);
+        };
+
+        ensure_stream(rocprofiler_stream_id_t{.handle = 0});
+        ensure_queue(rocprofiler_queue_id_t{.handle = 0});
+        (void) ensure_stream;
+        (void) ensure_queue;
+
+        for(const auto& itr : tool_metadata.get_code_objects())
+        {
+            if(itr.size == 0) continue;
+
+            const auto* _agent = tool_metadata.get_agent(itr.rocp_agent);
+            auto        json_data =
+                get_json_string([](auto& ar, const auto oitr) { cereal::save(ar, oitr); }, itr);
+
+            auto code_object = writer_types::code_object_info_t{};
+            code_object.id   = itr.code_object_id;
+            code_object.uri =
+                (itr.uri != nullptr) ? std::optional<std::string_view>{itr.uri} : std::nullopt;
+            code_object.load_base  = itr.load_base;
+            code_object.load_size  = itr.load_size;
+            code_object.load_delta = static_cast<size_t>(itr.load_delta);
+            code_object.extdata    = json_data;
+            code_object.node_id    = this_nid;
+            code_object.process_id = this_pid;
+            if(_agent != nullptr) code_object.agent_id = make_agent_unique_id(*_agent);
+            writer.register_code_object_info(code_object);
+        }
+
+        for(const auto& itr : tool_metadata.get_kernel_symbols())
+        {
+            if(itr.kernel_id == 0 && itr.code_object_id == 0) continue;
+
+            auto json_data =
+                get_json_string([](auto& ar, const auto& oitr) { cereal::save(ar, oitr); }, itr);
+
+            auto kernel_symbol                      = writer_types::kernel_symbol_info_t{};
+            kernel_symbol.id                        = itr.kernel_id;
+            kernel_symbol.name                      = std::string_view{itr.kernel_name};
+            kernel_symbol.display_name              = std::string_view{itr.formatted_kernel_name};
+            kernel_symbol.kernel_object             = itr.kernel_object;
+            kernel_symbol.kernarg_segment_size      = itr.kernarg_segment_size;
+            kernel_symbol.kernarg_segment_alignment = itr.kernarg_segment_alignment;
+            kernel_symbol.group_segment_size        = itr.group_segment_size;
+            kernel_symbol.private_segment_size      = itr.private_segment_size;
+            kernel_symbol.sgpr_count                = itr.sgpr_count;
+            kernel_symbol.arch_vgpr_count           = itr.arch_vgpr_count;
+            kernel_symbol.accum_vgpr_count          = itr.accum_vgpr_count;
+            kernel_symbol.extdata                   = json_data;
+            kernel_symbol.node_id                   = this_nid;
+            kernel_symbol.process_id                = this_pid;
+            kernel_symbol.code_obj_id               = itr.code_object_id;
+            writer.register_kernel_symbol_info(kernel_symbol);
+        }
+
+        {
+            auto recorded = std::unordered_set<rocprofiler_counter_id_t>{};
+            for(const auto& itr : tool_metadata.agent_counter_info)
             {
-                if(!recorded.emplace(aitr.id).second) continue;
+                const auto* agent = tool_metadata.get_agent(itr.first);
+                if(agent == nullptr) continue;
 
-                auto pmc_info      = writer_types::pmc_info_t{};
-                pmc_info.unique_id = writer_types::pmc_info_unique_id_t{
-                    std::string_view{aitr.name},
-                    agent_uid,
-                };
-                pmc_info.target_arch = std::string_view{"GPU"};
-                pmc_info.symbol      = std::string_view{aitr.name};
-                if(aitr.name != nullptr) pmc_info.description = std::string_view{aitr.description};
-                pmc_info.component  = std::string_view{"rocm"};
-                pmc_info.value_type = std::string_view{"ABS"};
-                if(aitr.block != nullptr) pmc_info.block = std::string_view{aitr.block};
-                if(aitr.expression != nullptr)
-                    pmc_info.expression = std::string_view{aitr.expression};
-                pmc_info.is_constant = aitr.is_constant;
-                pmc_info.is_derived  = aitr.is_derived;
-                pmc_info.extdata     = json_data;
-                pmc_info.node_id     = this_nid;
-                pmc_info.process_id  = this_pid;
-                writer.register_pmc_info(pmc_info);
+                auto agent_uid = make_agent_unique_id(*agent);
+                auto json_data = get_json_string([agent](auto& ar) { cereal::save(ar, *agent); });
+
+                for(const auto& aitr : itr.second)
+                {
+                    if(!recorded.emplace(aitr.id).second) continue;
+
+                    auto pmc_info      = writer_types::pmc_info_t{};
+                    pmc_info.unique_id = writer_types::pmc_info_unique_id_t{
+                        std::string_view{aitr.name},
+                        agent_uid,
+                    };
+                    pmc_info.target_arch = std::string_view{"GPU"};
+                    pmc_info.symbol      = std::string_view{aitr.name};
+                    if(aitr.name != nullptr)
+                        pmc_info.description = std::string_view{aitr.description};
+                    pmc_info.component  = std::string_view{"rocm"};
+                    pmc_info.value_type = std::string_view{"ABS"};
+                    if(aitr.block != nullptr) pmc_info.block = std::string_view{aitr.block};
+                    if(aitr.expression != nullptr)
+                        pmc_info.expression = std::string_view{aitr.expression};
+                    pmc_info.is_constant = aitr.is_constant;
+                    pmc_info.is_derived  = aitr.is_derived;
+                    pmc_info.extdata     = json_data;
+                    pmc_info.node_id     = this_nid;
+                    pmc_info.process_id  = this_pid;
+                    writer.register_pmc_info(pmc_info);
+                }
             }
         }
+    } catch(const std::exception& e)
+    {
+        ROCP_ERROR << fmt::format("rocpdsna writer failed: {}", e.what());
+        throw;
     }
 }
 }  // namespace
