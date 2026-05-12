@@ -119,6 +119,4 @@ def test_metric_description_hashes_match_files() -> None:
             )
 
     if failures:
-        pytest.fail(
-            "Metric description hash failures:\n\n" + "\n".join(failures)
-        )
+        pytest.fail("Metric description hash failures:\n\n" + "\n".join(failures))
