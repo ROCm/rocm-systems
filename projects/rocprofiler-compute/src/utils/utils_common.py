@@ -928,16 +928,20 @@ def load_yaml(filepath: str) -> dict[str, Any]:
 
 
 def get_arch_panel_id_to_alias(arch: str) -> dict[str, str]:
-    """Return panel_id_str -> alias for the *_config_template.yaml whose
-    panels best cover the arch. Empty/None
-    aliases stay as "". Returns {} when the arch dir is missing/empty
-    or no template covers the arch."""
-    arch_panel_ids = _arch_panel_ids(arch)
-    if not arch_panel_ids:
-        return {}
-    return _select_smallest_covering_alias_map(
-        _load_arch_template_aliases(), arch_panel_ids
+    """Return panel_id_str -> alias from the *_config_template.yaml whose
+    filename prefix matches arch. Empty/None aliases stay as "".
+    Returns {} when no template matches the arch."""
+    template_glob = (
+        f"{config.rocprof_compute_home}"
+        "/rocprof_compute_soc/analysis_configs/*_config_template.yaml"
     )
+    for path in sorted(glob.glob(template_glob)):
+        m = re.match(r".*(gfx\d+)_config_template\.yaml$", path)
+        if m and arch.startswith(m.group(1)):
+            panel_yaml = load_yaml(path) or {}
+            panels = panel_yaml.get("panels") or []
+            return {str(p["panel_id"]): (p.get("panel_alias") or "") for p in panels}
+    return {}
 
 
 def get_arch_alias_to_panel_id(arch: str) -> dict[str, str]:
@@ -947,71 +951,6 @@ def get_arch_alias_to_panel_id(arch: str) -> dict[str, str]:
     return {
         alias: pid for pid, alias in get_arch_panel_id_to_alias(arch).items() if alias
     }
-
-
-def _alias_map_from_template(path: str) -> Optional[dict[str, str]]:
-    """Return panel_id_str -> alias (None aliases become "") for one
-    *_config_template.yaml. Returns None when the file is not an arch
-    panels template (no panels[].panel_id)."""
-    panel_yaml = load_yaml(path) or {}
-    panels = panel_yaml.get("panels") or []
-    if not panels or "panel_id" not in panels[0]:
-        return None
-    return {str(p["panel_id"]): (p.get("panel_alias") or "") for p in panels}
-
-
-def _load_arch_template_aliases() -> list[dict[str, str]]:
-    """Load panel_id -> alias maps from every *_config_template.yaml in
-    sorted glob order."""
-    template_glob = (
-        f"{config.rocprof_compute_home}"
-        "/rocprof_compute_soc/analysis_configs/*_config_template.yaml"
-    )
-    maps: list[dict[str, str]] = []
-    for path in sorted(glob.glob(template_glob)):
-        id_to_alias = _alias_map_from_template(path)
-        if id_to_alias is not None:
-            maps.append(id_to_alias)
-    return maps
-
-
-def _select_smallest_covering_alias_map(
-    template_aliases: list[dict[str, str]],
-    arch_panel_ids: set[str],
-) -> dict[str, str]:
-    """Among template_aliases, return the map with the fewest entries whose
-    key set is a superset of arch_panel_ids (most specific match). Ties
-    resolve to the first such map in input order. Returns {} when no map
-    covers arch_panel_ids."""
-    best_size: Optional[int] = None
-    best_map: dict[str, str] = {}
-    for id_to_alias in template_aliases:
-        if not arch_panel_ids.issubset(id_to_alias):
-            continue
-        if best_size is None or len(id_to_alias) < best_size:
-            best_size = len(id_to_alias)
-            best_map = id_to_alias
-    return best_map
-
-
-def _arch_panel_ids(arch: str) -> set[str]:
-    """Return the set of top-level panel_id strings for the given arch,
-    read from analysis_configs/<arch>/*.yaml Panel Config.id values.
-    Panel Config.id encodes panel_idx * 100 (documented at tty.py:747);
-    the displayed panel_id is the // 100 quotient."""
-    arch_dir = (
-        Path(config.rocprof_compute_home)
-        / "rocprof_compute_soc"
-        / "analysis_configs"
-        / arch
-    )
-    panel_ids: set[str] = set()
-    for yaml_path in arch_dir.glob("*.yaml"):
-        data = load_yaml(str(yaml_path))
-        if not data or "Panel Config" not in data:
-            continue
-        panel_ids.add(str(data["Panel Config"]["id"] // 100))
-    return panel_ids
 
 
 def get_job_rank_and_size() -> tuple[Optional[str], Optional[int]]:
