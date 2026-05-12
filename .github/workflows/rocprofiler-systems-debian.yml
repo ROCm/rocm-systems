@@ -88,10 +88,10 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ${{ github.workspace }}/.ccache
-        key: ccache-${{ github.workflow }}-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
+        key: ccache-debian-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
         restore-keys: |
-          ccache-${{ github.workflow }}-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-
-          ccache-${{ github.workflow }}-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-
+          ccache-debian-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-
+          ccache-debian-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-
 
     - name: Configure ccache
       run: |
