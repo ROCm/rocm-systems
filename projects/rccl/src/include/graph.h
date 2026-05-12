@@ -83,6 +83,14 @@ ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int ch
 ncclResult_t ncclTopoGetLocalGpu(struct ncclTopoSystem* system, int64_t netId, int* gpuIndex);
 ncclResult_t getLocalNetCountByBw(struct ncclTopoSystem* system, int gpu, int *count);
 
+enum netDevsPolicy {
+  NETDEVS_POLICY_AUTO = 0x0,
+  NETDEVS_POLICY_ALL = 0x1,
+  NETDEVS_POLICY_MAX = 0x2,
+  NETDEVS_POLICY_UNDEF = 0xffffffff
+};
+ncclResult_t ncclTopoGetNetDevsPolicy(enum netDevsPolicy* policy, int* policyNum);
+
 // Allows for up to 32 NICs per node on GB200-NVL72
 #define NCCL_TOPO_MAX_NODES 64
 ncclResult_t ncclTopoGetLocal(struct ncclTopoSystem* system, int type, int index, int resultType, int locals[NCCL_TOPO_MAX_NODES], int* localCount, int* pathType);

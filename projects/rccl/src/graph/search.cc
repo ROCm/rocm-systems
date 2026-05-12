@@ -555,6 +555,15 @@ ncclResult_t ncclTopoSelectNets(struct ncclTopoSystem* system, int typeInter, in
     NCCLCHECK(ncclTopoPrefNetsChannelFirst(system, gpu, nets, &netCount));
   }
 
+  // Get the maximum of network devices allowed, depending on the policy.
+  // If the policy is not MAX, then allow all devices.
+  int maxDevCount = 0;
+  enum netDevsPolicy netDevsPolicy;
+  NCCLCHECK(ncclTopoGetNetDevsPolicy(&netDevsPolicy, &maxDevCount));
+  if (gpu == -1) maxDevCount *= system->nodes[GPU].count;
+  if (netDevsPolicy != NETDEVS_POLICY_MAX) maxDevCount = NCCL_TOPO_MAX_NODES;
+  if (netCount >= maxDevCount) goto exit;
+
   // Then add others satisfying typeInter
   for (int t=0; t <= typeInter; t++) {
     for (int g = 0; g < system->nodes[GPU].count; g++) {
@@ -575,6 +584,7 @@ ncclResult_t ncclTopoSelectNets(struct ncclTopoSystem* system, int typeInter, in
     }
   }
 
+exit:
   *netCountRet = netCount;
   return ret;
 }
