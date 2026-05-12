@@ -43,7 +43,7 @@ class TestValuDualIssueDetector:
         console_warning_mock.assert_called_once()
         msg = console_warning_mock.call_args.args[0]
         assert "VALU Utilization can go up to 200%" in msg
-        assert ValuDualIssueDetector.FAQ_URL in msg
+        assert ValuDualIssueDetector.faq_url in msg
         assert "SQ_ACTIVE_INST_VALU2" not in msg
 
     def test_check_emits_valu_flops_warning_above_peak(self):
@@ -54,7 +54,7 @@ class TestValuDualIssueDetector:
         console_warning_mock.assert_called_once()
         msg = console_warning_mock.call_args.args[0]
         assert "VALU FLOPs can exceed the peak value" in msg
-        assert ValuDualIssueDetector.FAQ_URL in msg
+        assert ValuDualIssueDetector.faq_url in msg
         assert "SQ_ACTIVE_INST_VALU2" not in msg
 
     def test_check_appends_valu2_suffix_on_gfx950(self):

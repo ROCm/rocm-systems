@@ -242,9 +242,17 @@ def validate_dual_issue_metrics(
     Warns about dual-issue behavior.
     For MI350 (gfx950), additionally verify SQ_ACTIVE_INST_VALU2 counter.
     """
+    valu2_series = None
+    if isinstance(raw_pmc_df, dict):
+        pmc_perf = raw_pmc_df.get("pmc_perf")
+        if (
+            pmc_perf is not None
+            and ValuDualIssueDetector.valu2_counter in pmc_perf.columns
+        ):
+            valu2_series = pmc_perf[ValuDualIssueDetector.valu2_counter]
     detector = ValuDualIssueDetector(
         gpu_arch=sys_info.get("gpu_arch", ""),
-        valu2_series=_resolve_valu2_series(raw_pmc_df),
+        valu2_series=valu2_series,
     )
 
     for df_id, df in dfs.items():
@@ -262,7 +270,7 @@ def validate_dual_issue_metrics(
         for _, row in df.iterrows():
             metric_name = row.get("Metric", "")
 
-            if metric_name not in ValuDualIssueDetector.METRICS:
+            if metric_name not in ValuDualIssueDetector.metrics:
                 continue
 
             try:
@@ -273,17 +281,3 @@ def validate_dual_issue_metrics(
                 continue
 
             detector.check(metric_name, value, peak)
-
-
-def _resolve_valu2_series(
-    raw_pmc_df: pd.DataFrame | dict,
-) -> pd.Series | None:
-    """Pull the SQ_ACTIVE_INST_VALU2 column from raw PMC data, or None if absent."""
-    if not isinstance(raw_pmc_df, dict):
-        return None
-    pmc_perf = raw_pmc_df.get("pmc_perf")
-    if pmc_perf is None:
-        return None
-    if ValuDualIssueDetector.VALU2_COUNTER not in pmc_perf.columns:
-        return None
-    return pmc_perf[ValuDualIssueDetector.VALU2_COUNTER]

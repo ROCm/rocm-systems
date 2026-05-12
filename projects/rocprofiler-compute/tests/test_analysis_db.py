@@ -510,7 +510,7 @@ def test_validate_dual_issue_metrics_appends_valu2_suffix_on_gfx950():
         "value": [150.0, 100.0],
     })
     pmc_df = pd.DataFrame({
-        ValuDualIssueDetector.VALU2_COUNTER: [1, 2, 3],
+        ValuDualIssueDetector.valu2_counter: [1, 2, 3],
     })
 
     with patch("utils.metrics.common.console_warning") as console_warning_mock:

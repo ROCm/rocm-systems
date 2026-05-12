@@ -600,15 +600,10 @@ class db_analysis(OmniAnalyze_Base):
         workload_values_df: pd.DataFrame,
         arch_config: schema.ArchConfig,
     ) -> None:
-        """Warn when VALU metrics exceed peak in the workload-level results.
-
-        Mirrors utils.metrics.evaluation_pipeline.validate_dual_issue_metrics
-        but adapted to the long-format (metric_id, value_name, value) shape
-        and flat per-workload pmc_df used by db_analysis.
-        """
+        """Warn when VALU metrics exceed peak in the workload-level results."""
         valu2_series = (
-            pmc_df[ValuDualIssueDetector.VALU2_COUNTER]
-            if ValuDualIssueDetector.VALU2_COUNTER in pmc_df.columns
+            pmc_df[ValuDualIssueDetector.valu2_counter]
+            if ValuDualIssueDetector.valu2_counter in pmc_df.columns
             else None
         )
         detector = ValuDualIssueDetector(
@@ -616,7 +611,22 @@ class db_analysis(OmniAnalyze_Base):
             valu2_series=valu2_series,
         )
 
-        candidates = db_analysis._resolve_dual_issue_candidates(arch_config)
+        candidates: list[tuple[str, str, str]] = []
+        for df_id, df in arch_config.dfs.items():
+            if arch_config.dfs_type.get(df_id) != "metric_table":
+                continue
+            if "Metric" not in df.columns or "Value" not in df.columns:
+                continue
+            if "Peak (Empirical)" in df.columns:
+                peak_col = "Peak (Empirical)"
+            elif "Peak" in df.columns:
+                peak_col = "Peak"
+            else:
+                continue
+            for metric_id, row in df.iterrows():
+                metric_name = row.get("Metric", "")
+                if metric_name in ValuDualIssueDetector.metrics:
+                    candidates.append((metric_id, metric_name, peak_col))
         if not candidates:
             return
 
@@ -635,34 +645,6 @@ class db_analysis(OmniAnalyze_Base):
             except (ValueError, TypeError):
                 continue
             detector.check(metric_name, value, peak)
-
-    @staticmethod
-    def _resolve_dual_issue_candidates(
-        arch_config: schema.ArchConfig,
-    ) -> list[tuple[str, str, str]]:
-        """Walk arch_config metric_tables for VALU dual-issue candidate rows.
-
-        Returns (metric_id, metric_name, peak_col) for every row whose Metric
-        is a dual-issue candidate and whose source table carries both a Value
-        column and a Peak (Empirical) or Peak column.
-        """
-        candidates: list[tuple[str, str, str]] = []
-        for df_id, df in arch_config.dfs.items():
-            if arch_config.dfs_type.get(df_id) != "metric_table":
-                continue
-            if "Metric" not in df.columns or "Value" not in df.columns:
-                continue
-            if "Peak (Empirical)" in df.columns:
-                peak_col = "Peak (Empirical)"
-            elif "Peak" in df.columns:
-                peak_col = "Peak"
-            else:
-                continue
-            for metric_id, row in df.iterrows():
-                metric_name = row.get("Metric", "")
-                if metric_name in ValuDualIssueDetector.METRICS:
-                    candidates.append((metric_id, metric_name, peak_col))
-        return candidates
 
     def calc_expressions(
         self,
