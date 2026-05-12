@@ -371,34 +371,302 @@ bool Os::isThreadAlive(const Thread& thread) {
   return ::pthread_kill((pthread_t)thread.handle(), 0) == 0;
 }
 
-static size_t tlsSize = 0;
+// The stacksize N passed to pthread_attr_setstacksize is the size of the
+// whole per-thread VMA glibc allocates with one mmap; it must satisfy
+//   N >= tls_static_size_for_stack + MINIMAL_REST_STACK
+// (page-aligned; see glibc nptl/allocatestack.c). N is consumed by static
+// TLS data, _dl_tls_static_surplus, the TCB slab (TLS_TCB_SIZE on
+// TCB_AT_TP arches such as x86_64; included in TLS_PRE_TCB_SIZE on
+// DTV_AT_TP arches such as aarch64), alignment, and only what's left over
+// is usable for frames. To preserve `thread->stackSize_` bytes of usable
+// stack we measure that reservation once and add it to the caller's
+// request when calling pthread_attr_setstacksize.
+//
+// Two compile-time strategies, both producing the same conceptual total:
+//   * Non-ASan: spawn a default-attribute helper thread and read
+//     (stack_top - &local). The distance spans the whole reservation in
+//     one pointer subtraction. Layout differs between TCB_AT_TP (TCB
+//     above static TLS) and DTV_AT_TP (static TLS above TCB), but the
+//     end-to-end byte count is the same.
+//   * ASan: under ASan locals live on the fake stack, so the heuristic
+//     above produces garbage (we've seen both ~16 EiB underflow and
+//     ~18 MiB overshoot on the same binary). Replaced with
+//       1. dl_iterate_phdr summing each DSO's PT_TLS p_memsz, and
+//       2. a linear probe of pthread_create's EINVAL boundary that
+//          folds in the rest of the reservation (_dl_tls_static_surplus,
+//          the TCB slab, MINIMAL_REST_STACK, and ASan's per-thread TLS).
+//
+// Cached once at first thread creation. A dlopen of a TLS-using DSO
+// after the first amd::Thread would undercount, but in practice rocclr
+// workers are spun up after the host's startup dlopens have settled.
+//
+// See https://github.com/ROCm/rocm-systems/commit/3fd285e26ba194fd7d944f72ffcff415898d9017
+// (SWDEV-204995: Houdini18 with ~286 KiB of static TLS hitting EINVAL
+// against a 256 KiB CQ stack).
+static size_t perThreadOverhead = 0;
 
-// Try to guess the size of TLS (plus some frames)
-void* guessTlsSizeThread(void* param) {
+namespace {
+
+// Sole __has_feature guard in this file. Constexpr so downstream code can
+// use `if constexpr` instead of #ifdef.
+#if defined(__clang__)
+#if __has_feature(address_sanitizer)
+constexpr bool kAsanEnabled = true;
+#else
+constexpr bool kAsanEnabled = false;
+#endif
+#else
+constexpr bool kAsanEnabled = false;
+#endif
+
+// Helpers below are compiled in both ASan and non-ASan builds; only one
+// path is reachable per build via `if constexpr`. Internal linkage lets
+// the linker drop the unreferenced one; `[[maybe_unused]]` silences the
+// "unused" warning in the meantime.
+
+// --- Non-ASan path: helper-thread (stack_top - &local) measurement ---------
+
+// Helper-thread entry point. Writes the page-aligned distance from the
+// top of the thread's mmap region to a local in this frame through *arg.
+// That distance covers everything glibc reserves on top of caller frames:
+// static TLS data, _dl_tls_static_surplus, the TCB slab, alignment slack,
+// and the few frames between this function and stacktop.
+[[maybe_unused]] void* captureThreadOverhead(void* arg) {
+  size_t* out = static_cast<size_t*>(arg);
   address stackBase;
-  address currentFrame;
   size_t stackSize;
   Os::currentStackInfo(&stackBase, &stackSize);
-  currentFrame = reinterpret_cast<address>(&stackSize);
-  tlsSize = stackBase - currentFrame;
-  // align up to page boundary
-  tlsSize = alignUp(tlsSize, amd::Os::pageSize());
-  return NULL;
+  const address currentFrame = reinterpret_cast<address>(&stackSize);
+  *out = amd::alignUp(static_cast<size_t>(stackBase - currentFrame), amd::Os::pageSize());
+  return nullptr;
 }
 
-static void guessTlsSize(void) {
-  int retval;
+// Spawn -> join -> return what the helper captured.
+[[maybe_unused]] size_t measureThreadOverhead() {
   pthread_t handle;
   pthread_attr_t threadAttr;
+  size_t result = 0;
 
   ::pthread_attr_init(&threadAttr);
-  retval = ::pthread_create(&handle, &threadAttr, guessTlsSizeThread, NULL);
-  if (retval == 0) {
-    pthread_join(handle, NULL);
+  if (::pthread_create(&handle, &threadAttr, captureThreadOverhead, &result) == 0) {
+    ::pthread_join(handle, nullptr);
   } else {
     fatal("pthread_create() failed with default stack size");
   }
   ::pthread_attr_destroy(&threadAttr);
+  return result;
+}
+
+// --- ASan path: PT_TLS sum + EINVAL probe ----------------------------------
+//
+// Two-step replacement for the broken (stack_top - &local) heuristic:
+//   1. measureStaticTls() sums each loaded DSO's PT_TLS p_memsz the way
+//      glibc folds them into _dl_tls_static_size.
+//   2. measureAsanThreadOverhead() linear-probes pthread_create starting
+//      at PTHREAD_STACK_MIN to find the smallest stacksize that doesn't
+//      EINVAL. Whatever the probe adds beyond the PT_TLS sum covers
+//      _dl_tls_static_surplus, the per-arch TCB slab (TLS_TCB_SIZE on
+//      TCB_AT_TP / TLS_PRE_TCB_SIZE on DTV_AT_TP), MINIMAL_REST_STACK,
+//      and ASan's own per-thread TLS.
+
+struct TlsAccumulator {
+  size_t total;
+  size_t maxAlign;
+};
+
+// dl_iterate_phdr per-DSO callback. The loader invokes this once for the
+// main executable and each loaded DSO. Each DSO has at most one PT_TLS
+// program header describing the in-memory footprint of its `__thread`
+// variables; we sum those p_memsz values with the per-DSO p_align rounding
+// glibc applies internally, and track the strictest alignment for one
+// final round-up after the walk.
+int collectTlsPhdr(struct dl_phdr_info* info, size_t /*size*/, void* data) {
+  auto* acc = static_cast<TlsAccumulator*>(data);
+  for (uint16_t i = 0; i < info->dlpi_phnum; ++i) {
+    const ElfW(Phdr)* ph = &info->dlpi_phdr[i];
+    if (ph->p_type != PT_TLS || ph->p_memsz == 0) continue;
+    // ELF p_align == 0 means "no requirement"; treat as 1 so the round-up
+    // below is a no-op.
+    const size_t align = ph->p_align ? ph->p_align : 1;
+    acc->total = (acc->total + align - 1) & ~(align - 1);
+    acc->total += ph->p_memsz;
+    if (align > acc->maxAlign) acc->maxAlign = align;
+  }
+  return 0;  // 0 = keep walking; non-zero would abort the iteration.
+}
+
+// Sums every loaded DSO's PT_TLS p_memsz, applying the per-DSO and final
+// max-alignment rounds glibc applies when computing _dl_tls_static_size,
+// then page-aligns (pthread_attr_setstacksize page-aligns its argument
+// anyway).
+//
+// Note: this is only the PT_TLS portion of glibc's tls_static_size_for_stack.
+// _dl_tls_static_surplus and the TCB slab (TLS_TCB_SIZE on TCB_AT_TP, or
+// the equivalent inside TLS_PRE_TCB_SIZE on DTV_AT_TP) are not measured
+// here -- the EINVAL probe below picks them up empirically.
+[[maybe_unused]] size_t measureStaticTls() {
+  TlsAccumulator acc{0, 1};
+  // dl_iterate_phdr is the portable, stable ELF interface for walking the
+  // loaded DSO list; no libc-private symbols required.
+  ::dl_iterate_phdr(collectTlsPhdr, &acc);
+  if (acc.maxAlign > 1) {
+    acc.total = (acc.total + acc.maxAlign - 1) & ~(acc.maxAlign - 1);
+  }
+  return amd::alignUp(acc.total, amd::Os::pageSize());
+}
+
+// Linear (not actually bisecting) probe parameters. Step is small because
+// glibc's EINVAL boundary is a single threshold, not a wide range.
+constexpr size_t kAsanBisectStep = 4 * Ki;            // +1 page per retry
+constexpr size_t kAsanBisectCeiling = 4 * Mi;         // give up rather than spin
+
+void* asanProbeThreadEntry(void* /*param*/) { return nullptr; }
+
+// Walks pthread_create requests upward from `staticTls + PTHREAD_STACK_MIN`
+// until one stops returning EINVAL; that minimum is what glibc reserves
+// per thread above usable stack on this build. Covers _dl_tls_static_surplus,
+// the TCB slab, MINIMAL_REST_STACK, and any ASan per-thread TLS.
+//
+// fatal() if nothing within kAsanBisectCeiling works.
+[[maybe_unused]] size_t measureAsanThreadOverhead() {
+  const size_t staticTls = measureStaticTls();
+
+  pthread_attr_t attr;
+  if (::pthread_attr_init(&attr) != 0) {
+    fatal("pthread_attr_init() failed during ASan thread-overhead measurement");
+  }
+  // Joinable so we can reclaim the probe immediately rather than leak a
+  // detached thread holding a nontrivial mmap region during startup.
+  ::pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+  // PTHREAD_STACK_MIN already satisfies MINIMAL_REST_STACK, so the only
+  // remaining EINVAL trigger is the tls_static_size_for_stack inequality
+  // -- exactly what we want to find.
+  const size_t baseStack = static_cast<size_t>(PTHREAD_STACK_MIN);
+  for (size_t grown = 0; grown <= kAsanBisectCeiling; grown += kAsanBisectStep) {
+    const size_t request = staticTls + baseStack + grown;
+    if (::pthread_attr_setstacksize(&attr, request) != 0) {
+      fatal("pthread_attr_setstacksize() failed during ASan thread-overhead measurement");
+    }
+    pthread_t probe = 0;
+    const int rc = ::pthread_create(&probe, &attr, asanProbeThreadEntry, nullptr);
+    if (rc == 0) {
+      ::pthread_join(probe, nullptr);
+      ::pthread_attr_destroy(&attr);
+      return staticTls + baseStack + grown;
+    }
+    // Anything other than EINVAL (EAGAIN/ENOMEM/EPERM) means the system
+    // is too constrained to measure anything; real thread creation would
+    // hit the same wall, so surface it now with context.
+    if (rc != EINVAL) {
+      fatal("pthread_create() failed during ASan thread-overhead measurement");
+    }
+  }
+  // Hitting the ceiling implies overhead > kAsanBisectCeiling above the
+  // PT_TLS sum -- i.e. a pathologically configured glibc (huge
+  // _dl_tls_static_surplus, etc.).
+  fatal("ASan thread-overhead measurement exceeded ceiling without finding a workable stacksize");
+}
+
+// --- Diagnostic: AMD_LOG_TLS_COMPARE ---------------------------------------
+//
+// Prints the ASan-path overhead next to what the broken (stack_top - &local)
+// heuristic would have produced. ASan-only, opt-in via env var, no effect
+// on stack sizing.
+
+size_t legacyTlsSize = 0;
+address legacyStackBase = nullptr;
+address legacyCurrentFrame = nullptr;
+size_t legacyStackSize = 0;
+int legacyMeasurementError = 0;  // pthread_create errno, 0 if ok.
+
+// Mirror of captureThreadOverhead that writes into the legacy* diagnostic
+// globals. The captured value is expected to be garbage under ASan (that's
+// the point of the comparison); not used for stack sizing.
+[[maybe_unused]] void* captureLegacyThreadOverhead(void* /*param*/) {
+  address stackBase;
+  size_t stackSize;
+  Os::currentStackInfo(&stackBase, &stackSize);
+  address currentFrame = reinterpret_cast<address>(&stackSize);
+  legacyStackBase = stackBase;
+  legacyCurrentFrame = currentFrame;
+  legacyStackSize = stackSize;
+  legacyTlsSize = stackBase - currentFrame;
+  legacyTlsSize = amd::alignUp(legacyTlsSize, amd::Os::pageSize());
+  return nullptr;
+}
+
+[[maybe_unused]] void measureLegacyThreadOverhead() {
+  pthread_t handle;
+  pthread_attr_t threadAttr;
+  ::pthread_attr_init(&threadAttr);
+  const int err =
+      ::pthread_create(&handle, &threadAttr, captureLegacyThreadOverhead, nullptr);
+  if (err == 0) {
+    ::pthread_join(handle, nullptr);
+  } else {
+    legacyMeasurementError = err;
+    // Diagnostic-only; production stack sizing does not depend on these
+    // globals, so we report and continue rather than fatal().
+    std::fprintf(stderr,
+                 "[TLS compare] legacy measurement pthread_create failed: %d (%s)\n",
+                 err, ::strerror(err));
+  }
+  ::pthread_attr_destroy(&threadAttr);
+}
+
+// Emits one AMD_LOG_TLS_COMPARE line per thread creation. No-op outside
+// ASan and when the env var is unset or "0".
+void maybeLogTlsComparison([[maybe_unused]] amd::Thread* thread,
+                           [[maybe_unused]] size_t guardsize,
+                           [[maybe_unused]] size_t newRequest) {
+  if constexpr (kAsanEnabled) {
+    static const bool kLogTlsCompare = []() {
+      const char* v = std::getenv("AMD_LOG_TLS_COMPARE");
+      return v != nullptr && v[0] != '\0' && v[0] != '0';
+    }();
+    if (!kLogTlsCompare) return;
+
+    const size_t threadStack = thread->stackSize();
+    const size_t legacyRequest = threadStack + guardsize + legacyTlsSize;
+    // Stay in size_t for the delta: under ASan, legacyTlsSize is often the
+    // wrapped underflow value (~16 EiB), which would silently signed-overflow.
+    const bool legacyLarger = legacyRequest > newRequest;
+    const size_t absDiff =
+        legacyLarger ? legacyRequest - newRequest : newRequest - legacyRequest;
+    std::fprintf(
+        stderr,
+        "[TLS compare] thread='%s' stack=%zu guard=%zu | "
+        "new(dl_iterate_phdr+probe): overhead=%zu request=%zu | "
+        "legacy(stack_top-&local): overhead=%zu request=%zu "
+        "stackBase=%p frame=%p stackSize=%zu err=%d | "
+        "diff(new-legacy)=%c%zu\n",
+        thread->name().c_str(),
+        threadStack, guardsize,
+        perThreadOverhead, newRequest,
+        legacyTlsSize, legacyRequest,
+        static_cast<void*>(legacyStackBase),
+        static_cast<void*>(legacyCurrentFrame),
+        legacyStackSize, legacyMeasurementError,
+        legacyLarger ? '-' : '+', absDiff);
+  }
+}
+
+}  // namespace
+
+// One-time init of `perThreadOverhead`. Both branches measure the same
+// quantity (the bytes glibc reserves above the caller's usable stack) using
+// the strategy described in the file-header block on `perThreadOverhead`.
+// The non-ASan branch's "few extra frames" and the ASan branch's
+// MINIMAL_REST_STACK both serve as a small cushion above glibc's threshold.
+static void initPerThreadOverhead(void) {
+  if constexpr (kAsanEnabled) {
+    perThreadOverhead = measureAsanThreadOverhead();
+    // Capture the broken (stack_top - &local) value for AMD_LOG_TLS_COMPARE.
+    measureLegacyThreadOverhead();
+  } else {
+    perThreadOverhead = measureThreadOverhead();
+  }
 }
 
 const void* Os::createOsThread(amd::Thread* thread) {
@@ -412,8 +680,19 @@ const void* Os::createOsThread(amd::Thread* thread) {
     }
 
     static std::once_flag initOnce;
-    std::call_once(initOnce, guessTlsSize);
-    ::pthread_attr_setstacksize(&threadAttr, thread->stackSize_ + guardsize + tlsSize);
+    std::call_once(initOnce, initPerThreadOverhead);
+
+    // perThreadOverhead absorbs glibc's
+    //   tls_static_size_for_stack + MINIMAL_REST_STACK
+    // reservation, so `stackSize_` survives as actual usable frames after
+    // glibc carves TCB+TLS off the top of the requested region. The
+    // attribute's guardsize is unchanged on `threadAttr`, so glibc still
+    // allocates that guard outside N at the bottom of the VMA; including
+    // guardsize in N here is just a one-page cushion (legacy behavior).
+    const size_t newRequest = thread->stackSize_ + guardsize + perThreadOverhead;
+
+    maybeLogTlsComparison(thread, guardsize, newRequest);
+    ::pthread_attr_setstacksize(&threadAttr, newRequest);
   }
 
   // We never plan the use join, so free the resources now.

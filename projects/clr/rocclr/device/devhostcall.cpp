@@ -209,6 +209,7 @@ void HostcallBuffer::initialize(uint32_t num_packets) {
 /** \brief Manage a unique listener thread and its associated buffers.
  */
 class HostcallListener {
+  public:
   std::set<HostcallBuffer*> buffers_;
   device::Signal* doorbell_;
   MessageHandler messages_;
@@ -283,6 +284,7 @@ void HostcallListener::consumePackets() {
   kHostThreadActive.state = Init::State::kInit;
   while (true) {
     while (true) {
+      std::cout << "HostListener Running1" << std::endl;
       if (kHostThreadActive.state == Init::State::kDestroy) {
         kHostThreadActive.state = Init::State::kExit;
         return;
@@ -303,6 +305,8 @@ void HostcallListener::consumePackets() {
     if (signal_value == SIGNAL_DONE) {
       return;
     }
+
+    std::cout << "HostListener Running2" << std::endl;
 
     if (!idle()) {
       amd::ScopedLock lock{listenerLock};
@@ -421,6 +425,11 @@ bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
     return false;
   }
 #endif  // defined(WITH_PAL_DEVICE)
+
+  std::cout << "HostCallListener state: " << hostcallListener->thread_.state()
+          << " (RUNNABLE=" << amd::Thread::RUNNABLE
+          << ", FINISHED=" << amd::Thread::FINISHED << ")" << std::endl;
+  // std::cout << "HostCallListener is alive: " <<  amd::Os::isThreadAlive(hostcallListener->thread_) << std::endl;
   hostcallListener->addBuffer(buffer);
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Registered hostcall buffer %p with listener %p", buffer,
           hostcallListener);
@@ -428,20 +437,40 @@ bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
 }
 
 void disableHostcalls(void* bfr) {
+  HostcallListener* doomed = nullptr;
   {
     amd::ScopedLock lock(listenerLock);
-    if (!hostcallListener) {
-      return;
-    }
-    assert(bfr && "expected a hostcall buffer");
+    if (!hostcallListener) return;
     auto buffer = reinterpret_cast<HostcallBuffer*>(bfr);
     hostcallListener->removeBuffer(buffer);
+    if (hostcallListener->idle()) {
+      doomed = hostcallListener;
+      hostcallListener = nullptr;          // publish "no listener" while holding the lock
+    }
   }
-  if (hostcallListener->idle()) {
-    hostcallListener->terminate();
-    delete hostcallListener;
-    hostcallListener = nullptr;
+  if (doomed) {
+    doomed->terminate();                   // safe: nobody else can observe `doomed` anymore
     ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Terminated hostcall listener");
+    delete doomed;
   }
 }
+
+// void disableHostcalls(void* bfr) {
+//   std::cout << "HELLO WORLD" << std::endl;
+//   {
+//     amd::ScopedLock lock(listenerLock);
+//     if (!hostcallListener) {
+//       return;
+//     }
+//     assert(bfr && "expected a hostcall buffer");
+//     auto buffer = reinterpret_cast<HostcallBuffer*>(bfr);
+//     hostcallListener->removeBuffer(buffer);
+//   }
+//   // if (hostcallListener->idle()) {
+//   //   hostcallListener->terminate();
+//   //   delete hostcallListener;
+//   //   hostcallListener = nullptr;
+//   //   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Terminated hostcall listener");
+//   // }
+// }
 }  // namespace amd
