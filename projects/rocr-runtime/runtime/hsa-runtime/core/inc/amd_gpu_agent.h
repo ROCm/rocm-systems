@@ -48,6 +48,8 @@
 #include <vector>
 #include <list>
 #include <map>
+#include <mutex>
+#include <unordered_set>
 
 #include "hsakmt/hsakmt.h"
 
@@ -66,6 +68,7 @@
 
 namespace rocr {
 namespace AMD {
+class BlitSdmaBase;
 class MemoryRegion;
 
 typedef ScratchCache::ScratchInfo ScratchInfo;
@@ -357,6 +360,30 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Release a queue earlier used by application
   hsa_status_t ReleaseCountedQueue(hsa_queue_t* queue);
+
+  // @brief Create a user-owned direct SDMA queue.
+  //        Wraps the protected CreateBlitSdma and registers the object
+  //        for later validation via UnregisterDirectSdmaQueue.
+  //
+  // @param [in]  use_xgmi   True to prefer an XGMI-connected engine.
+  // @param [in]  rec_eng    Preferred engine index, or -1 for auto.
+  // @param [out] out_sdma   Populated with the newly created BlitSdmaBase.
+  //
+  // @retval HSA_STATUS_SUCCESS on success.
+  hsa_status_t CreateUserSdmaQueue(bool use_xgmi, int rec_eng,
+                                     AMD::BlitSdmaBase** out_sdma);
+
+  // @brief Validate and unregister a handle previously returned by
+  //        CreateDirectSdmaQueue. Returns HSA_STATUS_ERROR_INVALID_ARGUMENT
+  //        if the handle was not registered on this agent.
+  // @param [in] sdma   SDMA queue handle.
+  hsa_status_t RemoveUserSdmaQueue(AMD::BlitSdmaBase* sdma);
+
+  // @brief Validate that the given SDMA queue is still registered to this agent
+  bool IsValidSdmaQueue(AMD::BlitSdmaBase* sdma);
+
+  // @brief Query information about a user SDMA queue.
+  hsa_status_t GetSdmaQueueInfo(AMD::BlitSdmaBase*, hsa_amd_sdma_queue_info_attribute_t, void*) const;
 
   // @brief Override from AMD::GpuAgentInt.
   void TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_time_t& time) override;
@@ -933,6 +960,10 @@ class GpuAgent : public GpuAgentInt {
 
   // Round-robin index for spreading SDMA work across engines.
   uint32_t sdma_rr_index_ = 0;
+
+  // @brief Registry of all user-owned SDMA queues created through ::hsa_amd_sdma_queue_create.
+  std::mutex user_sdma_lock_;
+  std::unordered_set<AMD::BlitSdmaBase*> user_sdma_queues_;
 
   // structure for host trap sampling
   pcs_data_t pcs_hosttrap_data_;

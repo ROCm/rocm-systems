@@ -72,9 +72,10 @@
  * - 1.19 - hsa_amd_agent_preload
  * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
  * - 1.21 - hsa_amd_signal_get_event_id
+ * - 1.22 - hsa_amd_sdma_queue_create, destroy and get_info APIs
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 21
+#define HSA_AMD_INTERFACE_VERSION_MINOR 22
 
 #ifdef __cplusplus
 extern "C" {
@@ -4690,6 +4691,189 @@ hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_
  * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The queue's agent is invalid or not a GPU agent.
  */
 hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue);
+
+/**
+ * @brief Opaque handle representing a direct SDMA queue.
+ */
+typedef struct hsa_amd_sdma_queue_s {
+  uint64_t handle;
+} hsa_amd_sdma_queue_t;
+
+/**
+ * @brief Structure containing user SDMA queue pointers.
+ *
+ * Returned by ::hsa_amd_sdma_queue_get_info with
+ * HSA_AMD_SDMA_QUEUE_INFO_RESOURCE attribute.
+ */
+typedef struct hsa_amd_sdma_queue_resource_s {
+  // Ring buffer base address.
+  void* ring_base;
+  // Ring buffer size in bytes.
+  size_t ring_size;
+  // Read pointer (RPTR) address.
+  volatile uint64_t* read_ptr;
+  // Write pointer (WPTR) address.
+  volatile uint64_t* write_ptr;
+  // Doorbell address.
+  volatile uint64_t* doorbell;
+} hsa_amd_sdma_queue_resource_t;
+
+/**
+ * @brief SDMA queue info attribute IDs for hsa_amd_sdma_queue_get_info.
+ */
+typedef enum hsa_amd_sdma_queue_info_attribute_s {
+  /**
+   * SDMA queue pointers (ring base, size, rptr, wptr, doorbell).
+   * Type: hsa_amd_sdma_queue_resource_t
+   */
+  HSA_AMD_SDMA_QUEUE_INFO_RESOURCE = 1,
+
+  /**
+   * Internal queue ID. Type: uint64_t
+   */
+  HSA_AMD_SDMA_QUEUE_INFO_QUEUE_ID = 2,
+
+  /**
+   * Engine index this queue is bound to. Type: uint32_t
+   */
+  HSA_AMD_SDMA_QUEUE_INFO_ENGINE_ID = 3,
+
+  /**
+   * Whether this is an XGMI engine. Type: bool
+   */
+  HSA_AMD_SDMA_QUEUE_INFO_IS_XGMI = 4,
+
+  /**
+   * GPU agent this queue belongs to. Type: hsa_agent_t
+   */
+  HSA_AMD_SDMA_QUEUE_INFO_AGENT = 5,
+
+  /**
+   * Minimum submission size in bytes. Some ASICs (MI100/MI200) require
+   * 256-byte minimum. User MUST pad submissions below this with NOP packets.
+   * Type: uint32_t.
+   */
+  HSA_AMD_SDMA_QUEUE_INFO_MIN_SUBMISSION_SIZE = 6,
+
+  /**
+   * Whether platform supports 64-bit atomics for signal completion.
+   * Type: bool. If false, FENCE packets used instead of ATOMIC.
+   */
+  HSA_AMD_SDMA_QUEUE_INFO_PLATFORM_ATOMIC_SUPPORT = 7,
+
+  /**
+   * Whether HDP flush packets are required for cache coherency.
+   * False for XGMI SDMA queues, true for PCIe SDMA queues. Type: bool.
+   */
+  HSA_AMD_SDMA_QUEUE_INFO_HDP_FLUSH_REQUIRED = 8,
+
+  /**
+   * Whether GCR (Global Cache) flush packets are required. True on GFX10+.
+   * User must insert GCR invalidate (before copy) and writeback (after copy).
+   */
+  HSA_AMD_SDMA_QUEUE_INFO_GCR_REQUIRED = 9,
+} hsa_amd_sdma_queue_info_attribute_t;
+
+/**
+ * @brief Flags for hsa_amd_sdma_queue_create.
+ */
+typedef enum hsa_amd_sdma_queue_flag_s {
+  /**
+   * Create XGMI SDMA engine. Default type is PCIe. 
+   */
+  HSA_AMD_SDMA_QUEUE_FLAG_XGMI = (1 << 0),
+
+  /**
+   * Request a specific SDMA engine ID.
+   */
+  HSA_AMD_SDMA_QUEUE_FLAG_USE_ENGINE_ID = (1 << 1),
+
+} hsa_amd_sdma_queue_flag_t;
+
+/**
+ * @brief Create a direct SDMA queue for low-level SDMA packet submission.
+ *
+ * This API exposes a raw SDMA ring buffer, read/write pointers, and doorbell
+ * to the caller. The caller is responsible for:
+ * - Building valid SDMA packets in the ring buffer for different asics
+ * - Managing ring buffer wrap-around
+ * - Updating the write pointer and doorbell
+ * - Ensuring memory coherency with appropriate cache operations
+ *
+ * The runtime manages the underlying KMT/FMM resources and ensures the queue
+ * is properly cleaned up on process termination.
+ *
+ * @param[in] agent GPU agent on which to create the queue.
+ *
+ * @param[in] flags Combination of hsa_amd_sdma_queue_flag_t values.
+ *
+ * @param[in] engine_id When HSA_AMD_SDMA_QUEUE_FLAG_USE_ENGINE_ID is set,
+ *            specifies the desired engine (1-hot mask from hsa_amd_sdma_engine_id_t).
+ *            If passed as 0, the runtime will select an available engine.
+ *            Ignored if HSA_AMD_SDMA_QUEUE_FLAG_USE_ENGINE_ID is not set.
+ *
+ * @param[out] queue Pointer to receive the created queue handle.
+ *
+ * @retval HSA_STATUS_SUCCESS Queue created successfully.
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED Runtime not initialized.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT Agent is not a GPU agent.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid parameters.
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES Insufficient resources.
+ *
+ */
+hsa_status_t HSA_API hsa_amd_sdma_queue_create(hsa_agent_t agent, uint32_t flags,
+                                               hsa_amd_sdma_engine_id_t engine_id_mask,
+                                               hsa_amd_sdma_queue_t* queue);
+
+/**
+ * @brief Destroy a direct SDMA queue.
+ *
+ * The caller must ensure no commands are in flight on the queue before
+ * destroying it. The runtime will wait for the queue to be idle
+ * (RPTR == WPTR) before releasing resources.
+ *
+ * @param[in] queue Queue handle to destroy.
+ *
+ * @retval HSA_STATUS_SUCCESS Queue destroyed successfully.
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED Runtime not initialized.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid queue handle.
+ */
+hsa_status_t HSA_API hsa_amd_sdma_queue_destroy(hsa_amd_sdma_queue_t queue);
+
+/**
+ * @brief Query information about a direct SDMA queue.
+ *
+ * @param[in] queue Queue handle to query.
+ *
+ * @param[in] attribute The attribute to query.
+ *
+ * @param[out] value Pointer to store the attribute value.
+ *             The type depends on the attribute being queried.
+ *
+ * @retval HSA_STATUS_SUCCESS Query successful.
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED Runtime not initialized.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid queue or attribute.
+ */
+hsa_status_t HSA_API hsa_amd_sdma_queue_get_info(hsa_amd_sdma_queue_t queue,
+                                                 hsa_amd_sdma_queue_info_attribute_t attribute,
+                                                 void* value);
+
+/**
+ * @brief Ring the doorbell for an SDMA queue.
+ *
+ * On Linux, writing directly to the doorbell pointer is sufficient.
+ * Windows/WSL requires a separate thunk call, which is why this call is required on it. 
+ * This API handles both cases transparently.
+ *
+ * @param[in] queue Queue handle.
+ * @param[in] write_index The write index value to signal.
+ *
+ * @retval HSA_STATUS_SUCCESS Doorbell rung successfully.
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED Runtime not initialized.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid queue handle.
+ */
+hsa_status_t HSA_API hsa_amd_sdma_queue_ring_doorbell(hsa_amd_sdma_queue_t queue,
+                                                      uint64_t write_index);
 
 /**
  * @brief logging types

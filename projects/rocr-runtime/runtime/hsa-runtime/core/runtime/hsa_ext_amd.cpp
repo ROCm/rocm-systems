@@ -63,6 +63,7 @@
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
 #include "core/inc/counted_queue_manager.h"
+#include "core/inc/amd_blit_sdma.h"
 
 namespace rocr {
 
@@ -1909,6 +1910,92 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
                                                 completion_signal);
 
   CATCH;                                       
+}
+
+hsa_status_t HSA_API hsa_amd_sdma_queue_create(hsa_agent_t agent, uint32_t flags,
+                                               hsa_amd_sdma_engine_id_t engine_id_mask,
+                                               hsa_amd_sdma_queue_t* queue) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(queue);
+
+  // Validate agent type
+  core::Agent* core_agent = core::Agent::Convert(agent);
+  IS_VALID(core_agent);
+
+  if (core_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(core_agent);
+
+  // Determine if XGMI SDMA is requested
+  bool use_xgmi = !!(flags & HSA_AMD_SDMA_QUEUE_FLAG_XGMI);
+
+  int rec_eng = -1; // auto selection of sdma engine by default
+  if (flags & HSA_AMD_SDMA_QUEUE_FLAG_USE_ENGINE_ID) {
+    // Only one engine must be selected
+    if (!engine_id_mask || (engine_id_mask & (engine_id_mask - 1))) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    // Find the lowest set bit index
+    rec_eng = rocr::os::Ctz(engine_id_mask);
+  }
+
+  AMD::BlitSdmaBase* sdma = nullptr;
+  hsa_status_t err = gpu_agent->CreateUserSdmaQueue(use_xgmi, rec_eng, &sdma);
+  if (err != HSA_STATUS_SUCCESS) return err;
+
+  queue->handle = reinterpret_cast<uint64_t>(sdma);
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
+hsa_status_t HSA_API hsa_amd_sdma_queue_destroy(hsa_amd_sdma_queue_t queue) {
+  TRY;
+  IS_OPEN();
+
+  if (queue.handle == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  AMD::BlitSdmaBase* sdma = reinterpret_cast<AMD::BlitSdmaBase*>(queue.handle);
+
+  // Retrieve owning agent for handle validation
+  AMD::GpuAgent* gpu_agent = sdma->agent();
+  if (gpu_agent == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // Validate and remove from registry before destroying the object
+  hsa_status_t err = gpu_agent->RemoveUserSdmaQueue(sdma);
+  if (err != HSA_STATUS_SUCCESS) return err;
+
+  // Wait for submitted packets to be read from ring buffer
+  sdma->WaitForIdle();
+
+  err = sdma->Destroy();
+  delete sdma;
+  return err;
+  CATCH;
+}
+
+hsa_status_t HSA_API hsa_amd_sdma_queue_get_info(hsa_amd_sdma_queue_t queue,
+                                                 hsa_amd_sdma_queue_info_attribute_t attribute,
+                                                 void* value) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(value);
+
+  if (queue.handle == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  AMD::BlitSdmaBase* sdma = reinterpret_cast<AMD::BlitSdmaBase*>(queue.handle);
+  AMD::GpuAgent* gpu_agent = sdma->agent();
+  if (gpu_agent == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // Validate this queue handle is still registered to the owning agent
+  if (!gpu_agent->IsValidSdmaQueue(sdma)) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  return gpu_agent->GetSdmaQueueInfo(sdma, attribute, value);
+  CATCH;
 }
 
 hsa_status_t hsa_amd_enable_logging(uint8_t* flags, void *file) {

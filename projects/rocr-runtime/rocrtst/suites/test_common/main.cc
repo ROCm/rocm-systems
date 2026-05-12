@@ -91,6 +91,7 @@
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
 #include "suites/functional/cuid.h"
+#include "suites/functional/sdma_queues.h"
 #include "common/os.h"
 #include "common/platform_filter.h"
 #include "common/base_rocr_utils.h"
@@ -615,6 +616,20 @@ TEST(rocrtstFunc, Cuid_GPU_Validation_Test) {
   RunCustomTestEpilog(&ct);
 }
 #endif
+
+TEST(rocrtstFunc, Sdma_Queues_Create_Destroy_Test) {
+  SdmaQueuesTest sq;
+  if (!RunCustomTestProlog(&sq)) return;
+  sq.CreateDestroy();
+  RunCustomTestEpilog(&sq);
+}
+
+TEST(rocrtstFunc, Sdma_Queues_Submit_LinearCopy_Test) {
+  SdmaQueuesTest sq;
+  if (!RunCustomTestProlog(&sq)) return;
+  sq.SubmitLinearCopy();
+  RunCustomTestEpilog(&sq);
+}
 
 TEST(rocrtstNeg, Memory_Negative_Tests) {
     MemoryAllocateNegativeTest mt;

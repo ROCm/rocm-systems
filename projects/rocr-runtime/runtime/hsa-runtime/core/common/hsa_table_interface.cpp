@@ -1383,6 +1383,22 @@ hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *
   return amdExtTable->hsa_amd_signal_get_event_id_fn(signal, event_id);
 }
 
+hsa_status_t HSA_API hsa_amd_sdma_queue_create(hsa_agent_t agent, uint32_t flags,
+                                               hsa_amd_sdma_engine_id_t engine_id_mask,
+                                               hsa_amd_sdma_queue_t* queue) {
+  return amdExtTable->hsa_amd_sdma_queue_create_fn(agent, flags, engine_id_mask, queue);
+}
+
+hsa_status_t HSA_API hsa_amd_sdma_queue_destroy(hsa_amd_sdma_queue_t queue) {
+  return amdExtTable->hsa_amd_sdma_queue_destroy_fn(queue);
+}
+
+hsa_status_t HSA_API hsa_amd_sdma_queue_get_info(hsa_amd_sdma_queue_t queue,
+                                                 hsa_amd_sdma_queue_info_attribute_t attribute,
+                                                 void* value) {
+  return amdExtTable->hsa_amd_sdma_queue_get_info_fn(queue, attribute, value);
+}
+
 // Tools only table interfaces.
 namespace rocr {
 

@@ -273,6 +273,16 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 }
 
 GpuAgent::~GpuAgent() {
+  // Clean up any user SDMA queues that were not explicitly destroyed
+  {
+    std::lock_guard<std::mutex> lock(user_sdma_lock_);
+    for (auto* sdma : user_sdma_queues_) {
+      sdma->Destroy();
+      delete sdma;
+    }
+    user_sdma_queues_.clear();
+  }
+
   for (auto& blit : blits_) blit.reset();
 
   regions_.clear();
@@ -3995,6 +4005,84 @@ hsa_status_t GpuAgent::AcquireCountedQueue(hsa_queue_type_t type,
 
 hsa_status_t GpuAgent::ReleaseCountedQueue(hsa_queue_t* queue) {
   return queue_pool_.ReleaseQueue(queue);
+}
+
+hsa_status_t GpuAgent::CreateUserSdmaQueue(bool use_xgmi, int rec_eng,
+                                              AMD::BlitSdmaBase** out_sdma) {
+  if (out_sdma == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  core::Blit* blit = CreateBlitSdma(use_xgmi, rec_eng);
+  if (blit == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  AMD::BlitSdmaBase* sdma = static_cast<AMD::BlitSdmaBase*>(blit);
+  {
+    std::lock_guard<std::mutex> lock(user_sdma_lock_);
+    user_sdma_queues_.insert(sdma);
+  }
+
+  *out_sdma = sdma;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t GpuAgent::RemoveUserSdmaQueue(AMD::BlitSdmaBase* sdma) {
+  if (sdma == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  std::lock_guard<std::mutex> lock(user_sdma_lock_);
+  auto it = user_sdma_queues_.find(sdma);
+  if (it == user_sdma_queues_.end()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  user_sdma_queues_.erase(it);
+  return HSA_STATUS_SUCCESS;
+}
+
+bool GpuAgent::IsValidSdmaQueue(AMD::BlitSdmaBase* sdma) {
+  std::lock_guard<std::mutex> lock(user_sdma_lock_);
+  return user_sdma_queues_.find(sdma) != user_sdma_queues_.end();
+}
+
+hsa_status_t GpuAgent::GetSdmaQueueInfo(AMD::BlitSdmaBase* sdma, 
+                                        hsa_amd_sdma_queue_info_attribute_t attribute, 
+                                        void* value) const {
+  switch (attribute) {
+    case HSA_AMD_SDMA_QUEUE_INFO_RESOURCE: {
+      auto* res = static_cast<hsa_amd_sdma_queue_resource_t*>(value);
+      res->ring_base = static_cast<void*>(sdma->queue_start_addr());
+      res->ring_size = sdma->kQueueSize;
+      res->read_ptr = sdma->queue_rptr();
+      res->write_ptr = sdma->queue_wptr();
+      res->doorbell = sdma->queue_doorbell();
+      break;
+    }
+    case HSA_AMD_SDMA_QUEUE_INFO_QUEUE_ID:
+      *static_cast<uint64_t*>(value) =
+          static_cast<uint64_t>(sdma->queue_resource().QueueId);
+      break;
+    case HSA_AMD_SDMA_QUEUE_INFO_ENGINE_ID:
+      *static_cast<int*>(value) = sdma->sdma_engine_id();
+      break;
+    case HSA_AMD_SDMA_QUEUE_INFO_IS_XGMI:
+      *static_cast<bool*>(value) = sdma->is_xgmi();
+      break;
+    case HSA_AMD_SDMA_QUEUE_INFO_AGENT:
+      *static_cast<hsa_agent_t*>(value) = sdma->agent()->public_handle();
+      break;
+    case HSA_AMD_SDMA_QUEUE_INFO_MIN_SUBMISSION_SIZE:
+      *static_cast<size_t*>(value) = sdma->min_submission_size();
+      break;
+    case HSA_AMD_SDMA_QUEUE_INFO_PLATFORM_ATOMIC_SUPPORT:
+      *static_cast<bool*>(value) = sdma->PlatformAtomicSupport();
+      break;
+    case HSA_AMD_SDMA_QUEUE_INFO_HDP_FLUSH_REQUIRED:
+      *static_cast<bool*>(value) = sdma->HdpFlushSupport();
+      break;
+    case HSA_AMD_SDMA_QUEUE_INFO_GCR_REQUIRED:
+      *static_cast<bool*>(value) = sdma->GcrRequired();
+      break;
+    default:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT; 
+  }
+
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t GpuAgent::Preload(uint64_t flags) {
