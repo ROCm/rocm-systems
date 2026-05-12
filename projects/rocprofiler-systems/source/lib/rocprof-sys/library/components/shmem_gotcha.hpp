@@ -145,9 +145,12 @@ template <typename Policy>
 concept valid_shmem_policy =
     has_comm_data<Policy> && has_gotcha_data<Policy> && has_category_region<Policy>;
 
-// Full policy contract: the shmem_gotcha component class itself touches
-// shmem_bundle_t / shmem_gotcha_t in configure / shutdown / start / pause /
-// resume, so the class template requires the configurable variant.
+// Full policy contract: methods that touch shmem_bundle_t / shmem_gotcha_t
+// (configure / shutdown / start / pause / resume) static_assert this in their
+// body. It is NOT a class-level requires because DefaultSHMEMPolicy aliases
+// shmem_gotcha<DefaultSHMEMPolicy> as a member type before declaring its own
+// shmem_bundle_t / shmem_gotcha_t members; a class-level requires would be
+// evaluated mid-policy-parse and incorrectly fail.
 template <typename Policy>
 concept configurable_shmem_policy =
     valid_shmem_policy<Policy> && has_shmem_bundle_t<Policy> &&
@@ -159,7 +162,7 @@ namespace rocprofsys::component
 {
 
 template <typename SHMEMPolicy>
-    requires traits::configurable_shmem_policy<SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
 {
     static constexpr size_t gotcha_capacity = 120;
@@ -216,10 +219,14 @@ get_shmem_gotcha()
 }  // namespace detail
 
 template <typename SHMEMPolicy>
-    requires traits::configurable_shmem_policy<SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::configure()
 {
+    static_assert(traits::configurable_shmem_policy<SHMEMPolicy>,
+                  "shmem_gotcha<Policy>::configure requires Policy to expose "
+                  "shmem_bundle_t and shmem_gotcha_t");
+
     using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
 
     using gotcha_data_t = typename SHMEMPolicy::gotcha_data;
@@ -476,19 +483,25 @@ shmem_gotcha<SHMEMPolicy>::configure()
 }
 
 template <typename SHMEMPolicy>
-    requires traits::configurable_shmem_policy<SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::shutdown()
 {
+    static_assert(traits::configurable_shmem_policy<SHMEMPolicy>,
+                  "shmem_gotcha<Policy>::shutdown requires Policy to expose "
+                  "shmem_bundle_t and shmem_gotcha_t");
     using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
     shmem_gotcha_t::disable();
 }
 
 template <typename SHMEMPolicy>
-    requires traits::configurable_shmem_policy<SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::start()
 {
+    static_assert(traits::configurable_shmem_policy<SHMEMPolicy>,
+                  "shmem_gotcha<Policy>::start requires Policy to expose "
+                  "shmem_bundle_t and shmem_gotcha_t");
     using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
 
     if(!detail::get_shmem_gotcha<SHMEMPolicy>()
@@ -502,37 +515,43 @@ shmem_gotcha<SHMEMPolicy>::start()
 }
 
 template <typename SHMEMPolicy>
-    requires traits::configurable_shmem_policy<SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::stop()
 {}
 
 template <typename SHMEMPolicy>
-    requires traits::configurable_shmem_policy<SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 std::mutex shmem_gotcha<SHMEMPolicy>::s_mutex = {};
 
 template <typename SHMEMPolicy>
-    requires traits::configurable_shmem_policy<SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::pause()
 {
+    static_assert(traits::configurable_shmem_policy<SHMEMPolicy>,
+                  "shmem_gotcha<Policy>::pause requires Policy to expose "
+                  "shmem_bundle_t and shmem_gotcha_t");
     std::scoped_lock<std::mutex> _lk{ s_mutex };
     using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
     shmem_gotcha_t::set_ready(false);
 }
 
 template <typename SHMEMPolicy>
-    requires traits::configurable_shmem_policy<SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::resume()
 {
+    static_assert(traits::configurable_shmem_policy<SHMEMPolicy>,
+                  "shmem_gotcha<Policy>::resume requires Policy to expose "
+                  "shmem_bundle_t and shmem_gotcha_t");
     std::scoped_lock<std::mutex> _lk{ s_mutex };
     using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
     shmem_gotcha_t::set_ready(true);
 }
 
 template <typename SHMEMPolicy>
-    requires traits::configurable_shmem_policy<SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing)
@@ -541,7 +560,7 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 }
 
 template <typename SHMEMPolicy>
-    requires traits::configurable_shmem_policy<SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing, void* ret)
@@ -550,7 +569,7 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 }
 
 template <typename SHMEMPolicy>
-    requires traits::configurable_shmem_policy<SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing, int ret)
@@ -559,7 +578,7 @@ shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
 }
 
 template <typename SHMEMPolicy>
-    requires traits::configurable_shmem_policy<SHMEMPolicy>
+    requires traits::valid_shmem_policy<SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
                                  tim::audit::outgoing, long ret)
