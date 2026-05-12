@@ -18,7 +18,6 @@
 #include "core/config.hpp"
 #include "core/constraint.hpp"
 #include "core/cpu.hpp"
-#include "core/dynamic_library.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
@@ -568,11 +567,6 @@ rocprofsys_init_tooling_hidden(void)
         rocprofsys_init_library_hidden();
         return false;
     }
-
-    dynamic_library _amdhip64{ "ROCPROFSYS_ROCTRACER_LIBAMDHIP64",
-                               find_library_path("libamdhip64.so",
-                                                 { "ROCPROFSYS_ROCM_PATH", "ROCM_PATH" },
-                                                 { ROCPROFSYS_DEFAULT_ROCM_PATH }) };
 
     auto _debug_init = get_debug_init();
 
