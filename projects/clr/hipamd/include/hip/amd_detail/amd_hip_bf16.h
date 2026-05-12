@@ -126,6 +126,7 @@
 #define HIPRT_NAN_BF16 __ushort_as_bfloat16((unsigned short)0x7FFFU)
 #define HIPRT_NEG_ZERO_BF16 __ushort_as_bfloat16((unsigned short)0x8000U)
 
+#if defined(__clang__)
 // Since we are using unsigned short to represent data in bfloat16, it can be of different sizes on
 // different machines. These naive checks should prevent some undefined behavior on systems which
 // have different sizes for basic types.
@@ -1986,4 +1987,9 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 unsafeAtomicAdd(__hip_bfloat16* address,
 }
 #endif  // defined(__clang__) && defined(__HIP__)
 #pragma pop_macro("MAYBE_UNDEF")
+#elif defined(__GNUC__) || defined(_MSC_VER)
+#if !defined(__HIPCC_RTC__)
+#include "amd_hip_bf16_gcc.h"
+#endif
+#endif
 #endif
