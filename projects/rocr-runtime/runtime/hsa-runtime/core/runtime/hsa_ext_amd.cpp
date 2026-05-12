@@ -1917,5 +1917,50 @@ hsa_status_t hsa_amd_enable_logging(uint8_t* flags, void *file) {
   CATCH;
 }
 
+hsa_status_t hsa_amd_external_semaphore_handle_open(
+    hsa_agent_t agent,
+    const hsa_amd_external_semaphore_handle_descriptor_t *desc,
+    hsa_amd_external_semaphore_t *out_sem) {
+  TRY;
+  IS_OPEN();
+  if (desc == nullptr || out_sem == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  const core::Agent *core_agent = core::Agent::Convert(agent);
+  if (core_agent == NULL || !core_agent->IsValid() ||
+      core_agent->device_type() != core::Agent::kAmdGpuDevice)
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  // hsa_amd_external_semaphore_handle_type_t maps 1:1 to
+  // HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE by design (see hsa_ext_amd.h).
+  HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE kmt_type =
+      static_cast<HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE>(desc->type);
+
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {};
+  HSAKMT_STATUS s = hsaKmtImportExternalSemaphore(
+      core_agent->node_id(),
+      desc->handle.win32_handle,
+      kmt_type,
+      &kmt_handle);
+
+  if (s == HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (s != HSAKMT_STATUS_SUCCESS)        return HSA_STATUS_ERROR;
+
+  out_sem->handle = kmt_handle.handle;
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
+hsa_status_t hsa_amd_external_semaphore_handle_close(
+    hsa_amd_external_semaphore_t sem) {
+  TRY;
+  IS_OPEN();
+
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = { sem.handle };
+  HSAKMT_STATUS s = hsaKmtDestroyExternalSemaphore(kmt_handle);
+  if (s != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
 }   //  namespace amd
 }   //  namespace rocr

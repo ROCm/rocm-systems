@@ -72,9 +72,10 @@
  * - 1.19 - hsa_amd_agent_preload
  * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
  * - 1.21 - hsa_amd_signal_get_event_id
+ * - 1.22 - hsa_amd_external_semaphore_handle_open/hsa_amd_external_semaphore_handle_close
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 21
+#define HSA_AMD_INTERFACE_VERSION_MINOR 22
 
 #ifdef __cplusplus
 extern "C" {
@@ -3172,6 +3173,66 @@ hsa_status_t HSA_API hsa_amd_ipc_memory_attach(
  * with hsa_amd_ipc_memory_attach.
  */
 hsa_status_t HSA_API hsa_amd_ipc_memory_detach(void* mapped_ptr);
+
+/**
+ * @brief External semaphore handle types (subset of Vulkan
+ * VkExternalSemaphoreHandleTypeFlagBits, mapped 1:1 to
+ * HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE in libhsakmt).
+ */
+typedef enum {
+  HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32     = 0,
+  HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT = 1,
+  HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD        = 2,
+} hsa_amd_external_semaphore_handle_type_t;
+
+/**
+ * @brief Imported external semaphore. Opaque; created by
+ * hsa_amd_external_semaphore_handle_open and consumed by the queue
+ * signal/wait calls. Internally encodes the libhsakmt
+ * HSA_EXTERNAL_SEMAPHORE_HANDLE.
+ */
+typedef struct hsa_amd_external_semaphore_s {
+  uint64_t handle;
+} hsa_amd_external_semaphore_t;
+
+/**
+ * @brief Descriptor passed to hsa_amd_external_semaphore_handle_open.
+ */
+typedef struct {
+  hsa_amd_external_semaphore_handle_type_t type;
+  union {
+    void *win32_handle;   // valid when type == OPAQUE_WIN32 / KMT
+    int   fd;             // valid when type == OPAQUE_FD
+  } handle;
+} hsa_amd_external_semaphore_handle_descriptor_t;
+
+/**
+ * @brief Imports a Vulkan-exported external semaphore on the given
+ * agent's KMD node. The returned semaphore can be passed to the queue
+ * signal/wait calls and must be released with
+ * hsa_amd_external_semaphore_handle_close.
+ *
+ * @param[in] agent A GPU agent whose node owns the imported syncobj.
+ * @param[in] desc Descriptor naming the OS handle and its type.
+ * @param[out] out_sem On success, the imported semaphore.
+ *
+ * @retval HSA_STATUS_SUCCESS Imported.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT Agent is not a GPU.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT desc/out_sem null or
+ *   handle type unsupported.
+ * @retval HSA_STATUS_ERROR Underlying KMD import failed.
+ */
+hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
+    hsa_agent_t agent,
+    const hsa_amd_external_semaphore_handle_descriptor_t *desc,
+    hsa_amd_external_semaphore_t *out_sem);
+
+/**
+ * @brief Releases an imported external semaphore. Outstanding queue
+ * waits/signals on @p sem are not aborted; callers must drain.
+ */
+hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
+    hsa_amd_external_semaphore_t sem);
 
 /** @} */
 
