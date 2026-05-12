@@ -91,7 +91,7 @@ static int doca_gpu_gdrcopy_ftable_init(struct doca_gpu_gdrcopy_function_table *
     void *handle = NULL;
     struct doca_gpu_gdrcopy_function_table *table = NULL;
 
-    handle = dlopen(DOCA_GPUNETIO_GDRCOPY_LIB_NAME, RTLD_LAZY);
+    handle = dlopen(DOCA_GPUNETIO_GDRCOPY_LIB_NAME, RTLD_NOW);
     if (!handle) {
         DOCA_LOG(LOG_ERR, "Failed to open libgdrapi.so.2");
         status = ENOENT;

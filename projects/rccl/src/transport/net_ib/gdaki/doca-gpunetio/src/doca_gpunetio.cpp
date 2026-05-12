@@ -80,13 +80,14 @@ static inline bool priv_query_async_store_release_support(void) {
     int compute_cap_major;
     cudaError_t status = cudaSuccess;
 
-    status = cudaGetDevice(&current_device);
+    status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaGetDevice(&current_device));
     if (status != cudaSuccess) return false;
 
-    status = cudaDeviceGetAttribute(&compute_cap_major, cudaDevAttrComputeCapabilityMajor,
-                                    current_device);
+    status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaDeviceGetAttribute(
+        &compute_cap_major, cudaDevAttrComputeCapabilityMajor, current_device));
     if (status != cudaSuccess) return false;
 
+    return (compute_cap_major >= GPU_FULL_ASYNC_STORE_RELEASE_SUPPORT_COMPUTE_CAP_MAJOR);
     return (compute_cap_major >= GPU_FULL_ASYNC_STORE_RELEASE_SUPPORT_COMPUTE_CAP_MAJOR);
 }
 
@@ -101,7 +102,7 @@ static size_t priv_get_page_size() {
 
 doca_error_t doca_gpu_create(const char *gpu_bus_id, struct doca_gpu **gpu_dev) {
     struct doca_gpu *gpu_dev_;
-    int dmabuf_supported;
+    int dmabuf_supported, order = 0;
     CUresult res_drv = CUDA_SUCCESS;
     cudaError_t res_cuda = cudaSuccess;
 
@@ -116,7 +117,8 @@ doca_error_t doca_gpu_create(const char *gpu_bus_id, struct doca_gpu **gpu_dev) 
         return DOCA_ERROR_NO_MEMORY;
     }
 
-    res_cuda = cudaDeviceGetByPCIBusId(&gpu_dev_->cuda_dev, gpu_bus_id);
+    res_cuda =
+        DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaDeviceGetByPCIBusId(&gpu_dev_->cuda_dev, gpu_bus_id));
     if (res_cuda != cudaSuccess) {
         DOCA_LOG(LOG_ERR, "Invalid GPU bus id provided (ret %d).", res_drv);
         goto exit_error;
@@ -133,11 +135,19 @@ doca_error_t doca_gpu_create(const char *gpu_bus_id, struct doca_gpu **gpu_dev) 
     (dmabuf_supported == 1 ? (gpu_dev_->support_dmabuf = true)
                            : (gpu_dev_->support_dmabuf = false));
 
-    // status = gdaki_map_uar(guar);
-    // device_attr->support_uar_gpumem = (status == 0);
-    // did_map_uar = (status == 0);
+    res_drv = doca_verbs_wrapper_cuDeviceGetAttribute(
+        &order, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WRITES_ORDERING, gpu_dev_->cuda_dev);
+    if (res_drv != CUDA_SUCCESS) {
+        DOCA_LOG(
+            LOG_ERR,
+            "cuDeviceGetAttribute CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WRITES_ORDERING returned %d.",
+            res_drv);
+        goto exit_error;
+    }
 
-    // TBD
+    gpu_dev_->need_mcst = true;
+    if (order >= CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_OWNER) gpu_dev_->need_mcst = false;
+
     gpu_dev_->support_wq_gpumem = true;
     gpu_dev_->support_cq_gpumem = true;
     gpu_dev_->support_uar_gpumem = true;
@@ -231,11 +241,13 @@ doca_error_t doca_gpu_mem_alloc(struct doca_gpu *gpu_dev, size_t size, size_t al
     if (mtype == DOCA_GPU_MEM_TYPE_GPU) {
         mentry->size_orig = mentry->size + alignment;
 
-        res = cudaMalloc(&(cudev_memptr_gpu_orig_), mentry->size_orig);
+        res = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(
+            cudaMalloc(&(cudev_memptr_gpu_orig_), mentry->size_orig));
         if (res != cudaSuccess) {
             err_string = cudaGetErrorString(res);
             DOCA_LOG(LOG_ERR, "cudaMalloc current failed with %s size %zd", err_string,
                      mentry->size_orig);
+            status = DOCA_ERROR_DRIVER;
             goto error;
         }
 
@@ -250,7 +262,7 @@ doca_error_t doca_gpu_mem_alloc(struct doca_gpu *gpu_dev, size_t size, size_t al
         res_drv = doca_verbs_wrapper_cuPointerSetAttribute(&flag, CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
                                                            (CUdeviceptr)cudev_memptr_gpu_);
         if (res_drv != CUDA_SUCCESS) {
-            cudaFree(cudev_memptr_gpu_orig_);
+            DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaFree(cudev_memptr_gpu_orig_));
             DOCA_LOG(LOG_ERR, "Could not set SYNC MEMOP attribute for GPU memory at %lx, err %d",
                      (uintptr_t)cudev_memptr_gpu_, res);
             status = DOCA_ERROR_DRIVER;
@@ -264,7 +276,8 @@ doca_error_t doca_gpu_mem_alloc(struct doca_gpu *gpu_dev, size_t size, size_t al
         if (gpu_dev->support_gdrcopy == true) {
             mentry->size_orig = mentry->size + alignment;
 
-            res = cudaMalloc(&(cudev_memptr_gpu_orig_), mentry->size_orig);
+            res = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(
+                cudaMalloc(&(cudev_memptr_gpu_orig_), mentry->size_orig));
             if (res != cudaSuccess) {
                 err_string = cudaGetErrorString(res);
                 DOCA_LOG(LOG_ERR, "cudaMalloc current failed with %s", err_string);
@@ -283,7 +296,7 @@ doca_error_t doca_gpu_mem_alloc(struct doca_gpu *gpu_dev, size_t size, size_t al
             res_drv = doca_verbs_wrapper_cuPointerSetAttribute(
                 &flag, CU_POINTER_ATTRIBUTE_SYNC_MEMOPS, (CUdeviceptr)cudev_memptr_gpu_);
             if (res_drv != CUDA_SUCCESS) {
-                cudaFree(cudev_memptr_gpu_orig_);
+                DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaFree(cudev_memptr_gpu_orig_));
                 DOCA_LOG(LOG_ERR,
                          "Could not set SYNC MEMOP attribute for GPU memory at %lx, err %d",
                          (uintptr_t)cudev_memptr_gpu_, res);
@@ -317,8 +330,8 @@ doca_error_t doca_gpu_mem_alloc(struct doca_gpu *gpu_dev, size_t size, size_t al
                 goto error;
             }
 
-            res = cudaHostRegister(memptr_cpu_, mentry->size_orig,
-                                   cudaHostRegisterPortable | cudaHostRegisterMapped);
+            res = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaHostRegister(
+                memptr_cpu_, mentry->size_orig, cudaHostRegisterPortable | cudaHostRegisterMapped));
             if (res != cudaSuccess) {
                 DOCA_LOG(LOG_ERR, "Could register CPU memory to CUDA %lx, err %d",
                          (uintptr_t)memptr_cpu_, res);
@@ -329,7 +342,8 @@ doca_error_t doca_gpu_mem_alloc(struct doca_gpu *gpu_dev, size_t size, size_t al
 
             mentry->base_addr = (uintptr_t)memptr_cpu_;
 
-            res = cudaHostGetDevicePointer(&cudev_memptr_gpu_, memptr_cpu_, 0);
+            res = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(
+                cudaHostGetDevicePointer(&cudev_memptr_gpu_, memptr_cpu_, 0));
             if (res != cudaSuccess) {
                 DOCA_LOG(LOG_ERR, "Could get GPU device ptr for CPU memory %lx, err %d",
                          (uintptr_t)memptr_cpu_, res);
@@ -352,8 +366,8 @@ doca_error_t doca_gpu_mem_alloc(struct doca_gpu *gpu_dev, size_t size, size_t al
             goto error;
         }
 
-        res = cudaHostRegister(memptr_cpu_, mentry->size_orig,
-                               cudaHostRegisterPortable | cudaHostRegisterMapped);
+        res = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaHostRegister(
+            memptr_cpu_, mentry->size_orig, cudaHostRegisterPortable | cudaHostRegisterMapped));
         if (res != cudaSuccess) {
             DOCA_LOG(LOG_ERR, "Could register CPU memory to CUDA %lx, err %d",
                      (uintptr_t)memptr_cpu_, res);
@@ -364,7 +378,8 @@ doca_error_t doca_gpu_mem_alloc(struct doca_gpu *gpu_dev, size_t size, size_t al
 
         mentry->base_addr = (uintptr_t)memptr_cpu_;
 
-        res = cudaHostGetDevicePointer(&cudev_memptr_gpu_, memptr_cpu_, 0);
+        res = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(
+            cudaHostGetDevicePointer(&cudev_memptr_gpu_, memptr_cpu_, 0));
         if (res != cudaSuccess) {
             DOCA_LOG(LOG_ERR, "Could get GPU device ptr for CPU memory %lx, err %d",
                      (uintptr_t)memptr_cpu_, res);
@@ -426,14 +441,14 @@ doca_error_t doca_gpu_mem_free(struct doca_gpu *gpu_dev, void *memptr_gpu) {
     mentry = it->second;
 
     if (mentry->mtype == DOCA_GPU_MEM_TYPE_GPU)
-        cudaFree((void *)mentry->base_addr);
+        DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaFree((void *)mentry->base_addr));
     else if (mentry->mtype == DOCA_GPU_MEM_TYPE_GPU_CPU) {
         if (gpu_dev->support_gdrcopy)
             doca_gpu_gdrcopy_destroy_mapping(mentry->gdr_mh, (void *)mentry->align_addr_cpu,
                                              mentry->size);
-        cudaFree((void *)mentry->base_addr);
+        DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaFree((void *)mentry->base_addr));
     } else {
-        res_cuda = cudaHostUnregister((void *)mentry->base_addr);
+        res_cuda = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaHostUnregister((void *)mentry->base_addr));
         if (res_cuda != cudaSuccess)
             DOCA_LOG(LOG_ERR, "Error unregistering GPU memory at %p", (void *)mentry->base_addr);
         free((void *)mentry->base_addr);
@@ -478,69 +493,66 @@ doca_error_t doca_gpu_dmabuf_fd(struct doca_gpu *gpu_dev, void *memptr_gpu, size
 #endif
 }
 
+static std::mutex registered_uar_mutex;
+
 doca_error_t doca_gpu_verbs_can_gpu_register_uar(void *db, bool *out_can_register) {
+    std::lock_guard<std::mutex> lock(registered_uar_mutex);
     cudaError_t cuda_status = cudaSuccess;
+    static bool can_register = false;
+    static bool registration_checked = false;
 
-    if (db == nullptr || out_can_register == nullptr) return DOCA_ERROR_INVALID_VALUE;
+    if (out_can_register == nullptr) return DOCA_ERROR_INVALID_VALUE;
 
-    cuda_status = cudaHostRegister(
-        db, DOCA_VERBS_DB_UAR_SIZE,
-        cudaHostRegisterPortable | cudaHostRegisterMapped | cudaHostRegisterIoMemory);
+    if (!registration_checked) {
+        if (db == nullptr) return DOCA_ERROR_INVALID_VALUE;
+        cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaHostRegister(
+            db, DOCA_VERBS_DB_UAR_SIZE,
+            cudaHostRegisterPortable | cudaHostRegisterMapped | cudaHostRegisterIoMemory));
 
-    *out_can_register =
-        (cuda_status == cudaSuccess || cuda_status == cudaErrorHostMemoryAlreadyRegistered);
+        can_register =
+            (cuda_status == cudaSuccess || cuda_status == cudaErrorHostMemoryAlreadyRegistered);
 
-    if (cuda_status == cudaSuccess) cudaHostUnregister(db);
+        if (cuda_status == cudaSuccess) DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaHostUnregister(db));
+        registration_checked = true;
+    }
+
+    *out_can_register = can_register;
 
     return DOCA_SUCCESS;
 }
 
-struct pair_ptr_cucontext_hash {
-    std::size_t operator()(const std::pair<void *, CUcontext> &p) const noexcept {
-        // Hash the pointer and the CUcontext (which is also a pointer type)
-        std::size_t h1 = std::hash<void *>{}(p.first);
-        std::size_t h2 = std::hash<CUcontext>{}(p.second);
-        // Combine the two hashes
-        return h1 ^ (h2 << 1);
-    }
-};
-static std::unordered_map<std::pair<void *, CUcontext>, unsigned int, pair_ptr_cucontext_hash>
-    registered_uar_refcount;
-static std::mutex registered_uar_mutex;
+static std::unordered_map<void *, unsigned int> registered_uar_refcount;
 
 doca_error_t doca_gpu_verbs_export_uar(uint64_t *sq_db, uint64_t **uar_addr_gpu) {
     std::lock_guard<std::mutex> lock(registered_uar_mutex);
 
     void *ptr = nullptr;
     cudaError_t cuda_status = cudaSuccess;
-    CUresult cuda_drv_status = CUDA_SUCCESS;
     bool registered = false;
-    CUcontext current_ctx = nullptr;
-    std::pair<void *, CUcontext> uar_key;
+    void *uar_key;
 
     if (sq_db == nullptr || uar_addr_gpu == nullptr) return DOCA_ERROR_INVALID_VALUE;
 
-    // Get current CUDA context
-    cuda_drv_status = doca_verbs_wrapper_cuCtxGetCurrent(&current_ctx);
-    if (cuda_drv_status != CUDA_SUCCESS) {
-        DOCA_LOG(LOG_ERR, "Failed to get current CUDA context (err %d)", cuda_drv_status);
-        return DOCA_ERROR_DRIVER;
+    uar_key = (void *)sq_db;
+    if (registered_uar_refcount.find(uar_key) == registered_uar_refcount.end()) {
+        registered_uar_refcount[uar_key] = 0;
     }
 
-    cuda_status = cudaHostRegister(
-        sq_db, DOCA_VERBS_DB_UAR_SIZE,
-        cudaHostRegisterPortable | cudaHostRegisterMapped | cudaHostRegisterIoMemory);
-    if (cuda_status == cudaSuccess)
+    if (registered_uar_refcount[uar_key] == 0) {
+        cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaHostRegister(
+            sq_db, DOCA_VERBS_DB_UAR_SIZE,
+            cudaHostRegisterPortable | cudaHostRegisterMapped | cudaHostRegisterIoMemory));
+        if (cuda_status != cudaSuccess) {
+            DOCA_LOG(LOG_ERR,
+                     "Function cudaHostRegister (err %d) "
+                     "failed on addr %p size %d",
+                     cuda_status, (void *)sq_db, DOCA_VERBS_DB_UAR_SIZE);
+            goto out;
+        }
         registered = true;
-    else if (cuda_status != cudaErrorHostMemoryAlreadyRegistered) {
-        DOCA_LOG(LOG_ERR,
-                 "Function cudaHostRegister (err %d) "
-                 "failed on addr %p size %d",
-                 cuda_status, (void *)sq_db, DOCA_VERBS_DB_UAR_SIZE);
-        goto out;
     }
 
-    cuda_status = cudaHostGetDevicePointer(&ptr, sq_db, 0);
+    cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaHostGetDevicePointer(&ptr, sq_db, 0));
     if (cuda_status != cudaSuccess) {
         DOCA_LOG(LOG_ERR,
                  "Function cudaHostGetDevicePointer (err %d) "
@@ -549,17 +561,13 @@ doca_error_t doca_gpu_verbs_export_uar(uint64_t *sq_db, uint64_t **uar_addr_gpu)
         goto out;
     }
 
-    uar_key = std::make_pair((void *)sq_db, current_ctx);
-    if (registered_uar_refcount.find(uar_key) == registered_uar_refcount.end()) {
-        registered_uar_refcount[uar_key] = 0;
-    }
     registered_uar_refcount[uar_key]++;
 
     *uar_addr_gpu = (uint64_t *)ptr;
 
 out:
     if (cuda_status != cudaSuccess) {
-        if (registered) cudaHostUnregister(sq_db);
+        if (registered) DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaHostUnregister(sq_db));
         return DOCA_ERROR_DRIVER;
     }
 
@@ -569,31 +577,21 @@ out:
 doca_error_t doca_gpu_verbs_unexport_uar(uint64_t *uar_addr_gpu) {
     std::lock_guard<std::mutex> lock(registered_uar_mutex);
 
-    CUcontext current_ctx = nullptr;
-    CUresult cuda_drv_status = CUDA_SUCCESS;
     cudaError_t cuda_status = cudaSuccess;
-    std::pair<void *, CUcontext> uar_key;
+    void *uar_key;
 
     if (uar_addr_gpu == nullptr) return DOCA_ERROR_INVALID_VALUE;
 
-    // Get current CUDA context
-    cuda_drv_status = doca_verbs_wrapper_cuCtxGetCurrent(&current_ctx);
-    if (cuda_drv_status != CUDA_SUCCESS) {
-        DOCA_LOG(LOG_ERR, "Failed to get current CUDA context (err %d)", cuda_drv_status);
-        return DOCA_ERROR_DRIVER;
-    }
-
-    uar_key = std::make_pair((void *)uar_addr_gpu, current_ctx);
+    uar_key = (void *)uar_addr_gpu;
     if (registered_uar_refcount.find(uar_key) == registered_uar_refcount.end()) {
-        DOCA_LOG(LOG_ERR, "UAR address %p with context %p not found in registered_uar_refcount",
-                 uar_addr_gpu, current_ctx);
+        DOCA_LOG(LOG_ERR, "UAR address %p not found in registered_uar_refcount", uar_addr_gpu);
         return DOCA_ERROR_INVALID_VALUE;
     }
     registered_uar_refcount[uar_key]--;
     assert(registered_uar_refcount[uar_key] >= 0);
     if (registered_uar_refcount[uar_key] == 0) {
         registered_uar_refcount.erase(uar_key);
-        cuda_status = cudaHostUnregister(uar_addr_gpu);
+        cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaHostUnregister(uar_addr_gpu));
         if (cuda_status != cudaSuccess) {
             DOCA_LOG(LOG_ERR, "Failed to unregister UAR address %p", uar_addr_gpu);
             return DOCA_ERROR_DRIVER;
@@ -687,6 +685,7 @@ doca_error_t doca_gpu_verbs_export_qp(struct doca_gpu *gpu_dev, struct doca_verb
     qp_cpu_->sq_num_shift8_be_2ds = htobe32(qp_cpu_->sq_num_shift8 | 2);
     qp_cpu_->sq_num_shift8_be_3ds = htobe32(qp_cpu_->sq_num_shift8 | 3);
     qp_cpu_->sq_num_shift8_be_4ds = htobe32(qp_cpu_->sq_num_shift8 | 4);
+    qp_cpu_->sq_num_shift8_be_5ds = htobe32(qp_cpu_->sq_num_shift8 | 5);
     qp_cpu_->sq_wqe_pi = 0;
     qp_cpu_->sq_rsvd_index = 0;
     qp_cpu_->sq_ready_index = 0;
@@ -837,8 +836,8 @@ doca_error_t doca_gpu_verbs_get_qp_dev(struct doca_gpu_verbs_qp *qp,
             return status;
         }
 
-        custatus = cudaMemcpy(qp->qp_gpu, qp->qp_cpu, sizeof(struct doca_gpu_dev_verbs_qp),
-                              cudaMemcpyHostToDevice);
+        custatus = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaMemcpy(
+            qp->qp_gpu, qp->qp_cpu, sizeof(struct doca_gpu_dev_verbs_qp), cudaMemcpyHostToDevice));
         if (custatus != cudaSuccess) {
             DOCA_LOG(LOG_ERR, "cuMemcpyHtoD failed");
             doca_gpu_mem_free(qp->gpu_dev, qp->qp_gpu);
@@ -847,7 +846,8 @@ doca_error_t doca_gpu_verbs_get_qp_dev(struct doca_gpu_verbs_qp *qp,
             return DOCA_ERROR_DRIVER;
         }
 
-        if (qp->send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED) {
+        if ((qp->send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED) &&
+            (qp->qp_cpu->nic_handler != DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY)) {
             assert(qp->gpu_dev->support_gdrcopy);
             qp->cpu_db = &qp->qp_gpu_h->sq_wqe_pi;
         }
@@ -862,8 +862,10 @@ doca_error_t doca_gpu_verbs_unexport_qp(struct doca_gpu *gpu_dev,
                                         struct doca_gpu_verbs_qp *qp_gverbs) {
     if (gpu_dev == nullptr || qp_gverbs == nullptr) return DOCA_ERROR_INVALID_VALUE;
 
-    if (qp_gverbs->cpu_db &&
-        (qp_gverbs->send_dbr_mode_ext != DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED))
+    if (qp_gverbs->cpu_db && ((qp_gverbs->send_dbr_mode_ext !=
+                               DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED) ||
+                              (qp_gverbs->qp_cpu && (qp_gverbs->qp_cpu->nic_handler ==
+                                                     DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY))))
         doca_gpu_mem_free(gpu_dev, qp_gverbs->cpu_db);
 
     if (qp_gverbs->qp_cpu) {
@@ -932,7 +934,8 @@ doca_error_t doca_gpu_verbs_export_multi_qps_dev(struct doca_gpu *gpu_dev,
         qp = qps[qp_idx];
         assert(qp->qp_cpu != nullptr);
         qp->qp_gpu = &(qp_gpus_d[qp_idx]);
-        if (qp->send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED) {
+        if ((qp->send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED) &&
+            (qp->qp_cpu->nic_handler != DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY)) {
             qp->qp_gpu_h = &(qp_cpus[qp_idx]);
             qp->cpu_db = &qp->qp_gpu_h->sq_wqe_pi;
         }
@@ -976,73 +979,91 @@ doca_error_t doca_gpu_verbs_unexport_multi_qps_dev(struct doca_gpu *gpu_dev,
     return status;
 }
 
-static inline void priv_cpu_proxy_progress_full_assisted(struct doca_gpu_verbs_qp *qp) {
+static inline void priv_cpu_proxy_progress_full_assisted(struct doca_gpu_verbs_qp *qp,
+                                                         bool *out_progressed) {
     uint32_t tmp_db = 0;
     __be32 dbr_val;
+    bool progressed = false;
 
-    tmp_db = (uint32_t) * ((volatile uint64_t *)qp->cpu_db);
+    tmp_db = (uint32_t)(reinterpret_cast<std::atomic<uint64_t> *>(qp->cpu_db)
+                            ->load(std::memory_order_relaxed));
     if (tmp_db != qp->sq_wqe_pi_last) {
-        struct doca_gpu_dev_verbs_wqe_ctrl_seg ctrl_seg = {.opmod_idx_opcode = htobe32(tmp_db << 8),
-                                                           .qpn_ds = qp->sq_num_shift8_be};
+        struct doca_gpunetio_ib_mlx5_wqe_ctrl_seg ctrl_seg = {
+            .opmod_idx_opcode = htobe32(tmp_db << 8), .qpn_ds = qp->sq_num_shift8_be};
 
-        if (!qp->send_dbr_mode_ext) {
+        if (qp->send_dbr_mode_ext != DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_HW) {
             dbr_val = htobe32(tmp_db & 0xffff);
 
             // Ring the DB ASAP.
             // The second DB ringing happens after the fence. This is used when the NIC enters a
             // recovery state and it needs to read DBR.
-            *((volatile uint64_t *)qp->sq_db) = *((volatile uint64_t *)&ctrl_seg);
-            *((volatile uint32_t *)qp->sq_dbrec) = dbr_val;
+            reinterpret_cast<std::atomic<uint64_t> *>(qp->sq_db)->store(
+                *reinterpret_cast<uint64_t *>(&ctrl_seg), std::memory_order_relaxed);
+            reinterpret_cast<std::atomic<uint32_t> *>(qp->sq_dbrec)
+                ->store(dbr_val, std::memory_order_relaxed);
             std::atomic_thread_fence(std::memory_order_release);
         }
-        *((volatile uint64_t *)qp->sq_db) = *((volatile uint64_t *)&ctrl_seg);
+        reinterpret_cast<std::atomic<uint64_t> *>(qp->sq_db)->store(
+            *reinterpret_cast<uint64_t *>(&ctrl_seg), std::memory_order_relaxed);
 
         qp->sq_wqe_pi_last = tmp_db;
+        progressed = true;
     }
+    *out_progressed = progressed;
 }
 
 static inline void priv_cpu_proxy_progress_dbr_assisted(struct doca_gpu_verbs_qp *qp) {
     uint32_t tmp_db = 0;
     __be32 dbr_val;
 
-    tmp_db = (uint32_t) * ((volatile uint64_t *)qp->cpu_db);
+    tmp_db = (uint32_t)(reinterpret_cast<std::atomic<uint64_t> *>(qp->cpu_db)
+                            ->load(std::memory_order_relaxed));
     if (tmp_db != qp->sq_wqe_pi_last) {
-        struct doca_gpu_dev_verbs_wqe_ctrl_seg ctrl_seg = {.opmod_idx_opcode = htobe32(tmp_db << 8),
-                                                           .qpn_ds = qp->sq_num_shift8_be};
+        struct doca_gpunetio_ib_mlx5_wqe_ctrl_seg ctrl_seg = {
+            .opmod_idx_opcode = htobe32(tmp_db << 8), .qpn_ds = qp->sq_num_shift8_be};
 
         dbr_val = htobe32(tmp_db & 0xffff);
-        *((volatile uint32_t *)qp->sq_dbrec) = dbr_val;
+        reinterpret_cast<std::atomic<uint32_t> *>(qp->sq_dbrec)
+            ->store(dbr_val, std::memory_order_relaxed);
         std::atomic_thread_fence(std::memory_order_release);
-        *((volatile uint64_t *)qp->sq_db) = *((volatile uint64_t *)&ctrl_seg);
+        reinterpret_cast<std::atomic<uint64_t> *>(qp->sq_db)->store(
+            *reinterpret_cast<uint64_t *>(&ctrl_seg), std::memory_order_relaxed);
 
         qp->sq_wqe_pi_last = tmp_db;
     }
 }
 
-doca_error_t doca_gpu_verbs_cpu_proxy_progress(struct doca_gpu_verbs_qp *qp) {
+doca_error_t doca_gpu_verbs_cpu_proxy_progress(struct doca_gpu_verbs_qp *qp, bool *out_progressed) {
+    bool progressed = false;
     if (qp == nullptr) return DOCA_ERROR_INVALID_VALUE;
 
     if (qp->cpu_proxy != true) return DOCA_ERROR_NOT_SUPPORTED;
 
-    if (qp->send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED)
+    if ((qp->send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED) &&
+        (qp->qp_cpu->nic_handler != DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY)) {
         priv_cpu_proxy_progress_dbr_assisted(qp);
-    else
-        priv_cpu_proxy_progress_full_assisted(qp);
+    } else {
+        priv_cpu_proxy_progress_full_assisted(qp, &progressed);
+    }
 
+    if (out_progressed) *out_progressed = progressed;
     return DOCA_SUCCESS;
 }
 
 static void *priv_service_mainloop(void *args) {
     struct doca_gpu_verbs_service *service = (struct doca_gpu_verbs_service *)args;
-    const unsigned int num_loops = 1000;
+    bool progressed = false;
 
     while (service->running) {
         pthread_rwlock_rdlock(&service->service_lock);
-        for (unsigned int i = 0; i < num_loops; i++) {
+        do {
+            progressed = false;
             for (auto qp : *service->qps) {
-                doca_gpu_verbs_cpu_proxy_progress(qp);
+                bool qp_progressed = false;
+                doca_gpu_verbs_cpu_proxy_progress(qp, &qp_progressed);
+                progressed |= qp_progressed;
             }
-        }
+        } while (progressed);
         pthread_rwlock_unlock(&service->service_lock);
         sched_yield();
     }
@@ -1134,5 +1155,113 @@ doca_error_t doca_gpu_verbs_query_last_error(struct doca_gpu_verbs_qp *qp,
 
     error_info->has_error = (qp_attr.current_state == DOCA_VERBS_QP_STATE_ERR);
 
+    return DOCA_SUCCESS;
+}
+
+doca_error_t doca_gpu_verbs_reset_tracking_and_memory(struct doca_gpu_verbs_qp *qp_gverbs) {
+    doca_error_t status = DOCA_SUCCESS;
+    cudaError_t cuda_status = cudaSuccess;
+
+    struct doca_gpu_dev_verbs_qp qp_gpu_h;
+
+    if (qp_gverbs == nullptr) {
+        status = DOCA_ERROR_INVALID_VALUE;
+        goto out;
+    }
+
+    assert(qp_gverbs->qp_gpu);
+    cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaMemcpy(&qp_gpu_h, qp_gverbs->qp_gpu,
+                                                              sizeof(struct doca_gpu_dev_verbs_qp),
+                                                              cudaMemcpyDeviceToHost));
+    if (cuda_status != cudaSuccess) {
+        DOCA_LOG(LOG_ERR, "Failed to copy qp_gpu to qp_gpu_h");
+        status = DOCA_ERROR_DRIVER;
+        goto out;
+    }
+
+    assert(qp_gverbs->qp_cpu);
+
+    qp_gverbs->qp_cpu->sq_wqe_pi = 0;
+    qp_gverbs->qp_cpu->sq_rsvd_index = 0;
+    qp_gverbs->qp_cpu->sq_ready_index = 0;
+    qp_gverbs->qp_cpu->sq_lock = 0;
+
+    qp_gverbs->qp_cpu->cq_sq.cqe_ci = 0;
+    qp_gverbs->qp_cpu->cq_sq.cqe_rsvd = qp_gpu_h.sq_rsvd_index;
+
+    qp_gverbs->sq_wqe_pi_last = 0;
+
+    if (qp_gverbs->cpu_proxy) {
+        assert(qp_gverbs->sq_dbrec);
+        *qp_gverbs->sq_dbrec = 0;
+        *qp_gverbs->cpu_db = 0;
+    } else {
+        assert(qp_gverbs->qp_cpu->sq_dbrec);
+        cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(
+            cudaMemset(qp_gverbs->qp_cpu->sq_dbrec, 0, sizeof(uint32_t)));
+        if (cuda_status != cudaSuccess) {
+            DOCA_LOG(LOG_ERR, "Failed to reset sq_dbrec");
+            status = DOCA_ERROR_DRIVER;
+            goto out;
+        }
+    }
+
+    assert(qp_gverbs->qp_cpu->cq_sq.cqe_daddr);
+    cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(
+        cudaMemset(qp_gverbs->qp_cpu->cq_sq.cqe_daddr, 0xff,
+                   qp_gverbs->qp_cpu->cq_sq.cqe_num * qp_gverbs->qp_cpu->cq_sq.cqe_size));
+    if (cuda_status != cudaSuccess) {
+        DOCA_LOG(LOG_ERR, "Failed to reset cqe_daddr");
+        status = DOCA_ERROR_DRIVER;
+        goto out;
+    }
+
+    assert(qp_gverbs->qp_cpu->sq_wqe_daddr);
+    cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(
+        cudaMemset(qp_gverbs->qp_cpu->sq_wqe_daddr, 0,
+                   qp_gverbs->qp_cpu->sq_wqe_num * sizeof(struct doca_gpu_dev_verbs_wqe)));
+    if (cuda_status != cudaSuccess) {
+        DOCA_LOG(LOG_ERR, "Failed to reset sq_wqe_daddr");
+        status = DOCA_ERROR_DRIVER;
+        goto out;
+    }
+
+    cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaMemcpy(qp_gverbs->qp_gpu, qp_gverbs->qp_cpu,
+                                                              sizeof(struct doca_gpu_dev_verbs_qp),
+                                                              cudaMemcpyHostToDevice));
+    if (cuda_status != cudaSuccess) {
+        DOCA_LOG(LOG_ERR, "Failed to update qp_gpu");
+        status = DOCA_ERROR_DRIVER;
+        goto out;
+    }
+
+    cuda_status = cudaDeviceSynchronize();
+    if (cuda_status != cudaSuccess) {
+        DOCA_LOG(LOG_ERR, "Failed to synchronize");
+        status = DOCA_ERROR_DRIVER;
+        goto out;
+    }
+
+out:
+    return status;
+}
+
+doca_error_t doca_gpu_verbs_get_library_version(uint32_t *version) {
+    if (version == nullptr) return DOCA_ERROR_INVALID_VALUE;
+    *version = DOCA_GPUNETIO_VERSION;
+    return DOCA_SUCCESS;
+}
+
+doca_error_t doca_gpu_verbs_check_device_code_compatibility(uint32_t device_code_version) {
+    if ((device_code_version < DOCA_GPUNETIO_MIN_COMPAT_DEVICE_CODE_VERSION) ||
+        (device_code_version > DOCA_GPUNETIO_VERSION))
+        return DOCA_ERROR_NOT_SUPPORTED;
+    return DOCA_SUCCESS;
+}
+
+doca_error_t doca_gpu_verbs_check_host_code_compatibility(uint32_t host_code_version) {
+    if ((host_code_version < DOCA_GPUNETIO_MIN_COMPAT_HOST_CODE_VERSION) ||
+        (host_code_version > DOCA_GPUNETIO_VERSION))
+        return DOCA_ERROR_NOT_SUPPORTED;
     return DOCA_SUCCESS;
 }

@@ -222,4 +222,29 @@ NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsWaitSignal, static con
   )
 )
 
+NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsPut, static constexpr,
+  NCCL_NVTX_PAYLOAD_ENTRIES(
+    (uint64_t, comm, TYPE_UINT64, nccl_nvtxCommStr),
+    (size_t, bytes, TYPE_SIZE, nccl_nvtxMsgSizeStr),
+    (int, peer, TYPE_INT, "Peer rank"),
+    (int, ctx, TYPE_INT, "Context ID")
+  )
+)
+
+NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsSignal, static constexpr,
+  NCCL_NVTX_PAYLOAD_ENTRIES(
+    (uint64_t, comm, TYPE_UINT64, nccl_nvtxCommStr),
+    (int, peer, TYPE_INT, "Peer rank"),
+    (int, ctx, TYPE_INT, "Context ID")
+  )
+)
+
+NCCL_NVTX_DEFINE_STRUCT_WITH_SCHEMA_ENTRIES(NcclNvtxParamsWaitSignal, static constexpr,
+  NCCL_NVTX_PAYLOAD_ENTRIES(
+    (uint64_t, comm, TYPE_UINT64, nccl_nvtxCommStr),
+    (int, npeers, TYPE_INT, "Number of peers"),
+    (int, ctx, TYPE_INT, "Context ID")
+  )
+)
+
 #endif // end include guard

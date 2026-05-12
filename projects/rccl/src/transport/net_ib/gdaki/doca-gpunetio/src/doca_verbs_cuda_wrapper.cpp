@@ -66,14 +66,14 @@ static void *get_cuda_symbol(const char *symbol_name) {
 
 static void doca_verbs_wrapper_init_once(int *ret) {
     /* Open libcuda.so */
-    cuda_handle = dlopen("libcuda.so", RTLD_LAZY);
+    cuda_handle = dlopen("libcuda.so.1", RTLD_NOW);
     if (!cuda_handle) {
-        cuda_handle = dlopen("libcuda.so.1", RTLD_LAZY);
-        if (!cuda_handle) {
-            DOCA_LOG(LOG_ERR, "Failed to open libcuda: %s\n", dlerror());
-            *ret = -1;
-            return;
-        }
+        cuda_handle = dlopen("libcuda.so", RTLD_NOW);
+    }
+    if (!cuda_handle) {
+        DOCA_LOG(LOG_ERR, "Failed to open libcuda: %s\n", dlerror());
+        *ret = -1;
+        return;
     }
 
     /* Get function pointers */
@@ -97,7 +97,7 @@ static void doca_verbs_wrapper_init_once(int *ret) {
 }
 
 static int init_cuda_wrapper(void) {
-    int ret = 0;
+    static int ret = 0;
     static std::once_flag once;
     std::call_once(once, doca_verbs_wrapper_init_once, &ret);
     return ret;

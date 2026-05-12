@@ -12,9 +12,9 @@
 #include "ibvwrap.h"
 
 struct ncclIbQpCreateAttr {
-  uint8_t ibPort;
+  void* qpContext;
   enum ibv_qp_type type;
-  unsigned int accessFlags;
+  bool oooRq;
   struct ibv_cq* cq;
   struct ibv_pd* pd;
   uint32_t maxRecvWorkRequest;
@@ -38,6 +38,8 @@ struct ncclIbQpInfo {
 struct ncclIbResiliencyInfo {
   // QPs used for probing of data transfers in case of QP/device failures.
   struct ncclIbQpInfo probingQpsInfo[NCCL_IB_MAX_DEVS_PER_NIC];
+  // QPs used for recovery protocol after QP/device failures.
+  struct ncclIbQpInfo portRecoveryQpsInfo[NCCL_IB_MAX_DEVS_PER_NIC];
 };
 
 // Structure used to hold information needed to establish the communication
@@ -64,8 +66,13 @@ struct ncclIbConnectionMetadata {
   int sl;
 };
 
-ncclResult_t ncclIbCreateQp(struct ncclIbQpCreateAttr* createQpAttrs, void* qp_context, struct ncclIbQp* qp);
-ncclResult_t ncclIbRtrQp(struct ibv_qp* qp, struct ncclIbGidInfo* sGidInfo, uint32_t dest_qp_num, struct ncclIbDevInfo* info, bool fifoTc, int tc, int sl);
-ncclResult_t ncclIbRtsQp(struct ibv_qp* qp);
+ncclResult_t ncclIbQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
+ncclResult_t ncclIbQpInit(struct ncclIbQp* qp);
+ncclResult_t ncclIbQpRtr(struct ncclIbQp* qp);
+ncclResult_t ncclIbQpRts(struct ncclIbQp* qp);
+ncclResult_t ncclIbQpReset(struct ncclIbQp* qp);
+ncclResult_t ncclIbQpError(struct ncclIbQp* qp);
+
+ncclResult_t ncclIbPostReceiveWorkRequestsOnQp(struct ncclIbRecvComm* recvComm, ncclIbQp* dataQp);
 
 #endif // NET_IB_CONNECT_H_
