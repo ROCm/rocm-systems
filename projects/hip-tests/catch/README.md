@@ -97,6 +97,66 @@ TEMPLATE_TEST_CASE(Unit_atomicExch_system_Positive_Peer_GPUs, int, float, double
 
 <b>Every newly added test should mandate adding an entry to the configuration file.</b>
 
+## Test Levels and Quick Mode (`level_0`)
+
+Tests are assigned a level in the YAML configuration (`level: 0` through `level: 4`). The level serves two purposes: it controls which tests are **selected** to run (via Catch2 tag filters), and it allows tests to **adjust their behavior** at runtime (e.g., reducing workload at lower levels).
+
+| Level | Use case | Typical runtime |
+|-------|----------|-----------------|
+| `level_0` | Quick smoke tests, emulation environments | Seconds per test |
+| `level_1` | Reserved for future use | — |
+| `level_2` | Standard test suite (default) | Minutes |
+| `level_3` | Reserved for future use | — |
+| `level_4` | Reserved for future use | — |
+
+### Running at a specific level
+
+Use the `HIP_TEST_LEVEL` environment variable:
+
+```bash
+HIP_TEST_LEVEL=level_0 ./MemoryTest1 "Unit_hipMemsetSync"
+```
+
+Or use Catch2 tag filters:
+
+```bash
+./MemoryTest1 "[level_0]"
+```
+
+### Writing level-aware tests with `isQuickLevel()`
+
+Tests that are slow in emulation environments can use `isQuickLevel()` to reduce their workload at `level_0` while preserving full coverage at higher levels. This function returns `true` when the active test level is `level_0` (set via `HIP_TEST_LEVEL` environment variable or `[level_0]` Catch2 tag filter).
+
+```cpp
+#include <hip_test_common.hh>
+
+HIP_TEST_CASE(Unit_hipMemsetSync) {
+  size_t N = isQuickLevel() ? 1024 : (1024 * 1024);
+  // ...
+}
+```
+
+#### Guidelines for `isQuickLevel()` trimming
+
+- **Prefer reducing iteration counts and buffer sizes** over skipping code paths, so the same API surface is exercised with less data.
+- **Call `isQuickLevel()` inside the test function**, not in global/static variable initializers. The test level is detected at runtime by the Catch2 listener, which runs after static initialization.
+- **Use reproducible seeds** when tests involve randomization. Log the seed and allow overriding (e.g., via `HIP_TEST_SEED`) so failures can be replayed.
+
+#### Example: reducing a memset size
+
+```cpp
+size_t numH = isQuickLevel() ? 256 : (1024 * 1024);
+size_t numW = isQuickLevel() ? 256 : (1024 * 1024);
+```
+
+#### Example: reducing GENERATE parameters
+
+```cpp
+auto size = GENERATE(isQuickLevel()
+    ? values({64, 256, 1024})
+    : values({64, 256, 1024, 65536, 1048576}));
+```
+
 ## Environment Variables
 - `HT_LOG_ENABLE` : This is for debugging the HIP Test Framework itself. Setting it to 1, all `LogPrintf` will be printed on screen
 
