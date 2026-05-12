@@ -4,6 +4,10 @@ All notable changes to the hipFile Python bindings will be documented in this fi
 
 ## [Unreleased]
 
+### Added
+
+- Docstrings for the public Python API.
+
 ## [0.2.0.dev1]
 
 ### Fixed

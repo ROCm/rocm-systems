@@ -476,7 +476,8 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_Graph) {
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
   auto start1 = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < GRAPH_LAUNCH_ITERATIONS; i++) {
+  const int graphIters = isQuickLevel() ? 10 : GRAPH_LAUNCH_ITERATIONS;
+  for (int i = 0; i < graphIters; i++) {
     HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
   }
   HIP_CHECK(hipStreamSynchronize(streamForGraph));

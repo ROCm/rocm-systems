@@ -372,6 +372,13 @@ ncclResult_t  ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError);
 /*! @cond       include_hidden */
 ncclResult_t pncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError);
 /*! @endcond */
+
+typedef enum {
+  ncclStatGpuMemSuspend      = 0,  // Allocated GPU memory that can be suspended (bytes)
+  ncclStatGpuMemSuspended    = 1,   // GPU memory suspended? (0=active, 1=suspended)
+  ncclStatGpuMemPersist      = 2,  // Allocated GPU memory that cannot be suspended (bytes)
+  ncclStatGpuMemTotal        = 3  // Total allocated GPU memory tracked by NCCL (bytes)
+} ncclCommMemStat_t;
 /*! @} */
 
 /*! @defgroup   rccl_api_comminfo Communicator Information
