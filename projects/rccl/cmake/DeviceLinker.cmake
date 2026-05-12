@@ -387,7 +387,7 @@ set(COMMON_FAT_OBJ "${DEVICE_BUILD_DIR}/common.o")
 
 set(DL_HOST_COMPRESS "")
 if(ENABLE_COMPRESS)
-  set(DL_HOST_COMPRESS "--offload-compress")
+  set(DL_HOST_COMPRESS "-mcmodel=medium")
 endif()
 
 # Gather include flags for host compile (same paths as device)
