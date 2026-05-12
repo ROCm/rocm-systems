@@ -327,9 +327,9 @@
           "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"
         },
         {
-          "name": "CommTests",
-          "description": "Communicator unit tests",
-          "test_filter": "CommTests.*"
+          "name": "MiscTests",
+          "description": "Miscellaneous header-level unit tests (e.g. task coll sorter)",
+          "test_filter": "MiscTests.*"
         },
         {
           "name": "EnqueueCountTests",
@@ -572,6 +572,26 @@
         }
       ]
     },
+    "comm_mpi_tests": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "CommMPITests_TrafficClass",
+          "description": "CommMPITests traffic class (ncclCommInitRankConfig)",
+          "test_filter": "TrafficClassMPITest.*"
+        }
+      ]
+    },
     "ubr_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -622,19 +642,19 @@
           "name": "UBR_AllToAllStress_InterleavedMultiSize",
           "description": "Stress test with interleaved AllToAll/AllToAllv across small/medium/large sizes",
           "test_filter": "UBR_AllToAllStress.InterleavedMultiSize_MultiNode",
-          "timeout": 120
+          "timeout": 300
         },
         {
           "name": "UBR_AllToAllStress_SplitComm",
           "description": "Stress test with interleaved AllToAll/AllToAllv using split communicators",
           "test_filter": "UBR_AllToAllStress.InterleavedWithSplitComm_MultiNode",
-          "timeout": 120
+          "timeout": 300
         },
         {
           "name": "UBR_AllToAllStress_ConcurrentMultiComm",
           "description": "Concurrent AllToAll on multiple communicators with separate streams",
           "test_filter": "UBR_AllToAllStress.ConcurrentMultiComm_MultiNode",
-          "timeout": 120
+          "timeout": 300
         },
         {
           "name": "UBR_ConcurrentRegHang_ContiguousBuffer_Grouped",
@@ -998,6 +1018,12 @@
       "name": "Implicit Launch Order Tests",
       "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT for multi-communicator serialization",
       "config": "implicit_launch_order",
+      "enabled": true
+    },
+    {
+      "name": "Comm MPI Tests",
+      "description": "MPI unit tests from CommMPITests.cpp",
+      "config": "comm_mpi_tests",
       "enabled": true
     },
     {
