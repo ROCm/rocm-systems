@@ -112,6 +112,10 @@ NCCL_PARAM(SetCpuStackSize, "SET_CPU_STACK_SIZE", 1);
 NCCL_PARAM(DrainFenceProbe, "DRAIN_FENCE_PROBE", 0);
 // ROCM-21766 diagnostic: drain ALL device work before devCommSetup to fence in-flight P2pSetup blits. Remove before merge.
 NCCL_PARAM(P2pDrainFenceProbe, "P2P_DRAIN_FENCE_PROBE", 0);
+// ROCM-21766 diagnostic: drain after the devCommAndChans alloc/memset to test if the freshly-acquired stream's first op is the offender. Remove before merge.
+NCCL_PARAM(AllocFenceProbe, "ALLOC_FENCE_PROBE", 0);
+// ROCM-21766 diagnostic: drain after the per-channel devRingUserRanks loop to test if the loop is the offender. Remove before merge.
+NCCL_PARAM(ChanLoopFenceProbe, "CHAN_LOOP_FENCE_PROBE", 0);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
 
@@ -897,6 +901,12 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(), &comm->sharedRes->deviceStream, /*concurrent=*/false, &deviceStream), ret, fail);
   NCCLCHECKGOTO(ncclCudaCallocAsync(&devCommAndChans, 1, deviceStream), ret, fail);
   ncclCommPushCudaFree(comm, devCommAndChans);
+  // ROCM-21766 diagnostic: optionally drain after the devCommAndChans alloc/memset.
+  // Tests Suspect #4 (the freshly-acquired stream's first cudaMemsetAsync, dispatched as
+  // a __amd_rocclr_fillBuffer shader wave under HIP, is the offender). Remove before merge.
+  if (ncclParamAllocFenceProbe()) {
+    CUDACHECKGOTO(cudaDeviceSynchronize(), ret, fail);
+  }
   NCCLCHECKGOTO(ncclCudaCallocAsync(&tmpCommAndChans.comm.rankToLocalRank, comm->nRanks, deviceStream), ret, fail);
   ncclCommPushCudaFree(comm, tmpCommAndChans.comm.rankToLocalRank);
   NCCLCHECKGOTO(ncclCudaMemcpyAsync(tmpCommAndChans.comm.rankToLocalRank, comm->rankToLocalRank, comm->nRanks, deviceStream), ret, fail);
@@ -986,6 +996,13 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
     if (comm->channels[c].ring.userRanks != nullptr) {
       NCCLCHECKGOTO(ncclCudaMemcpyAsync(tmpCommAndChans.channels[c].ring.userRanks, comm->channels[c].ring.userRanks, nRanks, deviceStream), ret, fail);
     }
+  }
+
+  // ROCM-21766 diagnostic: optionally drain after the per-channel devRingUserRanks loop.
+  // Tests Suspect #2 (the up-to-128 small back-to-back H2Ds on deviceStream are the offender).
+  // Remove before merge.
+  if (ncclParamChanLoopFenceProbe()) {
+    CUDACHECKGOTO(cudaDeviceSynchronize(), ret, fail);
   }
 
 #ifdef ENABLE_COLLTRACE
