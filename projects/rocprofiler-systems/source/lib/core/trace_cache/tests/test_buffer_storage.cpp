@@ -28,11 +28,11 @@ verify_buffer_contains(const T& sample, const std::uint8_t* buffer, size_t& buff
     buffer_pos += sizeof(test_type_identifier_t);
 
     auto size = *reinterpret_cast<const size_t*>(buffer + buffer_pos);
-    EXPECT_EQ(size, rocprofsys::trace_cache::get_size(sample));
+    EXPECT_EQ(size, rocprofsys::trace_cache::serialized_size(sample));
     buffer_pos += sizeof(size_t);
 
     std::uint8_t* deserialize_ptr = const_cast<std::uint8_t*>(buffer + buffer_pos);
-    auto          deserialized = rocprofsys::trace_cache::deserialize<T>(deserialize_ptr);
+    auto deserialized = rocprofsys::trace_cache::deserialize_from<T>(deserialize_ptr);
     EXPECT_EQ(deserialized, sample);
     buffer_pos += size;
 }

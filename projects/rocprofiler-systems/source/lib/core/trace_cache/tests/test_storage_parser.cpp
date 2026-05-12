@@ -186,7 +186,7 @@ protected:
         {
             sample_header header;
             header.type        = identifier;
-            header.sample_size = rocprofsys::trace_cache::get_size(sample);
+            header.sample_size = rocprofsys::trace_cache::serialized_size(sample);
 
             ofs.write(reinterpret_cast<const char*>(&header), sizeof(header));
 
@@ -194,7 +194,7 @@ protected:
             buffer.reserve(header.sample_size);
             buffer.assign(header.sample_size, 0xFF);
 
-            rocprofsys::trace_cache::serialize(buffer.data(), sample);
+            rocprofsys::trace_cache::serialize_at(buffer.data(), sample);
 
             ofs.write(reinterpret_cast<const char*>(buffer.data()), header.sample_size);
         }
@@ -331,12 +331,12 @@ TEST_F(storage_parser_test, load_file_with_zero_sized_samples)
 
         sample_header valid_header;
         valid_header.type        = test_type_identifier_t::sample_type_1;
-        valid_header.sample_size = rocprofsys::trace_cache::get_size(valid_sample);
+        valid_header.sample_size = rocprofsys::trace_cache::serialized_size(valid_sample);
 
         ofs.write(reinterpret_cast<const char*>(&valid_header), sizeof(valid_header));
 
         std::vector<std::uint8_t> buffer(valid_header.sample_size);
-        rocprofsys::trace_cache::serialize(buffer.data(), valid_sample);
+        rocprofsys::trace_cache::serialize_at(buffer.data(), valid_sample);
         ofs.write(reinterpret_cast<const char*>(buffer.data()), valid_header.sample_size);
 
         ofs.close();

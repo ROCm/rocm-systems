@@ -42,10 +42,10 @@ TEST_F(cpu_pmc_sample_test, serialize_deserialize)
     std::vector<std::uint8_t> loads_data = { 10, 20, 30, 40 };
     cpu_pmc_sample            original(em, 1u, 80000, pm, freqs_data, loads_data);
 
-    serialize(buffer.data(), original);
+    serialize_at(buffer.data(), original);
 
     std::uint8_t* buffer_ptr   = buffer.data();
-    auto          deserialized = deserialize<cpu_pmc_sample>(buffer_ptr);
+    auto          deserialized = deserialize_from<cpu_pmc_sample>(buffer_ptr);
 
     EXPECT_EQ(deserialized.device_id, original.device_id);
     EXPECT_EQ(deserialized.timestamp, original.timestamp);
@@ -74,7 +74,7 @@ TEST_F(cpu_pmc_sample_test, get_size)
     std::vector<std::uint8_t> loads_data = { 10, 20, 30, 40 };
     cpu_pmc_sample            s(em, 0u, 80000, pm, freqs_data, loads_data);
 
-    EXPECT_GT(get_size(s), 0u);
+    EXPECT_GT(serialized_size(s), 0u);
 }
 
 TEST_F(cpu_pmc_sample_test, type_identifier)
@@ -91,10 +91,10 @@ TEST_F(cpu_pmc_sample_test, empty_data)
     std::vector<std::uint8_t> empty;
     cpu_pmc_sample            original(em, 0u, 0, pm, empty, empty);
 
-    serialize(buffer.data(), original);
+    serialize_at(buffer.data(), original);
 
     std::uint8_t* buffer_ptr   = buffer.data();
-    auto          deserialized = deserialize<cpu_pmc_sample>(buffer_ptr);
+    auto          deserialized = deserialize_from<cpu_pmc_sample>(buffer_ptr);
 
     EXPECT_TRUE(deserialized.freqs.empty());
     EXPECT_TRUE(deserialized.loads.empty());

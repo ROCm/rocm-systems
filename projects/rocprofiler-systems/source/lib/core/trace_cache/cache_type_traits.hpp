@@ -25,42 +25,6 @@ namespace type_traits
 {
 
 template <typename T>
-struct always_false : std::false_type
-{};
-
-}  // namespace type_traits
-
-// Free-function wrappers that dispatch through the member-archive path. They
-// exist so legacy call sites that already write
-// `serialize(buf, value)` / `deserialize<T>(cursor)` / `get_size(value)`
-// continue to compile and work bytewise-identical. The implementation is the
-// archive in archive.hpp; per-type bodies live as
-// `template <class Archive> serialize(Archive&)` members on the type.
-template <typename T>
-ROCPROFSYS_INLINE void
-serialize(std::uint8_t* buffer, const T& item)
-{
-    serialize_at(buffer, item);
-}
-
-template <typename T>
-ROCPROFSYS_INLINE T
-deserialize(std::uint8_t*& buffer)
-{
-    return deserialize_from<T>(buffer);
-}
-
-template <typename T>
-ROCPROFSYS_INLINE std::size_t
-                  get_size(const T& item)
-{
-    return serialized_size(item);
-}
-
-namespace type_traits
-{
-
-template <typename T>
 struct tuple_to_variant;
 
 template <typename... Types>
