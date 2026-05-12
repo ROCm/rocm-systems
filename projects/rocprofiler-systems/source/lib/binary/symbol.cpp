@@ -123,7 +123,7 @@ symbol::operator+=(const symbol& _rhs)
     }
     else
     {
-        throw exception<std::runtime_error>("incompatible symbol+=");
+        throw ::rocprofsys::runtime_error{ "incompatible symbol+=" };
     }
 
     return *this;

@@ -4,8 +4,8 @@
 #pragma once
 
 #include "common/defines.h"
+#include "common/diagnostic/exception.hpp"
 #include "core/containers/operators.hpp"
-#include "core/exception.hpp"
 
 #include <algorithm>
 #include <array>
@@ -218,9 +218,10 @@ aligned_static_vector<Tp, N, AlignN, AtomicSizeV>::operator=(
 {
     if(ROCPROFSYS_UNLIKELY(_v.size() > N))
     {
-        throw exception<std::out_of_range>(
+        throw ::rocprofsys::out_of_range{
             std::string{ "aligned_static_vector::operator=(initializer_list) size > " } +
-            std::to_string(N));
+            std::to_string(N)
+        };
     }
 
     clear();
@@ -299,9 +300,10 @@ aligned_static_vector<Tp, N, AlignN, AtomicSizeV>::emplace_back(Args&&... _v)
     auto _idx = m_size++;
     if(_idx >= N)
     {
-        throw exception<std::out_of_range>(
+        throw ::rocprofsys::out_of_range{
             std::string{ "aligned_static_vector::emplace_back - reached capacity " } +
-            std::to_string(N));
+            std::to_string(N)
+        };
     }
 
     if constexpr(sizeof...(Args) > 0)

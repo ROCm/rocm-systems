@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "argparse.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
 #include "config.hpp"
-#include "exception.hpp"
 #include "gpu.hpp"
 #include "state.hpp"
 #include <cstdint>
@@ -1099,7 +1099,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 {
                     if(p.exists("sampling-overflow-event") &&
                        _v.front() != p.get<std::string>("sampling-overflow-event"))
-                        throw exception<std::runtime_error>(fmt::format(
+                        throw ::rocprofsys::runtime_error(fmt::format(
                             "'--sample-overflow {} ...' conflicts with "
                             "'--sampling-overflow-event {}' option",
                             _v.front(), p.get<std::string>("sampling-overflow-event")));
@@ -1225,8 +1225,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         if(!_data.setting_filter(itr.get(), _data)) return false;
 
         if(_name.empty())
-            throw exception<std::runtime_error>("Error! empty name for " +
-                                                itr->get_name());
+            throw ::rocprofsys::runtime_error("Error! empty name for " + itr->get_name());
 
         _data.processed_settings.emplace(itr.get());
 
@@ -1240,7 +1239,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                 if(_value.empty()) _value = p.get<std::string>(_name);
                 if(_value.empty()) _value = fmt::format("{}", p.get<bool>(_name));
                 if(_value.empty())
-                    throw exception<std::runtime_error>("Error! no value for " + _name);
+                    throw ::rocprofsys::runtime_error("Error! no value for " + _name);
                 update_env(_data, itr->get_env_name(), _value);
             });
         }
@@ -1252,8 +1251,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                     auto _value =
                         fmt::format("{}", fmt::join(p.get<strvec_t>(_name), " "));
                     if(_value.empty())
-                        throw exception<std::runtime_error>("Error! no value for " +
-                                                            _name);
+                        throw ::rocprofsys::runtime_error("Error! no value for " + _name);
                     update_env(_data, itr->get_env_name(), _value);
                 });
         }

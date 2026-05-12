@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/diagnostic/format_exception.hpp"
+#include "common/diagnostic/stacktrace.hpp"
 #include "core/categories.hpp"
 #include "core/config.hpp"
 #include "core/locking.hpp"
@@ -12,11 +14,11 @@
 
 #include <timemory/log/color.hpp>
 #include <timemory/signals/types.hpp>
-#include <timemory/unwind/backtrace.hpp>
 
 #include "logger/debug.hpp"
 
 #include <chrono>
+#include <exception>
 #include <sstream>
 #include <thread>
 
@@ -29,9 +31,9 @@ setup() ROCPROFSYS_INTERNAL_API;
 
 namespace
 {
-namespace unwind  = ::tim::unwind;
-namespace signals = ::tim::signals;
-namespace log     = ::tim::log;
+namespace signals    = ::tim::signals;
+namespace log        = ::tim::log;
+namespace diagnostic = ::rocprofsys::common::diagnostic;
 
 constexpr auto timeout_signal   = signals::sys_signal::Hangup;
 constexpr auto timeout_signal_v = static_cast<int>(timeout_signal);
@@ -49,17 +51,17 @@ ci_timeout_backtrace(int)
     if(ci_timeout_backtrace_local_count >= ci_timeout_backtrace_global_count) return;
     ++ci_timeout_backtrace_local_count;
 
-    auto _err            = std::stringstream{};
-    auto _cfg            = unwind::detailed_backtrace_config{};
-    _cfg.proc_pid_maps   = false;
-    _cfg.unwind_lineinfo = false;
-    _cfg.force_color     = !log::monochrome();
-
-    unwind::detailed_backtrace<0>(_err, _cfg);
+    auto trace      = diagnostic::stacktrace::capture(/*skip_frames=*/0);
+    auto opts       = diagnostic::stacktrace::format_options{};
+    opts.with_color = !log::monochrome();
+    // Match the previous output: skip line info / proc maps. The stacktrace
+    // type already excludes proc/maps; line info is omitted by clearing the
+    // file/line column.
+    opts.with_file_line = false;
 
     static auto _mutex = locking::atomic_mutex{};
     auto        _lk    = locking::atomic_lock{ _mutex };
-    LOG_INFO("{}", _err.str());
+    LOG_INFO("{}", trace.to_string(opts));
 
     ++ci_timeout_backtrace_global_done;
 }

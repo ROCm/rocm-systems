@@ -4,6 +4,7 @@
 #include "config.hpp"
 #include "amd_smi.hpp"
 #include "common/defines.h"
+#include "common/diagnostic/exception.hpp"
 #include "common/static_object.hpp"
 #include "constraint.hpp"
 #include "gpu.hpp"
@@ -199,12 +200,12 @@ configure_settings(bool _init)
 
     if(is_ci_value && get_state() < State::Init)
     {
-        timemory_print_demangled_backtrace<64>();
-
-        auto message = fmt::format("config::configure_settings() called before "
-                                   "rocprofsys_init_library. state = {}",
-                                   static_cast<int>(get_state()));
-        throw std::runtime_error(message);
+        // Trace is captured by rocprofsys::config_error at construction; no
+        // need for a separate timemory_print_demangled_backtrace call here.
+        throw rocprofsys::config_error{ fmt::format(
+            "config::configure_settings() called before "
+            "rocprofsys_init_library. state = {}",
+            static_cast<int>(get_state())) };
     }
 
     tim::manager::add_metadata("ROCPROFSYS_VERSION", ROCPROFSYS_VERSION_STRING);

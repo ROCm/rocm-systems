@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/components/pthread_create_gotcha.hpp"
+#include "common/diagnostic/stacktrace.hpp"
 #include "core/config.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
@@ -605,13 +606,13 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
             std::to_string(_use_bundle), std::to_string(_enable_causal),
             std::to_string(_enable_sampling), _info->as_string());
 
-        std::stringstream _backtrace_ss;
-        timemory_print_demangled_backtrace<8>(_backtrace_ss, std::string{},
-                                              std::string{ "threading::get_id() [id=" } +
-                                                  std::to_string(_tid) +
-                                                  std::string{ "]" },
-                                              std::string{ " " }, false);
-        LOG_TRACE("Backtrace: {}", _backtrace_ss.str());
+        auto trace = ::rocprofsys::common::diagnostic::stacktrace::capture(
+            /*skip_frames=*/0, /*max_frames=*/8);
+        auto opts       = ::rocprofsys::common::diagnostic::stacktrace::format_options{};
+        opts.with_color = false;
+        opts.with_file_line   = false;
+        opts.max_frames_shown = 8;
+        LOG_TRACE("Backtrace [tid={}]: {}", _tid, trace.to_string(opts));
     }
 
     if(_active && !_disabled && !_info->is_offset)

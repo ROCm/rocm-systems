@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "common/diagnostic/exception.hpp"
 #include "core/common.hpp"
 #include "core/containers/c_array.hpp"
-#include "core/exception.hpp"
 
 #include <timemory/utility/demangle.hpp>
 
@@ -129,9 +129,10 @@ static_vector<Tp, N, AtomicSizeV>::operator=(std::initializer_list<Tp>&& _v)
 {
     if(ROCPROFSYS_UNLIKELY(_v.size() > N))
     {
-        throw exception<std::out_of_range>(
+        throw ::rocprofsys::out_of_range{
             std::string{ "static_vector::operator=(initializer_list) size > " } +
-            std::to_string(N));
+            std::to_string(N)
+        };
     }
 
     clear();
@@ -185,9 +186,10 @@ static_vector<Tp, N, AtomicSizeV>::emplace_back(Args&&... _v)
     auto _idx = m_size++;
     if(_idx >= N)
     {
-        throw exception<std::out_of_range>(
+        throw ::rocprofsys::out_of_range{
             std::string{ "static_vector::emplace_back - reached capacity " } +
-            std::to_string(N));
+            std::to_string(N)
+        };
     }
 
     if constexpr(std::is_assignable<Tp, decltype(std::forward<Args>(_v))...>::value)

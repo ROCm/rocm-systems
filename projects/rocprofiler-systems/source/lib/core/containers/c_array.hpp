@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/exception.hpp"
+#include "common/diagnostic/exception.hpp"
 
 #include <array>
 #include <atomic>
@@ -43,18 +43,18 @@ struct c_array
     Tp& at(size_t i)
     {
         if(i < m_size) return m_base[i];
-        throw ::rocprofsys::exception<std::out_of_range>(
-            std::string{ typeid(*this).name() } + std::to_string(i) + " exceeds size " +
-            std::to_string(m_size));
+        throw ::rocprofsys::out_of_range{ std::string{ typeid(*this).name() } +
+                                          std::to_string(i) + " exceeds size " +
+                                          std::to_string(m_size) };
     }
 
     // Access an element by index with bounds check
     const Tp& at(size_t i) const
     {
         if(i < m_size) return m_base[i];
-        throw ::rocprofsys::exception<std::out_of_range>(
-            std::string{ typeid(*this).name() } + std::to_string(i) + " exceeds size " +
-            std::to_string(m_size));
+        throw ::rocprofsys::out_of_range{ std::string{ typeid(*this).name() } +
+                                          std::to_string(i) + " exceeds size " +
+                                          std::to_string(m_size) };
     }
 
     // Get a slice of this array, from a start index (inclusive) to end index (exclusive)

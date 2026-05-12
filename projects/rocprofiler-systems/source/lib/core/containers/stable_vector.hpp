@@ -341,9 +341,8 @@ stable_vector<Tp, ChunkSizeV, AlignN>::at(size_type i)
 {
     if(ROCPROFSYS_UNLIKELY(i >= size()))
     {
-        throw ::rocprofsys::exception<std::out_of_range>(
-            "stable_vector::at(" + std::to_string(i) + "). size is " +
-            std::to_string(size()));
+        throw ::rocprofsys::out_of_range{ "stable_vector::at(" + std::to_string(i) +
+                                          "). size is " + std::to_string(size()) };
     }
 
     return operator[](i);

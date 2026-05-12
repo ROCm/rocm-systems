@@ -8,6 +8,7 @@
 //
 #include "api.hpp"
 #include "common/defines.h"
+#include "common/diagnostic/exception.hpp"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
 #include "core/agent.hpp"
@@ -185,7 +186,7 @@ ensure_finalization(bool _static_init = false)
     {
         auto _idx = threading::add_callback(&ensure_initialization);
         if(_idx < 0)
-            throw exception<std::runtime_error>("failure adding threading callback");
+            throw ::rocprofsys::runtime_error{ "failure adding threading callback" };
     }
 
     if(config::set_signal_handler(nullptr) != &finalization_handler)
@@ -523,14 +524,6 @@ rocprofsys_init_library_hidden()
     {
         LOG_DEBUG("State is {}. Setting to {}...", std::to_string(get_state()),
                   std::to_string(State::Init));
-        LOG_DEBUG("Calling backtrace once so that the one-time call of malloc in "
-                  "glibc's backtrace() occurs...");
-    }
-
-    {
-        std::stringstream _ss{};
-        timemory_print_backtrace<16>(_ss);
-        (void) _ss;
     }
 
     set_state(State::Init);

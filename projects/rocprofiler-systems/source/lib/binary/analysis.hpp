@@ -4,9 +4,9 @@
 #pragma once
 
 #include "common/defines.h"
+#include "common/diagnostic/exception.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/common.hpp"
-#include "core/exception.hpp"
 
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/concepts.hpp>
