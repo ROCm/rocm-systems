@@ -22,7 +22,7 @@
 // must satisfy: totalBytes * (nRanks+1)/nRanks <= ceARTmpBufSize.
 //
 // Default is <= 2 MiB (covers most deep-learning AllReduce sizes).  
-#define NCCL_CE_AR_MAX_MSG_BYTES  (2 * 1024 * 1024)
+#define NCCL_CE_AR_MAX_MSG_BYTES  (256ull * 1024 * 1024)
 
 struct ncclCeColl {
   uint8_t* baseUCSymReadyPtr;
