@@ -23,6 +23,16 @@ rocprofiler-sdk:
             - gfx90a
           expression: 
             400*reduce(SQ_WAIT_INST_LDS,sum)/reduce(SQ_WAVES,sum)/reduce(GRBM_GUI_ACTIVE,max)
+    - name: ActiveWGPs
+      description: 'Active WGPs - average number of active WGPs per SQG cycle.'
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(accumulate(SQG_LEVEL_WGP_ACTIVE,HIGH_RES),sum)/reduce(SQG_CYCLES,sum)
     - name: AggSysCycles
       description: 'Unit: cycles'
       properties: []
@@ -3389,66 +3399,6 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 15
-    - name: SQG_EVENTS
-      description: Number of perfcounter events received by SQG (per shader engine). 
-        SQG_PERF_SEL_EVENTS.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 11
-    - name: SQG_EXP_BUS0_BUSY
-      description: Number of cycles export bus 0 is busy (per shader engine). 
-        SQG_PERF_SEL_EXP_BUS0_BUSY.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 4
-    - name: SQG_EXP_BUS1_BUSY
-      description: Number of cycles export bus 1 is busy (per shader engine). 
-        SQG_PERF_SEL_EXP_BUS1_BUSY.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 5
-    - name: SQG_EXP_REQ0_BUS_BUSY
-      description: Number of cycles export request bus 0 is busy (per shader engine). 
-        SQG_PERF_SEL_EXP_REQ0_BUS_BUSY.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 2
-    - name: SQG_EXP_REQ1_BUS_BUSY
-      description: Number of cycles export request bus 1 is busy (per shader engine). 
-        SQG_PERF_SEL_EXP_REQ1_BUS_BUSY.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 3
     - name: SQG_ITEMS
       description: Sum of work items processed by SQG-tracked waves. Useful for computing average 
         wave occupancy across pipeline stages (per shader engine). SQG_PERF_SEL_ITEMS.
@@ -3461,9 +3411,9 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 24
-    - name: SQG_LEVEL_WAVES
-      description: Number of in-flight waves observed by SQG. Best used with accumulate() functions 
-        as part of a derived counter (per shader engine). SQG_PERF_SEL_LEVEL_WAVES.
+    - name: SQG_LEVEL_WGP_ACTIVE
+      description: Number of active WGPs observed by SQG. Best used with accumulate() functions as 
+        part of a derived counter (per shader engine). SQG_PERF_SEL_LEVEL_WGP_ACTIVE.
       properties: []
       definitions:
         - architectures:
@@ -3472,7 +3422,7 @@ rocprofiler-sdk:
             - gfx1152
             - gfx1153
           block: SQG
-          event: 23
+          event: 45
     - name: SQG_MSG
       description: Number of S_SENDMSG instructions issued by waves observed by SQG (per shader 
         engine). SQG_PERF_SEL_MSG.
@@ -3485,9 +3435,8 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 18
-    - name: SQG_MSG_BUS_BUSY
-      description: Number of cycles the SQG message bus is busy (per shader engine). 
-        SQG_PERF_SEL_MSG_BUS_BUSY.
+    - name: SQG_REFCLKS
+      description: Number of SQG reference clock cycles (per shader engine). SQG_PERF_SEL_REFCLKS.
       properties: []
       definitions:
         - architectures:
@@ -3496,115 +3445,7 @@ rocprofiler-sdk:
             - gfx1152
             - gfx1153
           block: SQG
-          event: 1
-    - name: SQG_MSG_INTERRUPT
-      description: Number of S_SENDMSG interrupt messages issued (per shader engine). 
-        SQG_PERF_SEL_MSG_INTERRUPT.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 19
-    - name: SQG_NONE
-      description: Do not count anything; perf counter is disabled (SQG_PERFCOUNTER0_SELECT 
-        PERF_SEL). SQG_PERF_SEL_NONE.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 0
-    - name: SQG_PS_QUADS
-      description: Number of pixel-shader quads processed (per shader engine). 
-        SQG_PERF_SEL_PS_QUADS.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 27
-    - name: SQG_TTRACE_INFLIGHT_REQS
-      description: Number of in-flight thread-trace requests (per shader engine). 
-        SQG_PERF_SEL_TTRACE_INFLIGHT_REQS.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 7
-    - name: SQG_TTRACE_LOST_PACKETS
-      description: Number of thread-trace packets dropped (per shader engine). 
-        SQG_PERF_SEL_TTRACE_LOST_PACKETS.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 9
-    - name: SQG_TTRACE_REQS
-      description: Number of thread-trace requests issued (per shader engine). 
-        SQG_PERF_SEL_TTRACE_REQS.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 6
-    - name: SQG_TTRACE_STALL
-      description: Number of cycles thread-trace was stalled (per shader engine). 
-        SQG_PERF_SEL_TTRACE_STALL.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 8
-    - name: SQG_WAVE32_ITEMS
-      description: Number of work items contributed by wave32 waves (per shader engine). 
-        SQG_PERF_SEL_WAVE32_ITEMS.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 25
-    - name: SQG_WAVE64_ITEMS
-      description: Number of work items contributed by wave64 waves (per shader engine). 
-        SQG_PERF_SEL_WAVE64_ITEMS.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 26
+          event: 33
     - name: SQG_WAVES
       description: Number of waves dispatched and observed by SQG, summed across all graphics and 
         compute pipeline stages (per shader engine). SQG_PERF_SEL_WAVES.
@@ -3617,64 +3458,6 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 20
-    - name: SQG_WAVES_32
-      description: Number of wave32 waves dispatched (per shader engine). SQG_PERF_SEL_WAVES_32.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 21
-    - name: SQG_WAVES_64
-      description: Number of wave64 waves dispatched (per shader engine). SQG_PERF_SEL_WAVES_64.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 22
-    - name: SQG_WAVES_ENDED
-      description: Aggregated number of waves ended over a period of time (per shader engine). 
-        SQG_PERF_SEL_WAVES_ENDED.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 35
-    - name: SQG_WAVES_EQ_32
-      description: Number of waves that occupied exactly 32 lanes (per shader engine). 
-        SQG_PERF_SEL_WAVES_EQ_32.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 29
-    - name: SQG_WAVES_EQ_64
-      description: Number of waves that occupied exactly 64 lanes (per shader engine). 
-        SQG_PERF_SEL_WAVES_EQ_64.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 28
     - name: SQG_WAVES_INITIAL_PREFETCH
       description: Number of waves that issued an initial instruction prefetch (per shader engine). 
         SQG_PERF_SEL_WAVES_INITIAL_PREFETCH.
@@ -3687,54 +3470,6 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 10
-    - name: SQG_WAVES_LT_16
-      description: Number of waves with fewer than 16 active lanes (per shader engine). 
-        SQG_PERF_SEL_WAVES_LT_16.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 33
-    - name: SQG_WAVES_LT_32
-      description: Number of waves with fewer than 32 active lanes (per shader engine). 
-        SQG_PERF_SEL_WAVES_LT_32.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 32
-    - name: SQG_WAVES_LT_48
-      description: Number of waves with fewer than 48 active lanes (per shader engine). 
-        SQG_PERF_SEL_WAVES_LT_48.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 31
-    - name: SQG_WAVES_LT_64
-      description: Number of waves with fewer than 64 active lanes (per shader engine). 
-        SQG_PERF_SEL_WAVES_LT_64.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 30
     - name: SQG_WAVES_RESTORED
       description: Number of waves restored by context-switch (per shader engine). 
         SQG_PERF_SEL_WAVES_RESTORED.
@@ -3759,30 +3494,6 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 13
-    - name: SQG_WAVES_STARTED
-      description: Aggregated number of waves started over a period of time (per shader engine). 
-        SQG_PERF_SEL_WAVES_STARTED.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 34
-    - name: SQG_WAVE_CYCLES
-      description: Sum of clock cycles spent by waves observed at the SQG (per shader engine). 
-        Incremented by the number of valid waves each cycle. SQG_PERF_SEL_WAVE_CYCLES.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: SQG
-          event: 17
     - name: SQ_ACCUM_PREV
       description: This is a hardware register that can be used for accumulating values for other 
         counters. This is useful in expressions where you want to integrate over time. Only 
@@ -11691,6 +11402,16 @@ rocprofiler-sdk:
         - architectures:
             - gfx906
           expression: ((TCC_EA1_WRREQ_sum-TCC_EA1_WRREQ_64B_sum)*32+TCC_EA1_WRREQ_64B_sum*64)
+    - name: WGPUtilization
+      description: 'WGP Utilization - SQG busy cycles as a percent of SQG cycles.'
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: 100*reduce(SQG_BUSY_CYCLES,sum)/reduce(SQG_CYCLES,sum)
     - name: WRITE_REQ_32B
       description: The total number of 32-byte effective memory writes.
       properties: []

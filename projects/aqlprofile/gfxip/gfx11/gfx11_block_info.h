@@ -189,7 +189,7 @@ static const uint32_t RlcCounterBlockMaxEvent = 7;
 static const uint32_t SdmaCounterBlockMaxEvent = 15;  // SDMA_PERF_SEL_MMHUB_TAG_DELAY_COUNTER;
 static const uint32_t SpiCounterBlockMaxEvent = SPI_PERF_BUSY;     // SC_SC_SPI_EVENT;
 static const uint32_t SqCounterBlockMaxEvent = SQ_PERF_SEL_NONE2;  // SQC_PERF_SEL_DUMMY_LAST;
-static const uint32_t SqgCounterBlockMaxEvent = 0x24;              // SQG_PERF_SEL_DUMMY_LAST
+static const uint32_t SqgCounterBlockMaxEvent = 0x2e;              // SQG_PERF_SEL_DUMMY_LAST
 static const uint32_t SxCounterBlockMaxEvent =
     SX_PERF_SEL_DB3_4X2_DISCARD;  // SX_PERF_SEL_DB3_SIZE;
 // static const uint32_t TaCounterBlockMaxEvent        = TA_PERF_SEL_first_xnack_on_phase3;

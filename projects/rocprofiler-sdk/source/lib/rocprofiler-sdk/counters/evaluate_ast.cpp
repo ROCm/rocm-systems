@@ -427,10 +427,11 @@ EvaluateAST::EvaluateAST(rocprofiler_counter_id_t                       out_id,
             if(_type == NodeType::ACCUMULATE_NODE)
             {
                 ROCP_FATAL_IF(ast.accumulate_op != ACCUMULATE_OP_TYPE::NONE &&
-                              _metric.block() != "SQ")
-                    << fmt::format("Accumulate High_RES/Low_RES only works for counters from SQ "
-                                   "block: invalid operation on {} counter.",
-                                   _metric.name());
+                              _metric.block() != "SQ" && _metric.block() != "SQG")
+                    << fmt::format(
+                           "Accumulate High_RES/Low_RES only works for counters from SQ or SQG "
+                           "block: invalid operation on {} counter.",
+                           _metric.name());
 
                 // LOW_RES (quad-cycle integration) is not supported on gfx10 and above.
                 // Redirect to HIGH_RES and warn the user.

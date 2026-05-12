@@ -42,6 +42,10 @@ class Gfx11Factory : public Pm4Factory {
   virtual int GetAccumLowID() const override { return 1; }
   virtual int GetAccumHiID() const override { return 1; }
 
+  // SQG_PERF_SEL_ACCUM_PREV event id for gfx11 (soc21 SQG enum).
+  virtual int GetSqgAccumLowID() const override { return 14; }
+  virtual int GetSqgAccumHiID() const override { return 14; }
+
  protected:
   void Init(const AgentInfo* agent_info);
   static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
