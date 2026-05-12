@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/perfetto_processor.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "core/agent_manager.hpp"
 #include "core/categories.hpp"
 #include "core/common.hpp"
@@ -465,7 +466,7 @@ perfetto_processor_t::get_session_data()
 
         if(get_is_continuous_integration() && _fnum_read != _fnum_elem)
         {
-            throw std::runtime_error(fmt::format(
+            throw ::rocprofsys::storage_error(fmt::format(
                 "Error! read {} elements from perfetto trace file '{}'. Expected {}",
                 _fnum_read, m_tmp_file->filename, _fnum_elem));
         }
@@ -582,7 +583,7 @@ perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
 
     if(!kernel_symbol.has_value())
     {
-        throw std::runtime_error("Kernel symbol is missing for kernel dispatch");
+        throw ::rocprofsys::storage_error("Kernel symbol is missing for kernel dispatch");
     }
 
     auto kernel_name = rocprofsys::utility::demangle(kernel_symbol->kernel_name);

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/diagnostic/exception.hpp"
 #include "library/pmc/collectors/base/traits_check.hpp"
 #include "logger/debug.hpp"
 
@@ -77,7 +78,7 @@ struct collector
     {
         if(!m_device_provider)
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::device_error(
                 "Device provider not set. Use constructor or set_device_provider().");
         }
 

@@ -5,6 +5,7 @@
 
 #include "library/pmc/collectors/nic/types.hpp"
 
+#include "common/diagnostic/exception.hpp"
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -23,7 +24,7 @@ namespace rocprofsys::pmc::collectors::nic
  * (handle, status codes, raw structs) are encapsulated here so that
  * device.hpp has zero AMD SMI dependency.
  *
- * Methods throw std::runtime_error on AMD SMI failures.
+ * Methods throw ::rocprofsys::nic_error on AMD SMI failures.
  */
 class nic_driver
 {
@@ -119,10 +120,11 @@ private:
                    AMDSMI_STATUS_SUCCESS &&
                status_msg != nullptr)
             {
-                throw std::runtime_error(std::string(func) + " failed: " + status_msg);
+                throw ::rocprofsys::nic_error(std::string(func) +
+                                              " failed: " + status_msg);
             }
-            throw std::runtime_error(std::string(func) + " failed with status " +
-                                     std::to_string(static_cast<int>(status)));
+            throw ::rocprofsys::nic_error(std::string(func) + " failed with status " +
+                                          std::to_string(static_cast<int>(status)));
         }
     }
 

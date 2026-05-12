@@ -16,6 +16,7 @@
 
 #include "common/defines.h"
 #include "common/delimit.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "common/environment.hpp"
 #include "common/invoke.hpp"
 #include "common/join.hpp"
@@ -1296,7 +1297,7 @@ verify_instrumented_preloaded()
         }
         case dl::InstrumentMode::Last:
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::runtime_error(
                 "Invalid instrumentation type: InstrumentMode::Last");
         }
     }
@@ -1462,7 +1463,8 @@ extern "C"
     //     _reentry = 1;
 
     //     if(!::rocprofsys::dl::main_real)
-    //         throw std::runtime_error("[rocprof-sys][dl] Unsuccessful wrapping of main:
+    //         throw ::rocprofsys::runtime_error("[rocprof-sys][dl] Unsuccessful wrapping
+    //         of main:
     //         "
     //                                  "nullptr to real main function");
 
@@ -1504,8 +1506,9 @@ extern "C"
         _reentry = 1;
 
         if(!::rocprofsys::dl::main_real)
-            throw std::runtime_error("[rocprof-sys][dl] Unsuccessful wrapping of main: "
-                                     "real_main function is nullptr.");
+            throw ::rocprofsys::runtime_error(
+                "[rocprof-sys][dl] Unsuccessful wrapping of main: "
+                "real_main function is nullptr.");
 
         if(envp)
         {

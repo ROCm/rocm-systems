@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "data_processor.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/rocpd/data_storage/table_insert_query.hpp"
 #include <cstdint>
@@ -158,7 +159,7 @@ data_processor::insert_pmc_description(
     auto it = _pmc_descriptor_map.find({ agent_id, name });
     if(it != _pmc_descriptor_map.end())
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::storage_error(
             fmt::format("Insert PMC description failed! Error: PMC descriptor "
                         "(name: {}) (ID: {}) already exist!",
                         name, agent_id));

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/defines.h"
+#include "common/diagnostic/exception.hpp"
 #include <cstdint>
 
 #include "common/join.hpp"
@@ -115,8 +116,8 @@ get_env_impl(std::string_view env_id, bool _default)
     if(env_var)
     {
         if(std::string_view{ env_var }.empty())
-            throw std::runtime_error(std::string{ "No boolean value provided for " } +
-                                     std::string{ env_id });
+            throw ::rocprofsys::runtime_error(
+                std::string{ "No boolean value provided for " } + std::string{ env_id });
 
         if(std::string_view{ env_var }.find_first_not_of("0123456789") ==
            std::string_view::npos)

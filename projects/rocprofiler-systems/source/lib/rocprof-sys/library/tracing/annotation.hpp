@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/defines.h"
+#include "common/diagnostic/exception.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/perfetto.hpp"
@@ -181,7 +182,7 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
         }
         else
         {
-            throw std::runtime_error("Annotation value type is invalid");
+            throw ::rocprofsys::runtime_error("Annotation value type is invalid");
         }
     }
 }

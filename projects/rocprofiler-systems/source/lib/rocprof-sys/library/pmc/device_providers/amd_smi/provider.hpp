@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/diagnostic/exception.hpp"
 #include "library/pmc/common/types.hpp"
 #include "library/pmc/device_providers/amd_smi/drivers/driver.hpp"
 
@@ -44,7 +45,7 @@ private:
         {
             std::stringstream ss;
             ss << error_message << " AMD SMI Error code: " << status;
-            throw std::runtime_error(ss.str());
+            throw ::rocprofsys::device_error(ss.str());
         }
     }
 

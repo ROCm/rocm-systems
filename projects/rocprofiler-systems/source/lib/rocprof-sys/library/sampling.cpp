@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/sampling.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -222,7 +223,8 @@ metadata_initialize_thread_info(size_t tid)
     const auto& _thread_info = thread_info::get(tid, SequentTID);
     if(get_is_continuous_integration() && !_thread_info)
     {
-        throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
+        throw ::rocprofsys::sampling_error(
+            fmt::format("No valid thread info for tid={}", tid));
     }
     if(!_thread_info) return;
 
@@ -239,7 +241,8 @@ metadata_initialize_track(std::int64_t tid)
     const auto& _thread_info = thread_info::get(tid, SequentTID);
     if(get_is_continuous_integration() && !_thread_info)
     {
-        throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
+        throw ::rocprofsys::sampling_error(
+            fmt::format("No valid thread info for tid={}", tid));
     }
     if(!_thread_info) return;
 
@@ -297,7 +300,8 @@ cache_sampling_data(std::int64_t                               _tid,
     const auto& _thread_info = thread_info::get(_tid, SequentTID);
     if(get_is_continuous_integration() && !_thread_info)
     {
-        throw std::runtime_error(fmt::format("No valid thread info for tid={}", _tid));
+        throw ::rocprofsys::sampling_error(
+            fmt::format("No valid thread info for tid={}", _tid));
     }
     if(!_thread_info) return;
 
@@ -745,8 +749,9 @@ configure(bool _setup, std::int64_t _tid)
 
     if(get_use_causal())
     {
-        throw std::runtime_error("Internal error! configuring sampling not permitted "
-                                 "when causal profiling is enabled");
+        throw ::rocprofsys::sampling_error(
+            "Internal error! configuring sampling not permitted "
+            "when causal profiling is enabled");
     }
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
@@ -899,7 +904,7 @@ configure(bool _setup, std::int64_t _tid)
            tim::trait::buffer_size<sampling::sampler_t>::value)
 
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::sampling_error(
                 fmt::format("dynamic sampler has a buffer size different from static "
                             "trait: {} instead "
                             "of {}",
@@ -909,7 +914,7 @@ configure(bool _setup, std::int64_t _tid)
 
         if(_sampler->get_buffer_size() <= 0)
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::sampling_error(
                 fmt::format("dynamic sampler requires a positive buffer size: {}",
                             _sampler->get_buffer_size()));
         }
@@ -1205,7 +1210,7 @@ post_process()
         if(get_is_continuous_integration() &&
            _sampler->get_sample_count() != _raw_data.size())
         {
-            throw std::runtime_error(fmt::format(
+            throw ::rocprofsys::sampling_error(fmt::format(
                 "Error! sampler recorded {} samples but {} samples were returned",
                 _sampler->get_sample_count(), _raw_data.size()));
         }
@@ -1414,7 +1419,8 @@ post_process_perfetto(std::int64_t                               _tid,
     const auto& _thread_info = thread_info::get(_tid, SequentTID);
     if(get_is_continuous_integration() && !_thread_info)
     {
-        throw std::runtime_error(fmt::format("No valid thread info for tid={}", _tid));
+        throw ::rocprofsys::sampling_error(
+            fmt::format("No valid thread info for tid={}", _tid));
     }
     if(!_thread_info) return;
 

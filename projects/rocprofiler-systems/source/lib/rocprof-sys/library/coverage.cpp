@@ -3,6 +3,7 @@
 
 #include "library/coverage.hpp"
 #include "api.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "core/config.hpp"
 #include "library/coverage/impl.hpp"
 #include "library/thread_data.hpp"
@@ -198,7 +199,7 @@ post_process()
         auto&& _b = config::get_setting_value<bool>(_v);
         if(!_b && get_is_continuous_integration())
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::runtime_error(
                 fmt::format("Error! No configuration setting named '{}'", _v));
         }
         return _b.value_or(true);
@@ -233,7 +234,7 @@ post_process()
         }
         else
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::runtime_error(
                 fmt::format("Error opening coverage output file: {}", _fname));
         }
     }
@@ -266,7 +267,7 @@ post_process()
         }
         else
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::runtime_error(
                 fmt::format("Error opening coverage output file: {}", _fname));
         }
     }

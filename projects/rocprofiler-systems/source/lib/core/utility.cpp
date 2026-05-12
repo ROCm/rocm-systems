@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "utility.hpp"
+#include "common/diagnostic/exception.hpp"
 #include <cstdint>
 
 #include "logger/debug.hpp"
@@ -76,7 +77,7 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
             auto _vv = tim::delimit(_v, "-");
             if(_vv.size() != 2)
             {
-                throw std::runtime_error(fmt::format(
+                throw ::rocprofsys::runtime_error(fmt::format(
                     "Invalid {} range specification: {}. Required format N-M, e.g. 0-4",
                     _label, _v));
             }

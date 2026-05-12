@@ -3,6 +3,7 @@
 
 #include "core/trace_cache/discovery.hpp"
 
+#include "common/diagnostic/exception.hpp"
 #include "core/config.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cacheable.hpp"
@@ -35,7 +36,9 @@ list_dir_files(const std::string& path)
 
     std::unique_ptr<DIR, decltype(dir_deleter)> dir(opendir(path.c_str()), dir_deleter);
 
-    if(!dir) throw std::runtime_error(fmt::format("Error opening directory: {}", path));
+    if(!dir)
+        throw ::rocprofsys::storage_error(
+            fmt::format("Error opening directory: {}", path));
 
     data::directory_files_t result{};
     dirent*                 entry;

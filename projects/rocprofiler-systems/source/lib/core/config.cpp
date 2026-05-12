@@ -935,7 +935,7 @@ configure_settings(bool _init)
         {
             if(_config->get<bool>("ROCPROFSYS_CI"))
             {
-                throw std::runtime_error(
+                throw ::rocprofsys::config_error(
                     fmt::format("Error! Setting '{}' not found!", _name));
             }
         }
@@ -1508,7 +1508,7 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new,
 
     if(get_is_continuous_integration() && _new_setting == _config->end())
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::config_error(
             fmt::format("New configuration setting not found: '{}'", _new));
     }
 
@@ -1801,7 +1801,7 @@ get_mode()
         for(const auto& itr : _v->second->get_choices())
             _ss << ", " << itr;
         auto _msg = (_ss.str().length() > 2) ? _ss.str().substr(2) : std::string{};
-        throw std::runtime_error(
+        throw ::rocprofsys::config_error(
             fmt::format("[{}] invalid mode {}. Choices: {}", __FUNCTION__, _mode, _msg));
     }
     return Mode::Trace;
@@ -1917,7 +1917,7 @@ get_use_sampling()
     static auto _v = get_config()->find("ROCPROFSYS_USE_SAMPLING");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 #else
-    throw std::runtime_error(
+    throw ::rocprofsys::config_error(
         "Error! sampling was enabled but rocprof-sys was not built with "
         "libunwind support");
     static bool _v = false;
@@ -2148,7 +2148,7 @@ get_category_config()
         if(get_is_continuous_integration() &&
            _enabled.size() + _disabled.size() != _avail.size())
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::config_error(
                 fmt::format("Error! Internal error for categories: {} (enabled) + {} "
                             "(disabled) != {} (total)\n",
                             _enabled.size(), _disabled.size(), _avail.size()));
@@ -2908,7 +2908,7 @@ get_tmp_file(std::string _basename, std::string _ext)
 
     if(_fname.empty() || _fname.front() != '/')
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::config_error(
             fmt::format("Error! temporary file '{}' (based on '{}.'{}) is either empty "
                         "or is not an absolute path",
                         _fname, _basename, _ext));
@@ -2937,7 +2937,7 @@ get_causal_backend()
     } catch(std::runtime_error& _e)
     {
         auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-        throw std::runtime_error(
+        throw ::rocprofsys::config_error(
             fmt::format("[{}] invalid causal backend {}. Choices: {}", __FUNCTION__,
                         _mode, fmt::join(_v->second->get_choices(), ", ")));
     }
@@ -2967,7 +2967,7 @@ get_causal_mode()
         } catch(std::runtime_error& _e)
         {
             auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-            throw std::runtime_error(
+            throw ::rocprofsys::config_error(
                 fmt::format("[{}] invalid causal mode {}. Choices: {}", __FUNCTION__,
                             _mode, fmt::join(_v->second->get_choices(), ", ")));
         }

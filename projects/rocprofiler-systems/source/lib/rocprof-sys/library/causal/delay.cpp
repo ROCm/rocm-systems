@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/causal/delay.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/components/causal_gotcha.hpp"
@@ -58,7 +59,7 @@ compute_sleep_for_overhead()
         auto _diff = (_end - _beg);
         if(_diff < _val)
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::causal_error(
                 fmt::format("Error! sleep_for({}) [nanoseconds] >= {}", _val, _diff));
         }
         _stats += (_diff - _val);
@@ -187,7 +188,7 @@ delay::get_local(std::int64_t _tid)
     auto& _data = get_delay_data();
     if(_data == nullptr)
     {
-        throw std::runtime_error("No data: get_delay_data() returned nullptr");
+        throw ::rocprofsys::causal_error("No data: get_delay_data() returned nullptr");
     }
     return _data->at(_tid);
 }

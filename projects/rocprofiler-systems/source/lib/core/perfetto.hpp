@@ -5,6 +5,7 @@
 
 #include "categories.hpp"
 #include "common.hpp"
+#include "common/diagnostic/exception.hpp"
 #include <cstdint>
 
 #include "config.hpp"
@@ -135,7 +136,7 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
                 std::stringstream _css{};
                 for(auto&& eitr : _curr)
                     _css << " " << std::hex << std::setw(12) << std::left << eitr;
-                throw std::runtime_error(fmt::format(
+                throw ::rocprofsys::runtime_error(fmt::format(
                     "perfetto_counter_track emplace method for '{}' ({:p}) "
                     "invalidated C-string '{}' ({p}).\nprevious: {}\ncurrent: {}\n",
                     _v, (void*) _name->c_str(), std::get<0>(itr),

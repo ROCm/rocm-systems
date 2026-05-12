@@ -3,6 +3,7 @@
 
 #include "agent.hpp"
 #include "agent_info.hpp"
+#include "common/diagnostic/exception.hpp"
 #include <cstdint>
 #define ROCPROFILER_SDK_CEREAL_NAMESPACE_BEGIN                                           \
     namespace tim                                                                        \
@@ -49,13 +50,13 @@ check_amdsmi_error(amdsmi_status_t _code, const char* _file, int _line)
     auto        _err = amdsmi_status_code_to_string(_code, &_msg);
     if(_err != AMDSMI_STATUS_SUCCESS)
     {
-        throw std::runtime_error(fmt::format(
+        throw ::rocprofsys::gpu_error(fmt::format(
             "amdsmi_status_code_to_string failed. No error message available. "
             "Error code {} originated at {}:{}",
             static_cast<int>(_code), _file, _line));
     }
-    throw std::runtime_error(fmt::format("[{}:{}] Error code {} :: {}", _file, _line,
-                                         static_cast<int>(_code), _msg));
+    throw ::rocprofsys::gpu_error(fmt::format("[{}:{}] Error code {} :: {}", _file, _line,
+                                              static_cast<int>(_code), _msg));
 }
 
 std::atomic<bool> amdsmi_initialized{ false };
@@ -267,7 +268,7 @@ get_processor_handles()
 #endif  // AINIC_SUPPORTED
             if(processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU)
             {
-                throw std::runtime_error("Not AMD_GPU device type!");
+                throw ::rocprofsys::gpu_error("Not AMD_GPU device type!");
             }
             processors::processors_list.push_back(processor);
 

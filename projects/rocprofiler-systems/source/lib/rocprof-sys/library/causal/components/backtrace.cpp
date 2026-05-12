@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/causal/components/backtrace.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/state.hpp"
@@ -201,7 +202,7 @@ backtrace::sample(int _sig)
     }
     else
     {
-        throw std::runtime_error(fmt::format("Unhandled signal {}", _sig));
+        throw ::rocprofsys::causal_error(fmt::format("Unhandled signal {}", _sig));
     }
 
     ++_protect_flag;

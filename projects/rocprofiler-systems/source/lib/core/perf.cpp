@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "perf.hpp"
+#include "common/diagnostic/exception.hpp"
 #include <cstdint>
 
 #include <timemory/units.hpp>
@@ -55,7 +56,7 @@ get_hw_config(std::string_view _v)
         return hw_config::reference_cpu_cycles;
     else
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::runtime_error(
             fmt::format("Unknown perf hardware config: {}", _v.data()));
     }
 
@@ -89,7 +90,7 @@ get_sw_config(std::string_view _v)
         return sw_config::emulation_faults;
     else
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::runtime_error(
             fmt::format("Unknown perf hw cache config: {}", _v.data()));
     }
 
@@ -121,7 +122,7 @@ get_hw_cache_config(std::string_view _v)
     else if(HW_CACHE_CONFIG_REGEX("NODE"))
         _value |= static_cast<int>(hw_cache_config::node);
     else
-        throw std::runtime_error(
+        throw ::rocprofsys::runtime_error(
             fmt::format("Unknown perf software config: {}", _v.data()));
 
 #undef HW_CACHE_CONFIG_REGEX
@@ -183,7 +184,7 @@ config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
         case PERF_TYPE_MAX:
         default:
         {
-            throw std::runtime_error("Unsupported perf type");
+            throw ::rocprofsys::runtime_error("Unsupported perf type");
         }
     };
 

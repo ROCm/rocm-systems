@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/defines.h"
+#include "common/diagnostic/exception.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
@@ -183,7 +184,7 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
     auto _name = std::forward<FuncT>(_desc_generator)(std::forward<Args>(_args)...);
     if(get_is_continuous_integration() && _track_uuids.at(_uuid) != _name)
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::runtime_error(
             fmt::format("Error! Multiple invocations of UUID {} produced different "
                         "descriptions: \"{}\" and \"{}\"",
                         _uuid, _track_uuids.at(_uuid), _name));

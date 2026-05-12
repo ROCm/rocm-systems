@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/thread_info.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
@@ -64,7 +65,7 @@ init_index_data(std::int64_t _tid, bool _offset = false)
 
         if(itr->internal_value != _tid)
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::runtime_error(
                 fmt::format("Error! thread_info::init_index_data was called for "
                             "thread {} on thread {}\n",
                             _tid, itr->internal_value));
@@ -211,7 +212,7 @@ thread_info::get(native_handle_t&& _tid)
 
     if(get_is_continuous_integration() && unknown_thread)
     {
-        throw std::runtime_error("Unknown thread has been assigned a value");
+        throw ::rocprofsys::runtime_error("Unknown thread has been assigned a value");
     }
     return unknown_thread;
 }
@@ -230,7 +231,7 @@ thread_info::get(std::thread::id _tid)
 
     if(get_is_continuous_integration() && unknown_thread)
     {
-        throw std::runtime_error("Unknown thread has been assigned a value");
+        throw ::rocprofsys::runtime_error("Unknown thread has been assigned a value");
     }
 
     return unknown_thread;
@@ -267,20 +268,20 @@ thread_info::get(std::int64_t _tid, ThreadIdType _type)
     }
     else if(_type == ThreadIdType::PthreadID)
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::runtime_error(
             "rocprof-sys does not support thread_info::get(std::int64_t, "
             "ThreadIdType) with ThreadIdType::PthreadID");
     }
     else if(_type == ThreadIdType::StlThreadID)
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::runtime_error(
             "rocprof-sys does not support thread_info::get(std::int64_t, "
             "ThreadIdType) with ThreadIdType::StlThreadID");
     }
 
     if(get_is_continuous_integration() && unknown_thread)
     {
-        throw std::runtime_error("Unknown thread has been assigned a value");
+        throw ::rocprofsys::runtime_error("Unknown thread has been assigned a value");
     }
 
     return unknown_thread;

@@ -7,6 +7,7 @@
 #include "binary/binary_info.hpp"
 #include "binary/link_map.hpp"
 #include "binary/scope_filter.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/config.hpp"
 #include "core/containers/c_array.hpp"
@@ -71,7 +72,7 @@ auto speedup_dist      = []() {
     std::sort(_v.begin(), _v.end());
     if(get_is_continuous_integration() && _v.back() > 100)
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::causal_error(
             fmt::format("Error! last value is too large: {}", _v.back()));
     }
 
@@ -335,7 +336,7 @@ compute_eligible_lines_impl()
 
     if(_eligible_ar.empty())
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::causal_error(
             "Error! binary analysis (after filters) resulted in "
             "zero eligible instruction pointer addresses for causal experimentation");
     }
@@ -453,7 +454,8 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     set_thread_state(ThreadState::Disabled);
     if(!_thr_info->is_offset)
     {
-        throw std::runtime_error("Error! causal profiling thread should be offset");
+        throw ::rocprofsys::causal_error(
+            "Error! causal profiling thread should be offset");
     }
 
     if(!perform_experiment_impl_completed)
@@ -624,7 +626,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                 {
                     if(_impl_no == 0)
                     {
-                        throw std::runtime_error(
+                        throw ::rocprofsys::causal_error(
                             "Error! Causal experiment never started");
                     }
                 }
@@ -705,7 +707,7 @@ save_line_info(const settings::compose_filename_config& _cfg, int _verbose)
         }
         else
         {
-            throw std::runtime_error(fmt::format("Error opening {}", ofname));
+            throw ::rocprofsys::causal_error(fmt::format("Error opening {}", ofname));
         }
     };
 
@@ -921,7 +923,7 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                     for(const auto& itr : ditr.get_debug_line_info(_filters))
                     {
                         if(!_ipaddr.contains(itr.ipaddr()))
-                            throw std::runtime_error(
+                            throw ::rocprofsys::causal_error(
                                 fmt::format("Error! debug line info ipaddr ({}) is not "
                                                           "contained in symbol ipaddr ({})",
                                                    itr.ipaddr().as_hex(), _ipaddr.as_hex()));

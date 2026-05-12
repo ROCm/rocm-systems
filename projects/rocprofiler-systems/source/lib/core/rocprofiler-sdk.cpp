@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/rocprofiler-sdk.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "core/config.hpp"
 #include "timemory.hpp"
 #include <regex>
@@ -447,7 +448,7 @@ get_callback_domains()
     {
         if(invalid_domain(itr))
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::sdk_error(
                 fmt::format("unsupported ROCPROFSYS_ROCM_DOMAINS value: {}", itr));
         }
 
@@ -528,7 +529,7 @@ get_buffered_domains()
     {
         if(invalid_domain(itr))
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::sdk_error(
                 fmt::format("unsupported ROCPROFSYS_ROCM_DOMAINS value: {}", itr));
         }
 

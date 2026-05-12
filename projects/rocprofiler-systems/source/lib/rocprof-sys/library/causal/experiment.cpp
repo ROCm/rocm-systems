@@ -6,6 +6,7 @@
 #include "binary/dwarf_entry.hpp"
 #include "binary/symbol.hpp"
 #include "common/defines.h"
+#include "common/diagnostic/exception.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
@@ -549,7 +550,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
         }
         else
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::causal_error(
                 fmt::format("Error opening causal experiments output file: %s", _fname));
         }
     }
@@ -595,12 +596,12 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
 
             if(_name.empty())
             {
-                throw std::runtime_error(fmt::format("Error! causal experiment selection "
-                                                     "has no name: address={}, file={}, "
-                                                     "line={}, func={}",
-                                                     _line_info.address.as_hex(),
-                                                     _line_info.file, _line_info.line,
-                                                     _line_info.func));
+                throw ::rocprofsys::causal_error(
+                    fmt::format("Error! causal experiment selection "
+                                "has no name: address={}, file={}, "
+                                "line={}, func={}",
+                                _line_info.address.as_hex(), _line_info.file,
+                                _line_info.line, _line_info.func));
             }
 
             ofs << "experiment\tselected=" << rocprofsys::utility::demangle(_name)
@@ -653,7 +654,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
     }
     else
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::causal_error(
             fmt::format("Error opening causal experiments output file: {}", _fname));
     }
 }
@@ -691,7 +692,7 @@ experiment::load_experiments(std::string _fname, const filename_config_t& _cfg,
     {
         if(_throw_on_error)
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::causal_error(
                 fmt::format("Error opening causal experiments input file: %s", _fname));
         }
     }

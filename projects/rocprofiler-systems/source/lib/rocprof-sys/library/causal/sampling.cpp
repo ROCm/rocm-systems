@@ -3,6 +3,7 @@
 
 #include "library/causal/sampling.hpp"
 #include "binary/analysis.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
@@ -203,8 +204,9 @@ configure(bool _setup, std::int64_t _tid)
 
     if(get_use_sampling())
     {
-        throw std::runtime_error("Internal error! configuring causal profiling not "
-                                 "permitted when sampling is enabled");
+        throw ::rocprofsys::causal_error(
+            "Internal error! configuring causal profiling not "
+            "permitted when sampling is enabled");
     }
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);

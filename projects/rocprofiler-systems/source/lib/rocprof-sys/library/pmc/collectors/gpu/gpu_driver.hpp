@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/diagnostic/exception.hpp"
 #include "core/amd_smi.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 
@@ -103,10 +104,11 @@ private:
                    AMDSMI_STATUS_SUCCESS &&
                status_msg != nullptr)
             {
-                throw std::runtime_error(std::string(func) + " failed: " + status_msg);
+                throw ::rocprofsys::gpu_error(std::string(func) +
+                                              " failed: " + status_msg);
             }
-            throw std::runtime_error(std::string(func) + " failed with status " +
-                                     std::to_string(static_cast<int>(status)));
+            throw ::rocprofsys::gpu_error(std::string(func) + " failed with status " +
+                                          std::to_string(static_cast<int>(status)));
         }
     }
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/rocpd_processor.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "core/agent_manager.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
@@ -101,7 +102,7 @@ rocpd_processor_t::handle(const kernel_dispatch_sample& _kds)
 
     if(!kernel_symbol.has_value())
     {
-        throw std::runtime_error("Kernel symbol is missing for kernel dispatch");
+        throw ::rocprofsys::storage_error("Kernel symbol is missing for kernel dispatch");
     }
 
     auto region_name_primary_key = m_data_processor->insert_string(

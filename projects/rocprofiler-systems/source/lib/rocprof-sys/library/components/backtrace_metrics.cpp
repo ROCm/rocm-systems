@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/components/backtrace_metrics.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -179,7 +180,7 @@ apply_for_all_thread_names(std::int64_t                            _tid,
             if(_desc.empty()) _desc = itr;
             if(get_is_continuous_integration() && _desc.empty())
             {
-                throw std::runtime_error(
+                throw ::rocprofsys::runtime_error(
                     fmt::format("Empty description for {}", itr.c_str()));
             }
 
@@ -396,7 +397,7 @@ backtrace_metrics::init_perfetto(std::int64_t _tid, valid_array_t _valid)
             if(_desc.empty()) _desc = itr;
             if(get_is_continuous_integration() && _desc.empty())
             {
-                throw std::runtime_error(
+                throw ::rocprofsys::runtime_error(
                     fmt::format("Empty description for {}", itr.c_str()));
             }
             perfetto_counter_track<hw_counters>::emplace(
@@ -413,7 +414,7 @@ backtrace_metrics::fini_perfetto(std::int64_t _tid, valid_array_t _valid)
 
     if(get_is_continuous_integration() && !_thread_info)
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::runtime_error(
             fmt::format("Error! missing thread info for tid={}", _tid));
     }
     if(!_thread_info) return;

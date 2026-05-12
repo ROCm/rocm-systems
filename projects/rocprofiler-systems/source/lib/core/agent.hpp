@@ -1,3 +1,4 @@
+#include "common/diagnostic/exception.hpp"
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
@@ -26,7 +27,7 @@ to_string(agent_type type)
         case agent_type::GPU: return "GPU";
         case agent_type::CPU: return "CPU";
         case agent_type::NIC: return "NIC";
-        default: throw std::runtime_error("Invalid agent type.");
+        default: throw ::rocprofsys::device_error("Invalid agent type.");
     }
 }
 

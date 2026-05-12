@@ -3,6 +3,7 @@
 
 #include "library/components/mpi_gotcha.hpp"
 #include "api.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/mpi.hpp"
@@ -61,7 +62,8 @@ struct comm_rank_data
     {
         if(get_is_continuous_integration() && !_lhs.updated() && !_rhs.updated())
         {
-            throw std::runtime_error("Error! Comparing rank data that is not updated");
+            throw ::rocprofsys::runtime_error(
+                "Error! Comparing rank data that is not updated");
         }
 
         if(_lhs.updated() && !_rhs.updated()) return true;

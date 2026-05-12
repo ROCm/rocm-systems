@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/process_sampler.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "core/config.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
@@ -181,7 +182,7 @@ sampler::shutdown()
         // during CI, throw an error if polling_finished is not valid
         if(!polling_finished && get_is_continuous_integration())
         {
-            throw std::runtime_error("polling_finished is not valid");
+            throw ::rocprofsys::runtime_error("polling_finished is not valid");
         }
         if(polling_finished)
         {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "perfetto.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "config.hpp"
 #include "library/runtime.hpp"
 #include "output_file_registry.hpp"
@@ -130,7 +131,7 @@ stop()
 
     if(get_is_continuous_integration() && tracing_session == nullptr)
     {
-        throw std::runtime_error("Null pointer to the tracing session");
+        throw ::rocprofsys::runtime_error("Null pointer to the tracing session");
     }
 
     if(tracing_session)
@@ -181,7 +182,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
 
             if(get_is_continuous_integration() && _fnum_read != _fnum_elem)
             {
-                throw std::runtime_error(fmt::format(
+                throw ::rocprofsys::runtime_error(fmt::format(
                     "read {} elements from perfetto trace file '{}'. Expected {}",
                     _fnum_read, _tmp_file->filename, _fnum_elem));
             }

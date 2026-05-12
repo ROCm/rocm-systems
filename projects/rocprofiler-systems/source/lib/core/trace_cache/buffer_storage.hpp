@@ -6,6 +6,7 @@
 #include "core/trace_cache/cacheable.hpp"
 
 #include "common/defines.h"
+#include "common/diagnostic/exception.hpp"
 
 #include <atomic>
 #include <cassert>
@@ -107,7 +108,7 @@ public:
     {
         if(m_worker == nullptr)
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::storage_error(
                 "Worker is null - unable to start buffered storage.");
         }
 
@@ -123,7 +124,7 @@ public:
     {
         if(m_worker == nullptr)
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::storage_error(
                 "Worker is null - unable to shutdown buffered storage.");
         }
 
@@ -140,7 +141,7 @@ public:
     {
         if(m_worker == nullptr || !is_running())
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::storage_error(
                 "Trying to use buffered storage while it is not running");
         }
 
@@ -210,7 +211,7 @@ private:
         }
         if(ofs.fail())
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::storage_error(
                 std::string("Error flushing buffered storage to file for pid: ") +
                 std::to_string(m_worker_synchronization->origin_pid) + "\n");
         }

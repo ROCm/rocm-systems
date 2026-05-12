@@ -3,6 +3,7 @@
 
 #pragma once
 #include "common/defines.h"
+#include "common/diagnostic/exception.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
 
@@ -329,7 +330,7 @@ struct sample_processor_t
             case type_identifier_t::kfd_sample:
                 handle_sample(static_cast<const kfd_sample&>(sample));
                 break;
-            default: throw std::runtime_error("Unsupported sample type");
+            default: throw ::rocprofsys::schema_error("Unsupported sample type");
         }
     }
 

@@ -191,7 +191,7 @@ ensure_finalization(bool _static_init = false)
 
     if(config::set_signal_handler(nullptr) != &finalization_handler)
 
-        throw std::runtime_error(fmt::format(
+        throw ::rocprofsys::runtime_error(fmt::format(
             "Assignment of signal handler failed. signal handler is {:P}, expected "
             "{:P}",
             fmt::format("0x{:X}",
@@ -204,16 +204,16 @@ ensure_finalization(bool _static_init = false)
     {
         if(get_is_continuous_integration() && _tid->sequent_value != threading::get_id())
         {
-            throw std::runtime_error(fmt::format("Error! internal tid != {} :: {}",
-                                                 threading::get_id(),
-                                                 _tid->sequent_value));
+            throw ::rocprofsys::runtime_error(
+                fmt::format("Error! internal tid != {} :: {}", threading::get_id(),
+                            _tid->sequent_value));
         }
         if(get_is_continuous_integration() &&
            _tid->system_value != threading::get_sys_tid())
         {
-            throw std::runtime_error(fmt::format("Error! system tid != {} :: {}",
-                                                 threading::get_sys_tid(),
-                                                 _tid->system_value));
+            throw ::rocprofsys::runtime_error(fmt::format("Error! system tid != {} :: {}",
+                                                          threading::get_sys_tid(),
+                                                          _tid->system_value));
         }
     }
 
@@ -511,7 +511,7 @@ rocprofsys_init_library_hidden()
 
     if(get_is_continuous_integration() && get_state() != State::PreInit)
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::runtime_error(
             fmt::format("State is not PreInit :: {}", std::to_string(get_state())));
     }
 
@@ -530,8 +530,8 @@ rocprofsys_init_library_hidden()
 
     if(get_is_continuous_integration() && get_state() != State::Init)
     {
-        throw std::runtime_error(fmt::format("set_state(State::Init) failed. state is {}",
-                                             std::to_string(get_state())));
+        throw ::rocprofsys::runtime_error(fmt::format(
+            "set_state(State::Init) failed. state is {}", std::to_string(get_state())));
     }
 
     if(_debug_init)
@@ -584,7 +584,7 @@ rocprofsys_init_tooling_hidden(void)
 
     if(get_state() == State::Init)
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::runtime_error(
             fmt::format("{} called after rocprofsys_init_library() was explicitly called",
                         __FUNCTION__));
     }
@@ -796,7 +796,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
     if(_count > 0 &&
        std::tie(_args.first, _args.second) != std::tie(_mode_sv, _is_binary_rewrite))
     {
-        throw std::runtime_error(fmt::format(
+        throw ::rocprofsys::runtime_error(fmt::format(
             "rocprofsys_init(...) called multiple times with different arguments for "
             "mode and/or is_binary_rewrite:"
             "\n    Invocation #1: rocprofsys_init(mode={}, is_binary_rewrite={}, ...)"
@@ -827,7 +827,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
     tracing::get_finalization_functions().emplace_back([_argv0_c]() {
         if(get_is_continuous_integration() && get_state() != State::Active)
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::runtime_error(
                 fmt::format("Finalizer function for popping main invoked in non-active "
                             "state :: state = {}",
                             std::to_string(get_state())));
@@ -1259,14 +1259,14 @@ rocprofsys_finalize_hidden(void)
 
     if(_perfetto_output_error)
     {
-        throw std::runtime_error(fmt::format("Error opening perfetto output file: {}",
-                                             get_perfetto_output_filename()));
+        throw ::rocprofsys::runtime_error(fmt::format(
+            "Error opening perfetto output file: {}", get_perfetto_output_filename()));
     }
 
     if(get_is_continuous_integration() && _push_count > _pop_count &&
        !get_env<bool>("ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK", false, false))
     {
-        throw std::runtime_error(fmt::format(
+        throw ::rocprofsys::runtime_error(fmt::format(
             "rocprofsys_push_trace was called more times than "
             "rocprofsys_pop_trace. The inverse is fine but the current state "
             "means not every measurement was ended :: pushed: {} vs. popped: {}",

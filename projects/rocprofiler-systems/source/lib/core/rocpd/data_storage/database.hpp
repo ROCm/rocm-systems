@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include "common/diagnostic/exception.hpp"
 #include "common/traits.hpp"
 #include "logger/debug.hpp"
 #include <cstdint>
@@ -85,7 +86,7 @@ private:
         }
         ss << " [Sqlite3 error: " << error_message;
         ss << " (Extended error message: " << sqlite3_errmsg(_sqlite3_db_temp) << ")]";
-        throw std::runtime_error(ss.str());
+        throw ::rocprofsys::storage_error(ss.str());
     }
 
     template <typename T,
@@ -99,7 +100,7 @@ private:
     void bind_value([[maybe_unused]] sqlite3_stmt* stmt, [[maybe_unused]] int position,
                     [[maybe_unused]] T& _value, [[maybe_unused]] const std::string& query)
     {
-        throw std::runtime_error("Unsupported type for binding!");
+        throw ::rocprofsys::storage_error("Unsupported type for binding!");
     }
 
     template <typename T,
@@ -168,7 +169,7 @@ public:
     {
         if(db_ref == nullptr)
         {
-            throw std::runtime_error("Database cannot be nullptr!");
+            throw ::rocprofsys::storage_error("Database cannot be nullptr!");
         }
 
         sqlite3_stmt* p_stmt;

@@ -5,6 +5,7 @@
 
 #include "common/defines.h"
 
+#include "common/diagnostic/exception.hpp"
 #include "core/progress/callback.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/type_registry.hpp"
@@ -49,7 +50,7 @@ public:
 
         if(_type_processing == nullptr)
         {
-            throw std::runtime_error("TypeProcessing is nullptr");
+            throw ::rocprofsys::schema_error("TypeProcessing is nullptr");
         }
 
         LOG_DEBUG("Loading storage from file: {}", m_filename);
@@ -57,7 +58,7 @@ public:
         std::ifstream ifs(m_filename, std::ios::binary);
         if(!ifs.good())
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::schema_error(
                 fmt::format("Error opening file for reading: {}", m_filename));
         }
 
@@ -79,7 +80,7 @@ public:
         {
             if(!ifs.good())
             {
-                throw std::runtime_error(fmt::format(
+                throw ::rocprofsys::schema_error(fmt::format(
                     "Stream not in good state, stopping parse. File: {}", m_filename));
             }
 
@@ -101,7 +102,7 @@ public:
 
             if(ifs.fail())
             {
-                throw std::runtime_error(
+                throw ::rocprofsys::schema_error(
                     fmt::format("Bad read while consuming buffered storage. Filename: {} "
                                 "Bytes read: {}",
                                 m_filename, static_cast<int>(ifs.tellg())));

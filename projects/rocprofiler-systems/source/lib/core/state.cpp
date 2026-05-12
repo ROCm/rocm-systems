@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "state.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "common/static_object.hpp"
 #include "config.hpp"
 #include "utility.hpp"
@@ -70,7 +71,7 @@ set_state(State _n)
     // state should always be increased, not decreased
     if(get_is_continuous_integration() && _n < get_state())
     {
-        throw std::runtime_error(
+        throw ::rocprofsys::runtime_error(
             fmt::format("State is being assigned to a lesser value :: {} -> {}",
                         std::to_string(get_state()), std::to_string(_n)));
     }

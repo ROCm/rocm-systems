@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "gpu_metrics.hpp"
+#include "common/diagnostic/exception.hpp"
 #include <cstdint>
 
 #include <stdexcept>
@@ -60,7 +61,8 @@ std::uint8_t
 deserialize_uint8(const std::vector<std::uint8_t>& data, size_t& offset)
 {
     if(offset >= data.size())
-        throw std::runtime_error("Invalid serialized data: unexpected end");
+        throw ::rocprofsys::serialization_error(
+            "Invalid serialized data: unexpected end");
     return data[offset++];
 }
 
@@ -68,7 +70,8 @@ std::uint16_t
 deserialize_uint16(const std::vector<std::uint8_t>& data, size_t& offset)
 {
     if(offset + 1 >= data.size())
-        throw std::runtime_error("Invalid serialized data: unexpected end");
+        throw ::rocprofsys::serialization_error(
+            "Invalid serialized data: unexpected end");
     std::uint16_t value = static_cast<std::uint16_t>(data[offset]) |
                           (static_cast<std::uint16_t>(data[offset + 1]) << 8);
     offset += 2;
@@ -79,7 +82,8 @@ std::uint64_t
 deserialize_uint64(const std::vector<std::uint8_t>& data, size_t& offset)
 {
     if(offset + 7 >= data.size())
-        throw std::runtime_error("Invalid serialized data: unexpected end");
+        throw ::rocprofsys::serialization_error(
+            "Invalid serialized data: unexpected end");
     std::uint64_t value = 0;
     for(int i = 0; i < 8; ++i)
         value |= (static_cast<std::uint64_t>(data[offset + i]) << (i * 8));
@@ -222,7 +226,8 @@ deserialize_gpu_metrics(const std::vector<std::uint8_t>& serialized_data,
 {
     if(serialized_data.empty())
     {
-        throw std::runtime_error("Invalid serialized data: insufficient header size");
+        throw ::rocprofsys::serialization_error(
+            "Invalid serialized data: insufficient header size");
     }
     size_t offset = 0;
 

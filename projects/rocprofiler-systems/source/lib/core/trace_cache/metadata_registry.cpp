@@ -3,6 +3,7 @@
 
 #include "metadata_registry.hpp"
 #include "agent_manager.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "logger/debug.hpp"
 
 #include "core/config.hpp"
@@ -737,14 +738,14 @@ metadata_registry::overwrite_callback_names(
         if(get_is_continuous_integration() &&
            modified_ops.find(callback_kind) != modified_ops.end())
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::storage_error(
                 "Overwriting a previously overwritten entry is forbidden");
         }
 
         if(get_is_continuous_integration() && !modified_ops.empty() &&
            callback_kind >= modified_ops.begin()->first)
         {
-            throw std::runtime_error(
+            throw ::rocprofsys::storage_error(
                 "Category must have a larger enum value than all previously "
                 "modified_ops categories");
         }
@@ -756,7 +757,7 @@ metadata_registry::overwrite_callback_names(
             if(get_is_continuous_integration() &&
                (index < 0 || static_cast<size_t>(index) >= operation_names.size()))
             {
-                throw std::runtime_error("Index is invalid");
+                throw ::rocprofsys::storage_error("Index is invalid");
             }
             operation_names[index] = new_value;
         }
@@ -773,7 +774,8 @@ metadata_registry::overwrite_callback_names(
 
         if(get_is_continuous_integration() && renaming_entry == modified_ops.end())
         {
-            throw std::runtime_error("A category that needs to be emplaced is missing");
+            throw ::rocprofsys::storage_error(
+                "A category that needs to be emplaced is missing");
         }
 
         const auto& operations_vec = renaming_entry->second;

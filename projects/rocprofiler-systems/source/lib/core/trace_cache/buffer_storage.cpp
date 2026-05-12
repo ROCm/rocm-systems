@@ -3,6 +3,7 @@
 
 #include "buffer_storage.hpp"
 
+#include "common/diagnostic/exception.hpp"
 #include "logger/debug.hpp"
 
 #include <memory>
@@ -34,7 +35,7 @@ flush_worker_t::start(const pid_t& current_pid)
     if(m_worker_synchronization->is_running)
     {
         LOG_WARNING("Flush worker is already running for pid={}", current_pid);
-        throw std::runtime_error("Flush worker is already running");
+        throw ::rocprofsys::storage_error("Flush worker is already running");
     }
 
     LOG_DEBUG("Starting flush worker for pid={}, filepath={}", current_pid, m_filepath);
@@ -46,7 +47,7 @@ flush_worker_t::start(const pid_t& current_pid)
         LOG_CRITICAL("Failed to open file for writing: {}", m_filepath);
         std::stringstream _ss;
         _ss << "Error opening file for writing: " << m_filepath;
-        throw std::runtime_error(_ss.str());
+        throw ::rocprofsys::storage_error(_ss.str());
     }
 
     m_worker_synchronization->origin_pid    = current_pid;

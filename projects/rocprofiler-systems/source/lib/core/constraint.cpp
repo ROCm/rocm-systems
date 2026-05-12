@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "constraint.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "config.hpp"
 #include "state.hpp"
 #include "utility.hpp"
@@ -90,8 +91,9 @@ find_clock_identifier(const Tp& _v)
     for(const auto& itr : accepted_clock_ids)
         _choices.emplace_back(itr.as_string());
 
-    throw std::runtime_error(fmt::format("Unknown clock id {}: {}. Valid choices: {}",
-                                         _descript, _v, fmt::join(_choices, "")));
+    throw ::rocprofsys::config_error(
+        fmt::format("Unknown clock id {}: {}. Valid choices: {}", _descript, _v,
+                    fmt::join(_choices, "")));
 }
 
 void

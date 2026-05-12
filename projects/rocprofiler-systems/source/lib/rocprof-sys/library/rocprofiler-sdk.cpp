@@ -4,6 +4,7 @@
 #include "core/rocprofiler-sdk.hpp"
 #include "api.hpp"
 #include "binary/analysis.hpp"
+#include "common/diagnostic/exception.hpp"
 #include "common/synchronized.hpp"
 #include "core/common.hpp"
 #include "core/common_types.hpp"
@@ -2119,7 +2120,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
             }
             else
             {
-                throw std::runtime_error(fmt::format(
+                throw ::rocprofsys::sdk_error(fmt::format(
                     "unexpected rocprofiler_record_header_t buffer tracing category "
                     "kind. category: {}, kind: {}",
                     static_cast<int>(header->category), static_cast<int>(header->kind)));
@@ -2127,7 +2128,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
         }
         else
         {
-            throw std::runtime_error(fmt::format(
+            throw ::rocprofsys::sdk_error(fmt::format(
                 "unexpected rocprofiler_record_header_t buffer tracing category "
                 "kind. category: {}, kind: {}",
                 static_cast<int>(header->category), static_cast<int>(header->kind)));
