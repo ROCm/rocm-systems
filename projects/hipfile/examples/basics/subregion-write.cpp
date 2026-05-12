@@ -109,6 +109,8 @@ hash_file_range(const char *path, off_t offset, size_t size, uint64_t *out_hash)
     while (total < size) {
         ssize_t n = read(fd, cpu_buf + total, size - total);
         if (n < 0) {
+            if (errno == EINTR)
+                continue;
             fprintf(stderr, "hash_file_range: read %s failed (%s)\n", path, strerror(errno));
             close(fd);
             free(cpu_buf);
@@ -147,7 +149,7 @@ open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *ha
         return 1;
     }
 
-    hipFileDescr_t descr;
+    hipFileDescr_t descr{};
     descr.type      = hipFileHandleTypeOpaqueFD;
     descr.handle.fd = *fd;
 
@@ -257,6 +259,16 @@ main(int argc, char *argv[])
         goto free_devbuf;
     }
     buf_registered = true;
+
+    /* Zero the buffer so any alignment padding past payload_size is deterministic
+     * rather than whatever uninitialized device memory contained. The padding is
+     * still written out by hipFileWrite (write_xfer >= write_size) and only
+     * trimmed by ftruncate. */
+    hip_err = hipMemset(devbuf, 0, alloc_size);
+    if (hipSuccess != hip_err) {
+        fprintf(stderr, "Could not zero device buffer (%d)\n", hip_err);
+        goto deregister_buf;
+    }
 
     nbytes = hipFileRead(in_handle, devbuf, alloc_size, /*file_offset=*/0, /*buf_offset=*/0);
     if (nbytes < 0) {

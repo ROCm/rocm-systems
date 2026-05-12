@@ -103,6 +103,8 @@ hash_file(const char *path, size_t size, uint64_t *out_hash)
     while (total < size) {
         ssize_t n = read(fd, cpu_buf + total, size - total);
         if (n < 0) {
+            if (errno == EINTR)
+                continue;
             fprintf(stderr, "hash_file: read %s failed (%s)\n", path, strerror(errno));
             close(fd);
             free(cpu_buf);
@@ -141,7 +143,7 @@ open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *ha
         return 1;
     }
 
-    hipFileDescr_t descr;
+    hipFileDescr_t descr{};
     descr.type      = hipFileHandleTypeOpaqueFD;
     descr.handle.fd = *fd;
 
@@ -235,6 +237,16 @@ main(int argc, char *argv[])
     if (hipSuccess != hip_err) {
         fprintf(stderr, "Could not allocate %zu bytes on GPU %d (%d)\n", alloc_size, gpu_id, hip_err);
         goto close_in;
+    }
+
+    /* Zero the buffer so any alignment padding past payload_size is deterministic
+     * rather than uninitialized device memory. The padding is still written by
+     * hipFileWrite (alloc_size > payload_size when payload_size is not block-
+     * aligned) and only trimmed by ftruncate. */
+    hip_err = hipMemset(devbuf, 0, alloc_size);
+    if (hipSuccess != hip_err) {
+        fprintf(stderr, "Could not zero device buffer (%d)\n", hip_err);
+        goto free_devbuf;
     }
 
     /* 4. Chunk-read loop. The host pointer passed to hipFileRead advances by

@@ -107,6 +107,8 @@ hash_file(const char *path, size_t size, uint64_t *out_hash)
     while (total < size) {
         ssize_t n = read(fd, cpu_buf + total, size - total);
         if (n < 0) {
+            if (errno == EINTR)
+                continue;
             fprintf(stderr, "hash_file: read %s failed (%s)\n", path, strerror(errno));
             close(fd);
             free(cpu_buf);
@@ -145,7 +147,7 @@ open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *ha
         return 1;
     }
 
-    hipFileDescr_t descr;
+    hipFileDescr_t descr{};
     descr.type      = hipFileHandleTypeOpaqueFD;
     descr.handle.fd = *fd;
 

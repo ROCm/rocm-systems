@@ -99,11 +99,25 @@ hash_file(const char *path, size_t size, uint64_t *out_hash)
         return 1;
     }
 
-    ssize_t nread = read(fd, cpu_buf, size);
+    size_t total = 0;
+    while (total < size) {
+        ssize_t n = read(fd, cpu_buf + total, size - total);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            fprintf(stderr, "hash_file: read %s failed (%s)\n", path, strerror(errno));
+            close(fd);
+            free(cpu_buf);
+            return 1;
+        }
+        if (n == 0)
+            break;
+        total += (size_t)n;
+    }
     close(fd);
 
-    if (nread != (ssize_t)size) {
-        fprintf(stderr, "hash_file: read %zd bytes from %s, expected %zu\n", nread, path, size);
+    if (total != size) {
+        fprintf(stderr, "hash_file: short read on %s (%zu of %zu bytes)\n", path, total, size);
         free(cpu_buf);
         return 1;
     }
@@ -130,7 +144,7 @@ open_file_no_odirect(const char *path, int flags, mode_t mode, int *fd, hipFileH
         return 1;
     }
 
-    hipFileDescr_t descr;
+    hipFileDescr_t descr{};
     descr.type      = hipFileHandleTypeOpaqueFD;
     descr.handle.fd = *fd;
 
