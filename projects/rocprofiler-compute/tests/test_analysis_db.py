@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from rocprof_compute_analyze.analysis_db import db_analysis
+from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -337,13 +338,14 @@ def test_calc_expressions_noise_clamp():
         "value_name": ["clamped"],
         "value": [noise_clamp_expression],
     })
-    sys_info_df = pd.DataFrame([{"placeholder": 1}])
+    sys_info_df = pd.DataFrame([{"placeholder": 1, "gpu_arch": "gfx942"}])
 
     analyzer = db_analysis(MagicMock(), {})
     analyzer._pmc_df_per_workload = {workload_path: pmc_df}
     analyzer._metric_expression_data_per_workload = {workload_path: expression_template}
     analyzer._roofline_ceilings_per_workload = {workload_path: {}}
     analyzer._runs = {workload_path: MagicMock(sys_info=sys_info_df)}
+    analyzer._arch_configs = MagicMock()
 
     # Direct evaluate kwarg behavior.
     clear_noise_clamp_warnings()
@@ -394,6 +396,7 @@ def test_calc_expressions_noise_clamp():
         patch(
             "rocprof_compute_analyze.analysis_db.print_noise_clamp_summary"
         ) as print_noise_clamp_summary_mock,
+        patch.object(db_analysis, "validate_dual_issue_metrics"),
     ):
         analyzer.calc_expressions()
 
@@ -406,3 +409,139 @@ def test_calc_expressions_noise_clamp():
     assert "1.1 - clamped" in variance_warning_calls[0].args[0]
     print_noise_clamp_summary_mock.assert_called_once()
     assert get_noise_clamp_warnings()["count"] >= 1
+
+
+# =============================================================================
+# Dual-issue VALU validation tests
+# =============================================================================
+
+
+def _make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
+    """Build an arch_config stub with a metric_table carrying one VALU row."""
+    metric_df = pd.DataFrame(
+        {
+            "Metric": [metric_name],
+            "Value": ["unused_expression"],
+            peak_col: ["unused_peak_expression"],
+        },
+        index=pd.Index(["1.1"], name="Metric_ID"),
+    )
+    arch_config = MagicMock()
+    arch_config.dfs = {201: metric_df}
+    arch_config.dfs_type = {201: "metric_table"}
+    return arch_config
+
+
+def test_validate_dual_issue_metrics_emits_warning_above_peak():
+    """Long-format VALU Utilization above peak triggers the dual-issue warning."""
+    arch_config = _make_dual_issue_arch_config("VALU Utilization")
+    workload_values_df = pd.DataFrame({
+        "metric_id": ["1.1", "1.1"],
+        "value_name": ["Value", "Peak"],
+        "value": [150.0, 100.0],
+    })
+    pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE": [1000]})
+
+    with patch("utils.metrics.common.console_warning") as console_warning_mock:
+        db_analysis.validate_dual_issue_metrics(
+            pmc_df,
+            {"gpu_arch": "gfx942"},
+            workload_values_df,
+            arch_config,
+        )
+
+    console_warning_mock.assert_called_once()
+    msg = console_warning_mock.call_args.args[0]
+    assert "VALU Utilization can go up to 200%" in msg
+
+
+def test_validate_dual_issue_metrics_silent_below_peak():
+    """Below-peak VALU Utilization stays silent."""
+    arch_config = _make_dual_issue_arch_config("VALU Utilization")
+    workload_values_df = pd.DataFrame({
+        "metric_id": ["1.1", "1.1"],
+        "value_name": ["Value", "Peak"],
+        "value": [80.0, 100.0],
+    })
+    pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE": [1000]})
+
+    with patch("utils.metrics.common.console_warning") as console_warning_mock:
+        db_analysis.validate_dual_issue_metrics(
+            pmc_df,
+            {"gpu_arch": "gfx942"},
+            workload_values_df,
+            arch_config,
+        )
+
+    console_warning_mock.assert_not_called()
+
+
+def test_validate_dual_issue_metrics_uses_peak_empirical_fallback():
+    """Peak (Empirical) column is preferred over Peak when both are absent."""
+    arch_config = _make_dual_issue_arch_config(
+        "VALU FLOPs (F64)", peak_col="Peak (Empirical)"
+    )
+    workload_values_df = pd.DataFrame({
+        "metric_id": ["1.1", "1.1"],
+        "value_name": ["Value", "Peak (Empirical)"],
+        "value": [600.0, 400.0],
+    })
+    pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE": [1000]})
+
+    with patch("utils.metrics.common.console_warning") as console_warning_mock:
+        db_analysis.validate_dual_issue_metrics(
+            pmc_df,
+            {"gpu_arch": "gfx942"},
+            workload_values_df,
+            arch_config,
+        )
+
+    console_warning_mock.assert_called_once()
+    msg = console_warning_mock.call_args.args[0]
+    assert "VALU FLOPs can exceed the peak value" in msg
+
+
+def test_validate_dual_issue_metrics_appends_valu2_suffix_on_gfx950():
+    """gfx950 with non-zero SQ_ACTIVE_INST_VALU2 appends the confirmation."""
+    arch_config = _make_dual_issue_arch_config("VALU Utilization")
+    workload_values_df = pd.DataFrame({
+        "metric_id": ["1.1", "1.1"],
+        "value_name": ["Value", "Peak"],
+        "value": [150.0, 100.0],
+    })
+    pmc_df = pd.DataFrame({
+        ValuDualIssueDetector.VALU2_COUNTER: [1, 2, 3],
+    })
+
+    with patch("utils.metrics.common.console_warning") as console_warning_mock:
+        db_analysis.validate_dual_issue_metrics(
+            pmc_df,
+            {"gpu_arch": "gfx950"},
+            workload_values_df,
+            arch_config,
+        )
+
+    msg = console_warning_mock.call_args.args[0]
+    assert "Dual-issue activity detected via SQ_ACTIVE_INST_VALU2 counter" in msg
+
+
+def test_validate_dual_issue_metrics_skips_non_metric_table_dfs():
+    """dfs entries whose dfs_type is not metric_table are ignored."""
+    arch_config = _make_dual_issue_arch_config("VALU Utilization")
+    arch_config.dfs_type = {201: "raw_csv_table"}
+    workload_values_df = pd.DataFrame({
+        "metric_id": ["1.1", "1.1"],
+        "value_name": ["Value", "Peak"],
+        "value": [150.0, 100.0],
+    })
+    pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE": [1000]})
+
+    with patch("utils.metrics.common.console_warning") as console_warning_mock:
+        db_analysis.validate_dual_issue_metrics(
+            pmc_df,
+            {"gpu_arch": "gfx942"},
+            workload_values_df,
+            arch_config,
+        )
+
+    console_warning_mock.assert_not_called()
