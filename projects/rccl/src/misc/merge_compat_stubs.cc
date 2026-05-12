@@ -41,10 +41,6 @@ ncclResult_t ncclScheduleBcastTasksToPlan(
   return ncclInternalError;
 } // RCCL_COMPAT_STUB
 
-ncclResult_t ncclSocketMultiOp(struct ncclSocketOp* /*ops*/, int /*numOps*/) {
-  return ncclInternalError;
-} // RCCL_COMPAT_STUB
-
 int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized,
                       int64_t* cache, int8_t* noCache);
 void ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, int64_t* cache) {
@@ -52,19 +48,8 @@ void ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, int6
   ncclLoadParam(env, deftVal, uninitialized, cache, &noCache);
 } // RCCL_COMPAT_STUB
 
-void* ncclOpenEnvPluginLib(const char* /*name*/) {
-  return nullptr;
-} // RCCL_COMPAT_STUB
-
-ncclResult_t ncclInitEnv(void) {
-  if (ncclEnvPluginInitialized()) return ncclSuccess;
-  return ncclEnvPluginInit();
-} // RCCL_COMPAT_STUB
-
 void ncclDevCommCopyLsaData(void* /*dstRankPtr*/, void const* /*srcRankPtr*/) {
 } // RCCL_COMPAT_STUB
-
-NCCL_PARAM(PollTimeOut, "SOCKET_POLL_TIMEOUT", 100); // RCCL_COMPAT_STUB
 
 const char* ncclVersionToString(int version, char* buf, size_t bufLen) {
   int major = version / 10000;

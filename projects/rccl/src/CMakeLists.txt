@@ -313,7 +313,6 @@ set(SRC_FILES
   nccl_device/gin_scratch.cc
   nccl_device/ll_a2a.cc
   nccl_device/lsa_barrier.cc
-  nccl_device/mem_barrier.cc
   os/linux.cc
   # rma/rma.cc             # RCCL_COMPAT_STUB: NCCL RMA path not wired through RCCL on AMD
   # rma/rma_ce.cc          # RCCL_COMPAT_STUB: NCCL RMA CE path depends on CUDA-only state
