@@ -120,6 +120,8 @@ NCCL_PARAM(ChanLoopFenceProbe, "CHAN_LOOP_FENCE_PROBE", 0);
 NCCL_PARAM(RankFenceProbe, "RANK_FENCE_PROBE", 0);
 // ROCM-21766 diagnostic: drain inside the per-channel loop, after each devRingUserRanks H2D memcpy. Remove before merge.
 NCCL_PARAM(InLoopFenceProbe, "IN_LOOP_FENCE_PROBE", 0);
+// ROCM-21766 diagnostic (Probe 7h): log src/dst VA, byte count, and stream for each per-channel devRingUserRanks H2D memcpy. Remove before merge.
+NCCL_PARAM(LogChanLoopVa, "LOG_CHAN_LOOP_VA", 0);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
 
@@ -1005,6 +1007,16 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
     tmpCommAndChans.channels[c].nvls = comm->channels[c].nvls;
 
     if (comm->channels[c].ring.userRanks != nullptr) {
+      // ROCM-21766 diagnostic (Probe 7h): log per-iteration VAs/bytes/stream BEFORE the H2D
+      // memcpy so a faulting iteration is identifiable from the last logged line. Remove before merge.
+      if (ncclParamLogChanLoopVa()) {
+        INFO(NCCL_INIT, "ROCM21766_CHANLOOP c=%d dst=%p src=%p nbytes=%zu stream=%p",
+             c,
+             (void*)tmpCommAndChans.channels[c].ring.userRanks,
+             (void*)comm->channels[c].ring.userRanks,
+             (size_t)(nRanks * sizeof(int)),
+             (void*)deviceStream);
+      }
       NCCLCHECKGOTO(ncclCudaMemcpyAsync(tmpCommAndChans.channels[c].ring.userRanks, comm->channels[c].ring.userRanks, nRanks, deviceStream), ret, fail);
       // ROCM-21766 diagnostic: optionally drain after each per-channel devRingUserRanks
       // H2D memcpy to bisect within the loop and isolate which iteration (or whether the
