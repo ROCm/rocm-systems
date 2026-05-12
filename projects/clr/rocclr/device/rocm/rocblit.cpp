@@ -2601,15 +2601,15 @@ struct CopyBufferBatchDescriptor {
 };
 
 // ================================================================================================
-bool KernelBlitManager::shaderCopyBufferBatch(
+bool KernelBlitManager::ShaderCopyBufferBatch(
     const std::vector<amd::BatchCopyOp> &copy_operations,
     bool attach_signal) const {
   std::scoped_lock transfer_operations_lock(lockXferOps_);
 
   constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
   constexpr uint32_t kLocalWorkSize = 512;
-  const uint32_t max_workgroups_per_copy =
-      std::max<uint32_t>(dev().settings().limit_blit_wg_ / copy_operations.size(), 1);
+  const uint32_t max_workgroups_per_copy = std::max<uint32_t>(
+      dev().settings().limit_blit_wg_ / copy_operations.size(), 1);
   const size_t descriptor_bytes =
       copy_operations.size() * sizeof(CopyBufferBatchDescriptor);
   void *descriptor_buffer = gpu().allocKernArg(descriptor_bytes, kCBAlignment);
@@ -2642,8 +2642,8 @@ bool KernelBlitManager::shaderCopyBufferBatch(
         std::max(max_aligned_element_count, aligned_element_count);
 
     descriptors[descriptor_index++] = {
-        source_address,        destination_address, aligned_element_count,
-        aligned_element_size,  trailing_byte_count};
+        source_address, destination_address, aligned_element_count,
+        aligned_element_size, trailing_byte_count};
   }
 
   uint32_t workgroup_count = static_cast<uint32_t>(
@@ -2748,20 +2748,22 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
       gpu().Barriers().AddExternalSignal(priorSignal);
     }
 
-    bool attachSignal = false;
-    for (const auto& op : d2dCopyOps) {
-      attachSignal |= !op.metadata.isAsync_;
+    bool attach_signal = false;
+    for (const auto &op : d2dCopyOps) {
+      attach_signal |= !op.metadata.isAsync_;
     }
 
-    std::map<size_t, std::vector<amd::BatchCopyOp>, std::greater<size_t>> d2dCopyOpsBySize;
-    for (const auto& op : d2dCopyOps) {
-      d2dCopyOpsBySize[op.size].push_back(op);
+    std::map<size_t, std::vector<amd::BatchCopyOp>, std::greater<size_t>>
+        d2d_copy_ops_by_size;
+    for (const auto &op : d2dCopyOps) {
+      d2d_copy_ops_by_size[op.size].push_back(op);
     }
 
-    for (const auto& copyOpsBySizeEntry : d2dCopyOpsBySize) {
-      const auto& copyOpsBySize = copyOpsBySizeEntry.second;
-      if (!shaderCopyBufferBatch(copyOpsBySize, attachSignal)) {
-        LogError("KernelBlitManager::shaderCopyBufferBatch: Intra-device batch copy failed!");
+    for (const auto &copy_ops_by_size_entry : d2d_copy_ops_by_size) {
+      const auto &copy_ops_by_size = copy_ops_by_size_entry.second;
+      if (!ShaderCopyBufferBatch(copy_ops_by_size, attach_signal)) {
+        LogError("KernelBlitManager::ShaderCopyBufferBatch: Intra-device batch "
+                 "copy failed!");
         return false;
       }
     }

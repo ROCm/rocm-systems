@@ -605,7 +605,7 @@ class KernelBlitManager : public DmaBlitManager {
                         bool attachSignal = false) const;
 
   //! Copies a batch of buffers using a single/multiple shader dispatch
-  bool shaderCopyBufferBatch(const std::vector<amd::BatchCopyOp> &copy_ops,
+  bool ShaderCopyBufferBatch(const std::vector<amd::BatchCopyOp>& copy_ops,
                              bool attach_signal = false) const;
 
   //! Atomically updates a memory location (i.e. writes, increments or decrements the memory).
