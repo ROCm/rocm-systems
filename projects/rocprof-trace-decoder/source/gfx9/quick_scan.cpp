@@ -125,7 +125,7 @@ size_t scan_gfx9_scalar(const uint8_t* buf, size_t size, QuickToken* __restrict_
         {
             uint64_t contents;
             std::memcpy(&contents, buf + bp, sizeof(contents));
-            out[n_out++] = QuickToken{contents, nibble};
+            out[n_out++] = QuickToken{contents, nibble, bp};
             if (n_out >= out_cap) return n_out;
         }
 
@@ -148,7 +148,7 @@ size_t scan_gfx9_scalar(const uint8_t* buf, size_t size, QuickToken* __restrict_
             const size_t avail = size - bp;
             const size_t to_copy = avail < 8 ? avail : 8;
             std::memcpy(&contents, buf + bp, to_copy);
-            out[n_out++] = QuickToken{contents, nibble};
+            out[n_out++] = QuickToken{contents, nibble, bp};
             if (n_out >= out_cap) break;
         }
 
@@ -255,7 +255,7 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,bmi2"))) size_t scan_gfx9_avx
             {
                 uint64_t contents;
                 std::memcpy(&contents, buf + bp + pos, 8);
-                out[n_out++] = QuickToken{contents, static_cast<uint32_t>(buf[bp + pos] & 0x0F)};
+                out[n_out++] = QuickToken{contents, static_cast<uint64_t>(buf[bp + pos] & 0x0F), bp + pos};
                 if (n_out >= out_cap) goto done;
             }
 
@@ -281,7 +281,7 @@ done:
             const size_t avail = size - bp;
             const size_t to_copy = avail < 8 ? avail : 8;
             std::memcpy(&contents, buf + bp, to_copy);
-            out[n_out++] = QuickToken{contents, nibble};
+            out[n_out++] = QuickToken{contents, nibble, bp};
             if (n_out >= out_cap) break;
         }
 
@@ -378,7 +378,7 @@ __attribute__((target("avx512bw,avx512f,bmi2"))) size_t scan_gfx9_avx512bw(
                     // it implicitly (the LUT is keyed by nibble, so
                     // info[pos] tells us this position is rare iff its
                     // nibble was rare). Recompute to populate QuickToken.type:
-                    out[n_out++] = QuickToken{contents, static_cast<uint32_t>(buf[bp + pos] & 0x0F)};
+                    out[n_out++] = QuickToken{contents, static_cast<uint64_t>(buf[bp + pos] & 0x0F), bp + pos};
                     if (n_out >= out_cap) goto done;
                 }
 
@@ -406,7 +406,7 @@ done:
             const size_t avail = size - bp;
             const size_t to_copy = avail < 8 ? avail : 8;
             std::memcpy(&contents, buf + bp, to_copy);
-            out[n_out++] = QuickToken{contents, nibble};
+            out[n_out++] = QuickToken{contents, nibble, bp};
             if (n_out >= out_cap) break;
         }
 
@@ -506,7 +506,7 @@ __attribute__((target("avx2"))) size_t scan_gfx9_avx2(
             {
                 uint64_t contents;
                 std::memcpy(&contents, buf + bp + pos, 8);
-                out[n_out++] = QuickToken{contents, static_cast<uint32_t>(buf[bp + pos] & 0x0F)};
+                out[n_out++] = QuickToken{contents, static_cast<uint64_t>(buf[bp + pos] & 0x0F), bp + pos};
                 if (n_out >= out_cap) goto done;
             }
 
@@ -532,7 +532,7 @@ done:
             const size_t avail = size - bp;
             const size_t to_copy = avail < 8 ? avail : 8;
             std::memcpy(&contents, buf + bp, to_copy);
-            out[n_out++] = QuickToken{contents, nibble};
+            out[n_out++] = QuickToken{contents, nibble, bp};
             if (n_out >= out_cap) break;
         }
 
