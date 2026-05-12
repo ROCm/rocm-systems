@@ -47,7 +47,6 @@ enum CounterBlockId {
   SqPsCounterBlockId,
   SqHsCounterBlockId,
   SqCsCounterBlockId,
-  SqgCounterBlockId,
   SxCounterBlockId,
   TaCounterBlockId,
   // TcaCounterBlockId,
@@ -149,7 +148,6 @@ static const uint32_t SdmaCounterBlockNumCounters = 2;
 static const uint32_t UmcCounterBlockNumCounters = 5;
 static const uint32_t SpiCounterBlockNumCounters = 6;
 static const uint32_t SqCounterBlockNumCounters = 8;
-static const uint32_t SqgCounterBlockNumCounters = 8;
 static const uint32_t SxCounterBlockNumCounters = 4;
 static const uint32_t TaCounterBlockNumCounters = 2;
 static const uint32_t TcaCounterBlockNumCounters = 4;
@@ -189,7 +187,6 @@ static const uint32_t RlcCounterBlockMaxEvent = 7;
 static const uint32_t SdmaCounterBlockMaxEvent = 15;  // SDMA_PERF_SEL_MMHUB_TAG_DELAY_COUNTER;
 static const uint32_t SpiCounterBlockMaxEvent = SPI_PERF_BUSY;     // SC_SC_SPI_EVENT;
 static const uint32_t SqCounterBlockMaxEvent = SQ_PERF_SEL_NONE2;  // SQC_PERF_SEL_DUMMY_LAST;
-static const uint32_t SqgCounterBlockMaxEvent = 0x2e;              // SQG_PERF_SEL_DUMMY_LAST
 static const uint32_t SxCounterBlockMaxEvent =
     SX_PERF_SEL_DB3_4X2_DISCARD;  // SX_PERF_SEL_DB3_SIZE;
 // static const uint32_t TaCounterBlockMaxEvent        = TA_PERF_SEL_first_xnack_on_phase3;
