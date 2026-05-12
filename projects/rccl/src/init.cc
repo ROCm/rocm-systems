@@ -110,6 +110,8 @@ NCCL_PARAM(NvlsChannels, "NVLS_NCHANNELS", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(SetCpuStackSize, "SET_CPU_STACK_SIZE", 1);
 // ROCM-21766 diagnostic: drain the device strong-stream before the final devCommSetup memcpy. Remove before merge.
 NCCL_PARAM(DrainFenceProbe, "DRAIN_FENCE_PROBE", 0);
+// ROCM-21766 diagnostic: drain ALL device work before devCommSetup to fence in-flight P2pSetup blits. Remove before merge.
+NCCL_PARAM(P2pDrainFenceProbe, "P2P_DRAIN_FENCE_PROBE", 0);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
 
@@ -2093,6 +2095,13 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->ceColl.baseUCSymReadyPtr = NULL;
   comm->ceColl.baseUCSymComplPtr = NULL;
 
+  // ROCM-21766 diagnostic: optionally drain ALL device work before devCommSetup runs its
+  // own deviceStream operations. Targets in-flight cudaMemcpyAsync(connInfo,...) blits from
+  // ncclTransportP2pSetup that are joined into deviceStream via ncclStreamWaitStream but
+  // not host-synced. Remove before merge.
+  if (ncclParamP2pDrainFenceProbe()) {
+    CUDACHECKGOTO(cudaDeviceSynchronize(), ret, fail);
+  }
   // Call devCommSetup before the last barrier, making sure we don't have a thread running in front and starting to
   // launch NCCL kernels before all cuda mem allocation is complete. That could cause a deadlock.
   NCCLCHECKGOTO(devCommSetup(comm), ret, fail);
