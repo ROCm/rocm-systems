@@ -9,7 +9,7 @@
 #include "gdrwrap.h"
 #include "transport.h"
 
-// When set to 1, ncclP2pChannelBaseForRound uses batch stride 8 instead of 1 when p2p-batching is not enabled
+// When RCCL_PXN_OPT_QP_USAGE is set to 1, ncclP2pChannelBaseForRound uses batch stride 8 instead of 1 when p2p-batching is not enabled
 RCCL_PARAM(PxnOptQpUsage, "PXN_OPT_QP_USAGE", 0);
 
 ncclResult_t initChannel(struct ncclComm* comm, int channelId) {
