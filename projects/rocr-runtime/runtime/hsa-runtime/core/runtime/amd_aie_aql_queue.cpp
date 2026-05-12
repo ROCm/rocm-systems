@@ -92,14 +92,11 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
   signal_.kind = AMD_SIGNAL_KIND_DOORBELL;
   signal_.queue_ptr = &amd_queue_;
 
-  HsaQueueResource queue_resource = {};
-  hsa_status_t status = agent->driver().CreateQueue(
-      node_id, HSA_QUEUE_COMPUTE_AQL, 0, rocr::HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL, 0, nullptr,
-      queue_size_bytes_, 0, nullptr, queue_resource);
-  if (status != HSA_STATUS_SUCCESS) {
-    throw hsa_exception(status, "Failed to create a hardware context for an AIE queue.");
+  auto& driver = static_cast<XdnaDriver&>(agent->driver());
+  hsa_status_t err = driver.CreateKernelModeQueue(req_size_pkts, &kmq_metadata_);
+  if (err != HSA_STATUS_SUCCESS) {
+    throw hsa_exception(err, "Failed to create KMQ metadata for the AIE queue.");
   }
-  queue_id_ = queue_resource.QueueId;
 
   active_ = true;
 
@@ -107,7 +104,9 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
 }
 
 AieAqlQueue::~AieAqlQueue() {
-  AieAqlQueue::Inactivate();
+  auto err = AieAqlQueue::Inactivate();
+  assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
+  (void)err;
   if (ring_buf_) {
     auto& agent = static_cast<AieAgent&>(*GetAgent());
     agent.system_deallocator()(ring_buf_);
@@ -119,13 +118,15 @@ AieAqlQueue::~AieAqlQueue() {
 
 hsa_status_t AieAqlQueue::Inactivate() {
   bool active = active_.exchange(false, std::memory_order_relaxed);
-  if (active) {
-    auto err = GetAgent()->driver().DestroyQueue(queue_id_);
-    assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
-    (void)err;
-    atomic::Fence(std::memory_order_acquire);
+  if (!active) {
+    return HSA_STATUS_SUCCESS;
   }
-  return HSA_STATUS_SUCCESS;
+
+  auto& driver = static_cast<XdnaDriver&>(GetAgent()->driver());
+  hsa_status_t err = driver.DestroyKernelModeQueue(kmq_metadata_);
+  kmq_metadata_ = nullptr;
+  atomic::Fence(std::memory_order_acquire);
+  return err;
 }
 
 hsa_status_t AieAqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
@@ -220,10 +221,10 @@ void AieAqlQueue::SubmitPackets() {
   }
 
   const auto num_pkts = last_pkt_idx - first_pkt_idx;
-  hsa_status_t status = driver.SubmitCmdChain(amd_queue_.hsa_queue, queue_id_, first_pkt_idx,
-                                              num_pkts, agent.properties().NumNeuralCores);
-  if (status != HSA_STATUS_SUCCESS) {
-    throw hsa_exception(status, "Could not submit packets");
+  hsa_status_t err = driver.SubmitCmdChain(amd_queue_.hsa_queue, kmq_metadata_, first_pkt_idx,
+                                           num_pkts, agent.properties().NumNeuralCores);
+  if (err != HSA_STATUS_SUCCESS) {
+    throw hsa_exception(err, "Could not submit packets");
   }
 
   atomic::Store(&amd_queue_.read_dispatch_id, last_pkt_idx, std::memory_order_release);

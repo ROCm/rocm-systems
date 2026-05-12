@@ -110,11 +110,12 @@ class AieAqlQueue : public core::Queue,
     return rtti_id_;
   }
 
-  HSA_QUEUEID queue_id_ = INVALID_QUEUEID;
   /// @brief Queue size in bytes.
   uint32_t queue_size_bytes_ = 0;
   /// @brief Base of the queue's ring buffer storage.
   void* ring_buf_ = nullptr;
+  /// @brief Kernel Mode Queue (KMQ) metadata associated with this queue.
+  void* kmq_metadata_ = nullptr;
   /// @brief Indicates if queue is active.
   std::atomic<bool> active_ = false;
 };
