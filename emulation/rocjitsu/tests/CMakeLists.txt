@@ -42,6 +42,7 @@ add_executable(rocjitsu_tests
     shared_infra_test.cpp
     transcendental_test.cpp
     analysis/liveness_test.cpp
+    patch/spill_manager_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
     kfd_ioctl_test.cpp
