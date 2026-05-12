@@ -1,17 +1,17 @@
-=== gdb-style boxed (default - with color) ===
-[90m┌────────────────────────────────────────────────────────────────────┐[0m
-[90m│[0m [1;91merror:[0m Failed to parse PMC metric 'bad_metric': value out of range [90m│[0m
-[90m└────────────────────────────────────────────────────────────────────┘[0m
+=== side-bar wrap (default - with color) ===
+[90m┌─[0m [1;91merror[0m
+[90m│[0m Failed to parse PMC metric 'bad_metric': value out of range
+[90m│[0m
+[90m│[0m   [90m#0[0m  [36m(anonymous namespace)::section(std::exception const&, bool, char const*)[0m  [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:59[0m
+[90m│[0m   [90m#1[0m  [36mmain[0m  [2min[0m [90msource/lib/common/diagnostic/tests/demo.cpp[0m[33m:74[0m
+[90m│[0m        [2m... 3 frames skipped (libc, runtime) ...[0m
+[90m└─[0m
 
-  [90m#0[0m  [36m(anonymous namespace)::section(std::exception const&, bool, char const*)[0m  [2min[0m [90mprojects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp[0m[33m:59[0m
-  [90m#1[0m  [36mmain[0m  [2min[0m [90mprojects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp[0m[33m:74[0m
-       [2m... 3 frames skipped (libc, runtime) ...[0m
-
-=== gdb-style boxed (no color) ===
-+--------------------------------------------------------------------+
-| error: Failed to parse PMC metric 'bad_metric': value out of range |
-+--------------------------------------------------------------------+
-
-  #0  (anonymous namespace)::section(std::exception const&, bool, char const*)  in projects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp:59
-  #1  main  in projects/rocprofiler-systems/source/lib/common/diagnostic/tests/demo.cpp:75
-       ... 3 frames skipped (libc, runtime) ...
+=== side-bar wrap (no color) ===
++- error
+| Failed to parse PMC metric 'bad_metric': value out of range
+|
+|   #0  (anonymous namespace)::section(std::exception const&, bool, char const*)  in source/lib/common/diagnostic/tests/demo.cpp:59
+|   #1  main  in source/lib/common/diagnostic/tests/demo.cpp:75
+|        ... 3 frames skipped (libc, runtime) ...
++-
