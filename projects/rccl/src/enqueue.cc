@@ -1914,12 +1914,14 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 
   if (planner->numStreams == 1 && !plan->persistent) {
     latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
-    comm->lastStream = planner->streams->stream;
-    comm->lastStreamValid = true;
     CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra), ret, do_return);
     // Record doneEvent so a future ncclLaunchPrepare on a different stream can wait on it.
     // Cheap (one event record per fast-path launch) and load-bearing for stream-change correctness.
     CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
+    // Update bookkeeping only after both launch and event-record succeed, so a partial
+    // failure does not leave lastStreamValid asserting a doneEvent that was never recorded.
+    comm->lastStream = launchStream;
+    comm->lastStreamValid = true;
     latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
     return ncclSuccess;
   }
@@ -2007,10 +2009,11 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra), ret, do_return);
   latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
   // Mirror fast-path bookkeeping so the next ncclLaunchPrepare can detect stream-change
-  // and find a fresh doneEvent to wait on.
+  // and find a fresh doneEvent to wait on. Update only after the event-record succeeds
+  // so a partial failure does not leave lastStreamValid asserting an unrecorded event.
+  CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
   comm->lastStream = launchStream;
   comm->lastStreamValid = true;
-  CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
 
 do_return:
   NCCLCHECK(ncclProfilerStopKernelLaunchEvent(plan));

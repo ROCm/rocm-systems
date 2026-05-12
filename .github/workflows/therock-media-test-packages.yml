@@ -32,7 +32,7 @@ jobs:
           "job_name": "rocdecode",
           "fetch_artifact_args": "--rocdecode --tests",
           "timeout_minutes": 10,
-          "test_script": "python build_tools/github_actions/test_executable_scripts/test_rocdecode.py",
+          "test_script": "python ./build/share/rocdecode/test/run_rocdecode.py",
           "shard_arr": [1],
           "total_shards": 1,
           "test_type": "full",
@@ -53,7 +53,7 @@ jobs:
           "job_name": "rocjpeg",
           "fetch_artifact_args": "--rocjpeg --tests",
           "timeout_minutes": 10,
-          "test_script": "python build_tools/github_actions/test_executable_scripts/test_rocjpeg.py",
+          "test_script": "python ./build/share/rocjpeg/test/run_rocjpeg.py",
           "shard_arr": [1],
           "total_shards": 1,
           "test_type": "full"

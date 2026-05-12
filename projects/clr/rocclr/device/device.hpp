@@ -43,6 +43,7 @@
 #include <shared_mutex>
 
 namespace amd {
+namespace roc { struct GraphSignalPool; }
 class Command;
 class CommandQueue;
 class ReadMemoryCommand;
@@ -283,6 +284,9 @@ struct Info : public amd::EmbeddedObject {
   //! Maximum number of work-items in a work-group executing a kernel
   //  using the data-parallel execution model.
   size_t maxWorkGroupSize_;
+
+  //! Maximum grid dimensions (from HSA_AGENT_INFO_GRID_MAX_DIM). Work-items per dimension.
+  uint32_t maxGridDim_[3];
 
   //! Preferred number of work-items in a work-group executing a kernel
   //  using the data-parallel execution model.
@@ -1351,6 +1355,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
 
   //! Returns fence state of the VirtualGPU
   virtual bool isFenceDirty() const = 0;
+  //! Insert a system scope on the next dispatch
+  virtual void addSystemScope() {}
   //! Init hidden heap for device memory allocations
   virtual void HiddenHeapInit() = 0;
 
@@ -1840,6 +1846,9 @@ class Device : public RuntimeObject {
   ///! Allocates a device signal object
   virtual device::Signal* createSignal() const = 0;
 
+  ///! Allocates an IPC-capable signal, or returns nullptr if unsupported
+  virtual device::Signal* createIpcSignal() const { return nullptr; }
+
   //! Return true if initialized external API interop, otherwise false
   virtual bool bindExternalDevice(
       uint flags,             //!< Enum val. for ext.API type: GL, D3D10, etc.
@@ -2122,6 +2131,19 @@ class Device : public RuntimeObject {
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const {}
+
+  // Creates a fully-initialised per-launch graph signal pool.
+  // Allocates gpu_count GPU-only signals and irq_count interrupt signals,
+  // then acquires segment_count hw-event slots into hw_events and resets
+  // the last-acquired pointer so GetLastAcquired() only tracks dispatches.
+  // Returns nullptr (and leaves hw_events empty) on allocation failure.
+  virtual roc::GraphSignalPool* CreateGraphSignalPool(
+      size_t gpu_count, size_t irq_count,
+      size_t segment_count, std::vector<void*>& hw_events) const { return nullptr; }
+
+  // Returns the number of GPU-only signals consumed from the pool so far.
+  // Used by the graph executor to cache the count for the next launch.
+  virtual size_t GetGraphSignalPoolUsedCount(roc::GraphSignalPool* pool) const { return 0; }
 
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;

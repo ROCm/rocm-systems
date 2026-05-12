@@ -25,7 +25,7 @@ Panel Config:
     Use this panel as the reference for **where** bandwidth is measured: GL2C Read/Write
     Bandwidth use **client-side** GL2 counters; GCEA (Graphics Core Efficiency Arbiter)
     tables use **DRAM interface** counters.
-    System Speed-of-Light lists separate **L2→fabric (EA)** and **memory controller** rates;
+    System Speed-of-Light lists separate **L2->fabric (EA)** and **memory controller** rates;
     those are kernel-summary views and are not the same rows as GL2C client read BW here.
 
   data source:
