@@ -53,23 +53,6 @@ set_target_properties(
     PROPERTIES OUTPUT_NAME ${BINARY_NAME_PREFIX}-diagnostic POSITION_INDEPENDENT_CODE ON
 )
 
-# ------------------------------------------------------------------------------#
-# diagnostic_demo - small demo executable, always built.
-# ------------------------------------------------------------------------------#
-
-add_executable(diagnostic_demo ${CMAKE_CURRENT_LIST_DIR}/tests/demo.cpp)
-target_link_libraries(
-    diagnostic_demo
-    PRIVATE
-        rocprofiler-systems::rocprofiler-systems-diagnostic
-        rocprofiler-systems-common-library
-        rocprofiler-systems::rocprofiler-systems-interface-library
-)
-set_target_properties(
-    diagnostic_demo
-    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin
-)
-
 if(ROCPROFSYS_BUILD_TESTING)
     add_subdirectory(tests)
 endif()
