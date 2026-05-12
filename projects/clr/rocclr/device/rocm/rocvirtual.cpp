@@ -1249,9 +1249,6 @@ void VirtualGPU::AnalyzeAqlQueue() const {
           gpu_queue_->base_address))[(read + valid_packet_idx) & queueMask];
       if (extractAqlBits((*aql_loc).header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE) ==
           HSA_PACKET_TYPE_INVALID) {
-        if (index == read) {
-          break;
-        }
         valid_packet_idx++;
       } else {
         break;
@@ -1262,7 +1259,7 @@ void VirtualGPU::AnalyzeAqlQueue() const {
       return;
     }
     auto aql_loc = &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
-        gpu_queue_->base_address))[(scan_start + valid_packet_idx) & queueMask];
+        gpu_queue_->base_address))[(read + valid_packet_idx) & queueMask];
     auto packet = *aql_loc;
     auto header = packet.header;
     auto pkt_type = extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
