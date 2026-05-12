@@ -1,21 +1,76 @@
-# rocprofsys diagnostic format spec (gdb-style compact)
+# rocprofsys diagnostic format spec (framed gdb-style)
 
 Locked spec for the Phase-1 stacktrace + exception formatter. The format
-mirrors gdb's `bt` output: one line per frame, prefixed with `#N`, with
-function-name column padded to align the `in <file>:<line>` suffix.
+mirrors gdb's `bt` output for the trace - one line per frame, prefixed
+with `#N`, function-name column padded so `in <file>:<line>` aligns -
+and wraps the `error: <message>` header in a single-line box for visual
+weight.
 
-## Header line
+## Top-level shape
 
 ```
-error: <exception::what()>
+<box top border>
+| error: <exception::what()>                                          |
+<box bottom border>
+
+  #0  <function-name>            in <relative-path>:<line>
+  #1  <function-name>            in <relative-path>:<line>
+  ...
+       ... N frames skipped (libc, runtime) ...
+       ... M more ...
 ```
 
-`error:` is bold bright-red when color is on. The header is single-line.
-If `what()` contains a newline (the timemory `core/exception.cpp` embeds
-backtrace text), strip everything from the first newline onward; the
-trace is rendered separately.
+A blank line separates the box from the first frame.
 
-A blank line follows the header before the trace.
+## Two color modes (bool toggle)
+
+`format_options::with_color` is a plain `bool`, default `true`.
+
+| Value | Box characters         | ANSI escapes |
+|---    |---                     |---           |
+| true  | UTF-8 box-drawing chars | emitted     |
+| false | ASCII `+`, `-`, `|`     | none        |
+
+`exception_format_options::with_color` is `std::optional<bool>`. When
+set, it is the explicit override and takes precedence over everything.
+When unset (the default), `format_exception` and `print_exception`
+resolve the effective value as:
+
+```
+effective_color = NO_COLOR is set in env ? false : true
+```
+
+`NO_COLOR` is honored only at the top-level public entry points
+(`format_exception`, `print_exception`). Once `with_color` is set
+explicitly, the env var is not consulted.
+
+There is no `auto_detect` mode and no `CLICOLOR_FORCE` support. Anyone
+who needs color in a pipe sets `opt.with_color = true` explicitly.
+
+## Header box
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│ error: Failed to parse PMC metric 'bad_metric': value out of range │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+- Interior width = `max(56, longest line)` capped at 116 characters,
+  with one space of padding on each side.
+- Long messages wrap at the chosen interior width. Greedy word-wrap;
+  tokens longer than the interior width are hard-broken.
+- The `error:` keyword is INSIDE the box, on the first line of the
+  message.
+- `what()` is single-line trimmed (everything from the first newline
+  on is dropped before wrapping) so that timemory's exception text
+  with embedded backtraces does not leak into the box.
+
+UTF-8 box-drawing characters used when colored:
+
+- `┌` U+250C, `┐` U+2510, `└` U+2514, `┘` U+2518, `─` U+2500, `│` U+2502.
+
+ASCII fallback when not colored: `+`, `-`, `|` (corners and edges all
+use the same characters, gdb-style).
 
 ## Frame line
 
@@ -43,8 +98,8 @@ If line info is unavailable, the line drops the `:line` suffix:
 
 If the file is unavailable too, the `in ...` clause is omitted entirely.
 
-If the function name is unresolved, the address is rendered as a
-hex literal in its place:
+If the function name is unresolved, the address is rendered as a hex
+literal in its place:
 
 ```
   #3  0x00007f8c4a3b1c40        in <relative-path>:<line>
@@ -100,55 +155,47 @@ name:
 
 ## Color palette
 
-Element                       | Style                | ANSI
----                           | ---                  | ---
-`error:`                      | bold bright red      | `\033[1;91m`
-`#N` frame index              | dim gray             | `\033[90m`
-function name                 | cyan                 | `\033[36m`
-`in` keyword                  | dim                  | `\033[2m`
-file path                     | dim gray             | `\033[90m`
-`:line`                       | yellow               | `\033[33m`
-`[inlined]`                   | dim gray             | `\033[90m`
-`[+0xNN]`                     | dim gray             | `\033[90m`
-`(module)`                    | dim gray             | `\033[90m`
-`... N skipped ... `          | dim                  | `\033[2m`
-`... N more ...`              | dim                  | `\033[2m`
+| Element                | Style                | ANSI         |
+|---                     |---                   |---           |
+| `error:`               | bold bright red      | `\033[1;91m` |
+| box border             | dim gray             | `\033[90m`   |
+| `#N` frame index       | dim gray             | `\033[90m`   |
+| function name          | cyan                 | `\033[36m`   |
+| `in` keyword           | dim                  | `\033[2m`    |
+| file path              | dim gray             | `\033[90m`   |
+| `:line`                | yellow               | `\033[33m`   |
+| `[inlined]`            | dim gray             | `\033[90m`   |
+| `[+0xNN]`              | dim gray             | `\033[90m`   |
+| `(module)`             | dim gray             | `\033[90m`   |
+| `... N skipped ...`    | dim                  | `\033[2m`    |
+| `... N more ...`       | dim                  | `\033[2m`    |
 
 Reset is `\033[0m`. Every styled span ends with reset; color never
 crosses a frame boundary.
 
-## Color decision rules
-
-```
-color = format_options.color
-if color == on:           emit ANSI
-if color == off:          plain
-if color == auto_detect:
-    if env NO_COLOR is set (any value): off
-    elif env CLICOLOR_FORCE=1 is set:   on
-    elif isatty(fd 2):                  on
-    else:                               off
-```
-
-`fd 2` is the default because `print_exception()` writes to stderr.
-
 ## Env-var overrides
 
-Var                            | Effect
----                            | ---
-`NO_COLOR`                     | color off (any value)
-`CLICOLOR_FORCE=1`             | color on when not a TTY
-`ROCPROFSYS_TRACE_VERBOSE=1`   | with_offset=true, with_module=true, max_frames_shown=64
-`ROCPROFSYS_TRACE_NO_FILTER=1` | clear default skip filters
+| Var                            | Effect                                              |
+|---                             |---                                                  |
+| `NO_COLOR`                     | flips the default `with_color` to false (any value) |
+| `ROCPROFSYS_TRACE_VERBOSE=1`   | with_offset=true, with_module=true, max_frames_shown=64 |
+| `ROCPROFSYS_TRACE_NO_FILTER=1` | clear default skip filters                          |
 
-These overrides are read once at the first call to `to_string()` per
-process and cached.
+`ROCPROFSYS_*` overrides are read once at the first call to
+`to_string()` per process and cached.
+
+## Removed from earlier drafts
+
+- `color_mode` enum (replaced by `with_color : bool`).
+- `auto_detect` mode (no TTY sniffing in the formatter; callers decide
+  or accept the default).
+- `CLICOLOR_FORCE` env var (no longer consulted).
 
 ## Defaults summary
 
 ```
-format_options{
-  color              = auto_detect,
+trace_format_options{
+  with_color         = true,
   with_module        = true,
   with_offset        = false,
   with_file_line     = true,
@@ -156,15 +203,26 @@ format_options{
   max_function_width = 60,
   max_frames_shown   = 32,
 }
+
+exception_format_options{
+  trace_options                  = {},
+  with_color                     = std::nullopt,  // resolved against NO_COLOR
+  capture_trace_at_call_site     = true,
+}
 ```
 
 ## Hard rules (test-locked)
 
-1. The `error: ...` header is on its own line.
-2. Each frame is exactly one line.
+1. The `error: ...` header sits inside a single-row box (multi-row when
+   the message wraps).
+2. Each trace frame is exactly one line.
 3. Frame indices are contiguous (0, 1, 2, ...) and monotonically
    increasing in print order.
 4. Skip and truncate trailers each appear at most once per trace.
 5. Color escapes never cross frame boundaries: every styled token is
    `<style><content>\033[0m`.
-6. `NO_COLOR` always wins over `CLICOLOR_FORCE`.
+6. With color on, the box uses UTF-8 box-drawing characters; with color
+   off, the box uses pure ASCII (`+`, `-`, `|`).
+7. `error:` is always bright-red bold when colored.
+8. `NO_COLOR` env disables color when `with_color` is unset; explicit
+   `with_color` always wins.

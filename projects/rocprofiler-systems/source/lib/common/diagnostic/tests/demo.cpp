@@ -3,12 +3,11 @@
 
 // Demo program for the rocprofsys diagnostic format.
 //
-// Captures one trace from a deep call chain and renders it in three modes
-// to exercise the gdb-style compact format:
+// Throws an exception from a deep call chain and renders the framed
+// gdb-style output in the two supported modes:
 //
-//   1. Default        - color decided by auto_detect (TTY + NO_COLOR rules)
-//   2. Color OFF      - explicit color_mode::off
-//   3. Color FORCED   - explicit color_mode::on (bypasses TTY check)
+//   1. Default (with color)
+//   2. No color (plain ASCII box)
 
 #include "common/diagnostic/format_exception.hpp"
 #include "common/diagnostic/stacktrace.hpp"
@@ -17,59 +16,47 @@
 #include <stdexcept>
 #include <string>
 
-using rocprofsys::common::diagnostic::stacktrace;
+using rocprofsys::common::diagnostic::exception_format_options;
+using rocprofsys::common::diagnostic::format_exception;
 
 namespace
 {
-[[gnu::noinline]] stacktrace
+[[gnu::noinline]] void
 parse_metric_value(const std::string& s)
 {
     asm volatile("");
-    if(s.empty() || s[0] == 'b')
-    {
-        return stacktrace::capture();
-    }
-    return stacktrace::capture();
+    throw std::runtime_error{ "Failed to parse PMC metric '" + s +
+                              "': value out of range" };
 }
 
-[[gnu::noinline]] stacktrace
+[[gnu::noinline]] void
 collector_setup(const std::string& s)
 {
     asm volatile("");
-    return parse_metric_value(s);
+    parse_metric_value(s);
 }
 
-[[gnu::noinline]] stacktrace
+[[gnu::noinline]] void
 sampler_setup(const std::string& s)
 {
     asm volatile("");
-    return collector_setup(s);
+    collector_setup(s);
 }
 
-[[gnu::noinline]] stacktrace
+[[gnu::noinline]] void
 library_initialize(const std::string& s)
 {
     asm volatile("");
-    return sampler_setup(s);
+    sampler_setup(s);
 }
 
 void
-section(const stacktrace& trace, stacktrace::format_options opt, const char* title,
-        const std::string& msg)
+section(const std::exception& e, bool color_on, const char* title)
 {
     std::printf("=== %s ===\n", title);
-
-    const bool color_on = opt.color == stacktrace::color_mode::on;
-    if(color_on)
-    {
-        std::printf("\033[1;91merror:\033[0m %s\n\n", msg.c_str());
-    }
-    else
-    {
-        std::printf("error: %s\n\n", msg.c_str());
-    }
-
-    auto s = trace.to_string(opt);
+    exception_format_options opt;
+    opt.with_color = color_on;
+    auto s         = format_exception(e, opt);
     std::fputs(s.c_str(), stdout);
     std::fputc('\n', stdout);
 }
@@ -78,27 +65,13 @@ section(const stacktrace& trace, stacktrace::format_options opt, const char* tit
 int
 main()
 {
-    auto              trace = library_initialize("bad_metric");
-    const std::string msg   = "Failed to parse PMC metric 'bad_metric': "
-                              "value out of range";
-
+    try
     {
-        stacktrace::format_options opt;
-        opt.color = stacktrace::color_mode::auto_detect;
-        section(trace, opt, "gdb-style (default)", msg);
-    }
-
+        library_initialize("bad_metric");
+    } catch(const std::exception& e)
     {
-        stacktrace::format_options opt;
-        opt.color = stacktrace::color_mode::off;
-        section(trace, opt, "gdb-style (NO color)", msg);
+        section(e, /*color_on=*/true, "gdb-style boxed (default - with color)");
+        section(e, /*color_on=*/false, "gdb-style boxed (no color)");
     }
-
-    {
-        stacktrace::format_options opt;
-        opt.color = stacktrace::color_mode::on;
-        section(trace, opt, "gdb-style (FORCED color)", msg);
-    }
-
     return 0;
 }
