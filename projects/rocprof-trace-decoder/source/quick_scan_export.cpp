@@ -33,6 +33,8 @@
 #include "handle.hpp"
 #include "trace_parser.hpp" // CSRegisterHandler, sqtt_token_reg_t, sqtt_event_type_t
 
+#define PUBLIC_API extern "C" __attribute__((visibility("default")))
+
 namespace
 {
 
@@ -90,20 +92,12 @@ inline bool is_gfx9_header(uint64_t header)
 
 rocprofiler_thread_trace_decoder_status_t quick_scan_gfx9(
     CSRegisterHandler& csregister,
-    const uint8_t* tokens,
-    uint64_t tokens_size,
+    const std::vector<gfx9::quick_scan::QuickToken>& raw,
+    int n,
     rocprof_trace_decoder_trace_callback_t trace_callback,
     void* userdata
 )
 {
-    // Cap matches the 32k generously-sized hint in the mi400 scanner — most
-    // traces produce ~50 rare tokens per ~5 MB; oversizing avoids a second
-    // pass and the scanner silently drops overflow.
-    constexpr size_t kCap = 1u << 15;
-    std::vector<gfx9::quick_scan::QuickToken> raw;
-    raw.resize(kCap);
-    size_t n = gfx9::quick_scan::scan_gfx9(tokens, tokens_size, raw.data(), raw.size());
-
     if (n == 0) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 
     // Mirror the register-tracking path in gfx9wave.cpp: feed each REG /
@@ -160,8 +154,7 @@ rocprofiler_thread_trace_decoder_status_t quick_scan_gfx9(
 
 } // namespace
 
-extern "C" __attribute__((visibility("default"))) rocprofiler_thread_trace_decoder_status_t
-rocprof_trace_decoder_quick_scan(
+PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick_scan(
     rocprof_trace_decoder_handle_t handle,
     uint64_t chunk_index,
     const void* data,
@@ -176,6 +169,8 @@ rocprof_trace_decoder_quick_scan(
     int gfxip = 0;
     auto csregister = std::shared_ptr<CSRegisterHandler>{nullptr};
 
+    const uint8_t* buf = static_cast<const uint8_t*>(data);
+
     if (chunk_index == 0)
     {
         gfxip = is_gfx9_header(static_cast<const uint64_t*>(data)[0]) ? 9 : 0;
@@ -185,8 +180,39 @@ rocprof_trace_decoder_quick_scan(
 
         csregister = std::make_shared<CSRegisterHandler>();
         decoder->gfxip = gfxip;
+
+        if (gfxip == 9)
+        {
+            data_size -= 8;
+            buf += 8;
+        }
+
+        if (data_size == 0)
+        {
+            decoder->pipestate[chunk_index + 1] = std::move(csregister);
+            decoder->cv.notify_all();
+            return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+        }
     }
     else
+    {
+        auto decoder = HandleData::get_read_handle(handle);
+        if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+        // Todo: Ensure it has been written
+        gfxip = decoder->gfxip;
+    }
+
+    thread_local std::vector<gfx9::quick_scan::QuickToken> raw{1u << 20};
+
+    size_t ntokens = gfx9::quick_scan::scan_gfx9(buf, data_size, raw.data(), raw.size());
+    while (ntokens == raw.size())
+    {
+        raw.resize(raw.size() * 2);
+        ntokens = gfx9::quick_scan::scan_gfx9(buf, data_size, raw.data(), raw.size());
+    }
+
+    if (csregister == nullptr)
     {
         auto decoder = HandleData::get_read_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -198,17 +224,15 @@ rocprof_trace_decoder_quick_scan(
         );
         if (!ready) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES;
 
-        gfxip = decoder->gfxip;
         csregister = decoder->pipestate.at(chunk_index);
     }
 
     if (csregister == nullptr) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES;
-
-    const uint8_t* buf = static_cast<const uint8_t*>(data);
+    csregister = std::make_shared<CSRegisterHandler>(*csregister); // Make a copy
 
     rocprofiler_thread_trace_decoder_status_t status;
     if (gfxip == 9)
-        status = quick_scan_gfx9(*csregister, buf, data_size, trace_callback, userdata);
+        status = quick_scan_gfx9(*csregister, raw, ntokens, trace_callback, userdata);
     else
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 
@@ -218,4 +242,76 @@ rocprof_trace_decoder_quick_scan(
     decoder->pipestate[chunk_index + 1] = std::move(csregister);
     decoder->cv.notify_all();
     return status;
+}
+
+PUBLIC_API rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_flush_chunk(rocprof_trace_decoder_handle_t handle, uint64_t chunk_index)
+{
+    auto hd = HandleData::get_write_handle(handle);
+    if (!hd.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if (hd->pipestate.erase(chunk_index + 1) == 0)
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+}
+
+PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_build_standalone(
+    rocprof_trace_decoder_handle_t handle,
+    uint64_t chunk_index,
+    const void* data,
+    uint64_t data_size,
+    uint64_t offset_begin,
+    uint64_t offset_end,
+    void* data_out,
+    uint64_t* size_out
+)
+{
+    if (!data || data_size < 8 || !data_out || offset_begin >= offset_end || offset_end < data_size)
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    /*int gfxip = 0;
+    auto csregister = std::shared_ptr<CSRegisterHandler>{nullptr};
+
+    {
+        auto decoder = HandleData::get_read_handle(handle);
+        if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+        gfxip = decoder->gfxip;
+
+        const auto& pipe = decoder->pipestate;
+        if (pipe.find(chunk_index) != pipe.end()) csregister = decoder->pipestate.at(chunk_index);
+    }
+
+    if (csregister == nullptr) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    CSRegisterHandler temp = *csregister;
+
+    if (gfxip != 9) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+
+    const uint8_t* buf = static_cast<const uint8_t*>(data);
+
+    // Advance temp to that byte
+    auto status = quick_scan_gfx9(temp, buf, offset_begin, trace_callback, userdata);
+
+    // Get tokens to reconstruct regs
+    auto tokens = BuildStatusTokens(temp);
+
+    if (*size_out < tokens.size()*8 + offset_end - offset_begin)
+    {
+        *size_out = tokens.size()*8 + 64 + offset_end - offset_begin;
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+
+    auto* buf_out = static_cast<uint8_t*>(data_out);
+    // Write beginning.
+    size_t size_used = WriteTokens(buf_out, tokens);
+
+    std::memcpy(buf_out + size_used, buf + offset_begin, offset_end - offset_begin);
+    size_used += offset_end - offset_begin;
+
+    std::memset(buf_out + size_used, 64, 0);
+    *size_out = size_used;*/
+
+    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
