@@ -89,8 +89,16 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
     }
   }
 
+  /// @brief Mark this queue as having experienced a VM fault.
+  /// Called by the per-queue ExceptionHandler thread on memory-fault exceptions.
   void MarkVMFaulted() { vm_faulted_.store(true, std::memory_order_release); }
+
+  /// @brief Check whether this queue has been marked as VM-faulted.
   bool IsVMFaulted() const { return vm_faulted_.load(std::memory_order_acquire); }
+
+  /// @brief Store the fault address and reason bitmask on this queue.
+  /// Called by VMFaultHandler after it identifies which queues faulted,
+  /// so that hsa_amd_queue_get_info() can report the details.
   void SetVMFaultDetails(uint64_t address, uint32_t reason) {
     vm_fault_address_ = address;
     vm_fault_reason_ = reason;

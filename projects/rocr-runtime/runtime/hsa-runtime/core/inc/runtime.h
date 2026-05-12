@@ -926,19 +926,27 @@ class Runtime {
   // Kfd version
   KfdVersion_t kfd_version;
 
-  // Signaled by per-queue ExceptionHandler when it marks a queue as
-  // VM-faulted, so VMFaultHandler can wait for it before stamping details.
+  // Synchronization between the per-queue ExceptionHandler thread and the
+  // global VMFaultHandler thread.  ExceptionHandler marks the faulting queue
+  // first (AqlQueue::MarkVMFaulted), then signals this condvar so that
+  // VMFaultHandler can stamp the fault address/reason onto the correct queue
+  // before the system-event callback fires.
   std::mutex              vm_fault_mutex_;
   std::condition_variable vm_fault_cv_;
   bool                    vm_fault_signaled_{false};
 
  public:
+  /// @brief Signal that a per-queue ExceptionHandler has marked a queue as
+  /// VM-faulted.  Wakes VMFaultHandler so it can proceed to stamp details.
   void SignalVMFault() {
     std::lock_guard<std::mutex> lock(vm_fault_mutex_);
     vm_fault_signaled_ = true;
     vm_fault_cv_.notify_all();
   }
 
+  /// @brief Block until a VM fault is signaled or the timeout expires.
+  /// @param timeout_ms Maximum time to wait in milliseconds.
+  /// @return true if a fault was signaled, false on timeout.
   bool WaitForVMFault(int timeout_ms) {
     std::unique_lock<std::mutex> lock(vm_fault_mutex_);
     return vm_fault_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms),
