@@ -164,11 +164,9 @@ rocprofiler_thread_trace_decoder_status_t comgr_isa_callback(
     auto decoder = hd->decoder();
     if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR;
 
-    auto& table = decoder->table;
-
     try
     {
-        auto instruction = table.get(pc.code_object_id, pc.address);
+        auto instruction = decoder->get(pc.code_object_id, pc.address);
 
         if (!instruction) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
@@ -264,10 +262,9 @@ rocprof_trace_decoder_create_handle(rocprof_trace_decoder_handle_t* handle)
 {
     if (!handle) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
+    // HandleData's constructor initializes `instance` (the AddressTable) when
+    // a disasm backend is compiled in; nothing to do here.
     auto hd = std::make_shared<HandleData>();
-#ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
-    hd->instance = std::make_shared<DecoderInstance>();
-#endif
 
     handle->handle = g_handle_counter.fetch_add(1);
 
@@ -346,7 +343,7 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_codeo
 
     try
     {
-        decoder->table.addDecoder(data, data_size, load_id, load_addr, load_size);
+        decoder->addDecoder(data, data_size, load_id, load_addr, load_size);
     }
     catch (...)
     {
@@ -366,7 +363,7 @@ rocprof_trace_decoder_codeobj_unload(rocprof_trace_decoder_handle_t handle, uint
 
     try
     {
-        bool result = decoder->table.removeDecoder(load_id);
+        bool result = decoder->removeDecoder(load_id);
         if (result) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
     }
     catch (...)

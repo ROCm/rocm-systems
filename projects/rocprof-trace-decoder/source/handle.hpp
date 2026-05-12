@@ -23,6 +23,7 @@
 #pragma once
 #include "trace_parser.hpp"
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -30,9 +31,51 @@
 #include <condition_variable>
 
 #ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
+#include "rocprof_trace_decoder/cxx/code_printing.hpp"
+
 using AddressTable = rocprof_trace_decoder::codeobj::CodeobjAddressTranslate;
-using Instruction = rocprof_trace_decoder::codeobj::Instruction;
 #endif
+
+class Pipestate
+{
+public:
+    static constexpr size_t kCapacity = 4096;
+
+    struct Slot
+    {
+        uint64_t          chunk_index = 0;
+        bool              occupied    = false;
+        CSRegisterHandler handler{};
+    };
+
+    Pipestate() : slots_(new Slot[kCapacity]()) {}
+
+    const CSRegisterHandler* get(uint64_t chunk_index) const
+    {
+        const auto& s = slots_[chunk_index % kCapacity];
+        return (s.occupied && s.chunk_index == chunk_index) ? &s.handler : nullptr;
+    }
+
+    void put(uint64_t chunk_index, CSRegisterHandler&& state)
+    {
+        auto& s       = slots_[chunk_index % kCapacity];
+        s.chunk_index = chunk_index;
+        s.handler     = std::move(state);
+        s.occupied    = true;
+    }
+
+    bool take(uint64_t chunk_index)
+    {
+        auto& s = slots_[chunk_index % kCapacity];
+        if (!s.occupied || s.chunk_index != chunk_index) return false;
+        s.handler  = CSRegisterHandler{};
+        s.occupied = false;
+        return true;
+    }
+
+private:
+    std::unique_ptr<Slot[]> slots_;
+};
 
 template<typename T>
 class ReadLock
@@ -71,20 +114,15 @@ public:
     rocprof_trace_decoder_se_data_callback_t se_data_cb{nullptr};
     void* se_data_userdata{nullptr};
 
-    // quick_scan state data
     mutable std::condition_variable_any cv;
     int gfxip = 0;
-    // Raw 8-byte chunk-0 header captured by quick_scan. Used by
-    // build_standalone to prepend the original arch header to the rebuilt
-    // standalone buffer (so a downstream decoder can identify the arch).
-    // Currently only the gfx9 8-byte header is captured; future archs will
-    // either reuse this slot (if their header fits in 8 bytes) or extend the
-    // storage.
     uint64_t gfx9_header = 0;
-    std::unordered_map<uint64_t, std::shared_ptr<CSRegisterHandler>> pipestate{};
+    Pipestate pipestate{};
 
 #ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
-    WriteLock<AddressTable> decoder() { return {instance, decoder_mut}; }
+    HandleData() : instance(std::make_shared<AddressTable>()) {}
+
+    WriteLock<AddressTable> decoder() const { return {instance, decoder_mut}; }
 #endif
 
     static std::mutex& get_map_mutex()
@@ -125,7 +163,7 @@ private:
     std::shared_mutex mtx;
 
 #ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
-    std::shared_mutex decoder_mut{};
+    mutable std::shared_mutex decoder_mut{};
     std::shared_ptr<AddressTable> instance;
 #endif
 };
