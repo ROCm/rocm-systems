@@ -16,6 +16,10 @@ NON_UNIT_GROUPS = [
     "TypeQualifiers",
 ]
 
+WARNING = "\033[0;33m"
+ERROR = "\033[0;31m"
+RESET = "\033[0m"
+
 
 def parse_size_string(size_str):
     """Convert size string (1K, 1M, 1G) to bytes.
@@ -63,14 +67,18 @@ def load_config(file_path, definitions_text):
 
 
 def iter_group_configs(configs_path):
-    """Yield (group, config) pairs for all unit and non-unit config files.
+    """Yield (group, cases) pairs for all unit and non-unit config files.
 
     Iterates unit configs first (sorted alphabetically), then non-unit groups
-    in the order defined by NON_UNIT_GROUPS.
+    in the order defined by NON_UNIT_GROUPS. Empty case entries (YAML keys
+    with no value) are yielded as empty dicts rather than ``None``.
     """
     definitions_path = os.path.join(configs_path, "definitions.yaml")
     with open(definitions_path) as file:
         definitions_text = file.read()
+
+    def _normalize(cases):
+        return {name: (cfg or {}) for name, cfg in (cases or {}).items()}
 
     unit_config_dir = os.path.join(configs_path, "unit")
     for config_file in sorted(glob.glob(os.path.join(unit_config_dir, "*.yaml"))):
@@ -78,9 +86,9 @@ def iter_group_configs(configs_path):
         group = os.path.splitext(os.path.basename(config_file))[0]
         if group not in config:
             continue
-        yield group, config[group]
+        yield group, _normalize(config[group])
 
     for group in NON_UNIT_GROUPS:
         config_file = os.path.join(configs_path, f"{group}.yaml")
         config = load_config(config_file, definitions_text)
-        yield group, config[group]
+        yield group, _normalize(config[group])
