@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <cstdint>
 #include <timemory/log/color.hpp>
 //
 //  above should always be included first
@@ -23,6 +24,8 @@
 #include "core/node_info.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto_fwd.hpp"
+#include "core/progress/bar.hpp"
+#include "core/progress/callback.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
@@ -110,7 +113,7 @@ auto               _timemory_manager  = tim::manager::instance();
 auto               _timemory_settings = tim::settings::shared_instance();
 
 void
-set_metadata_process_start_timestamp(int64_t _ts)
+set_metadata_process_start_timestamp(std::int64_t _ts)
 {
     auto process_info  = trace_cache::get_metadata_registry().get_process_info();
     process_info.start = _ts;
@@ -118,7 +121,7 @@ set_metadata_process_start_timestamp(int64_t _ts)
 }
 
 void
-set_metadata_process_end_timestamp(int64_t _ts)
+set_metadata_process_end_timestamp(std::int64_t _ts)
 {
     auto process_info = trace_cache::get_metadata_registry().get_process_info();
     process_info.end  = _ts;
@@ -146,7 +149,7 @@ escape_quotes(std::string str)
 }
 
 bool
-ensure_initialization(bool _offset, int64_t _glob_n, int64_t _offset_n)
+ensure_initialization(bool _offset, std::int64_t _glob_n, std::int64_t _offset_n)
 {
     auto _exit_info = component::exit_gotcha::get_exit_info();
     if(_exit_info.is_known && _exit_info.exit_code != EXIT_SUCCESS) return _offset;
@@ -223,7 +226,7 @@ ensure_finalization(bool _static_init = false)
     if(!tim::get_shared_ptr_pair_callback())
     {
         tim::get_shared_ptr_pair_callback() =
-            new tim::shared_ptr_pair_callback_t{ [](int64_t _n) {
+            new tim::shared_ptr_pair_callback_t{ [](std::int64_t _n) {
                 if(_n == 0) rocprofsys_finalize_hidden();
             } };
     }
@@ -1177,7 +1180,20 @@ rocprofsys_finalize_hidden(void)
     {
         auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         _manager.shutdown();
-        _manager.post_process_bulk(_output_registry);
+
+        rocprofsys::progress::bar_options _bar_opts;
+        _bar_opts.verbose = config::get_verbose();
+
+        rocprofsys::progress::tracker _tracker{ [_bar_opts](std::string   _label,
+                                                            std::uint64_t _total) {
+            auto                      _bar = std::make_shared<rocprofsys::progress::bar>(std::move(_label),
+                                                                                         _total, _bar_opts);
+            return rocprofsys::progress::progress_callback{ [_bar](std::uint64_t _delta) {
+                _bar->on_advance(_delta);
+            } };
+        } };
+
+        _manager.post_process_bulk(_output_registry, _tracker);
     }
 
     if(_timemory_manager && _timemory_manager != nullptr)
@@ -1293,6 +1309,7 @@ rocprofsys_reset_for_reattach_hidden(void)
     rocprofsys_finalization_done.store(false);
     rocprofsys_init_library_done.store(false);
     rocprofsys_init_tooling_done.store(0);
+    ::rocprofsys::reset_database_path_memo();
     ::rocprofsys::reset_state();
 }
 

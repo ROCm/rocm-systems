@@ -48,6 +48,12 @@ repos:
     hooks:
     - id: gersemi
 
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.22.1
+    hooks:
+      - id: markdownlint-cli2
+        exclude: ^external/
+
   - repo: local
     hooks:
       - id: check-copyright
@@ -57,3 +63,10 @@ repos:
         language: script
         files: \.(c|h|txt|cpp|hpp|py|cmake)$
         exclude: ^\.|^docs/|^examples/lulesh/|^examples/mpi/|^examples/openmp/|^external/|^cmake/
+
+      - id: check-fixedwidth-types
+        name: fixedwidth-type-consistency
+        entry: ./projects/rocprofiler-systems/scripts/check-fixedwidth-types.sh
+        language: script
+        files: \.(cpp|hpp)$
+        exclude: ^\.|^external/

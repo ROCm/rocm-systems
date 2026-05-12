@@ -286,7 +286,7 @@ class VirtualGPU : public device::VirtualDevice {
     void AddExternalSignal(ProfilingSignal* signal) { external_signals_.push_back(signal); }
 
     //! Get the last active signal on the queue
-    ProfilingSignal* GetLastSignal() const { return signal_list_[current_id_]; }
+    ProfilingSignal* GetLastSignal() const;
 
     //! Clear external signals
     void ClearExternalSignals() { external_signals_.clear(); }
@@ -524,7 +524,7 @@ class VirtualGPU : public device::VirtualDevice {
 
   void hasPendingDispatch() { hasPendingDispatch_ = true; }
   bool IsPendingDispatch() const { return (hasPendingDispatch_) ? true : false; }
-  void addSystemScope() {
+  void addSystemScope() override {
     addSystemScope_ = true;
     fence_state_ = amd::Device::CacheState::kCacheStateInvalid;
   }
@@ -767,6 +767,8 @@ class VirtualGPU : public device::VirtualDevice {
   int fence_state_;                    //!< Fence scope
                                        //!< kUnknown/kFlushedToDevice/kFlushedToSystem
   std::atomic<bool> fence_dirty_;      //!< Fence modified flag
+  bool heap_init_fence_emitted_ = false;  //!< True once this queue has emitted system scope
+                                          //!< fence after hidden heap init.
 
   uint64_t last_write_index_ = kInvalidQueueIndex; //!< The last HW queue write index for any packet
   uint64_t last_packet_with_signal_index_ = kInvalidQueueIndex; //!< The last HW queue write index for a packet

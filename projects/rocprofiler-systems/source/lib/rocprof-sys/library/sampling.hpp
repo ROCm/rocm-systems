@@ -26,7 +26,7 @@ namespace rocprofsys
 namespace sampling
 {
 unique_ptr_t<std::set<int>>&
-get_signal_types(int64_t _tid);
+get_signal_types(std::int64_t _tid);
 
 std::set<int>
 setup();

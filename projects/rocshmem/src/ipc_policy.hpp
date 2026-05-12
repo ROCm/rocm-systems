@@ -88,14 +88,20 @@ class IpcOnImpl {
 
   __device__ void ipcGpuInit(Backend *gpu_backend, Context *ctx, int thread_id);
 
-  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe,
-                          bool blocking = false);
+  template <MemcpyKind Kind = MemcpyKind::Put, bool Blocking = false>
+  __device__ void ipcCopy(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
+    memcpy_lane<Kind>(dst, src, size);
+  }
 
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe,
-                             bool blocking = false);
+  template <MemcpyKind Kind = MemcpyKind::Put, bool Blocking = false>
+  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
+    memcpy_wg<Kind>(dst, src, size);
+  }
 
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe,
-                               bool blocking = false);
+  template <MemcpyKind Kind = MemcpyKind::Put, bool Blocking = false>
+  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
+    memcpy_wave<Kind>(dst, src, size);
+  }
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
             detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
@@ -224,43 +230,43 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   __host__ void ipcHostStop();
 
-  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe,
-                          bool blocking = false) {
+  template <MemcpyKind Kind = MemcpyKind::Put, bool Blocking = false>
+  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
       auto* handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
       assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
-      if (blocking) handle->quietAll();
+      if constexpr (Blocking) handle->quietAll();
       return;
     }
-    memcpy_lane(dst, src, size);
+    memcpy_lane<Kind>(dst, src, size);
   }
 
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe,
-                             bool blocking = false) {
+  template <MemcpyKind Kind = MemcpyKind::Put, bool Blocking = false>
+  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
       anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_block()) {
         handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
         assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
-        if (blocking) handle->quietAll();
+        if constexpr (Blocking) handle->quietAll();
       }
       return;
     }
-    memcpy_wg(dst, src, size);
+    memcpy_wg<Kind>(dst, src, size);
   }
 
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe,
-                               bool blocking = false) {
+  template <MemcpyKind Kind = MemcpyKind::Put, bool Blocking = false>
+  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
       anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_wave()) {
         handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
         assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
-        if (blocking) handle->quietAll();
+        if constexpr (Blocking) handle->quietAll();
       }
       return;
     }
-    memcpy_wave(dst, src, size);
+    memcpy_wave<Kind>(dst, src, size);
   }
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
@@ -340,14 +346,17 @@ class IpcOffImpl {
   __device__ void ipcGpuInit(Backend *rocshmem_handle, Context *ctx,
                              int thread_id) {}
 
-  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe = 0,
-                          bool blocking = false) {}
+  template <MemcpyKind Kind = MemcpyKind::Put, bool Blocking = false>
+  __device__ void ipcCopy([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
+                          [[maybe_unused]] size_t size, [[maybe_unused]] int local_pe) {}
 
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe = 0,
-                             bool blocking = false) {}
+  template <MemcpyKind Kind = MemcpyKind::Put, bool Blocking = false>
+  __device__ void ipcCopy_wg([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
+                             [[maybe_unused]] size_t size, [[maybe_unused]] int local_pe) {}
 
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe = 0,
-                               bool blocking = false) {}
+  template <MemcpyKind Kind = MemcpyKind::Put, bool Blocking = false>
+  __device__ void ipcCopy_wave([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
+                               [[maybe_unused]] size_t size, [[maybe_unused]] int local_pe) {}
 
   __device__ void ipcQuiet() {}
 
