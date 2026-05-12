@@ -38,4 +38,13 @@ postfork_child_cleanup();
 void
 postfork_parent_reinit();
 
+void
+prefork_lock_sampler();
+
+void
+postfork_parent_unlock_sampler();
+
+void
+postfork_child_reset_sampler_lock();
+
 }  // namespace rocprofsys::pmc

@@ -30,9 +30,9 @@ namespace component
 namespace
 {
 // these are used to prevent handlers from executing multiple times
-bool prefork_lock         = false;
-bool postfork_parent_lock = false;
-bool postfork_child_lock  = false;
+thread_local bool prefork_lock         = false;
+thread_local bool postfork_parent_lock = false;
+thread_local bool postfork_child_lock  = false;
 
 // this does a quick exit (no cleanup) on child processes
 // because perfetto has a tendency to access memory it
@@ -63,7 +63,11 @@ prefork_setup()
                 "may result is segmentation fault");
     // TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(get_debug_env(), 16);
 
-    if(config::get_use_sampling()) sampling::block_samples();
+    if(config::get_use_sampling())
+    {
+        sampling::block_samples();
+        sampling::prefork_lock_pmc_sampler();
+    }
 
     rocprofsys::categories::disable_categories(config::get_enabled_categories());
 
@@ -81,7 +85,11 @@ postfork_parent()
     // Reinitialize AMD SMI in parent process to get fresh device handles before
     // unblocking the shutdown/setup transition. AMD SMI device handles may be corrupted
     // after fork.
-    if(config::get_use_sampling()) sampling::postfork_parent_reinit();
+    if(config::get_use_sampling())
+    {
+        sampling::postfork_parent_reinit();
+        sampling::postfork_parent_unlock_pmc_sampler();
+    }
 
     rocprofsys::categories::enable_categories(config::get_enabled_categories());
 
@@ -107,7 +115,11 @@ postfork_child()
     set_state(State::Finalized);
 
     // Clean up AMD SMI in child process before other shutdowns
-    if(config::get_use_sampling()) sampling::postfork_child_cleanup();
+    if(config::get_use_sampling())
+    {
+        sampling::postfork_child_reset_pmc_sampler_lock();
+        sampling::postfork_child_cleanup();
+    }
 
     settings::enabled() = false;
     settings::verbose() = -127;
