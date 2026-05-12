@@ -105,17 +105,22 @@ def check_kernel_in_workload(kernel_name_substr, workload_dir):
 
 
 def load_workload_counters_long(workload_dir):
-    """Return the long-format counters DataFrame for a rocpd workload.
-
-    Reads ``counters_collection`` from every ``<workload>/*.db`` and returns
-    rows with ``Counter_Name``/``Counter_Value`` columns.
-    """
+    """Return the long-format counters DataFrame for a rocpd workload."""
     from utils import utils_analysis
 
-    db_paths = rocpd_data.find_workload_db_paths(Path(workload_dir))
-    if not db_paths:
+    workload_path = Path(workload_dir)
+    per_pass_dbs = [
+        path
+        for path in rocpd_data.find_workload_db_paths(workload_path)
+        if Path(path).name != "pmc_perf.db"
+    ]
+    if not per_pass_dbs:
         return pd.DataFrame()
-    return utils_analysis.load_rocpd_pmc_df(db_paths)
+
+    merged_db = workload_path / "pmc_perf.db"
+    if not merged_db.is_file():
+        utils_analysis.build_workload_pmc_db(per_pass_dbs, str(merged_db))
+    return utils_analysis.load_rocpd_pmc_df(str(workload_path))
 
 
 def load_workload_timestamps(workload_dir):

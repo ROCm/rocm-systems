@@ -14,7 +14,7 @@ import pandas as pd
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from utils import rocpd_data, utils_analysis
+from utils import utils_analysis
 from utils.analysis_orm import Database, get_views
 from utils.file_io import process_pc_sampling_kernel_trace
 from utils.logger import (
@@ -296,11 +296,7 @@ class db_analysis(OmniAnalyze_Base):
         args = self.get_args()
 
         for workload_path in self._runs.keys():
-            db_paths = rocpd_data.find_workload_db_paths(workload_path)
-            if not db_paths:
-                continue
-
-            long_df = utils_analysis.load_rocpd_pmc_df(db_paths)
+            long_df = utils_analysis.load_rocpd_pmc_df(workload_path)
             if long_df.empty:
                 continue
 

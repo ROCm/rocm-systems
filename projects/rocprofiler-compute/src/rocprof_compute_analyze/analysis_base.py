@@ -14,7 +14,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, rocpd_data, schema
+from utils import file_io, parser, rocpd_data, schema, utils_analysis
 from utils.logger import (
     console_debug,
     console_error,
@@ -68,6 +68,33 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
 def test_df_column_equality(df: pd.DataFrame) -> bool:
     """Test if all columns in dataframe are equal."""
     return df.eq(df.iloc[:, 0], axis=0).all(1).all()
+
+
+def _build_rocpd_workload_cache(workload_dir: Path) -> None:
+    """Build or reuse database for a rocpd workload."""
+    merged_db_name = f"{schema.PMC_PERF_FILE_PREFIX}.db"
+    per_pass_dbs = [
+        path
+        for path in rocpd_data.find_workload_db_paths(workload_dir)
+        if Path(path).name != merged_db_name
+    ]
+    merged_db = workload_dir / merged_db_name
+
+    if not per_pass_dbs and not merged_db.is_file():
+        console_error(
+            f"No rocpd profiling data found in {workload_dir}.\n"
+            f"Expected: <workload>/<fbase>.db\n"
+            f"Please run 'rocprof-compute profile' first."
+        )
+        return
+
+    if merged_db.is_file():
+        console_debug(f"Using existing {merged_db}")
+        return
+
+    console_log(f"Building merged {merged_db.name} from per-pass dbs...")
+    utils_analysis.build_workload_pmc_db(per_pass_dbs, str(merged_db))
+    console_log(f"Created {merged_db.name}")
 
 
 class OmniAnalyze_Base:
@@ -400,14 +427,9 @@ class OmniAnalyze_Base:
         """
         output_file = out or str(workload_dir / "pmc_perf.csv")
 
-        # Load profiling config from THIS workload directory (not args)
         profiling_config = file_io.load_profiling_config(str(workload_dir))
-        format_rocprof = profiling_config.get("format_rocprof_output", "rocpd")
         join_type = profiling_config.get("join_type", "grid")
         kokkos_trace = profiling_config.get("kokkos_trace", False)
-
-        if format_rocprof == "rocpd":
-            return None
 
         # Collect files to process - normalize to Path objects
         files: list[Path] = []
@@ -620,15 +642,7 @@ class OmniAnalyze_Base:
             format_rocprof = profiling_config.get("format_rocprof_output", "rocpd")
 
             if format_rocprof == "rocpd":
-                db_paths = rocpd_data.find_workload_db_paths(directory)
-                if not db_paths:
-                    console_error(
-                        f"No rocpd profiling data found in {directory}.\n"
-                        f"Expected: <workload>/<fbase>.db\n"
-                        f"Please run 'rocprof-compute profile' first."
-                    )
-                    return
-                self.join_prof(directory)
+                _build_rocpd_workload_cache(directory)
                 return
 
             pmc_perf = directory / "pmc_perf.csv"

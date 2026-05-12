@@ -191,6 +191,10 @@ class RocProfCompute:
                     "Falling back to csv output format."
                 )
                 self.__args.format_rocprof_output = "csv"
+                console_debug(
+                    "Effective format_rocprof_output: "
+                    f"{self.__args.format_rocprof_output}"
+                )
 
         # Validate name and output directory arguments in profiling mode
         # Skip validation if only listing metrics or sets

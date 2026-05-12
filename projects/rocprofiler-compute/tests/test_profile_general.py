@@ -670,6 +670,9 @@ def test_path_rocpd(
     assert not (workload_path / "pmc_perf.csv").exists(), (
         "pmc_perf.csv must not be materialized by analyze on the rocpd path"
     )
+    assert (workload_path / "pmc_perf.db").is_file(), (
+        "Expected merged pmc_perf.db at the workload root after analyze"
+    )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -680,9 +683,6 @@ def test_analyze_rocpd_missing_db_errors_cleanly(
 ):
     """Strict rocpd contract: analyze must exit non-zero when a workload
     declares format_rocprof_output: rocpd but contains no .db files.
-
-    This locks in the contract that replaced the legacy results_*.csv
-    fallback removed from analysis_base.join_prof.
     """
     workload_dir = tmp_path / "rocpd_missing_db"
     workload_dir.mkdir()

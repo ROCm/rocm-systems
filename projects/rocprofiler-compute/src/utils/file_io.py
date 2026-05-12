@@ -310,31 +310,23 @@ def create_df_pmc(
         raw_data_dir: str, node_name: Optional[str], kernel_verbose: int, verbose: int
     ) -> pd.DataFrame:
         if config_dict.get("format_rocprof_output") == "rocpd":
-            db_paths = rocpd_data.find_workload_db_paths(raw_data_dir)
-            if db_paths:
-                long_df = utils_analysis.load_rocpd_pmc_df(db_paths)
-                if long_df.empty:
-                    return pd.DataFrame()
-                df = utils_analysis.process_rocpd_csv(long_df)
-                if kernel_verbose >= 0:
-                    kernel_name_shortener(df, kernel_verbose)
-                if node_name is not None:
-                    df.insert(0, "Node", node_name)
-                if verbose >= 2:
-                    console_debug(f"pmc_raw_data final_single_df {df.info}")
-                return df
+            long_df = utils_analysis.load_rocpd_pmc_df(raw_data_dir)
+            if long_df.empty:
+                return pd.DataFrame()
+            df = utils_analysis.process_rocpd_csv(long_df)
+            if kernel_verbose >= 0:
+                kernel_name_shortener(df, kernel_verbose)
+            if node_name is not None:
+                df.insert(0, "Node", node_name)
+            if verbose >= 2:
+                console_debug(f"pmc_raw_data final_single_df {df.info}")
+            return df
 
         pmc_perf_path = Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
         if not pmc_perf_path.is_file():
             return pd.DataFrame()
 
         df = pd.read_csv(pmc_perf_path)
-
-        # Legacy fallback: rocpd workloads that still carry an intermediate
-        # pmc_perf.csv (pre-rocpd-default profiling) need the long-to-wide
-        # collapse that load_rocpd_pmc_df + process_rocpd_csv handles above.
-        if config_dict.get("format_rocprof_output") == "rocpd":
-            df = utils_analysis.process_rocpd_csv(df)
 
         # Demangle original KernelNames
         # Skip for Standalone Roofline with -1 to keep full kernel names

@@ -88,7 +88,7 @@ def query_marker_trace(db_path: str) -> Iterator[tuple]:
 def query_pmc_event_table(db_path: str) -> Optional[tuple[str, str]]:
     """Return ``(table_name, guid)`` for the ``rocpd_pmc_event_<guid>`` table.
 
-    Returns ``None`` if no matching table exists in the db.
+   Returns ``None`` if no matching table exists in the db.
     """
     with closing(sqlite3.connect(db_path)) as conn:
         with closing(

@@ -12,7 +12,7 @@ from typing import Any, Optional, Union
 import numpy as np
 import pandas as pd
 
-from utils import rocpd_data
+from utils import rocpd_data, schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -22,31 +22,99 @@ from utils.logger import (
 )
 
 
-def load_rocpd_pmc_df(db_paths: list[str]) -> pd.DataFrame:
-    """Return the long-format PMC DataFrame across all per-pass `.db` files.
+def build_workload_pmc_db(
+    per_pass_db_paths: list[str],
+    dst_db_path: str,
+) -> None:
+    """Build a rocprof-compute-owned merged db from per-pass rocpd dbs.
 
-    Each DB is queried once with ``COUNTERS_COLLECTION_QUERY`` and the
-    resulting frames are concatenated. ``Dispatch_ID`` is then renumbered
-    per-DB so that multi-rank rows within one merged-host DB do not collide
-    on the downstream ``process_rocpd_csv`` groupby.
+    Args:
+        per_pass_db_paths: rocpd .db files to merge, in stable order.
+        dst_db_path: destination path; replaced atomically.
     """
-    frames: list[pd.DataFrame] = []
-    for db_path in db_paths:
-        with closing(sqlite3.connect(db_path)) as conn:
-            try:
-                frame = pd.read_sql_query(rocpd_data.COUNTERS_COLLECTION_QUERY, conn)
-            except Exception as e:
-                console_error(f"Error reading {db_path}: {e}")
-                continue
-            if frame.empty:
-                continue
-            frame["Dispatch_ID"] = (
-                frame.groupby(["PID", "Dispatch_ID"], sort=False).ngroup() + 1
+    if not per_pass_db_paths:
+        console_error(
+            f"build_workload_pmc_db called with no source dbs (dst={dst_db_path})"
+        )
+        return
+
+    dst_path = Path(dst_db_path)
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = dst_path.with_suffix(dst_path.suffix + ".tmp")
+    tmp_path.unlink(missing_ok=True)
+
+    with closing(sqlite3.connect(str(tmp_path))) as connection:
+        offset = 0
+        table_created = False
+        for src_path in per_pass_db_paths:
+            inserted = _append_pass_counters(
+                connection,
+                src_path,
+                dispatch_id_offset=offset,
+                table_exists=table_created,
             )
-            frames.append(frame)
-    if not frames:
+            offset += inserted
+            if inserted > 0:
+                table_created = True
+
+        if table_created:
+            connection.execute(
+                "CREATE INDEX ix_counters_dispatch ON counters (Dispatch_ID, GUID)"
+            )
+        connection.commit()
+
+    if not table_created:
+        # No source contributed any rows. Leave the destination absent.
+        tmp_path.unlink(missing_ok=True)
+        return
+
+    tmp_path.replace(dst_path)
+
+
+def _append_pass_counters(
+    dst_connection: sqlite3.Connection,
+    src_db_path: str,
+    dispatch_id_offset: int,
+    table_exists: bool,
+) -> int:
+    """Append one source db's counters_collection rows to the merged table."""
+    with closing(sqlite3.connect(src_db_path)) as src_connection:
+        try:
+            frame = pd.read_sql_query(
+                rocpd_data.COUNTERS_COLLECTION_QUERY,
+                src_connection,
+            )
+        except Exception as exc:
+            console_error(f"Error reading {src_db_path}: {exc}")
+            return 0
+    if frame.empty:
+        return 0
+
+    frame["Dispatch_ID"] = (
+        frame.groupby(["PID", "Dispatch_ID"], sort=False).ngroup()
+        + 1
+        + dispatch_id_offset
+    )
+    distinct = int(frame["Dispatch_ID"].nunique())
+    frame.to_sql(
+        "counters",
+        dst_connection,
+        if_exists="append" if table_exists else "replace",
+        index=False,
+    )
+    return distinct
+
+
+def load_rocpd_pmc_df(workload_dir: str) -> pd.DataFrame:
+    """Read the merged workload counters from ``<workload>/pmc_perf.db``.
+
+    Returns an empty DataFrame if the merged db is missing or empty.
+    """
+    merged_db = Path(workload_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.db"
+    if not merged_db.is_file():
         return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True)
+    with closing(sqlite3.connect(str(merged_db))) as connection:
+        return pd.read_sql_query("SELECT * FROM counters", connection)
 
 
 NS_TO_MS = 1.0 / 1_000_000.0
