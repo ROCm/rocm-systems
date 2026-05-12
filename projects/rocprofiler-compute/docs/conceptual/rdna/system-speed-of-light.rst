@@ -24,7 +24,7 @@ RDNA 3.5 supports both Wave32 (typical primary mode) and Wave64 wavefronts;
 wavefront size is fixed per kernel at compile time. The profiler’s ``$wave_size``
 comes from hardware discovery (for example ``rocminfo``), while the executing kernel
 may use a different size—treat peaks as approximate when those differ. VALU FLOPs
-in this panel scale roughly as ``wave_size × SQ_INSTS_VALU_sum / time``.
+in this panel scale roughly as ``wave_size * SQ_INSTS_VALU_sum / time``.
 
 Peak theoretical VALU rates (per CU, before multiplying by CU count and clock)
 ---------------------------------------------------------------------------------
