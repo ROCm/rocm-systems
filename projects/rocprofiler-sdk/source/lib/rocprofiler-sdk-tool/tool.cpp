@@ -3762,6 +3762,11 @@ rocprofv3_sigaction(int signum,
     if((act->sa_flags & SA_SIGINFO) == SA_SIGINFO &&
        act->sa_sigaction != &rocprofv3_error_signal_handler)
         get_chained_signals().at(signum) = chained_siginfo{signum, nullptr, *act};
+    // Also capture plain sa_handler (e.g. Python's SIGINT handler, which uses plain
+    // sa_handler without SA_SIGINFO). Without this, Python's handler would be silently
+    // discarded and the chained slot would stay empty. SIG_DFL/SIG_IGN are excluded
+    // because SIG_IGN is used by Python's multiprocessing spawn bootstrap and calling
+    // it as a function pointer would be undefined behavior.
     else if((act->sa_flags & SA_SIGINFO) != SA_SIGINFO && act->sa_handler &&
             act->sa_handler != SIG_DFL && act->sa_handler != SIG_IGN)
         get_chained_signals().at(signum) = chained_siginfo{signum, act->sa_handler, std::nullopt};
