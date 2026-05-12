@@ -103,6 +103,21 @@ TEST_F(HipFileStats, StatsContainer)
     ASSERT_EQ(10, sc.getFd());
 }
 
+TEST_F(HipFileStats, StatsContainerNoF_SEAL_FUTURE_WRITE)
+{
+    StrictMock<MSys>           msys{};
+    StrictMock<MConfiguration> mcfg{};
+    EXPECT_CALL(msys, memfd_create).WillOnce(testing::Return(10));
+    EXPECT_CALL(mcfg, statsLevel()).WillOnce(testing::Return(1));
+    EXPECT_CALL(msys, ftruncate);
+    EXPECT_CALL(msys, mmap).WillOnce(testing::Return(nullptr));
+    EXPECT_CALL(msys, fcntl).WillOnce(testing::Throw(std::system_error(EINVAL, std::generic_category())));
+    EXPECT_CALL(msys, munmap).Times(1);
+    EXPECT_CALL(msys, close).Times(1);
+    StatsContainer sc{};
+    ASSERT_EQ(nullptr, sc.getStats());
+}
+
 TEST_F(HipFileStats, GenerateReportV1)
 {
     Stats              stats{};

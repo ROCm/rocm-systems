@@ -97,6 +97,12 @@ populateSocketAddr(sockaddr_un &addr, pid_t pid) noexcept
 }
 
 namespace hipFile {
+
+// This flag is not defined on kernels before 5.1
+#ifndef F_SEAL_FUTURE_WRITE
+#define F_SEAL_FUTURE_WRITE 0x0010
+#endif
+
 StatsContainer::StatsContainer()
     : m_fd{FileDescriptor::make_managed(Context<Sys>::get()->memfd_create("AISSTATS", MFD_ALLOW_SEALING))},
       m_stats{nullptr}
@@ -107,6 +113,12 @@ StatsContainer::StatsContainer()
         Context<Sys>::get()->mmap(nullptr, sizeof(Stats), PROT_READ | PROT_WRITE, MAP_SHARED, m_fd.get(), 0);
     try {
         Context<Sys>::get()->fcntl(m_fd.get(), F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_FUTURE_WRITE);
+    }
+    catch (const std::system_error &e) {
+        Context<Sys>::get()->munmap(shm, sizeof(Stats));
+        if (e.code().value() == EINVAL)
+            return;
+        throw;
     }
     catch (...) {
         Context<Sys>::get()->munmap(shm, sizeof(Stats));
@@ -128,7 +140,8 @@ StatsContainer::~StatsContainer()
 StatsServer::StatsServer()
     : m_efd{FileDescriptor::make_managed(Context<Sys>::get()->eventfd(0, 0))}, m_stats{}
 {
-    m_thread = std::thread(&StatsServer::threadFn, this);
+    if (m_stats.getStats())
+        m_thread = std::thread(&StatsServer::threadFn, this);
 }
 
 StatsServer::~StatsServer()
