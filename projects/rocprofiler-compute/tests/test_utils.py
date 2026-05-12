@@ -972,7 +972,7 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
-    assert Path(workload_dir + "/pmc_perf_test.csv").exists()
+    assert Path(workload_dir + "/results_pmc_perf_test.csv").exists()
 
 
 def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
@@ -4071,512 +4071,6 @@ def test_set_locale_encoding_comprehensive_error_handling():
 
 
 # =============================================================================
-# TESTS FOR reverse_multi_index_df_pmc FUNCTION
-#
-# Normal Functionality:
-#
-# Basic multi-index DataFrame decomposition
-# Multiple levels with different column counts
-# Data type preservation
-# Column order preservation
-# Edge Cases:
-#
-# Single-level columns (error case)
-# Empty DataFrames
-# Single column per level
-# Uneven column distribution
-# Single row DataFrames
-# Error Conditions:
-#
-# Non-multi-index columns raising ValueError
-# Proper error message validation
-# Data Integrity:
-#
-# Mixed data types preservation
-# NaN value handling
-# Index preservation
-# Memory efficiency
-# Special Scenarios:
-#
-# Special characters in column names
-# Numeric level names
-# Three-level MultiIndex handling
-# Large DataFrame performance
-# Duplicate level name handling
-# Return Value Validation:
-#
-# Correct return types (list of DataFrames, list of levels)
-# Proper DataFrame structure in results
-# Consistent length of returned lists
-# =============================================================================
-
-
-def test_reverse_multi_index_df_pmc_basic_functionality():
-    """
-    Test reverse_multi_index_df_pmc with a basic multi-index DataFrame.
-
-    Returns:
-        None: Asserts function correctly decomposes multi-index DataFrame.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file1", "col2"): [4, 5, 6],
-        ("file2", "col1"): [7, 8, 9],
-        ("file2", "col3"): [10, 11, 12],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert len(coll_levels) == 2
-    assert "file1" in coll_levels
-    assert "file2" in coll_levels
-
-    assert list(dfs[0].columns) == ["col1", "col2"]
-    assert list(dfs[0]["col1"]) == [1, 2, 3]
-    assert list(dfs[0]["col2"]) == [4, 5, 6]
-
-    assert list(dfs[1].columns) == ["col1", "col3"]
-    assert list(dfs[1]["col1"]) == [7, 8, 9]
-    assert list(dfs[1]["col3"]) == [10, 11, 12]
-
-
-def test_reverse_multi_index_df_pmc_empty_dataframe():
-    """
-    Test reverse_multi_index_df_pmc with empty multi-index DataFrame.
-
-    Returns:
-        None: Asserts function handles empty DataFrames correctly.
-    """
-    import pandas as pd
-
-    columns = pd.MultiIndex.from_tuples([("file1", "col1"), ("file1", "col2")])
-    df = pd.DataFrame(columns=columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 1
-    assert len(coll_levels) == 1
-    assert coll_levels[0] == "file1"
-    assert len(dfs[0]) == 0
-    assert list(dfs[0].columns) == ["col1", "col2"]
-
-
-def test_reverse_multi_index_df_pmc_single_column_per_level():
-    """
-    Test reverse_multi_index_df_pmc with single column per level.
-
-    Returns:
-        None: Asserts function handles single column per level correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("level1", "col1"): [1, 2, 3],
-        ("level2", "col1"): [4, 5, 6],
-        ("level3", "col1"): [7, 8, 9],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 3
-    assert len(coll_levels) == 3
-    assert set(coll_levels) == {"level1", "level2", "level3"}
-
-    for i, df_result in enumerate(dfs):
-        assert len(df_result.columns) == 1
-        assert df_result.columns[0] == "col1"
-        assert len(df_result) == 3
-
-
-def test_reverse_multi_index_df_pmc_uneven_column_distribution():
-    """
-    Test reverse_multi_index_df_pmc with uneven column distribution across levels.
-
-    Returns:
-        None: Asserts function handles uneven column distributions correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file1", "col2"): [4, 5, 6],
-        ("file1", "col3"): [7, 8, 9],
-        ("file2", "col1"): [10, 11, 12],
-        ("file3", "col1"): [13, 14, 15],
-        ("file3", "col2"): [16, 17, 18],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 3
-    assert len(coll_levels) == 3
-    assert set(coll_levels) == {"file1", "file2", "file3"}
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert len(file1_df.columns) == 3
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert len(file2_df.columns) == 1
-
-    file3_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file3")
-    assert len(file3_df.columns) == 2
-
-
-def test_reverse_multi_index_df_pmc_duplicate_level_names():
-    """
-    Test reverse_multi_index_df_pmc with duplicate
-    level names (should handle unique() correctly).
-
-    Returns:
-        None: Asserts function handles duplicate level names correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file1", "col2"): [4, 5, 6],
-        ("file1", "col3"): [7, 8, 9],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 1
-    assert len(coll_levels) == 1
-    assert coll_levels[0] == "file1"
-    assert len(dfs[0].columns) == 3
-    assert list(dfs[0].columns) == ["col1", "col2", "col3"]
-
-
-def test_reverse_multi_index_df_pmc_mixed_data_types():
-    """
-    Test reverse_multi_index_df_pmc with mixed data types in columns.
-
-    Returns:
-        None: Asserts function handles mixed data types correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "integers"): [1, 2, 3],
-        ("file1", "floats"): [1.1, 2.2, 3.3],
-        ("file1", "strings"): ["a", "b", "c"],
-        ("file2", "booleans"): [True, False, True],
-        ("file2", "mixed"): [1, "text", 3.14],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert len(coll_levels) == 2
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert file1_df["integers"].dtype == "int64"
-    assert file1_df["floats"].dtype == "float64"
-    assert file1_df["strings"].dtype == "object"
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert file2_df["booleans"].dtype == "bool"
-    assert file2_df["mixed"].dtype == "object"
-
-
-def test_reverse_multi_index_df_pmc_nan_values():
-    """
-    Test reverse_multi_index_df_pmc with NaN values in data.
-
-    Returns:
-        None: Asserts function handles NaN values correctly.
-    """
-    import numpy as np
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, np.nan, 3],
-        ("file1", "col2"): [np.nan, 5, 6],
-        ("file2", "col1"): [7, 8, np.nan],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert pd.isna(file1_df.iloc[1, 0])
-    assert pd.isna(file1_df.iloc[0, 1])
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert pd.isna(file2_df.iloc[2, 0])
-
-
-def test_reverse_multi_index_df_pmc_special_column_names():
-    """
-    Test reverse_multi_index_df_pmc with special characters in column names.
-
-    Returns:
-        None: Asserts function handles special characters in column names.
-    """
-    import pandas as pd
-
-    data = {
-        ("file-1", "col_1"): [1, 2, 3],
-        ("file-1", "col.2"): [4, 5, 6],
-        ("file 2", "col@3"): [7, 8, 9],
-        ("file 2", "col#4"): [10, 11, 12],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert "file-1" in coll_levels
-    assert "file 2" in coll_levels
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file-1")
-    assert "col_1" in file1_df.columns
-    assert "col.2" in file1_df.columns
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file 2")
-    assert "col@3" in file2_df.columns
-    assert "col#4" in file2_df.columns
-
-
-def test_reverse_multi_index_df_pmc_numeric_level_names():
-    """
-    Test reverse_multi_index_df_pmc with numeric level names.
-
-    Returns:
-        None: Asserts function handles numeric level names correctly.
-    """
-    import pandas as pd
-
-    data = {
-        (1, "col1"): [1, 2, 3],
-        (1, "col2"): [4, 5, 6],
-        (2, "col1"): [7, 8, 9],
-        (3.5, "col1"): [10, 11, 12],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 3
-    assert set(coll_levels) == {1, 2, 3.5}
-
-    for level in [1, 2, 3.5]:
-        level_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == level)
-        assert len(level_df.columns) >= 1
-        assert "col1" in level_df.columns
-
-
-def test_reverse_multi_index_df_pmc_large_dataframe():
-    """
-    Test reverse_multi_index_df_pmc with large DataFrame.
-
-    Returns:
-        None: Asserts function handles large DataFrames efficiently.
-    """
-    import numpy as np
-    import pandas as pd
-
-    num_rows = 1000
-    num_levels = 5
-    num_cols_per_level = 10
-
-    data = {}
-    for level in range(num_levels):
-        for col in range(num_cols_per_level):
-            data[(f"level_{level}", f"col_{col}")] = np.random.randint(0, 100, num_rows)
-
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == num_levels
-    assert len(coll_levels) == num_levels
-
-    for i, df_result in enumerate(dfs):
-        assert len(df_result) == num_rows
-        assert len(df_result.columns) == num_cols_per_level
-
-
-def test_reverse_multi_index_df_pmc_three_level_index():
-    """
-    Test reverse_multi_index_df_pmc with three-level MultiIndex (should still work).
-
-    Returns:
-        None: Asserts function handles three-level MultiIndex correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "group1", "col1"): [1, 2, 3],
-        ("file1", "group1", "col2"): [4, 5, 6],
-        ("file1", "group2", "col1"): [7, 8, 9],
-        ("file2", "group1", "col1"): [10, 11, 12],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert set(coll_levels) == {"file1", "file2"}
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert len(file1_df.columns.levels) == 2
-
-
-def test_reverse_multi_index_df_pmc_return_type_validation():
-    """
-    Test reverse_multi_index_df_pmc return types are correct.
-
-    Returns:
-        None: Asserts function returns correct types.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file2", "col1"): [4, 5, 6],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert isinstance(dfs, list)
-    assert isinstance(coll_levels, list)
-    assert all(isinstance(df, pd.DataFrame) for df in dfs)
-    assert len(dfs) == len(coll_levels)
-
-
-def test_reverse_multi_index_df_pmc_column_order_preservation():
-    """
-    Test reverse_multi_index_df_pmc preserves column order within levels.
-
-    Returns:
-        None: Asserts function preserves column order correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "z_col"): [1, 2, 3],
-        ("file1", "a_col"): [4, 5, 6],
-        ("file1", "m_col"): [7, 8, 9],
-        ("file2", "b_col"): [10, 11, 12],
-        ("file2", "y_col"): [13, 14, 15],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert list(file1_df.columns) == ["z_col", "a_col", "m_col"]
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert list(file2_df.columns) == ["b_col", "y_col"]
-
-
-def test_reverse_multi_index_df_pmc_index_preservation():
-    """
-    Test reverse_multi_index_df_pmc preserves DataFrame index.
-
-    Returns:
-        None: Asserts function preserves original DataFrame index.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file1", "col2"): [4, 5, 6],
-        ("file2", "col1"): [7, 8, 9],
-    }
-    df = pd.DataFrame(data, index=["row_a", "row_b", "row_c"])
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    for df_result in dfs:
-        assert list(df_result.index) == ["row_a", "row_b", "row_c"]
-
-
-def test_reverse_multi_index_df_pmc_memory_efficiency():
-    """
-    Test reverse_multi_index_df_pmc memory usage patterns.
-
-    Returns:
-        None: Asserts function doesn't create unnecessary copies.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [1, 2, 3],
-        ("file2", "col1"): [4, 5, 6],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    original_memory = df.memory_usage(deep=True).sum()
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    total_result_memory = sum(df.memory_usage(deep=True).sum() for df in dfs)
-
-    assert total_result_memory < original_memory * 3
-
-
-def test_reverse_multi_index_df_pmc_edge_case_single_row():
-    """
-    Test reverse_multi_index_df_pmc with single row DataFrame.
-
-    Returns:
-        None: Asserts function handles single row DataFrames correctly.
-    """
-    import pandas as pd
-
-    data = {
-        ("file1", "col1"): [100],
-        ("file1", "col2"): [200],
-        ("file2", "col1"): [300],
-    }
-    df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
-
-    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
-
-    assert len(dfs) == 2
-    assert len(coll_levels) == 2
-
-    for df_result in dfs:
-        assert len(df_result) == 1
-
-    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
-    assert file1_df.iloc[0]["col1"] == 100
-    assert file1_df.iloc[0]["col2"] == 200
-
-    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
-    assert file2_df.iloc[0]["col1"] == 300
-
-
-# =============================================================================
 # TESTS FOR merge_counters_spatial_multiplex FUNCTION
 # =============================================================================
 
@@ -4591,47 +4085,35 @@ def test_merge_counters_spatial_multiplex_basic_functionality():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 1],
-        ("file1", "Grid_Size"): [64, 128, 256],
-        ("file1", "Workgroup_Size"): [16, 32, 64],
-        ("file1", "LDS_Per_Workgroup"): [1024, 2048, 4096],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [32, 64, 96],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [16, 32, 48],
-        ("file1", "Wave_Size"): [64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003],
-        ("file1", "Kernel_ID"): [501, 502, 503],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_b"],
-        ("file1", "Start_Timestamp"): [1000, 1100, 2000],
-        ("file1", "End_Timestamp"): [1200, 1300, 2500],
-        ("file1", "Counter1"): [100, 200, 300],
-        ("file2", "Dispatch_ID"): [4, 5, 6],
-        ("file2", "GPU_ID"): [1, 2, 2],
-        ("file2", "Grid_Size"): [512, 1024, 2048],
-        ("file2", "Workgroup_Size"): [32, 64, 128],
-        ("file2", "LDS_Per_Workgroup"): [2048, 4096, 8192],
-        ("file2", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file2", "Arch_VGPR"): [64, 96, 128],
-        ("file2", "Accum_VGPR"): [0, 0, 0],
-        ("file2", "SGPR"): [32, 48, 64],
-        ("file2", "Wave_Size"): [64, 64, 64],
-        ("file2", "Correlation_ID"): [2001, 2002, 2003],
-        ("file2", "Kernel_ID"): [601, 602, 603],
-        ("file2", "Kernel_Name"): ["kernel_c", "kernel_c", "kernel_d"],
-        ("file2", "Start_Timestamp"): [3000, 3100, 4000],
-        ("file2", "End_Timestamp"): [3400, 3500, 4800],
-        ("file2", "Counter1"): [400, 500, 600],
+        "Dispatch_ID": [1, 2, 3, 4, 5, 6],
+        "GPU_ID": [0, 0, 1, 1, 2, 2],
+        "Grid_Size": [64, 128, 256, 512, 1024, 2048],
+        "Workgroup_Size": [16, 32, 64, 32, 64, 128],
+        "LDS_Per_Workgroup": [1024, 2048, 4096, 2048, 4096, 8192],
+        "Scratch_Per_Workitem": [0, 0, 0, 0, 0, 0],
+        "Arch_VGPR": [32, 64, 96, 64, 96, 128],
+        "Accum_VGPR": [0, 0, 0, 0, 0, 0],
+        "SGPR": [16, 32, 48, 32, 48, 64],
+        "Wave_Size": [64, 64, 64, 64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003, 2001, 2002, 2003],
+        "Kernel_ID": [501, 502, 503, 601, 602, 603],
+        "Kernel_Name": [
+            "kernel_a",
+            "kernel_a",
+            "kernel_b",
+            "kernel_c",
+            "kernel_c",
+            "kernel_d",
+        ],
+        "Start_Timestamp": [1000, 1100, 2000, 3000, 3100, 4000],
+        "End_Timestamp": [1200, 1300, 2500, 3400, 3500, 4800],
+        "Counter1": [100, 200, 300, 400, 500, 600],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
     assert isinstance(result, pd.DataFrame)
-    assert isinstance(result.columns, pd.MultiIndex)
-    assert len(result.columns.levels) == 2
 
 
 def test_merge_counters_spatial_multiplex_kernel_name_fallback():
@@ -4644,25 +4126,24 @@ def test_merge_counters_spatial_multiplex_kernel_name_fallback():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2],
-        ("file1", "GPU_ID"): [0, 0],
-        ("file1", "Grid_Size"): [64, 128],
-        ("file1", "Workgroup_Size"): [16, 32],
-        ("file1", "LDS_Per_Workgroup"): [1024, 2048],
-        ("file1", "Scratch_Per_Workitem"): [0, 0],
-        ("file1", "Arch_VGPR"): [32, 64],
-        ("file1", "Accum_VGPR"): [0, 0],
-        ("file1", "SGPR"): [16, 32],
-        ("file1", "Wave_Size"): [64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002],
-        ("file1", "Kernel_ID"): [501, 502],
-        ("file1", "Name"): ["kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1100],
-        ("file1", "End_Timestamp"): [1200, 1300],
-        ("file1", "Counter1"): [100, 200],
+        "Dispatch_ID": [1, 2],
+        "GPU_ID": [0, 0],
+        "Grid_Size": [64, 128],
+        "Workgroup_Size": [16, 32],
+        "LDS_Per_Workgroup": [1024, 2048],
+        "Scratch_Per_Workitem": [0, 0],
+        "Arch_VGPR": [32, 64],
+        "Accum_VGPR": [0, 0],
+        "SGPR": [16, 32],
+        "Wave_Size": [64, 64],
+        "Correlation_ID": [1001, 1002],
+        "Kernel_ID": [501, 502],
+        "Name": ["kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1100],
+        "End_Timestamp": [1200, 1300],
+        "Counter1": [100, 200],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # The function currently has a bug where it doesn't properly check for 'Kernel_Name'
     # existence before accessing it, even though it has fallback logic for 'Name'
@@ -4693,25 +4174,24 @@ def test_merge_counters_spatial_multiplex_single_kernel_occurrence():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 1, 2],
-        ("file1", "Grid_Size"): [64, 128, 256],
-        ("file1", "Workgroup_Size"): [16, 32, 64],
-        ("file1", "LDS_Per_Workgroup"): [1024, 2048, 4096],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [32, 64, 96],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [16, 32, 48],
-        ("file1", "Wave_Size"): [64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003],
-        ("file1", "Kernel_ID"): [501, 502, 503],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_b", "kernel_c"],
-        ("file1", "Start_Timestamp"): [1000, 2000, 3000],
-        ("file1", "End_Timestamp"): [1200, 2500, 3800],
-        ("file1", "Counter1"): [100, 200, 300],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 1, 2],
+        "Grid_Size": [64, 128, 256],
+        "Workgroup_Size": [16, 32, 64],
+        "LDS_Per_Workgroup": [1024, 2048, 4096],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [32, 64, 96],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [16, 32, 48],
+        "Wave_Size": [64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003],
+        "Kernel_ID": [501, 502, 503],
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"],
+        "Start_Timestamp": [1000, 2000, 3000],
+        "End_Timestamp": [1200, 2500, 3800],
+        "Counter1": [100, 200, 300],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
@@ -4729,19 +4209,19 @@ def test_merge_counters_spatial_multiplex_multiple_duplicate_kernels():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6],
-        ("file1", "GPU_ID"): [0, 0, 1, 1, 2, 2],
-        ("file1", "Grid_Size"): [64, 64, 128, 128, 256, 256],
-        ("file1", "Workgroup_Size"): [16, 16, 32, 32, 64, 64],
-        ("file1", "LDS_Per_Workgroup"): [1024, 1024, 2048, 2048, 4096, 4096],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0, 0, 0, 0],
-        ("file1", "Arch_VGPR"): [32, 32, 64, 64, 96, 96],
-        ("file1", "Accum_VGPR"): [0, 0, 0, 0, 0, 0],
-        ("file1", "SGPR"): [16, 16, 32, 32, 48, 48],
-        ("file1", "Wave_Size"): [64, 64, 64, 64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003, 1004, 1005, 1006],
-        ("file1", "Kernel_ID"): [501, 502, 503, 504, 505, 506],
-        ("file1", "Kernel_Name"): [
+        "Dispatch_ID": [1, 2, 3, 4, 5, 6],
+        "GPU_ID": [0, 0, 1, 1, 2, 2],
+        "Grid_Size": [64, 64, 128, 128, 256, 256],
+        "Workgroup_Size": [16, 16, 32, 32, 64, 64],
+        "LDS_Per_Workgroup": [1024, 1024, 2048, 2048, 4096, 4096],
+        "Scratch_Per_Workitem": [0, 0, 0, 0, 0, 0],
+        "Arch_VGPR": [32, 32, 64, 64, 96, 96],
+        "Accum_VGPR": [0, 0, 0, 0, 0, 0],
+        "SGPR": [16, 16, 32, 32, 48, 48],
+        "Wave_Size": [64, 64, 64, 64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003, 1004, 1005, 1006],
+        "Kernel_ID": [501, 502, 503, 504, 505, 506],
+        "Kernel_Name": [
             "kernel_a",
             "kernel_a",
             "kernel_b",
@@ -4749,12 +4229,11 @@ def test_merge_counters_spatial_multiplex_multiple_duplicate_kernels():
             "kernel_c",
             "kernel_c",
         ],
-        ("file1", "Start_Timestamp"): [1000, 1100, 2000, 2100, 3000, 3100],
-        ("file1", "End_Timestamp"): [1200, 1300, 2500, 2600, 3800, 3900],
-        ("file1", "Counter1"): [100, 200, 300, 400, 500, 600],
+        "Start_Timestamp": [1000, 1100, 2000, 2100, 3000, 3100],
+        "End_Timestamp": [1200, 1300, 2500, 2600, 3800, 3900],
+        "Counter1": [100, 200, 300, 400, 500, 600],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
@@ -4772,25 +4251,24 @@ def test_merge_counters_spatial_multiplex_timestamp_median_calculation():
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [64, 64, 64],
-        ("file1", "Workgroup_Size"): [16, 16, 16],
-        ("file1", "LDS_Per_Workgroup"): [1024, 1024, 1024],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [32, 32, 32],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [16, 16, 16],
-        ("file1", "Wave_Size"): [64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003],
-        ("file1", "Kernel_ID"): [501, 502, 503],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Counter1"): [100, 200, 300],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [64, 64, 64],
+        "Workgroup_Size": [16, 16, 16],
+        "LDS_Per_Workgroup": [1024, 1024, 1024],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [32, 32, 32],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [16, 16, 16],
+        "Wave_Size": [64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003],
+        "Kernel_ID": [501, 502, 503],
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Counter1": [100, 200, 300],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
@@ -5767,203 +5245,198 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
     import pandas as pd
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 512, 1024],
-        ("file1", "Workgroup_Size"): [64, 64, 64],
-        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, None, None],
-        ("file1", "Counter2"): [None, 500, 300],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [1024, 512, 1024],
+        "Workgroup_Size": [64, 64, 64],
+        "LDS_Per_Workgroup": [32, 32, 32],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [16, 16, 16],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [32, 32, 32],
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Kernel_ID": [1, 1, 1],
+        "Counter1": [100, None, None],
+        "Counter2": [None, 500, 300],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
     result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
     # Assert Counter1 and Counter2 imputed for first two dispatches
-    assert result[("file1", "Counter2")].iloc[0] == 500
-    assert result[("file1", "Counter1")].iloc[1] == 100
+    assert result["Counter2"].iloc[0] == 500
+    assert result["Counter1"].iloc[1] == 100
 
     # For "kernel_launch_params" policy
     result = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
     # Assert Counter1 and Counter2 imputed for first and last dispatches
-    assert result[("file1", "Counter2")].iloc[0] == 300
-    assert result[("file1", "Counter1")].iloc[2] == 100
+    assert result["Counter2"].iloc[0] == 300
+    assert result["Counter1"].iloc[2] == 100
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
 
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 1024, 1024],
-        ("file1", "Workgroup_Size"): [64, 64, 32],
-        ("file1", "LDS_Per_Workgroup"): [32, 24, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, None, 300],
-        ("file1", "Counter2"): [None, 500, None],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [1024, 1024, 1024],
+        "Workgroup_Size": [64, 64, 32],
+        "LDS_Per_Workgroup": [32, 24, 32],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [16, 16, 16],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [32, 32, 32],
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Kernel_ID": [1, 1, 1],
+        "Counter1": [100, None, 300],
+        "Counter2": [None, 500, None],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
     # No imputation possible
-    assert pd.isna(result[("file1", "Counter2")].iloc[0])
-    assert pd.isna(result[("file1", "Counter1")].iloc[1])
-    assert pd.isna(result[("file1", "Counter2")].iloc[2])
+    assert pd.isna(result["Counter2"].iloc[0])
+    assert pd.isna(result["Counter1"].iloc[1])
+    assert pd.isna(result["Counter2"].iloc[2])
 
     # Test multi_kernel
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 1024, 512],
-        ("file1", "Workgroup_Size"): [64, 64, 64],
-        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_b", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, None, None],
-        ("file1", "Counter2"): [None, 500, 300],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [1024, 1024, 512],
+        "Workgroup_Size": [64, 64, 64],
+        "LDS_Per_Workgroup": [32, 32, 32],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [16, 16, 16],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [32, 32, 32],
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Kernel_ID": [1, 1, 1],
+        "Counter1": [100, None, None],
+        "Counter2": [None, 500, 300],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
     result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
     # Assert Counter1 and Counter2 imputed for first and last dispatches
-    assert result[("file1", "Counter2")].iloc[0] == 300
-    assert result[("file1", "Counter1")].iloc[2] == 100
+    assert result["Counter2"].iloc[0] == 300
+    assert result["Counter1"].iloc[2] == 100
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
 
     # For "kernel_launch_params" policy
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3],
-        ("file1", "GPU_ID"): [0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 1024, 1024],
-        ("file1", "Workgroup_Size"): [64, 64, 32],
-        ("file1", "LDS_Per_Workgroup"): [32, 24, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
-        ("file1", "End_Timestamp"): [1500, 1700, 1900],
-        ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, None, 300],
-        ("file1", "Counter2"): [None, 500, None],
+        "Dispatch_ID": [1, 2, 3],
+        "GPU_ID": [0, 0, 0],
+        "Grid_Size": [1024, 1024, 1024],
+        "Workgroup_Size": [64, 64, 32],
+        "LDS_Per_Workgroup": [32, 24, 32],
+        "Scratch_Per_Workitem": [0, 0, 0],
+        "Arch_VGPR": [16, 16, 16],
+        "Accum_VGPR": [0, 0, 0],
+        "SGPR": [32, 32, 32],
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
+        "Start_Timestamp": [1000, 1200, 1400],
+        "End_Timestamp": [1500, 1700, 1900],
+        "Kernel_ID": [1, 1, 1],
+        "Counter1": [100, None, 300],
+        "Counter2": [None, 500, None],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     # Sort by Dispatch_ID to ensure consistent order
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
     # No imputation possible
-    assert pd.isna(result[("file1", "Counter2")].iloc[0])
-    assert pd.isna(result[("file1", "Counter1")].iloc[1])
-    assert pd.isna(result[("file1", "Counter2")].iloc[2])
+    assert pd.isna(result["Counter2"].iloc[0])
+    assert pd.isna(result["Counter1"].iloc[1])
+    assert pd.isna(result["Counter2"].iloc[2])
 
     # Test incomplete last subgroup handling and no cross-subgroup contamination
     # Scenario: 3 counter buckets, 8 dispatches (2 complete subgroups + incomplete last)
     # Subgroup 0: rows 0-2, Subgroup 1: rows 3-5, Subgroup 2 (incomplete): rows 6-7
     data = {
-        ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6, 7, 8],
-        ("file1", "GPU_ID"): [0, 0, 0, 0, 0, 0, 0, 0],
-        ("file1", "Grid_Size"): [1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024],
-        ("file1", "Workgroup_Size"): [64, 64, 64, 64, 64, 64, 64, 64],
-        ("file1", "LDS_Per_Workgroup"): [32, 32, 32, 32, 32, 32, 32, 32],
-        ("file1", "Scratch_Per_Workitem"): [0, 0, 0, 0, 0, 0, 0, 0],
-        ("file1", "Arch_VGPR"): [16, 16, 16, 16, 16, 16, 16, 16],
-        ("file1", "Accum_VGPR"): [0, 0, 0, 0, 0, 0, 0, 0],
-        ("file1", "SGPR"): [32, 32, 32, 32, 32, 32, 32, 32],
-        ("file1", "Kernel_Name"): ["kernel_a"] * 8,
-        ("file1", "Start_Timestamp"): [1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400],
-        ("file1", "End_Timestamp"): [1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500],
-        ("file1", "Kernel_ID"): [1, 1, 1, 1, 1, 1, 1, 1],
+        "Dispatch_ID": [1, 2, 3, 4, 5, 6, 7, 8],
+        "GPU_ID": [0, 0, 0, 0, 0, 0, 0, 0],
+        "Grid_Size": [1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024],
+        "Workgroup_Size": [64, 64, 64, 64, 64, 64, 64, 64],
+        "LDS_Per_Workgroup": [32, 32, 32, 32, 32, 32, 32, 32],
+        "Scratch_Per_Workitem": [0, 0, 0, 0, 0, 0, 0, 0],
+        "Arch_VGPR": [16, 16, 16, 16, 16, 16, 16, 16],
+        "Accum_VGPR": [0, 0, 0, 0, 0, 0, 0, 0],
+        "SGPR": [32, 32, 32, 32, 32, 32, 32, 32],
+        "Kernel_Name": ["kernel_a"] * 8,
+        "Start_Timestamp": [1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400],
+        "End_Timestamp": [1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500],
+        "Kernel_ID": [1, 1, 1, 1, 1, 1, 1, 1],
         # Counter bucket pattern: A, B, C (repeats)
-        ("file1", "Counter_A"): [100, None, None, 200, None, None, 300, None],
-        ("file1", "Counter_B"): [None, 110, None, None, 210, None, None, 310],
-        ("file1", "Counter_C"): [None, None, 120, None, None, 220, None, None],
+        "Counter_A": [100, None, None, 200, None, None, 300, None],
+        "Counter_B": [None, 110, None, None, 210, None, None, 310],
+        "Counter_C": [None, None, 120, None, None, 220, None, None],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
     result = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
-    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    result = result.sort_values(by="Dispatch_ID")
 
     # Verify complete subgroups: all rows should have all counters
-    assert result[("file1", "Counter_A")].iloc[0] == 100
-    assert result[("file1", "Counter_A")].iloc[1] == 100
-    assert result[("file1", "Counter_A")].iloc[2] == 100
-    assert result[("file1", "Counter_B")].iloc[0] == 110
-    assert result[("file1", "Counter_C")].iloc[0] == 120
+    assert result["Counter_A"].iloc[0] == 100
+    assert result["Counter_A"].iloc[1] == 100
+    assert result["Counter_A"].iloc[2] == 100
+    assert result["Counter_B"].iloc[0] == 110
+    assert result["Counter_C"].iloc[0] == 120
 
     # Verify no cross-subgroup contamination: subgroup 1 has its own values
-    assert result[("file1", "Counter_A")].iloc[3] == 200
-    assert result[("file1", "Counter_A")].iloc[4] == 200
-    assert result[("file1", "Counter_B")].iloc[3] == 210
-    assert result[("file1", "Counter_C")].iloc[3] == 220
+    assert result["Counter_A"].iloc[3] == 200
+    assert result["Counter_A"].iloc[4] == 200
+    assert result["Counter_B"].iloc[3] == 210
+    assert result["Counter_C"].iloc[3] == 220
 
     # Verify incomplete last subgroup gets filled from previous subgroup
     # Row 6-7 only have Counter_A and Counter_B, missing Counter_C
-    assert result[("file1", "Counter_A")].iloc[6] == 300
-    assert result[("file1", "Counter_A")].iloc[7] == 300
-    assert result[("file1", "Counter_B")].iloc[6] == 310
-    assert result[("file1", "Counter_B")].iloc[7] == 310
+    assert result["Counter_A"].iloc[6] == 300
+    assert result["Counter_A"].iloc[7] == 300
+    assert result["Counter_B"].iloc[6] == 310
+    assert result["Counter_B"].iloc[7] == 310
     # Counter_C should be filled from previous subgroup via global ffill
-    assert result[("file1", "Counter_C")].iloc[6] == 220
-    assert result[("file1", "Counter_C")].iloc[7] == 220
+    assert result["Counter_C"].iloc[6] == 220
+    assert result["Counter_C"].iloc[7] == 220
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 8  # Ensure same number of rows

@@ -303,20 +303,17 @@ class db_analysis(OmniAnalyze_Base):
                 pd.read_csv(Path(workload_path) / "pmc_perf.csv")
             )
 
-            # Create multi index df with collection level as pmc_perf
-            raw_pmc = pd.concat([pmc_df], keys=["pmc_perf"], axis=1, copy=False)
-
             if args.spatial_multiplexing:
-                raw_pmc = self.spatial_multiplex_merge_counters(raw_pmc)
+                pmc_df = self.spatial_multiplex_merge_counters(pmc_df)
 
             if self._profiling_config.get("iteration_multiplexing") is not None:
-                raw_pmc = self.iteration_multiplex_impute_counters(
-                    raw_pmc,
+                pmc_df = self.iteration_multiplex_impute_counters(
+                    pmc_df,
                     policy=self._profiling_config["iteration_multiplexing"],
                     workload_dir=Path(workload_path),
                 )
 
-            pmc_df_per_workload[workload_path] = raw_pmc["pmc_perf"]
+            pmc_df_per_workload[workload_path] = pmc_df
 
         if pmc_df_per_workload:
             console_debug("Collected dispatch data")
@@ -490,7 +487,7 @@ class db_analysis(OmniAnalyze_Base):
             value = value.replace("raw_pmc_df", "pmc_df")
             value = value.replace("pmc_df['sys_info']", "sys_info")
         else:
-            value = value.replace("raw_pmc_df['pmc_perf']", "pmc_df")
+            value = value.replace("raw_pmc_df", "pmc_df")
             value = re.sub(
                 "ammolite__([0-9A-Za-z_]+)",
                 lambda m: f'sys_info["{m.group(1)}"]',
@@ -655,7 +652,6 @@ class db_analysis(OmniAnalyze_Base):
                 "Channel",
                 "Unit",
                 "Description",
-                "coll_level",
                 "Type",
                 "Xfer",
                 "Coherency",
