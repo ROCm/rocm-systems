@@ -9,6 +9,7 @@
 #include "core/trace_cache/perfetto_processor.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/trace_cache/sample_processor.hpp"
+#include "core/trace_cache/wall_clock_report_processor.hpp"
 
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
@@ -48,8 +49,13 @@ struct format_t
 
 struct enabled_formats_t
 {
-    std::vector<format_t> formats = { { true, get_use_rocpd(), "rocpd" },
-                                      { false, get_caching_perfetto(), "perfetto" } };
+    std::vector<format_t> formats;
+
+    enabled_formats_t()
+    : formats{ { true, get_use_rocpd(), "rocpd" },
+               { false, get_caching_perfetto(), "perfetto" },
+               { false, get_use_timemory(), "wall_clock" } }
+    {}
 
     void print() const
     {
@@ -161,6 +167,14 @@ struct enabled_formats_t
         });
         return it != formats.end() && it->enabled;
     }
+
+    bool is_wall_clock_enabled() const
+    {
+        auto it = std::find_if(formats.begin(), formats.end(), [](const auto& f) {
+            return std::strcmp(f.name, "wall_clock") == 0;
+        });
+        return it != formats.end() && it->enabled;
+    }
 };
 
 struct processor_config_t
@@ -183,8 +197,9 @@ struct processor_config_t
 
 struct processor_storage_t
 {
-    std::shared_ptr<rocpd_processor_t>    rocpd_processor{ nullptr };
-    std::shared_ptr<perfetto_processor_t> perfetto_processor{ nullptr };
+    std::shared_ptr<rocpd_processor_t>             rocpd_processor{ nullptr };
+    std::shared_ptr<perfetto_processor_t>          perfetto_processor{ nullptr };
+    std::shared_ptr<wall_clock_report_processor_t> wall_clock_processor{ nullptr };
 };
 
 using directory_files_t    = std::vector<std::string>;
@@ -404,6 +419,13 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _type_proc
             _processor_config->_pid, _processor_config->_ppid, _output_registry);
         _type_processing->add_handler(*processor_storage.perfetto_processor);
     }
+    if(_enabled_formats.is_wall_clock_enabled())
+    {
+        processor_storage.wall_clock_processor =
+            std::make_shared<wall_clock_report_processor_t>(
+                _processor_config->_pid, _processor_config->_ppid, _output_registry);
+        _type_processing->add_handler(*processor_storage.wall_clock_processor);
+    }
     return processor_storage;
 }
 
@@ -592,6 +614,9 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry)
         }
     }
 
+    // Remove buffered_storage_*.bin / metadata_*.json only after all consumers finish:
+    // dispatch_processing runs sequential formats (e.g. wall_clock) then parallel
+    // (rocpd), then optional perfetto merge above.
     filesystem_utils::clear_cache_files(cache_files);
 
     LOG_TRACE("Trace cache bulk post-processing completed");

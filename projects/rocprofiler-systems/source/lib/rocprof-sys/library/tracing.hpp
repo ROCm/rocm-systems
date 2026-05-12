@@ -17,6 +17,7 @@
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 #include "library/tracing/annotation.hpp"
+#include "library/wall_clock_span_trace.hpp"
 #include <cstdint>
 
 #include <timemory/components/io/components.hpp>
@@ -298,6 +299,11 @@ push_timemory(CategoryT, std::string_view name, Args&&... args)
     {
         // this generates a hash for the raw string array
         auto _hash = tim::add_hash_id(name);
+        if(config::get_use_timemory())
+        {
+            wall_clock_span_push_region(static_cast<tim::hash_value_t>(_hash), name,
+                                        trait::name<CategoryT>::value);
+        }
         _data->construct(_hash)->start(std::forward<Args>(args)...);
         // increment the profile stack
         ++get_profile_stack<CategoryT>();
@@ -376,6 +382,11 @@ pop_timemory(CategoryT, std::string_view name, Args&&... args)
     if(profile_pop_disabled<CategoryT>()) return;
 
     auto _data = stop_timemory(CategoryT{}, name, std::forward<Args>(args)...);
+    if(config::get_use_timemory() && _data.first)
+    {
+        auto _hash = tim::add_hash_id(name);
+        wall_clock_span_pop_region(static_cast<tim::hash_value_t>(_hash));
+    }
     if(_data.first) destroy_timemory(std::move(_data));
 }
 

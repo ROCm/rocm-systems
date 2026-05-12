@@ -25,7 +25,8 @@ using storage_parser_t =
                    memory_allocate_sample, region_sample, in_time_sample,
                    pmc_event_with_sample, pmc::collectors::gpu::sample,
                    pmc::collectors::nic::sample, pmc::collectors::cpu::sample,
-                   backtrace_region_sample, scratch_memory_sample, kfd_sample>;
+                   backtrace_region_sample, scratch_memory_sample, kfd_sample,
+                   wall_clock_span_begin_sample, wall_clock_span_end_sample>;
 
 using buffer_storage_t = buffer_storage<flush_worker_factory_t, type_identifier_t>;
 

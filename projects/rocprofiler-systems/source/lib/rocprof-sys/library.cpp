@@ -52,6 +52,7 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include "library/wall_clock_span_trace.hpp"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
 
 #include <timemory/hash/types.hpp>
@@ -1166,6 +1167,12 @@ rocprofsys_finalize_hidden(void)
     // explicitly stopped before finalization)
     LOG_DEBUG("Flushing pending region cache entries...");
     rocprofsys_flush_pending_region_cache_hidden();
+
+    if(get_use_timemory())
+    {
+        LOG_DEBUG("Flushing open wall-clock span trace stacks (this thread)...");
+        wall_clock_span_flush_open_regions();
+    }
 
     bool _perfetto_output_error = false;
     if(get_use_perfetto())

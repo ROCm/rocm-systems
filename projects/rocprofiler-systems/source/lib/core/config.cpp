@@ -2247,6 +2247,35 @@ get_perfetto_output_filename()
                : result;
 }
 
+std::string
+get_wall_clock_report_filename(pid_t output_pid)
+{
+    const auto* pwd = getenv("PWD");
+
+    auto basename =
+        fmt::format("rocprof-sys-wall-clock-{}", static_cast<std::int64_t>(output_pid));
+    auto ext = std::string{ "txt" };
+
+    auto        attach_add_session_id = getenv("ROCPROFSYS_REATTACH_ADD_SESSION_ID");
+    static auto wc_session_id         = 0;
+
+    auto cfg =
+        attach_add_session_id
+            ? settings::compose_filename_config{ settings::use_output_suffix(),
+                                                 fmt::format("%pid%-{}", wc_session_id++),
+                                                 false, std::string{} }
+            : settings::compose_filename_config{ settings::use_output_suffix(),
+                                                 settings::default_process_suffix(),
+                                                 false, std::string{} };
+
+    auto result = settings::compose_output_filename(basename, ext, cfg);
+
+    return (!result.empty() && result.at(0) != '/')
+               ? settings::format(fmt::format("{}/{}", pwd, result),
+                                  get_config()->get_tag())
+               : result;
+}
+
 double
 get_sampling_freq()
 {

@@ -29,6 +29,8 @@ enum class type_identifier_t : std::uint32_t
     scratch_memory          = 0x0009,
     ainic_pmc_sample        = 0x000A,
     kfd_sample              = 0x000B,
+    wall_clock_span_begin   = 0x000C,
+    wall_clock_span_end     = 0x000D,
     fragmented_space        = 0xFFFF
 };
 
@@ -765,6 +767,113 @@ get_size(const kfd_sample& item)
         std::string_view(item.category), std::string_view(item.track_name),
         std::string_view(item.event_metadata), item.device_id, item.device_type,
         std::string_view(item.pmc_info_name), item.value, item.system_tid);
+}
+
+//--------------------------------------------------------------------------------------//
+//
+//  Wall-clock span trace (Pass A / Option B): explicit span ids + parent links for
+//  offline hierarchical reconstruction (wall_clock_report_processor).
+//
+//--------------------------------------------------------------------------------------//
+
+struct wall_clock_span_begin_sample : cacheable_t
+{
+    static constexpr type_identifier_t type_identifier =
+        type_identifier_t::wall_clock_span_begin;
+
+    wall_clock_span_begin_sample() = default;
+    wall_clock_span_begin_sample(std::uint64_t _span_id, std::uint64_t _parent_span_id,
+                                 std::uint64_t _thread_seq_id, std::uint64_t _system_tid,
+                                 std::uint64_t _timestamp_ns, std::string _name,
+                                 std::string _category)
+    : span_id(_span_id)
+    , parent_span_id(_parent_span_id)
+    , thread_seq_id(_thread_seq_id)
+    , system_tid(_system_tid)
+    , timestamp_ns(_timestamp_ns)
+    , name(std::move(_name))
+    , category(std::move(_category))
+    {}
+
+    std::uint64_t span_id;
+    std::uint64_t parent_span_id;
+    std::uint64_t thread_seq_id;
+    std::uint64_t system_tid;
+    std::uint64_t timestamp_ns;
+    std::string   name;
+    std::string   category;
+};
+
+template <>
+inline void
+serialize(std::uint8_t* buffer, const wall_clock_span_begin_sample& item)
+{
+    utility::store_value(buffer, item.span_id, item.parent_span_id, item.thread_seq_id,
+                         item.system_tid, item.timestamp_ns, std::string_view(item.name),
+                         std::string_view(item.category));
+}
+
+template <>
+inline wall_clock_span_begin_sample
+deserialize(std::uint8_t*& buffer)
+{
+    wall_clock_span_begin_sample item;
+    std::string_view             name_view, category_view;
+    utility::parse_value(buffer, item.span_id, item.parent_span_id, item.thread_seq_id,
+                         item.system_tid, item.timestamp_ns, name_view, category_view);
+    item.name     = std::string(name_view);
+    item.category = std::string(category_view);
+    return item;
+}
+
+template <>
+inline size_t
+get_size(const wall_clock_span_begin_sample& item)
+{
+    return utility::get_size(
+        item.span_id, item.parent_span_id, item.thread_seq_id, item.system_tid,
+        item.timestamp_ns, std::string_view(item.name), std::string_view(item.category));
+}
+
+struct wall_clock_span_end_sample : cacheable_t
+{
+    static constexpr type_identifier_t type_identifier =
+        type_identifier_t::wall_clock_span_end;
+
+    wall_clock_span_end_sample() = default;
+    wall_clock_span_end_sample(std::uint64_t _span_id, std::uint64_t _thread_seq_id,
+                               std::uint64_t _timestamp_ns)
+    : span_id(_span_id)
+    , thread_seq_id(_thread_seq_id)
+    , timestamp_ns(_timestamp_ns)
+    {}
+
+    std::uint64_t span_id;
+    std::uint64_t thread_seq_id;
+    std::uint64_t timestamp_ns;
+};
+
+template <>
+inline void
+serialize(std::uint8_t* buffer, const wall_clock_span_end_sample& item)
+{
+    utility::store_value(buffer, item.span_id, item.thread_seq_id, item.timestamp_ns);
+}
+
+template <>
+inline wall_clock_span_end_sample
+deserialize(std::uint8_t*& buffer)
+{
+    wall_clock_span_end_sample item;
+    utility::parse_value(buffer, item.span_id, item.thread_seq_id, item.timestamp_ns);
+    return item;
+}
+
+template <>
+inline size_t
+get_size(const wall_clock_span_end_sample& item)
+{
+    return utility::get_size(item.span_id, item.thread_seq_id, item.timestamp_ns);
 }
 
 }  // namespace trace_cache

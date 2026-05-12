@@ -50,6 +50,8 @@ public:
     void handle(const cpu_pmc_sample& sample);
     void handle(const backtrace_region_sample& sample);
     void handle(const kfd_sample& sample);
+    void handle(const wall_clock_span_begin_sample&) {}
+    void handle(const wall_clock_span_end_sample&) {}
 
 private:
     void       initialize_perfetto();

@@ -268,6 +268,11 @@ get_perfetto_backend();
 std::string
 get_perfetto_output_filename();
 
+/// Native wall-clock text report (Pass B) path when ROCPROFSYS_PROFILE is enabled.
+/// \param output_pid Process whose buffered storage was replayed (unique basename).
+std::string
+get_wall_clock_report_filename(pid_t output_pid);
+
 double
 get_trace_delay();
 
