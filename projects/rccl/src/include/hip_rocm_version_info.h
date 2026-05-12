@@ -27,10 +27,7 @@ THE SOFTWARE.
 #define STR(v) STR2(v)
 
 // HIP version info retrieval
-#if ROCM_VERSION >= 50000
-   #define HIP_BUILD_INFO STR(HIP_VERSION_MAJOR) "." STR(HIP_VERSION_MINOR) "." STR(HIP_VERSION_PATCH) "-" HIP_VERSION_GITHASH
-// HIP Githash info not available in older ROCm versions < 5.0
-#elif ROCM_VERSION >= 40000
+#if ROCM_VERSION >= 40000
    #define HIP_BUILD_INFO STR(HIP_VERSION_MAJOR) "." STR(HIP_VERSION_MINOR) "." STR(HIP_VERSION_PATCH)
 #else
    #define HIP_BUILD_INFO "Unknown"

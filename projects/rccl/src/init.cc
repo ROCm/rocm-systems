@@ -1026,7 +1026,7 @@ fail:
   goto exit;
 }
 
-// Pre-process the string so that running "strings" on the lib can quickly reveal the version.
+// Pre-process fixed strings so running "strings" on the lib can quickly reveal the version.
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #define VERSION_STRING "RCCL version : " STR(NCCL_MAJOR) "." STR(NCCL_MINOR) "." STR(NCCL_PATCH) NCCL_SUFFIX
 #define VERSION_STRING_EXTENDED "HIP version  : " HIP_BUILD_INFO "\nROCm version : " ROCM_BUILD_INFO
@@ -1036,6 +1036,16 @@ fail:
 #endif
 static void showVersion() {
   char versionInfo[2048+2*HOST_NAME_MAX], hostInfo[HOST_NAME_MAX], libPathInfo[2048];
+  const char* versionStringExtended = VERSION_STRING_EXTENDED;
+
+#if defined(__HIP_PLATFORM_AMD__)
+  char hipVersionInfo[256];
+  snprintf(hipVersionInfo, sizeof(hipVersionInfo),
+    "HIP version  : " HIP_BUILD_INFO "-%s\nROCm version : " ROCM_BUILD_INFO,
+    amd_dbgapi_get_git_hash()
+  );
+  versionStringExtended = hipVersionInfo;
+#endif
 
   // Retrieve Hostname info
   if (gethostname(hostInfo, sizeof(hostInfo)-1) != 0) {
@@ -1055,7 +1065,7 @@ static void showVersion() {
   snprintf(versionInfo, sizeof(versionInfo),
     "%s-%s\n%s\n"
     "%-12s : %s\n%12s : %s",
-    VERSION_STRING, rcclGitHash, VERSION_STRING_EXTENDED,
+    VERSION_STRING, rcclGitHash, versionStringExtended,
     "Hostname", hostInfo, "Librccl path", libPathInfo
   );
 
