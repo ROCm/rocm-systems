@@ -71,8 +71,10 @@ int ncclIsCuMemSupported() {
     supported = 0;
   }
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
-  if (cudaDriverVersion < 71260540) {
-    WARN("cuMem support requires HIP_VERSION >= 7.12.60540");
+  // 70051831 = ROCm 7.0.2.2 backport build; [70051831, 70060000) covers 7.0.2.x range.
+  if (cudaDriverVersion < 71260540 &&
+      !(cudaDriverVersion >= 70051831 && cudaDriverVersion < 70060000)) {
+    WARN("cuMem support requires HIP_VERSION >= 7.12.60540 (or ROCm 7.0.2.x backport)");
     supported = 0;
   }
   CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
