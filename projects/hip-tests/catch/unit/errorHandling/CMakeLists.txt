@@ -28,7 +28,8 @@ set_source_files_properties(hipPeekAtLastErrorEnv_Exe.cc PROPERTIES LANGUAGE ${G
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
       hipExtGetLastError.cc
-    hipDynamicLogging.cc
+      hipDynamicLogging.cc
+      hipSkipAbortOnGpuError.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
