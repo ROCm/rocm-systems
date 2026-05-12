@@ -388,10 +388,10 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   if (isGfx942) {
      ddaThreshold = (size_t)(8388608);
   } else if (!isGfx950) {
-     ddaThreshold = -1;	
+     ddaThreshold = 0;	
   }
 
-  if (rcclParamDdaEnable() && (count * ncclTypeSize(datatype) <= ddaThreshold) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
+  if (rcclParamDdaEnable() && (count * ncclTypeSize(datatype) <= ddaThreshold) && (ddaThreshold > 0) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
     NCCLCHECK(ncclAllReduceDdaIpc(
         sendbuff,
         recvbuff,

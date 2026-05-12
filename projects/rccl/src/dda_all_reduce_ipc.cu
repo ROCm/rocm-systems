@@ -93,7 +93,7 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
   }
   if (count * sizeof(T) > comm->ddaIpcScratchBytes) {
     WARN(
-        "DDA IPC allreduce: element count %zu needs %zu bytes; comm scratch is %zu (set RCCL_DDA_IPC_BYTES)",
+        "DDA IPC allreduce: element count %zu needs %zu bytes; comm scratch is %zu bytes",
         count,
         count * sizeof(T),
         comm->ddaIpcScratchBytes);
@@ -109,7 +109,7 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
   if (wantTree && !treeOk) {
     INFO(
         NCCL_ALL,
-        "DDA IPC: size %zu B > 1 MiB but count %zu not divisible by %d; using flat kernel",
+        "DDA IPC: size %zu B > 256KB but count %zu not divisible by %d; using flat kernel",
         sizeBytes,
         count,
         kDdaNranks);
