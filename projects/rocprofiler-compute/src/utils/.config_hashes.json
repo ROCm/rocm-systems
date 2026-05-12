@@ -157,9 +157,5 @@
         "3000_mem_bw.yaml": "bdc167a85a3bffd439fb4d651b3c2df8"
       }
     }
-  },
-  "metric_descriptions": {
-    "docs/data/metrics/gfx1151_metrics.yaml": "c54d280f0154875bfd647607c8c9accc",
-    "tools/per_arch_metric_definitions/gfx1151_metrics_description.yaml": "7b463b26f61901a6098cd10ccae476db"
   }
 }
