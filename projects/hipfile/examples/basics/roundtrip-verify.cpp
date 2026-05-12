@@ -26,6 +26,8 @@
  *   6. Hash both files and compare
  */
 
+#include "basics_common.h"
+
 #include <hipfile.h>
 #include <hip/hip_runtime_api.h>
 
@@ -47,125 +49,6 @@
 
 /// @brief Alignment used for O_DIRECT transfers (must be a power of two).
 #define BLOCK_ALIGN ((size_t)4096)
-
-static const uint64_t FNV1A_OFFSET = 14695981039346656037ULL;
-static const uint64_t FNV1A_PRIME  = 1099511628211ULL;
-
-/// @brief Round value up to the next multiple of align. align must be a power of 2.
-static inline size_t
-align_up(size_t value, size_t align)
-{
-    return (value + align - 1) & ~(align - 1);
-}
-
-/// @brief Fill buf with a deterministic test pattern.
-static void
-fill_pattern(void *buf, size_t size)
-{
-    uint8_t *p = (uint8_t *)buf;
-    for (size_t i = 0; i < size; ++i)
-        p[i] = (uint8_t)(i & 0xFFU);
-}
-
-/// @brief Compute FNV-1a 64-bit hash of a memory buffer.
-static uint64_t
-hash_buffer(const void *buf, size_t size)
-{
-    uint64_t       h = FNV1A_OFFSET;
-    const uint8_t *p = (const uint8_t *)buf;
-    for (size_t i = 0; i < size; ++i) {
-        h ^= p[i];
-        h *= FNV1A_PRIME;
-    }
-    return h;
-}
-
-/// @brief Read the first `size` bytes of `path` and return their FNV-1a hash.
-static int
-hash_file(const char *path, size_t size, uint64_t *out_hash)
-{
-    uint8_t *cpu_buf = (uint8_t *)malloc(size);
-    if (!cpu_buf) {
-        fprintf(stderr, "hash_file: malloc failed for %zu bytes\n", size);
-        return 1;
-    }
-
-    int fd = open(path, O_RDONLY);
-    if (-1 == fd) {
-        fprintf(stderr, "hash_file: could not open %s (%s)\n", path, strerror(errno));
-        free(cpu_buf);
-        return 1;
-    }
-
-    size_t total = 0;
-    while (total < size) {
-        ssize_t n = read(fd, cpu_buf + total, size - total);
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
-            fprintf(stderr, "hash_file: read %s failed (%s)\n", path, strerror(errno));
-            close(fd);
-            free(cpu_buf);
-            return 1;
-        }
-        if (n == 0)
-            break;
-        total += (size_t)n;
-    }
-    close(fd);
-
-    if (total != size) {
-        fprintf(stderr, "hash_file: short read on %s (%zu of %zu bytes)\n", path, total, size);
-        free(cpu_buf);
-        return 1;
-    }
-
-    *out_hash = hash_buffer(cpu_buf, size);
-    free(cpu_buf);
-    return 0;
-}
-
-/// @brief Open a file and register it with hipFile.
-/// @param path   Path to the file.
-/// @param flags  Flags to pass to open(2); O_DIRECT is added automatically.
-/// @param mode   Mode bits for open(2) (used when O_CREAT is set).
-/// @param fd     [out] Resulting file descriptor.
-/// @param handle [out] Resulting hipFile handle.
-/// @return zero on success, non-zero on failure.
-static int
-open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *handle)
-{
-    *fd = open(path, flags | O_DIRECT, mode);
-    if (-1 == *fd) {
-        fprintf(stderr, "Could not open %s (%s)\n", path, strerror(errno));
-        return 1;
-    }
-
-    hipFileDescr_t descr{};
-    descr.type      = hipFileHandleTypeOpaqueFD;
-    descr.handle.fd = *fd;
-
-    hipFileError_t hipfile_err = hipFileHandleRegister(handle, &descr);
-    if (hipFileSuccess != hipfile_err.err) {
-        fprintf(stderr, "Could not register %s (%s)\n", path, hipFileGetOpErrorString(hipfile_err.err));
-        close(*fd);
-        return 1;
-    }
-
-    return 0;
-}
-
-/// @brief Deregister a hipFile handle and close the underlying file descriptor.
-static int
-close_file(const char *path, int fd, hipFileHandle_t handle)
-{
-    hipFileHandleDeregister(handle);
-    if (-1 == close(fd)) {
-        fprintf(stderr, "Could not close %s (%s)\n", path, strerror(errno));
-        return 1;
-    }
-    return 0;
-}
 
 int
 main(int argc, char *argv[])
