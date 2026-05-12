@@ -37,7 +37,12 @@ from utils.metrics.aggregation import (
     to_sum,
 )
 from utils.metrics.expression import CodeTransformer
-from utils.metrics.noise_clamper import to_noise_clamp
+from utils.metrics.noise_clamper import (
+    clear_noise_clamp_warnings,
+    get_noise_clamp_warnings,
+    print_noise_clamp_summary,
+    to_noise_clamp,
+)
 from utils.parser import (
     PC_SAMPLING_NOT_ISSUE_PREFIX,
 )
@@ -472,6 +477,7 @@ class db_analysis(OmniAnalyze_Base):
         pmc_df: pd.DataFrame,
         sys_info: dict[str, Any],  # noqa ANN401
         parse: bool = False,
+        emit_variance_warnings: bool = False,
     ) -> Any:  # noqa ANN401
         if parse:
             value = re.sub(
@@ -493,6 +499,7 @@ class db_analysis(OmniAnalyze_Base):
                 value,
             )
         try:
+            prev_noise_clamp_count = get_noise_clamp_warnings()["count"]
             eval_result = eval(
                 compile(value, "<string>", "eval"),
                 {},  # no globals
@@ -536,35 +543,59 @@ class db_analysis(OmniAnalyze_Base):
                         "likely due to missing counter data."
                     )
                 return None
-            else:
-                return eval_result
+
+            if (
+                emit_variance_warnings
+                and get_noise_clamp_warnings()["count"] > prev_noise_clamp_count
+            ):
+                console_warning(f"Variance corrected for metric: {name}")
+            return eval_result
         except Exception as e:
             console_warning(f"Failed to evaluate expression for {name}: {value} - {e}")
             return None
 
     @staticmethod
-    def calc_builtin_vars(pmc_df: pd.DataFrame, sys_info: dict) -> pd.DataFrame:
+    def calc_builtin_vars(
+        pmc_df: pd.DataFrame,
+        sys_info: dict,
+        emit_variance_warnings: bool = False,
+    ) -> pd.DataFrame:
         """Calculate built-in variables (numActiveCUs, kernelBusyCycles, etc.)"""
         # Calculate PER_XCD variables first
         for key, value in BUILD_IN_VARS.items():
             if "PER_XCD" in key:
                 sys_info[key] = db_analysis.evaluate(
-                    key, value, pmc_df, sys_info, parse=True
+                    key,
+                    value,
+                    pmc_df,
+                    sys_info,
+                    parse=True,
+                    emit_variance_warnings=emit_variance_warnings,
                 )
         # Variable dependent on PER_XCD variables
         for key, value in BUILD_IN_VARS.items():
             if "PER_XCD" not in key:
                 sys_info[key] = db_analysis.evaluate(
-                    key, value, pmc_df, sys_info, parse=True
+                    key,
+                    value,
+                    pmc_df,
+                    sys_info,
+                    parse=True,
+                    emit_variance_warnings=emit_variance_warnings,
                 )
         return pmc_df
 
     @staticmethod
     def calc_dataframe_expressions(
-        pmc_df: pd.DataFrame, sys_info: dict, expression_df: pd.DataFrame
+        pmc_df: pd.DataFrame,
+        sys_info: dict,
+        expression_df: pd.DataFrame,
+        emit_variance_warnings: bool = False,
     ) -> pd.Series:
         # Calculate built-in variables
-        db_analysis.calc_builtin_vars(pmc_df, sys_info)
+        db_analysis.calc_builtin_vars(
+            pmc_df, sys_info, emit_variance_warnings=emit_variance_warnings
+        )
         # Evaluate expressions while printing warnings
         return expression_df.apply(
             lambda row: db_analysis.evaluate(
@@ -572,6 +603,7 @@ class db_analysis(OmniAnalyze_Base):
                 row["value"],
                 pmc_df,
                 sys_info,
+                emit_variance_warnings=emit_variance_warnings,
             ),
             axis=1,
         )
@@ -614,15 +646,23 @@ class db_analysis(OmniAnalyze_Base):
                 else pd.DataFrame()
             )
 
-            # Calculate workload-level metrics (aggregate across ALL dispatches)
+            # Calculate workload-level metrics (aggregate across ALL dispatches).
+            # Variance-correction warnings and the aggregate noise-clamp summary
+            # are scoped to this pass: kernel-level evaluation runs the same
+            # expressions once per kernel and would multiply each warning by
+            # the kernel count.
+            console_debug(f"Processing workload: {workload_path}")
+            clear_noise_clamp_warnings()
             workload_values_data[workload_path] = expression_template.copy()
             workload_values_data[workload_path]["value"] = (
                 db_analysis.calc_dataframe_expressions(
                     pmc_df,
                     sys_info.copy(),
                     workload_values_data[workload_path],
+                    emit_variance_warnings=True,
                 )
             )
+            print_noise_clamp_summary()
 
         if kernel_values_data or workload_values_data:
             console_debug("Calculated kernel-level and workload-level metric values")
