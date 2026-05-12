@@ -23,6 +23,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - JSON schema file (`share/rocprofiler-systems/presets/schema.json`) for preset validation.
 - Documentation (`docs/how-to/instrumenting-rewriting-binary-application.rst`) describing what to do when Dyninst reports a "Failed to transform trace" error during instrumentation.
 - Progress bars during trace cache post-processing: perfetto generation (`sequential dispatch`) shows one bar per buffered_storage file in turn; rocpd generation (`multithreaded dispatch`) shows a single aggregate bar accumulating updates from all worker threads.
+- Per-stream Perfetto tracks (`HIP Activity Stream {N}`) for kernel dispatch, scratch memory, and memory copy events in the trace-cache path, matching the buffered tracing behavior. Controlled via `ROCPROFSYS_ROCM_GROUP_BY_QUEUE` (default: `false` — group by HIP stream).
 
 ### Changed
 
