@@ -203,8 +203,8 @@ if(BUILD_TESTS)
 
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
+      MiscTests.cpp
       RomeTopoConsensusTests.cpp
-      CommTests.cpp
       EnqueueCountTests.cpp
       device/TestOp128.cpp
       device/GinDeviceTests.cpp
@@ -281,6 +281,7 @@ if(BUILD_TESTS)
       transport/NetIbMPI/CastTests.cpp
       transport/GinMPI/GinMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
+      CommMPITests.cpp
       RegistrationMPITests.cpp
     )
 
