@@ -3430,7 +3430,7 @@ ncclResult_t ncclGinIbGdakiListen(void* ctx, int dev, void* opaqueHandle, void**
 ncclResult_t ncclGinIbGdakiCreateContext(void* collComm, int nSignals, int nCounters, int nContexts, void **ginCtx, ncclNetDeviceHandle_v11_t** devHandle) {
   struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
 
-  NCCLCHECK(ncclGinGdakiCreateContext(cComm, nSignals, nCounters, nContexts, ginCtx, devHandle));
+  NCCLCHECK(ncclGinGdakiCreateContext(cComm, nSignals, nCounters, nContexts, /*queueDepth*/0, /*trafficClass*/0, ginCtx, devHandle));
 
   return ncclSuccess;
 }

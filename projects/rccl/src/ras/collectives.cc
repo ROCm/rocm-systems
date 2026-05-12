@@ -5,6 +5,7 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
+#include <algorithm>
 #include <mutex>
 
 #include "alloc.h"

@@ -5,22 +5,9 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
+#include <algorithm>
 #include "ras_internal.h"
 #include "os.h"
-
-// Links forming the backbone of the RAS network (currently a ring).
-struct rasLink rasNextLink = {1}, rasPrevLink = {-1};
-
-// Connections on the RAS network.
-struct rasConnection* rasConnsHead;
-struct rasConnection* rasConnsTail;
-
-// Sockets implementing the RAS network.
-struct rasSocket *rasSocketsHead;
-struct rasSocket *rasSocketsTail;
-
-// Magic file descriptor number when we want poll() to ignore an entry.  Anything negative would do, but
-// I didn't want to use -1 because it has a special meaning for us.
 #define POLL_FD_IGNORE -2
 
 static void freeConnEntry(struct rasConnection* conn);

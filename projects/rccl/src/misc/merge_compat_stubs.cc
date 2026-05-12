@@ -65,3 +65,11 @@ void ncclDevCommCopyLsaData(void* /*dstRankPtr*/, void const* /*srcRankPtr*/) {
 } // RCCL_COMPAT_STUB
 
 NCCL_PARAM(PollTimeOut, "SOCKET_POLL_TIMEOUT", 100); // RCCL_COMPAT_STUB
+
+const char* ncclVersionToString(int version, char* buf, size_t bufLen) {
+  int major = version / 10000;
+  int minor = (version / 100) % 100;
+  int patch = version % 100;
+  snprintf(buf, bufLen, "%d.%d.%d", major, minor, patch);
+  return buf;
+} // RCCL_COMPAT_STUB
