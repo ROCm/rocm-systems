@@ -2,7 +2,7 @@
 ! SPDX-License-Identifier: MIT
 !
 ! Combined OpenMP host example that runs two distinct phases in sequence:
-!   Phase 1: ordered parallel loop
+!   Phase 1: round-robin parallel loop
 !   Phase 2: parallel task with detach (Currently Disabled)
 
 
@@ -19,42 +19,27 @@ program host_combined
 contains
 
     ! ------------------------------------------------------------------ !
-    ! Phase 1: ordered parallel loop                                      !
+    ! Phase 1: round-robin parallel loop                                  !
     ! ------------------------------------------------------------------ !
     subroutine run_ordered_phase()
-        integer, parameter :: N = 16
-        integer :: i, k
-        real(8) :: input(N), output(N)
-        real(8) :: running_sum, local
+        integer, parameter :: N = 20
+        integer :: i
+        integer :: values(0:N)
 
-        do i = 1, N
-            input(i) = real(i, kind=8)
+        do i = 0, N
+            values(i) = i
         end do
-        output = 0.0d0
-        running_sum = 0.0d0
 
-        print *, "[phase 1] ordered parallel loop"
-
-        !$omp parallel do ordered num_threads(2)              &
-        !$omp&     shared(input, output, running_sum)         &
-        !$omp&     private(k, local)                          &
-        !$omp&     schedule(static, 1)
-        do i = 1, N
-            local = 0.0d0
-            do k = 1, 1000
-                local = local + sin(real(i * k, kind=8))
-            end do
-            output(i) = 2.0d0 * input(i) + 1.0d-12 * local
-
-            !$omp ordered
-                running_sum = running_sum + output(i)
-                print *, "i=", i, "thread=", omp_get_thread_num(), &
-                         "output=", output(i), "running_sum=", running_sum
-            !$omp end ordered
+        !$omp parallel do num_threads(2) shared(values) schedule(static, 1)
+        do i = 0, N
+            values(i) = values(i) + omp_get_thread_num()
         end do
         !$omp end parallel do
 
-        print *, "[phase 1] final running_sum =", running_sum
+        print *, "[phase 1] final values:"
+        do i = 0, N
+            print *, "values(", i, ")=", values(i)
+        end do
     end subroutine run_ordered_phase
 
     ! ------------------------------------------------------------------ !

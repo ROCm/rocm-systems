@@ -39,7 +39,7 @@ mark_as_advanced(amdflang_EXECUTABLE)
 if(NOT amdflang_EXECUTABLE)
     rocprofiler_systems_message(
       FATAL_ERROR
-      "Could not find amdflang. This is required for the OMPVV tests."
+      "Could not find amdflang. This is required for the OpenMP Fortran examples."
     )
 endif()
 
@@ -76,7 +76,7 @@ endif()
 if(AMDFLANG_VERSION_MAJOR LESS 20)
     message(
         WARNING
-        "amdflang version ${AMDFLANG_FULL_VERSION} is less than the minimum required version 20 for fortran examples"
+        "amdflang version ${AMDFLANG_FULL_VERSION} is less than the minimum required version 20 for OpenMP fortran examples"
     )
     return()
 endif()

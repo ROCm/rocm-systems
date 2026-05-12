@@ -1,34 +1,42 @@
 ! Copyright (c) Advanced Micro Devices, Inc.
 ! SPDX-License-Identifier: MIT
 !
-! OpenMP offload tracing workload. Launches NUM_KERNELS GPU kernels
+! OpenMP offload tracing workload. Performs the transpose of a matrix on the GPU.
 
-program target_burner
+program target_transpose
     use omp_lib
     implicit none
 
-    integer, parameter :: NUM_KERNELS     = 10
-    integer, parameter :: WORK_PER_KERNEL = 65536
+    integer, parameter :: ROWS = 128
+    integer, parameter :: COLS = 256
 
-    real(8) :: total, partial, xx
-    integer :: kernel, i
+    integer :: input(ROWS, COLS), output(COLS, ROWS)
+    integer :: i, j, errors
 
-    total = 0.0d0
-
-    do kernel = 1, NUM_KERNELS
-        partial = 0.0d0
-
-        !$omp target teams distribute parallel do                    &
-        !$omp&   private(xx) reduction(+: partial)
-        do i = 1, WORK_PER_KERNEL
-            xx = real(i, kind=8) * 1.0d-4 + real(kernel, kind=8)
-            partial = partial + sin(xx) * cos(xx)
+    do j = 1, COLS
+        do i = 1, ROWS
+            input(i, j) = i + (j * 10)
         end do
-        !$omp end target teams distribute parallel do
+    end do
+    output = 0
 
-        total = total + partial
+    ! Distribute the transpose operation across GPU threads
+    !$omp target teams distribute parallel do collapse(2) map(to: input) map(from: output)
+    do j = 1, COLS
+        do i = 1, ROWS
+            output(j, i) = input(i, j)
+        end do
+    end do
+    !$omp end target teams distribute parallel do
+
+    ! Validate that the transpose was performed correctly
+    errors = 0
+    do j = 1, COLS
+        do i = 1, ROWS
+            if (output(j, i) /= input(i, j)) errors = errors + 1
+        end do
     end do
 
-    print *, "kernels launched =", NUM_KERNELS
-    print *, "result (sink)    =", total
-end program target_burner
+    print *, "matrix size       =", ROWS, "x", COLS
+    print *, "validation errors =", errors
+end program target_transpose
