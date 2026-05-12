@@ -2598,7 +2598,6 @@ struct CopyBufferBatchDescriptor {
   uint64_t aligned_element_count;
   uint32_t aligned_element_size;
   uint32_t trailing_byte_count;
-  uint32_t workgroup_count;
 };
 
 // ================================================================================================
@@ -2617,7 +2616,7 @@ bool KernelBlitManager::shaderCopyBufferBatch(
   CopyBufferBatchDescriptor *descriptors =
       static_cast<CopyBufferBatchDescriptor *>(descriptor_buffer);
   size_t descriptor_index = 0;
-  uint32_t max_workgroups_used = 1;
+  uint64_t max_aligned_element_count = 0;
 
   for (const auto &copy_operation : copy_operations) {
     device::Memory *source_device_memory =
@@ -2639,19 +2638,21 @@ bool KernelBlitManager::shaderCopyBufferBatch(
         copy_operation.size / aligned_element_size;
     const uint32_t trailing_byte_count =
         copy_operation.size % aligned_element_size;
-
-    uint32_t workgroup_count = static_cast<uint32_t>(
-        std::min<uint64_t>(max_workgroups_per_copy,
-                           amd::alignUp(aligned_element_count,
-                                        static_cast<uint64_t>(kLocalWorkSize)) /
-                               kLocalWorkSize));
-    workgroup_count = std::max<uint32_t>(workgroup_count, 1);
-    max_workgroups_used = std::max(max_workgroups_used, workgroup_count);
+    max_aligned_element_count =
+        std::max(max_aligned_element_count, aligned_element_count);
 
     descriptors[descriptor_index++] = {
         source_address,        destination_address, aligned_element_count,
-        aligned_element_size,  trailing_byte_count, workgroup_count};
+        aligned_element_size,  trailing_byte_count};
   }
+
+  uint32_t workgroup_count = static_cast<uint32_t>(
+      std::min<uint64_t>(max_workgroups_per_copy,
+                         amd::alignUp(max_aligned_element_count,
+                                      static_cast<uint64_t>(kLocalWorkSize)) /
+                             kLocalWorkSize));
+  workgroup_count = std::max<uint32_t>(workgroup_count, 1);
+  const uint32_t copy_stride = workgroup_count * kLocalWorkSize;
 
   amd::Kernel *const kernel = kernels_[BlitCopyBufferBatch];
   constexpr bool kDirectVa = true;
@@ -2659,10 +2660,9 @@ bool KernelBlitManager::shaderCopyBufferBatch(
               kDirectVa);
 
   setArgument(kernel, 1, sizeof(kLocalWorkSize), &kLocalWorkSize);
+  setArgument(kernel, 2, sizeof(copy_stride), &copy_stride);
 
-  size_t global_work_size[2] = {static_cast<size_t>(max_workgroups_used) *
-                                    kLocalWorkSize,
-                                copy_operations.size()};
+  size_t global_work_size[2] = {copy_stride, copy_operations.size()};
   size_t local_work_size[2] = {kLocalWorkSize, 1};
   amd::NDRangeContainer nd_range(2, nullptr, global_work_size, local_work_size);
 

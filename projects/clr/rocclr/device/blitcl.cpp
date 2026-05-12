@@ -140,26 +140,21 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       ulong aligned_element_count;
       uint aligned_element_size;
       uint trailing_byte_count;
-      uint workgroup_count;
     } CopyBufferBatchDescriptor;
 
     __kernel void __amd_rocclr_copyBufferBatch(
         __global const CopyBufferBatchDescriptor *descriptors,
-        uint workgroup_size) {
+        uint workgroup_size,
+        uint copy_stride) {
       uint work_item_id = __builtin_amdgcn_workitem_id_x();
       uint group_ordinal = __builtin_amdgcn_workgroup_id_x();
       uint descriptor_index = __builtin_amdgcn_workgroup_id_y();
 
       CopyBufferBatchDescriptor descriptor = descriptors[descriptor_index];
-      if (group_ordinal >= descriptor.workgroup_count) {
-        return;
-      }
-
       __global uchar *source = (__global uchar *)descriptor.source_address;
       __global uchar *destination =
           (__global uchar *)descriptor.destination_address;
       ulong copy_index = ((ulong)group_ordinal * workgroup_size) + work_item_id;
-      uint copy_stride = descriptor.workgroup_count * workgroup_size;
 
       if (descriptor.aligned_element_size == sizeof(ulong2)) {
         __global ulong2 *source_data = (__global ulong2 *)(source);
