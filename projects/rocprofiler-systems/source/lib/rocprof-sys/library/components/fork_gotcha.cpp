@@ -87,8 +87,8 @@ postfork_parent()
     // after fork.
     if(config::get_use_sampling())
     {
-        sampling::postfork_parent_unlock_pmc_sampler();
         sampling::postfork_parent_reinit();
+        sampling::postfork_parent_unlock_pmc_sampler();
     }
 
     rocprofsys::categories::enable_categories(config::get_enabled_categories());
