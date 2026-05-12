@@ -4213,17 +4213,34 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
               queue->base_address, errorMsg, status, host_tag.c_str(), dev->index(), kname);
     }
 
-    // Core dumps generally provide limited value for OOM or register overflow,
-    // so do not let DumpCoreFile() be the reason to abort in those cases. These
-    // errors should still honor HIP_SKIP_ABORT_ON_GPU_ERROR consistently.
+    // OOM and invalid dispatch are not GPU hardware execution exceptions, but
+    // CPU core dumps offer no value for them either. Let HIP_SKIP_ABORT_ON_GPU_ERROR
+    // alone control whether to abort for these cases.
     const bool is_oom = (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES);
     // HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS is a dispatch-time
     // failure (kernel exceeds hardware register limits), not a corruption.
     // Treat it as recoverable rather than aborting.
     const bool invalid_dispatch =
         (status == (hsa_status_t)HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS);
+
+    // The following GPU hardware exceptions mirror CUDA's CU_COREDUMP_SKIP_ABORT
+    // coverage (CUDA_EXCEPTION_4/5/6/7/9/12 per the CUDA-GDB manual). For all of
+    // these the relevant fault state (wave PC, registers, faulting address) is
+    // captured GPU-side; a CPU core dump adds no value. Let HIP_SKIP_ABORT_ON_GPU_ERROR
+    // alone control the abort, matching CUDA's behavior. Note: MEMORY_FAULT is excluded
+    // because VMFaultHandler handles it and never routes it here. See:
+    //   https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__COREDUMP.html
+    //   https://docs.nvidia.com/cuda/cuda-gdb/index.html
+    const bool is_exception = (status == HSA_STATUS_ERROR_EXCEPTION);
+    const bool is_illegal_instruction =
+        (status == (hsa_status_t)HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION);
+    const bool is_aperture_violation =
+        (status == (hsa_status_t)HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+    const bool is_register_overflow =
+        (status == (hsa_status_t)HSA_STATUS_ERROR_OUT_OF_REGISTERS);
     const bool should_abort =
-      (is_oom || invalid_dispatch)
+      (is_oom || invalid_dispatch || is_exception || is_illegal_instruction ||
+       is_aperture_violation || is_register_overflow)
         ? !HIP_SKIP_ABORT_ON_GPU_ERROR
         : (amd::Os::DumpCoreFile() || !HIP_SKIP_ABORT_ON_GPU_ERROR);
 
