@@ -743,7 +743,8 @@ process_t::insert_watchpoint (const watchpoint_t &watchpoint)
   try
     {
       for (auto &&agent : range<agent_t> ())
-        agent.insert_watchpoint (watchpoint);
+        if (agent.supports_debugging ())
+          agent.insert_watchpoint (watchpoint);
     }
   catch (...)
     {
@@ -752,7 +753,9 @@ process_t::insert_watchpoint (const watchpoint_t &watchpoint)
          the watchpoint and forward the exception.  Note: Removing a watchpoint
          that is not inserted is a no-op.  */
       for (auto &&agent : range<agent_t> ())
-        agent.remove_watchpoint (watchpoint);
+        if (agent.supports_debugging ())
+          agent.remove_watchpoint (watchpoint);
+
       throw;
     }
 }
@@ -761,7 +764,8 @@ void
 process_t::remove_watchpoint (const watchpoint_t &watchpoint)
 {
   for (auto &&agent : range<agent_t> ())
-    agent.remove_watchpoint (watchpoint);
+    if (agent.supports_debugging ())
+      agent.remove_watchpoint (watchpoint);
 
   const bool last_watchpoint = count<watchpoint_t> () == 1;
   if (last_watchpoint)

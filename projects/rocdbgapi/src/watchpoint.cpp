@@ -112,7 +112,8 @@ watchpoint_t::watchpoint_t (amd_dbgapi_watchpoint_id_t watchpoint_id,
     std::numeric_limits<decltype (programmable_mask_bits)>::max ()
   };
   for (auto &&agent : process.range<agent_t> ())
-    programmable_mask_bits &= agent.os_info ().address_watch_mask_bits;
+    if (agent.supports_debugging ())
+      programmable_mask_bits &= agent.os_info ().address_watch_mask_bits;
 
   uint64_t field_B = programmable_mask_bits;
   uint64_t field_A = ~(field_B | (field_B - 1));
