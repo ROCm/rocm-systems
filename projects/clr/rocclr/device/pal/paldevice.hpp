@@ -243,6 +243,8 @@ class Device : public NullDevice {
     // Use extSize == 0 on the path that carries no PAL trailing payload.
     void* operator new(size_t) = delete;
     void operator delete(void*) = delete;
+    // Placement new overload required by MSVC when operator new(size_t) is deleted
+    void* operator new(size_t, void* p) noexcept { return p; }
 
     //! Returns the MQD's read_dispatch_id's address.
     uintptr_t DebuggerData() const {

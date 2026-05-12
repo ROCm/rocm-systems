@@ -84,6 +84,9 @@ class VirtualGPU : public device::VirtualDevice {
     // placed in the trailing region.
     void* operator new(size_t) = delete;
     void operator delete(void*) = delete;
+    // Placement new overloads required by MSVC when operator new(size_t) is deleted
+    void* operator new(size_t, void* p) noexcept { return p; }
+    void* operator new(size_t, std::align_val_t, void* p) noexcept { return p; }
 
     static Queue* Create(VirtualGPU& gpu,                       //!< ROCCLR virtual GPU object
                          Pal::QueueType queueType,              //!< PAL queue type
