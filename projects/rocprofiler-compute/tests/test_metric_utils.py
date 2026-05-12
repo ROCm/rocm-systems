@@ -30,6 +30,10 @@ from utils.metrics.expression import (
     update_normal_unit_string,
 )
 from utils.metrics.metric_evaluator import MetricEvaluator
+from utils.metrics.noise_clamper import (
+    clear_noise_clamp_warnings,
+    get_noise_clamp_warnings,
+)
 from utils.utils_common import calc_builtin_var
 
 # =============================================================================
@@ -395,14 +399,9 @@ class TestEvaluationPipeline:
 
     def test_eval_metric_noise_clamp(self):
         """eval_metric emits per-metric variance warning + summary on clamp."""
-        from utils.metrics.noise_clamper import (
-            clear_noise_clamp_warnings,
-            get_noise_clamp_warnings,
-        )
-
         # Negative DIFF over a positive REF crosses the 1% threshold and bumps
         # the noise-clamp counter when to_noise_clamp evaluates the expression.
-        metric_df, dfs, dfs_type, sys_info, _ = self._build_eval_metric_inputs(
+        _, dfs, dfs_type, sys_info, _ = self._build_eval_metric_inputs(
             metric_fields={
                 "Value": (
                     "to_noise_clamp("

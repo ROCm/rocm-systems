@@ -555,33 +555,19 @@ class db_analysis(OmniAnalyze_Base):
             return None
 
     @staticmethod
-    def calc_builtin_vars(
-        pmc_df: pd.DataFrame,
-        sys_info: dict,
-        emit_variance_warnings: bool = False,
-    ) -> pd.DataFrame:
+    def calc_builtin_vars(pmc_df: pd.DataFrame, sys_info: dict) -> pd.DataFrame:
         """Calculate built-in variables (numActiveCUs, kernelBusyCycles, etc.)"""
         # Calculate PER_XCD variables first
         for key, value in BUILD_IN_VARS.items():
             if "PER_XCD" in key:
                 sys_info[key] = db_analysis.evaluate(
-                    key,
-                    value,
-                    pmc_df,
-                    sys_info,
-                    parse=True,
-                    emit_variance_warnings=emit_variance_warnings,
+                    key, value, pmc_df, sys_info, parse=True
                 )
         # Variable dependent on PER_XCD variables
         for key, value in BUILD_IN_VARS.items():
             if "PER_XCD" not in key:
                 sys_info[key] = db_analysis.evaluate(
-                    key,
-                    value,
-                    pmc_df,
-                    sys_info,
-                    parse=True,
-                    emit_variance_warnings=emit_variance_warnings,
+                    key, value, pmc_df, sys_info, parse=True
                 )
         return pmc_df
 
@@ -593,9 +579,7 @@ class db_analysis(OmniAnalyze_Base):
         emit_variance_warnings: bool = False,
     ) -> pd.Series:
         # Calculate built-in variables
-        db_analysis.calc_builtin_vars(
-            pmc_df, sys_info, emit_variance_warnings=emit_variance_warnings
-        )
+        db_analysis.calc_builtin_vars(pmc_df, sys_info)
         # Evaluate expressions while printing warnings
         return expression_df.apply(
             lambda row: db_analysis.evaluate(
@@ -646,11 +630,7 @@ class db_analysis(OmniAnalyze_Base):
                 else pd.DataFrame()
             )
 
-            # Calculate workload-level metrics (aggregate across ALL dispatches).
-            # Variance-correction warnings and the aggregate noise-clamp summary
-            # are scoped to this pass: kernel-level evaluation runs the same
-            # expressions once per kernel and would multiply each warning by
-            # the kernel count.
+            # Variance warnings are emitted at workload-level, not per kernel.
             console_debug(f"Processing workload: {workload_path}")
             clear_noise_clamp_warnings()
             workload_values_data[workload_path] = expression_template.copy()

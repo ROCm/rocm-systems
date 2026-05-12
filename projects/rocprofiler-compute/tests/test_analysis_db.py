@@ -3,13 +3,16 @@
 
 """Unit tests for analysis_db.py static methods."""
 
-from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 
 from rocprof_compute_analyze.analysis_db import db_analysis
+from utils.metrics.noise_clamper import (
+    clear_noise_clamp_warnings,
+    get_noise_clamp_warnings,
+)
 
 # =============================================================================
 # db_analysis.evaluate() tests
@@ -308,112 +311,98 @@ def test_calc_dataframe_expressions_with_builtin_vars():
 
 
 def test_calc_expressions_noise_clamp():
-    """Variance warning fires only on workload-level pass; summary per workload.
+    """Variance warnings fire only at workload level, summary once per workload.
 
-    Covers three things in one test:
-    1. db_analysis.evaluate(emit_variance_warnings=True) emits a per-metric
-       'Variance corrected for metric: ...' console_warning when to_noise_clamp
-       advances the global counter; the same call with the kwarg False stays
-       silent.
-    2. db_analysis.calc_expressions emits the warning exactly once per
-       workload (workload-level pass) even though the kernel-level pass
-       evaluates the same noise-clamping expression for every kernel.
-    3. print_noise_clamp_summary is called exactly once per workload.
+    - evaluate(emit_variance_warnings=True) emits the per-metric warning when
+      to_noise_clamp advances the global counter; the False kwarg stays silent.
+    - calc_expressions emits exactly one variance warning per workload
+      (kernel-level pass is silent) and calls print_noise_clamp_summary once.
     """
-    from utils.metrics.noise_clamper import (
-        clear_noise_clamp_warnings,
-        get_noise_clamp_warnings,
-    )
-
     workload_path = "/fake/workload"
-    # Two distinct kernels so the kernel-level groupby produces two groups.
-    # Without the kwarg gate the unguarded code would emit three warnings
-    # (two kernel + one workload); with the gate exactly one fires.
+    noise_clamp_expression = (
+        "to_noise_clamp("
+        "to_min(raw_pmc_df['pmc_perf']['DIFF']), "
+        "to_max(raw_pmc_df['pmc_perf']['REF']))"
+    )
+    # Two distinct kernels so groupby yields two kernel-level evaluate calls
+    # in addition to one workload-level call. Without the kwarg gate the
+    # unguarded code would emit three warnings; with the gate, exactly one.
     pmc_df = pd.DataFrame({
-        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_b", "kernel_b"],
-        "DIFF": [-100.0, -100.0, -100.0, -100.0],
-        "REF": [1000.0, 1000.0, 1000.0, 1000.0],
+        "Kernel_Name": ["kernel_a", "kernel_b"],
+        "DIFF": [-100.0, -100.0],
+        "REF": [1000.0, 1000.0],
     })
     expression_template = pd.DataFrame({
         "metric_id": ["1.1"],
         "value_name": ["clamped"],
-        "value": [
-            "to_noise_clamp("
-            "to_min(raw_pmc_df['pmc_perf']['DIFF']), "
-            "to_max(raw_pmc_df['pmc_perf']['REF']))"
-        ],
+        "value": [noise_clamp_expression],
     })
     sys_info_df = pd.DataFrame([{"placeholder": 1}])
 
-    instance = object.__new__(db_analysis)
-    instance._pmc_df_per_workload = {workload_path: pmc_df}
-    instance._metric_expression_data_per_workload = {workload_path: expression_template}
-    instance._roofline_ceilings_per_workload = {workload_path: {}}
-    instance._runs = {workload_path: SimpleNamespace(sys_info=sys_info_df)}
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pmc_df_per_workload = {workload_path: pmc_df}
+    analyzer._metric_expression_data_per_workload = {workload_path: expression_template}
+    analyzer._roofline_ceilings_per_workload = {workload_path: {}}
+    analyzer._runs = {workload_path: MagicMock(sys_info=sys_info_df)}
 
-    # --- 1. Direct evaluate() kwarg behavior ---------------------------------
+    # Direct evaluate kwarg behavior.
     clear_noise_clamp_warnings()
-    with patch("rocprof_compute_analyze.analysis_db.console_warning") as mock_warning:
+    with patch(
+        "rocprof_compute_analyze.analysis_db.console_warning"
+    ) as console_warning_mock:
         db_analysis.evaluate(
             "direct_test",
-            "to_noise_clamp("
-            "to_min(raw_pmc_df['pmc_perf']['DIFF']), "
-            "to_max(raw_pmc_df['pmc_perf']['REF']))",
+            noise_clamp_expression,
             pmc_df,
             {},
             emit_variance_warnings=True,
         )
-        emitted_with_kwarg = [
+        variance_warning_calls = [
             c
-            for c in mock_warning.call_args_list
+            for c in console_warning_mock.call_args_list
             if "Variance corrected for metric: direct_test" in c.args[0]
         ]
-        assert len(emitted_with_kwarg) == 1
+        assert len(variance_warning_calls) == 1
         assert get_noise_clamp_warnings()["count"] >= 1
 
     clear_noise_clamp_warnings()
     with patch(
         "rocprof_compute_analyze.analysis_db.console_warning"
-    ) as mock_warning_off:
+    ) as console_warning_mock:
         db_analysis.evaluate(
             "direct_test_off",
-            "to_noise_clamp("
-            "to_min(raw_pmc_df['pmc_perf']['DIFF']), "
-            "to_max(raw_pmc_df['pmc_perf']['REF']))",
+            noise_clamp_expression,
             pmc_df,
             {},
             emit_variance_warnings=False,
         )
         assert get_noise_clamp_warnings()["count"] >= 1
-        emitted_without_kwarg = [
+        variance_warning_calls = [
             c
-            for c in mock_warning_off.call_args_list
+            for c in console_warning_mock.call_args_list
             if "Variance corrected for metric:" in c.args[0]
         ]
-        assert emitted_without_kwarg == []
+        assert variance_warning_calls == []
 
-    # --- 2 & 3. calc_expressions per-workload bracket ------------------------
+    # calc_expressions per-workload bracket.
     clear_noise_clamp_warnings()
     with (
         patch("rocprof_compute_analyze.analysis_db.BUILD_IN_VARS", {}),
         patch(
             "rocprof_compute_analyze.analysis_db.console_warning"
-        ) as mock_console_warning,
+        ) as console_warning_mock,
         patch(
             "rocprof_compute_analyze.analysis_db.print_noise_clamp_summary"
-        ) as mock_print_summary,
+        ) as print_noise_clamp_summary_mock,
     ):
-        instance.calc_expressions()
+        analyzer.calc_expressions()
 
-    variance_calls = [
+    variance_warning_calls = [
         c
-        for c in mock_console_warning.call_args_list
+        for c in console_warning_mock.call_args_list
         if "Variance corrected for metric:" in c.args[0]
     ]
-    # Exactly one variance warning per workload (kernel-level pass is silent).
-    assert len(variance_calls) == 1
-    assert "1.1 - clamped" in variance_calls[0].args[0]
-    mock_print_summary.assert_called_once()
-    # Counter reflects only the workload-level pass (kernel-level counts were
-    # cleared by the bracket before workload-level evaluation).
+    assert len(variance_warning_calls) == 1
+    assert "1.1 - clamped" in variance_warning_calls[0].args[0]
+    print_noise_clamp_summary_mock.assert_called_once()
     assert get_noise_clamp_warnings()["count"] >= 1
