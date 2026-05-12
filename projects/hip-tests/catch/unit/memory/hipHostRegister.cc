@@ -642,14 +642,15 @@ HIP_TEST_CASE(Unit_hipHostRegister_Memcpy) {
   Bh = reinterpret_cast<int*>(malloc(sizeBytes));
   HIP_CHECK(hipMalloc(&Bd, sizeBytes));
 
-  REQUIRE(LEN > OFFSET);
+  const size_t offset = isQuickLevel() ? 32 : OFFSET;
+  REQUIRE(LEN > offset);
   if (mem_type) {
-    for (size_t i = 0; i < OFFSET; i++) {
+    for (size_t i = 0; i < offset; i++) {
       doMemCopy<int>(LEN, i, A, Bh, Bd, true /*internalRegister*/);
     }
   } else {
     HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
-    for (size_t i = 0; i < OFFSET; i++) {
+    for (size_t i = 0; i < offset; i++) {
       doMemCopy<int>(LEN, i, A, Bh, Bd, false /*internalRegister*/);
     }
     HIP_CHECK(hipHostUnregister(A));

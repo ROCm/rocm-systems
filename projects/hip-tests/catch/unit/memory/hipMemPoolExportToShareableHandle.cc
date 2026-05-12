@@ -18,8 +18,11 @@
 #include "mempool_common.hh"
 #include <hip_test_process.hh>
 
-constexpr int DATA_SIZE = 1024 * 1024;
-constexpr size_t byte_size = DATA_SIZE * sizeof(int);
+static int DATA_SIZE() {
+  static const int val = isQuickLevel() ? 128 * 1024 : 1024 * 1024;
+  return val;
+}
+static size_t byte_size() { return DATA_SIZE() * sizeof(int); }
 
 /**
  Kernel to perform Square of input data.
@@ -34,7 +37,7 @@ static __global__ void square_kernel(int* Buff) {
  Fill with input and expected output data.
  */
 static void fill_data(std::vector<int>& A_h, std::vector<int>& B_h, std::vector<int>& C_h) {
-  for (int i = 0; i < DATA_SIZE; i++) {
+  for (int i = 0; i < DATA_SIZE(); i++) {
     A_h[i] = i % 1024;
     B_h[i] = 0;
     C_h[i] = A_h[i] * A_h[i];
@@ -57,7 +60,7 @@ static void fill_data(std::vector<int>& A_h, std::vector<int>& B_h, std::vector<
 HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_SameProc) {
   hipMemPoolPtrExportData ptrExp;
   hipShareableHdl sharedHandle;
-  std::vector<int> A_h(DATA_SIZE), B_h(DATA_SIZE), C_h(DATA_SIZE);
+  std::vector<int> A_h(DATA_SIZE()), B_h(DATA_SIZE()), C_h(DATA_SIZE());
   fill_data(A_h, B_h, C_h);
   hipMemPoolProps pool_props{};
   hipMemPool_t mempool, mempoolImp;
@@ -77,8 +80,8 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_SameProc) {
   HIP_CHECK(hipMemPoolCreate(&mempool, &pool_props));
   // Allocate device memory from mempool
   int* A_d;
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mempool, stream));
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), byte_size, hipMemcpyHostToDevice, stream));
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size(), mempool, stream));
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), byte_size(), hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   // Export mempool
   HIP_CHECK(hipMemPoolExportToShareableHandle(&sharedHandle, mempool,
@@ -91,9 +94,9 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_SameProc) {
   // Import and use pointer
   void* ptrImp;
   HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
-  square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, stream>>>(
+  square_kernel<<<dim3(DATA_SIZE() / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, stream>>>(
       (int*)ptrImp);
-  HIP_CHECK(hipMemcpyAsync(B_h.data(), ptrImp, byte_size, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipMemcpyAsync(B_h.data(), ptrImp, byte_size(), hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
   HIP_CHECK(hipFree(ptrImp));
@@ -121,7 +124,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_SameProc) {
  *    - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldUseHdl) {
-  std::vector<int> A_h(DATA_SIZE), B_h(DATA_SIZE), C_h(DATA_SIZE);
+  std::vector<int> A_h(DATA_SIZE()), B_h(DATA_SIZE()), C_h(DATA_SIZE());
   fill_data(A_h, B_h, C_h);
   int fd[2], fdSig[2];
   REQUIRE(pipe(fd) == 0);
@@ -151,7 +154,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldUseHdl) {
     // Import and use pointer
     void* ptrImp;
     HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
-    square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
+    square_kernel<<<dim3(DATA_SIZE() / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
         (int*)ptrImp);
     HIP_CHECK(hipStreamSynchronize(0));
     // Import and use pointer
@@ -180,8 +183,8 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldUseHdl) {
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
     int* A_d;
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mempool, stream));
-    HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), byte_size, hipMemcpyHostToDevice, stream));
+    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size(), mempool, stream));
+    HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), byte_size(), hipMemcpyHostToDevice, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     hipMemPoolPtrExportData ptrExp;
     // Export A_d
@@ -198,7 +201,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldUseHdl) {
     int status;
     REQUIRE(wait(&status) >= 0);
     REQUIRE(status == 0);
-    HIP_CHECK(hipMemcpyAsync(B_h.data(), A_d, byte_size, hipMemcpyDeviceToHost, stream));
+    HIP_CHECK(hipMemcpyAsync(B_h.data(), A_d, byte_size(), hipMemcpyDeviceToHost, stream));
     // Free all resources
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
     HIP_CHECK(hipStreamSynchronize(stream));
@@ -331,7 +334,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess) {
  *    - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
-  std::vector<int> A_h(DATA_SIZE), B_h(DATA_SIZE), C_h(DATA_SIZE);
+  std::vector<int> A_h(DATA_SIZE()), B_h(DATA_SIZE()), C_h(DATA_SIZE());
   fill_data(A_h, B_h, C_h);
   int fd[2], fdSig[2], fdpid[2];
   REQUIRE(pipe(fd) == 0);
@@ -363,7 +366,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
       // Import and use pointer
       void* ptrImp;
       HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
-      square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
+      square_kernel<<<dim3(DATA_SIZE() / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
           (int*)ptrImp);
       HIP_CHECK(hipStreamSynchronize(0));
       REQUIRE(close(fd[0]) == 0);
@@ -403,8 +406,8 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
     int* A_d;
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mempool, stream));
-    HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), byte_size, hipMemcpyHostToDevice, stream));
+    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size(), mempool, stream));
+    HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), byte_size(), hipMemcpyHostToDevice, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     hipMemPoolPtrExportData ptrExp;
     // Export A_d
@@ -422,7 +425,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
     int status;
     REQUIRE(wait(&status) >= 0);
     REQUIRE(status == 0);
-    HIP_CHECK(hipMemcpyAsync(B_h.data(), A_d, byte_size, hipMemcpyDeviceToHost, stream));
+    HIP_CHECK(hipMemcpyAsync(B_h.data(), A_d, byte_size(), hipMemcpyDeviceToHost, stream));
     // Free all resources
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
     HIP_CHECK(hipStreamSynchronize(stream));
@@ -486,11 +489,11 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc) {
   HIP_CHECK(hipStreamCreate(&stream));
 
   int* A_d;
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mempool, stream));
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size(), mempool, stream));
 
-  std::vector<int> A_h(DATA_SIZE);
-  for (int i = 0; i < DATA_SIZE; i++) A_h[i] = i % 1024;
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), byte_size, hipMemcpyHostToDevice, stream));
+  std::vector<int> A_h(DATA_SIZE());
+  for (int i = 0; i < DATA_SIZE(); i++) A_h[i] = i % 1024;
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h.data(), byte_size(), hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
   hipShareableHdl sharedHandle;
@@ -530,10 +533,10 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc) {
   int exitCode = child.wait();
   REQUIRE(exitCode == 0);
 
-  std::vector<int> B_h(DATA_SIZE);
-  HIP_CHECK(hipMemcpyAsync(B_h.data(), A_d, byte_size, hipMemcpyDeviceToHost, stream));
+  std::vector<int> B_h(DATA_SIZE());
+  HIP_CHECK(hipMemcpyAsync(B_h.data(), A_d, byte_size(), hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
-  for (int i = 0; i < DATA_SIZE; i++) {
+  for (int i = 0; i < DATA_SIZE(); i++) {
     REQUIRE(B_h[i] == (A_h[i] * A_h[i]));
   }
 
@@ -602,7 +605,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc_child) {
   void *ptrImp;
   HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
 
-  square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
+  square_kernel<<<dim3(DATA_SIZE() / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0>>>(
       (int *)ptrImp);
   HIP_CHECK(hipStreamSynchronize(0));
 

@@ -225,7 +225,7 @@ HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_WithFlags) {
  * 100 times in a loop.
  */
 HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_MultipleRun) {
-  validateAddEventRecordNode(false, false, 100);
+  validateAddEventRecordNode(false, false, isQuickLevel() ? 10 : 100);
 }
 
 /**

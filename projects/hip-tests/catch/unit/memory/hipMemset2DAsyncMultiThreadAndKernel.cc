@@ -126,7 +126,8 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_MultiThread) {
   int validateCount{};
   hipStream_t stream;
 
-  auto thread_count = HipTest::getHostThreadCount(memPerThread, NUM_THREADS);
+  const int maxThreads = isQuickLevel() ? 4 : NUM_THREADS;
+  auto thread_count = HipTest::getHostThreadCount(memPerThread, maxThreads);
   if (thread_count == 0) {
     WARN("Resources not available for thread creation");
     return;
@@ -148,7 +149,8 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_MultiThread) {
   HIP_CHECK(hipMemcpy2D(B_d, width, B_h, pitch_B, NUM_W, NUM_H, hipMemcpyHostToDevice));
   HIP_CHECK(hipStreamCreate(&stream));
 
-  for (int i = 0; i < ITER; i++) {
+  const int numIter = isQuickLevel() ? 2 : ITER;
+  for (int i = 0; i < numIter; i++) {
     for (size_t k = 0; k < thread_count; k++) {
       if (k % 2) {
         t[k] = std::thread(queueJobsForhipMemset2DAsync, A_d, A_h, pitch_A, width, stream);
@@ -168,7 +170,7 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_MultiThread) {
     }
   }
 
-  REQUIRE(static_cast<size_t>(validateCount) == (ITER * elements));
+  REQUIRE(static_cast<size_t>(validateCount) == (numIter * elements));
 
   HIP_CHECK(hipFree(A_d));
   HIP_CHECK(hipFree(B_d));
