@@ -114,6 +114,14 @@ count_occurrences(const std::string& hay, const std::string& needle)
     }
     return n;
 }
+
+stacktrace::format_options
+plain_opts()
+{
+    stacktrace::format_options o;
+    o.with_color = false;
+    return o;
+}
 }  // namespace
 
 TEST(diagnostic_stacktrace_test, CaptureReturnsNonEmpty)
@@ -127,10 +135,8 @@ TEST(diagnostic_stacktrace_test, CaptureReturnsNonEmpty)
 
 TEST(diagnostic_stacktrace_test, CaptureIncludesCallerName)
 {
-    auto t     = make_marker_trace();
-    auto opts  = stacktrace::format_options{};
-    opts.color = stacktrace::color_mode::off;
-    auto s     = t.to_string(opts);
+    auto t = make_marker_trace();
+    auto s = t.to_string(plain_opts());
     EXPECT_NE(s.find("diagnostic_test_marker_capture"), std::string::npos)
         << "trace was:\n"
         << s;
@@ -138,19 +144,15 @@ TEST(diagnostic_stacktrace_test, CaptureIncludesCallerName)
 
 TEST(diagnostic_stacktrace_test, FrameZeroAppears)
 {
-    auto t     = make_marker_trace();
-    auto opts  = stacktrace::format_options{};
-    opts.color = stacktrace::color_mode::off;
-    auto s     = t.to_string(opts);
+    auto t = make_marker_trace();
+    auto s = t.to_string(plain_opts());
     EXPECT_NE(s.find("#0 "), std::string::npos) << "trace was:\n" << s;
 }
 
 TEST(diagnostic_stacktrace_test, FramesNumberedMonotonically)
 {
-    auto t     = make_marker_trace();
-    auto opts  = stacktrace::format_options{};
-    opts.color = stacktrace::color_mode::off;
-    auto s     = t.to_string(opts);
+    auto t = make_marker_trace();
+    auto s = t.to_string(plain_opts());
 
     std::size_t prev = std::string::npos;
     for(std::size_t i = 0; i < 4; ++i)
@@ -168,10 +170,8 @@ TEST(diagnostic_stacktrace_test, FramesNumberedMonotonically)
 
 TEST(diagnostic_stacktrace_test, SingleLinePerFrame)
 {
-    auto t     = make_marker_trace();
-    auto opts  = stacktrace::format_options{};
-    opts.color = stacktrace::color_mode::off;
-    auto s     = t.to_string(opts);
+    auto t = make_marker_trace();
+    auto s = t.to_string(plain_opts());
 
     // One newline per `#N` token. Trailing trailers (... skipped ..., ... more
     // ...) add their own lines; subtract them.
@@ -190,56 +190,26 @@ TEST(diagnostic_stacktrace_test, SingleLinePerFrame)
         << s;
 }
 
-TEST(diagnostic_stacktrace_test, NoColorModeProducesNoEscape)
+TEST(diagnostic_stacktrace_test, DefaultIsColored)
 {
-    auto t     = make_marker_trace();
-    auto opts  = stacktrace::format_options{};
-    opts.color = stacktrace::color_mode::off;
-    auto s     = t.to_string(opts);
-    EXPECT_EQ(s.find("\033["), std::string::npos);
-}
-
-TEST(diagnostic_stacktrace_test, ForceColorModeProducesAnsi)
-{
-    auto t     = make_marker_trace();
-    auto opts  = stacktrace::format_options{};
-    opts.color = stacktrace::color_mode::on;
-    auto s     = t.to_string(opts);
-    EXPECT_NE(s.find("\033["), std::string::npos);
-}
-
-TEST(diagnostic_stacktrace_test, NoColorEnvDisablesColor)
-{
-    env_guard nc{ "NO_COLOR", "1" };
-    env_guard cf{ "CLICOLOR_FORCE", nullptr };
-    auto      t    = make_marker_trace();
-    auto      opts = stacktrace::format_options{};
-    opts.color     = stacktrace::color_mode::auto_detect;
-    auto s         = t.to_string(opts);
-    EXPECT_EQ(s.find("\033["), std::string::npos)
-        << "NO_COLOR must suppress all ANSI escapes; trace was:\n"
-        << s;
-}
-
-TEST(diagnostic_stacktrace_test, ClicolorForceOverridesNoTty)
-{
-    env_guard nc{ "NO_COLOR", nullptr };
-    env_guard cf{ "CLICOLOR_FORCE", "1" };
-    auto      t    = make_marker_trace();
-    auto      opts = stacktrace::format_options{};
-    opts.color     = stacktrace::color_mode::auto_detect;
-    auto s         = t.to_string(opts);
+    auto t = make_marker_trace();
+    auto s = t.to_string();  // defaults: with_color = true
     EXPECT_NE(s.find("\033["), std::string::npos)
-        << "CLICOLOR_FORCE must enable color even off-TTY; trace was:\n"
+        << "default options must produce ANSI escapes; trace was:\n"
         << s;
+}
+
+TEST(diagnostic_stacktrace_test, WithColorFalseNoEscapes)
+{
+    auto t = make_marker_trace();
+    auto s = t.to_string(plain_opts());
+    EXPECT_EQ(s.find("\033["), std::string::npos);
 }
 
 TEST(diagnostic_stacktrace_test, DefaultFiltersDropLibcStartMain)
 {
-    auto t     = make_marker_trace();
-    auto opts  = stacktrace::format_options{};
-    opts.color = stacktrace::color_mode::off;
-    auto s     = t.to_string(opts);
+    auto t = make_marker_trace();
+    auto s = t.to_string(plain_opts());
     EXPECT_EQ(s.find("__libc_start_main"), std::string::npos) << "trace was:\n" << s;
 }
 
@@ -247,8 +217,7 @@ TEST(diagnostic_stacktrace_test, NoFilterEnvKeepsLibcFrames)
 {
     env_guard g{ "ROCPROFSYS_TRACE_NO_FILTER", "1" };
     auto      t          = make_marker_trace();
-    auto      opts       = stacktrace::format_options{};
-    opts.color           = stacktrace::color_mode::off;
+    auto      opts       = plain_opts();
     opts.skip_substrings = { "__ZZZ_no_match_ZZZ__" };
     auto s               = t.to_string(opts);
     EXPECT_FALSE(s.empty());
@@ -257,8 +226,7 @@ TEST(diagnostic_stacktrace_test, NoFilterEnvKeepsLibcFrames)
 TEST(diagnostic_stacktrace_test, TruncatesAtMaxFramesShown)
 {
     auto t                = make_deep_trace(60);
-    auto opts             = stacktrace::format_options{};
-    opts.color            = stacktrace::color_mode::off;
+    auto opts             = plain_opts();
     opts.max_frames_shown = 8;
     auto s                = t.to_string(opts);
     EXPECT_NE(s.find("more"), std::string::npos) << "trace was:\n" << s;
@@ -267,8 +235,7 @@ TEST(diagnostic_stacktrace_test, TruncatesAtMaxFramesShown)
 TEST(diagnostic_stacktrace_test, ModuleBasenameOnly)
 {
     auto t           = make_marker_trace();
-    auto opts        = stacktrace::format_options{};
-    opts.color       = stacktrace::color_mode::off;
+    auto opts        = plain_opts();
     opts.with_module = true;
     auto s           = t.to_string(opts);
 

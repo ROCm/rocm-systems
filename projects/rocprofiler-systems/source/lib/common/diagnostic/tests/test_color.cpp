@@ -4,6 +4,7 @@
 #include "common/diagnostic/color.hpp"
 
 #include <cstdlib>
+#include <string>
 
 #include <gtest/gtest.h>
 
@@ -48,32 +49,23 @@ private:
 
 namespace color = rocprofsys::common::diagnostic::color;
 
-TEST(diagnostic_color_test, NoColorEnvDisablesEvenForcedTty)
+TEST(diagnostic_color_test, NoColorEnvDetected)
 {
     color_env_guard nc{ "NO_COLOR" };
-    color_env_guard cf{ "CLICOLOR_FORCE" };
     ::setenv("NO_COLOR", "1", 1);
-    ::setenv("CLICOLOR_FORCE", "1", 1);
-    // Use fd 1; whether it's a TTY in CI doesn't matter - NO_COLOR wins.
-    EXPECT_FALSE(color::color_supported_for(1));
+    EXPECT_TRUE(color::no_color_env());
 }
 
-TEST(diagnostic_color_test, ClicolorForceEnablesOffTty)
+TEST(diagnostic_color_test, NoColorEnvUnsetReportsFalse)
 {
     color_env_guard nc{ "NO_COLOR" };
-    color_env_guard cf{ "CLICOLOR_FORCE" };
     ::unsetenv("NO_COLOR");
-    ::setenv("CLICOLOR_FORCE", "1", 1);
-    // /dev/null fd if needed - here we use the closed fd 99 which is not
-    // a tty; CLICOLOR_FORCE should still enable.
-    EXPECT_TRUE(color::color_supported_for(99));
+    EXPECT_FALSE(color::no_color_env());
 }
 
-TEST(diagnostic_color_test, NoTtyNoForceDisables)
+TEST(diagnostic_color_test, NoColorEnvAnyValueDetected)
 {
     color_env_guard nc{ "NO_COLOR" };
-    color_env_guard cf{ "CLICOLOR_FORCE" };
-    ::unsetenv("NO_COLOR");
-    ::unsetenv("CLICOLOR_FORCE");
-    EXPECT_FALSE(color::color_supported_for(99));
+    ::setenv("NO_COLOR", "", 1);  // even empty string counts per no-color.org
+    EXPECT_TRUE(color::no_color_env());
 }

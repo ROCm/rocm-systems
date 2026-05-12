@@ -32,19 +32,16 @@ struct stacktrace_frame
     bool           inlined = false;
 };
 
-enum class trace_color_mode
-{
-    off,
-    on,
-    auto_detect
-};
-
 struct trace_format_options
 {
-    trace_color_mode color          = trace_color_mode::auto_detect;
-    bool             with_module    = true;
-    bool             with_offset    = false;
-    bool             with_file_line = true;
+    /// When true, emit ANSI escapes per the format spec. Default is true.
+    /// Public entry points (`format_exception`, `print_exception`) flip the
+    /// default to false when `NO_COLOR` is set in the environment, but the
+    /// explicit field always wins when the caller sets it.
+    bool with_color     = true;
+    bool with_module    = true;
+    bool with_offset    = false;
+    bool with_file_line = true;
     // Empty here means "use default_skip_filters() at to_string time".
     // Set to an explicit list to override.
     std::vector<std::string> skip_substrings;
@@ -62,7 +59,6 @@ struct trace_format_options
 class stacktrace
 {
 public:
-    using color_mode     = trace_color_mode;
     using format_options = trace_format_options;
 
     /// Capture the current call stack.

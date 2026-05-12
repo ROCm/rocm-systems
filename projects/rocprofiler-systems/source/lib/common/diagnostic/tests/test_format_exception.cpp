@@ -4,6 +4,7 @@
 #include "common/diagnostic/format_exception.hpp"
 #include "common/diagnostic/stacktrace.hpp"
 
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 
@@ -28,6 +29,58 @@ exception_test_throw_range()
     asm volatile("");
     throw std::out_of_range{ "index 9 of 5" };
 }
+
+class env_guard
+{
+public:
+    env_guard(const char* name, const char* value)
+    : m_name{ name }
+    {
+        if(const char* prev = std::getenv(name); prev != nullptr)
+        {
+            m_had   = true;
+            m_saved = prev;
+        }
+        if(value != nullptr)
+        {
+            ::setenv(name, value, 1);
+        }
+        else
+        {
+            ::unsetenv(name);
+        }
+    }
+
+    ~env_guard()
+    {
+        if(m_had)
+        {
+            ::setenv(m_name, m_saved.c_str(), 1);
+        }
+        else
+        {
+            ::unsetenv(m_name);
+        }
+    }
+
+    env_guard(const env_guard&)            = delete;
+    env_guard& operator=(const env_guard&) = delete;
+    env_guard(env_guard&&)                 = delete;
+    env_guard& operator=(env_guard&&)      = delete;
+
+private:
+    const char* m_name = nullptr;
+    bool        m_had  = false;
+    std::string m_saved;
+};
+
+exception_format_options
+plain_opts()
+{
+    exception_format_options o;
+    o.with_color = false;
+    return o;
+}
 }  // namespace
 
 TEST(diagnostic_format_exception_test, FormatsRuntimeErrorWithMessage)
@@ -38,9 +91,7 @@ TEST(diagnostic_format_exception_test, FormatsRuntimeErrorWithMessage)
         FAIL() << "expected std::runtime_error";
     } catch(const std::exception& e)
     {
-        exception_format_options opt;
-        opt.trace_options.color = stacktrace::color_mode::off;
-        auto s                  = format_exception(e, opt);
+        auto s = format_exception(e, plain_opts());
         EXPECT_NE(s.find("error:"), std::string::npos);
         EXPECT_NE(s.find("value out of range"), std::string::npos);
         EXPECT_NE(s.find("#0 "), std::string::npos);
@@ -55,9 +106,7 @@ TEST(diagnostic_format_exception_test, FormatsOutOfRangeWithMessage)
         FAIL() << "expected std::out_of_range";
     } catch(const std::exception& e)
     {
-        exception_format_options opt;
-        opt.trace_options.color = stacktrace::color_mode::off;
-        auto s                  = format_exception(e, opt);
+        auto s = format_exception(e, plain_opts());
         EXPECT_NE(s.find("error:"), std::string::npos);
         EXPECT_NE(s.find("index 9 of 5"), std::string::npos);
     }
@@ -70,9 +119,7 @@ TEST(diagnostic_format_exception_test, ColorOffProducesNoEscape)
         exception_test_throw_runtime();
     } catch(const std::exception& e)
     {
-        exception_format_options opt;
-        opt.trace_options.color = stacktrace::color_mode::off;
-        auto s                  = format_exception(e, opt);
+        auto s = format_exception(e, plain_opts());
         EXPECT_EQ(s.find("\033["), std::string::npos);
     }
 }
@@ -85,8 +132,8 @@ TEST(diagnostic_format_exception_test, ColorOnProducesEscape)
     } catch(const std::exception& e)
     {
         exception_format_options opt;
-        opt.trace_options.color = stacktrace::color_mode::on;
-        auto s                  = format_exception(e, opt);
+        opt.with_color = true;
+        auto s         = format_exception(e, opt);
         EXPECT_NE(s.find("\033["), std::string::npos);
     }
 }
@@ -98,15 +145,102 @@ TEST(diagnostic_format_exception_test, HeaderHasSingleLineWhat)
         throw std::runtime_error{ "first line\nsecond line should be trimmed" };
     } catch(const std::exception& e)
     {
+        auto s = format_exception(e, plain_opts());
+        // Header (the box) must end before the first blank line.
+        // The trimmed second-line text must not appear anywhere in the
+        // formatted block since `what()` is single-line-trimmed.
+        EXPECT_EQ(s.find("second line"), std::string::npos)
+            << "second line not trimmed; output was:\n"
+            << s;
+    }
+}
+
+TEST(diagnostic_format_exception_test, NoColorEnvDisablesDefault)
+{
+    env_guard nc{ "NO_COLOR", "1" };
+    try
+    {
+        exception_test_throw_runtime();
+    } catch(const std::exception& e)
+    {
+        // No explicit `with_color` -> NO_COLOR env should disable color.
+        auto s = format_exception(e);
+        EXPECT_EQ(s.find("\033["), std::string::npos)
+            << "NO_COLOR must suppress all ANSI escapes; output was:\n"
+            << s;
+    }
+}
+
+TEST(diagnostic_format_exception_test, ExplicitColorOverridesNoColorEnv)
+{
+    env_guard nc{ "NO_COLOR", "1" };
+    try
+    {
+        exception_test_throw_runtime();
+    } catch(const std::exception& e)
+    {
         exception_format_options opt;
-        opt.trace_options.color = stacktrace::color_mode::off;
-        auto s                  = format_exception(e, opt);
-        // Header must end at first newline; second line text must not be
-        // present in the header itself. We check by ensuring the literal
-        // "second line" text does not appear before the first blank line.
-        auto blank = s.find("\n\n");
-        ASSERT_NE(blank, std::string::npos);
-        auto hdr = s.substr(0, blank);
-        EXPECT_EQ(hdr.find("second line"), std::string::npos) << "header was:\n" << hdr;
+        opt.with_color = true;  // explicit override wins over NO_COLOR
+        auto s         = format_exception(e, opt);
+        EXPECT_NE(s.find("\033["), std::string::npos);
+    }
+}
+
+TEST(diagnostic_format_exception_test, BoxPresentDefault)
+{
+    try
+    {
+        exception_test_throw_runtime();
+    } catch(const std::exception& e)
+    {
+        // Default (with color) -> UTF-8 box-drawing top-left corner.
+        auto s = format_exception(e);
+        // U+250C top-left corner.
+        EXPECT_NE(s.find("\xe2\x94\x8c"), std::string::npos)
+            << "expected UTF-8 box-drawing corner; output was:\n"
+            << s;
+    }
+}
+
+TEST(diagnostic_format_exception_test, BoxPresentAsciiWhenNoColor)
+{
+    try
+    {
+        exception_test_throw_runtime();
+    } catch(const std::exception& e)
+    {
+        auto s = format_exception(e, plain_opts());
+        // First character of the framed block is `+`.
+        ASSERT_FALSE(s.empty());
+        EXPECT_EQ(s[0], '+') << "expected ASCII box corner; output was:\n" << s;
+        EXPECT_NE(s.find("|"), std::string::npos);
+        EXPECT_NE(s.find("+--"), std::string::npos);
+    }
+}
+
+TEST(diagnostic_format_exception_test, ErrorInsideBoxWithRedWhenColored)
+{
+    try
+    {
+        exception_test_throw_runtime();
+    } catch(const std::exception& e)
+    {
+        auto s = format_exception(e);
+        // The `error:` keyword must be styled bright-red bold.
+        // Composite escape used by color::error_kw is `\033[1;91m`.
+        auto err_pos = s.find("error:");
+        ASSERT_NE(err_pos, std::string::npos);
+        // The bright-red bold escape must precede the keyword.
+        const std::string red_bold = "\033[1;91m";
+        auto              red_pos  = s.rfind(red_bold, err_pos);
+        EXPECT_NE(red_pos, std::string::npos)
+            << "error: keyword must be bright-red bold; output was:\n"
+            << s;
+        // The line carrying `error:` must be wrapped in vertical box borders
+        // (UTF-8 U+2502).
+        const std::string line_start = "\xe2\x94\x82";  // |
+        auto              before     = s.rfind(line_start, err_pos);
+        EXPECT_NE(before, std::string::npos)
+            << "error: keyword must sit inside a vertical box border";
     }
 }

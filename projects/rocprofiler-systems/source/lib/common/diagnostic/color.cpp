@@ -4,7 +4,6 @@
 #include "common/diagnostic/color.hpp"
 
 #include <cstdlib>
-#include <cstring>
 #include <unistd.h>
 
 namespace rocprofsys
@@ -28,21 +27,9 @@ stdout_is_tty() noexcept
 }
 
 bool
-color_supported_for(int fd) noexcept
+no_color_env() noexcept
 {
-    // NO_COLOR wins over CLICOLOR_FORCE per the no-color.org spec wording.
-    if(const char* nc = std::getenv("NO_COLOR"); nc != nullptr)
-    {
-        return false;
-    }
-
-    if(const char* force = std::getenv("CLICOLOR_FORCE");
-       force != nullptr && std::strcmp(force, "1") == 0)
-    {
-        return true;
-    }
-
-    return ::isatty(fd) != 0;
+    return std::getenv("NO_COLOR") != nullptr;
 }
 }  // namespace color
 }  // namespace diagnostic

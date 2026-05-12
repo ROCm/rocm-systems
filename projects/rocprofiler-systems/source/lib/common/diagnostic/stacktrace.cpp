@@ -510,13 +510,7 @@ stacktrace::to_string(format_options opt) const
         opt.skip_substrings.clear();
     }
 
-    bool color_on = false;
-    switch(opt.color)
-    {
-        case color_mode::off: color_on = false; break;
-        case color_mode::on: color_on = true; break;
-        case color_mode::auto_detect: color_on = color::color_supported_for(2); break;
-    }
+    const bool color_on = opt.with_color;
 
     auto col = [color_on](const char* code) -> const char* {
         return color_on ? code : "";

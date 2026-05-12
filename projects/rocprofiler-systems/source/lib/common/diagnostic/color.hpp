@@ -32,6 +32,7 @@ constexpr const char* tag         = "\033[90m";
 constexpr const char* keyword_dim = "\033[2m";
 constexpr const char* frame_idx   = "\033[90m";
 constexpr const char* trailer     = "\033[2m";
+constexpr const char* box_border  = "\033[90m";
 
 /// True iff `fd` refers to a TTY.
 bool
@@ -39,13 +40,10 @@ stderr_is_tty() noexcept;
 bool
 stdout_is_tty() noexcept;
 
-/// Decide whether color output is permitted for the given file descriptor.
-/// Honors:
-///   - `NO_COLOR` (https://no-color.org) - any value disables.
-///   - `CLICOLOR_FORCE=1` - forces enable even off-TTY.
-///   - otherwise: enabled iff `isatty(fd)`.
+/// True iff the `NO_COLOR` environment variable is set (any value).
+/// Public entry points use this to flip their default `with_color` to false.
 bool
-color_supported_for(int fd) noexcept;
+no_color_env() noexcept;
 }  // namespace color
 }  // namespace diagnostic
 }  // namespace common
