@@ -266,6 +266,33 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
         rocshmem_ctx_tile_get_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
         break;
       }
+      case TileGetRowMajorTestType: {
+        // Row-major get with gaps: rows=tile_extent_0, cols=tile_extent_1, row_stride=2*tile_extent_1
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+        Tuple2D start(0, 0);
+        Tuple2D boundary(tile_extent_0, tile_extent_1);
+        rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+        break;
+      }
+      case TileGetColumnMajorTestType: {
+        // Column-major get: rows=tile_extent_0, cols=tile_extent_1, row_stride=1, col_stride=tile_extent_0
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+        Tuple2D start(0, 0);
+        Tuple2D boundary(tile_extent_0, tile_extent_1);
+        rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+        break;
+      }
+      case TileGetArbitraryTestType: {
+        // Arbitrary strides get: rows=tile_extent_0, cols=tile_extent_1, row_stride=257, col_stride=3
+        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 257, 3);
+        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 257, 3);
+        Tuple2D start(0, 0);
+        Tuple2D boundary(tile_extent_0, tile_extent_1);
+        rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+        break;
+      }
       case TilePut1DTestType: {
         // 1D tensor put
         Tensor1D<float> src_tensor(source + offset, 1);
@@ -324,15 +351,18 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
 
   switch (_type) {
     case TilePutRowMajorTestType:
+    case TileGetRowMajorTestType:
       // Row stride = 2*64 = 128, need 64 rows * 128 stride
       buffer_elements_per_thread = 64 * 128;
       break;
     case TilePutColumnMajorTestType:
+    case TileGetColumnMajorTestType:
       // Column-major: row_stride=1, col_stride=64
       // Need 64 cols * 64 col_stride = 4096 (same as contiguous)
       buffer_elements_per_thread = tile_size;
       break;
     case TilePutArbitraryTestType:
+    case TileGetArbitraryTestType:
       // Arbitrary strides: row_stride=257, col_stride=3
       // Need 64 rows * 257 row_stride
       buffer_elements_per_thread = 64 * 257;
@@ -343,7 +373,8 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
       break;
   }
 
-  // Total number of threads = num_wgs * num_threads
+  // For now, allocate one buffer per thread to keep it simple
+  // TODO: Optimize to allocate only num_tiles (wave/wg count) for collective ops
   size_t total_threads = args.num_wgs * args.num_threads;
   size_t num_elements = buffer_elements_per_thread * total_threads;
 
@@ -371,6 +402,9 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
       dest = remote;
       break;
     case TileGetContiguousTestType:
+    case TileGetRowMajorTestType:
+    case TileGetColumnMajorTestType:
+    case TileGetArbitraryTestType:
     case TileGetWGContiguousTestType:
     case TileGetWaveContiguousTestType:
     case TileGet1DTestType:
@@ -388,14 +422,17 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
 
   switch (_type) {
     case TilePutRowMajorTestType:
+    case TileGetRowMajorTestType:
       row_stride = 2 * 64;  // 128
       col_stride = 1;
       break;
     case TilePutColumnMajorTestType:
+    case TileGetColumnMajorTestType:
       row_stride = 1;
       col_stride = 64;
       break;
     case TilePutArbitraryTestType:
+    case TileGetArbitraryTestType:
       row_stride = 257;
       col_stride = 3;
       break;
@@ -407,8 +444,8 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
   }
 
   // Initialize with strided pattern for all threads
-  for (size_t flat_id = 0; flat_id < total_threads; flat_id++) {
-    size_t base_offset = flat_id * buffer_elements_per_thread;
+  for (size_t tile_id = 0; tile_id < total_threads; tile_id++) {
+    size_t base_offset = tile_id * buffer_elements_per_thread;
 
     // Initialize each element in the 64×64 tile using stride pattern
     for (int row = 0; row < tile_rows; row++) {
@@ -440,12 +477,15 @@ void TileRMATester::resetBuffers(size_t size) {
 
   switch (_type) {
     case TilePutRowMajorTestType:
+    case TileGetRowMajorTestType:
       buffer_elements_per_thread = 64 * 128;
       break;
     case TilePutColumnMajorTestType:
+    case TileGetColumnMajorTestType:
       buffer_elements_per_thread = tile_size;
       break;
     case TilePutArbitraryTestType:
+    case TileGetArbitraryTestType:
       buffer_elements_per_thread = 64 * 257;
       break;
     default:
@@ -481,6 +521,9 @@ void TileRMATester::verifyResults(size_t size) {
   int check_id;
   switch (_type) {
     case TileGetContiguousTestType:
+    case TileGetRowMajorTestType:
+    case TileGetColumnMajorTestType:
+    case TileGetArbitraryTestType:
     case TileGetWGContiguousTestType:
     case TileGetWaveContiguousTestType:
     case TileGet1DTestType:
@@ -499,14 +542,17 @@ void TileRMATester::verifyResults(size_t size) {
     // Determine strides based on test type
     switch (_type) {
       case TilePutRowMajorTestType:
+      case TileGetRowMajorTestType:
         row_stride = 2 * 64;  // 128
         col_stride = 1;
         break;
       case TilePutColumnMajorTestType:
+      case TileGetColumnMajorTestType:
         row_stride = 1;
         col_stride = 64;
         break;
       case TilePutArbitraryTestType:
+      case TileGetArbitraryTestType:
         row_stride = 257;
         col_stride = 3;
         break;
@@ -517,19 +563,22 @@ void TileRMATester::verifyResults(size_t size) {
         break;
     }
 
-    // Verify tile elements (not entire buffer for strided layouts)
+    // Verify all tiles
     size_t total_threads = args.num_wgs * args.num_threads;
-    for (size_t flat_id = 0; flat_id < total_threads; flat_id++) {
+    for (size_t tile_id = 0; tile_id < total_threads; tile_id++) {
       // Calculate buffer offset for this thread
       size_t buffer_elements_per_thread;
       switch (_type) {
         case TilePutRowMajorTestType:
+        case TileGetRowMajorTestType:
           buffer_elements_per_thread = 64 * 128;
           break;
         case TilePutColumnMajorTestType:
+        case TileGetColumnMajorTestType:
           buffer_elements_per_thread = 64 * 64;
           break;
         case TilePutArbitraryTestType:
+        case TileGetArbitraryTestType:
           buffer_elements_per_thread = 64 * 257;
           break;
         default:
@@ -537,7 +586,7 @@ void TileRMATester::verifyResults(size_t size) {
           break;
       }
 
-      size_t base_offset = flat_id * buffer_elements_per_thread;
+      size_t base_offset = tile_id * buffer_elements_per_thread;
 
       // Verify each element in the 64×64 tile using stride pattern
       for (int row = 0; row < tile_rows; row++) {
@@ -550,7 +599,7 @@ void TileRMATester::verifyResults(size_t size) {
 
           if (dest[buffer_idx] != expected) {
             std::cerr << "Data validation error at buffer idx " << buffer_idx
-                      << " (tile pos [" << row << "," << col << "], flat_id=" << flat_id << ")" << std::endl;
+                      << " (tile pos [" << row << "," << col << "], tile_id=" << tile_id << ")" << std::endl;
             std::cerr << " Got " << dest[buffer_idx] << ", Expected " << expected << std::endl;
             exit(-1);
           }
