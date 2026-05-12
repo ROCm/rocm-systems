@@ -161,8 +161,9 @@ std::string_view action_name(Action action) {
     return "Expand";
   case Action::Illegal:
     return "Illegal";
+  default:
+    return "Unknown";
   }
-  return "Unknown";
 }
 
 std::string unsupported_expansion_category(std::string_view mnemonic) {

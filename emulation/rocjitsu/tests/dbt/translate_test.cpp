@@ -118,7 +118,12 @@ TEST(CoherencyRemap, Gfx940ToGfx11) {
   auto coh = remap_gfx940_to_gfx11({1, 1, 1});
   EXPECT_EQ(coh.glc, 1);
   EXPECT_EQ(coh.slc, 1);
-  EXPECT_EQ(coh.dlc, 1);
+  EXPECT_EQ(coh.dlc, 0);
+
+  auto nt_only = remap_gfx940_to_gfx11({0, 0, 1});
+  EXPECT_EQ(nt_only.glc, 0);
+  EXPECT_EQ(nt_only.slc, 1);
+  EXPECT_EQ(nt_only.dlc, 0);
 }
 
 TEST(CoherencyRemap, Gfx9GlcToGfx11) {
@@ -237,7 +242,7 @@ TEST(EncodingTranslator, Cdna4ToRdna3MubufRemapsCoherency) {
   std::memcpy(&dst, result.words, sizeof(dst));
   EXPECT_EQ(dst.glc, 1);
   EXPECT_EQ(dst.slc, 1);
-  EXPECT_EQ(dst.dlc, 1);
+  EXPECT_EQ(dst.dlc, 0);
   EXPECT_EQ(dst.vaddr, 4);
   EXPECT_EQ(dst.vdata, 5);
   EXPECT_EQ(dst.srsrc, 6);
@@ -270,7 +275,7 @@ TEST(EncodingTranslator, Cdna4ToRdna3MtbufPacksFormatAndRemapsCoherency) {
   std::memcpy(&dst, result.words, sizeof(dst));
   EXPECT_EQ(dst.glc, 1);
   EXPECT_EQ(dst.slc, 1);
-  EXPECT_EQ(dst.dlc, 1);
+  EXPECT_EQ(dst.dlc, 0);
   EXPECT_EQ(dst.format, 0x74);
   EXPECT_EQ(dst.vaddr, 4);
   EXPECT_EQ(dst.vdata, 5);
@@ -1096,7 +1101,7 @@ TEST(Cdna4ToRdna3MemoryFamilies, MubufLoadAndAtomicPreserveOperandsAndCoherency)
     EXPECT_EQ(dst.soffset, 0x7Cu);
     EXPECT_EQ(dst.glc, 1u);
     EXPECT_EQ(dst.slc, 1u);
-    EXPECT_EQ(dst.dlc, 1u);
+    EXPECT_EQ(dst.dlc, 0u);
     EXPECT_EQ(dst.tfe, 0u);
     EXPECT_EQ(dst.op, tc.target_op);
 
@@ -1158,7 +1163,7 @@ TEST(Cdna4ToRdna3MemoryFamilies, FlatSegmentsPreserveDomainAndCoherency) {
   EXPECT_EQ(flat_dst.seg, 0u);
   EXPECT_EQ(flat_dst.glc, 1u);
   EXPECT_EQ(flat_dst.slc, 1u);
-  EXPECT_EQ(flat_dst.dlc, 1u);
+  EXPECT_EQ(flat_dst.dlc, 0u);
   // Generic FLAT uses the scalar null remap when saddr carries CDNA's sentinel.
   EXPECT_EQ(flat_dst.saddr, 0x7Cu);
   EXPECT_EQ(flat_dst.addr, flat.addr);
@@ -1223,7 +1228,7 @@ TEST(Cdna4ToRdna3MemoryFamilies, FlatSegmentsPreserveDomainAndCoherency) {
   EXPECT_EQ(global_dst.seg, 2u);
   EXPECT_EQ(global_dst.glc, 0u);
   EXPECT_EQ(global_dst.slc, 1u);
-  EXPECT_EQ(global_dst.dlc, 1u);
+  EXPECT_EQ(global_dst.dlc, 0u);
   EXPECT_EQ(global_dst.saddr, global.saddr);
   EXPECT_NE(decode_one_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(translated.words, 2)),
             nullptr);
@@ -1587,6 +1592,17 @@ TEST(Cdna4ToRdna3SemanticTranslator, RemovedVopcConstantComparisonsLowerToScalar
   ASSERT_EQ(true_replacement.size(), 1u);
   expect_rdna3_s_mov_b64(true_replacement[0], kVccLo, kExecLo);
 
+  const std::array<uint32_t, 1> cmpx_true_source{make_cdna4_vopc_cmp(183)};
+  SemanticInstructionContext cmpx_true_context(cmpx_true_source);
+  ASSERT_TRUE(cmpx_true_context.is_valid());
+  const auto *cmpx_true_inst = cmpx_true_context.first_instruction();
+  ASSERT_NE(cmpx_true_inst, nullptr);
+  ASSERT_EQ(std::string_view(cmpx_true_inst->mnemonic()), "v_cmpx_t_i16_e32");
+  auto cmpx_true_replacement =
+      translator.try_lower_expand(*cmpx_true_inst, 0, cmpx_true_context.live());
+  ASSERT_EQ(cmpx_true_replacement.size(), 1u);
+  expect_rdna3_s_mov_b64(cmpx_true_replacement[0], kVccLo, kExecLo);
+
   const std::array<uint32_t, 1> cmpx_false_source{make_cdna4_vopc_cmp(176)};
   SemanticInstructionContext cmpx_false_context(cmpx_false_source);
   ASSERT_TRUE(cmpx_false_context.is_valid());
@@ -1635,6 +1651,17 @@ TEST(Cdna4ToRdna3SemanticTranslator, RemovedVop3ConstantComparisonsUseExplicitSd
   auto true_replacement = translator.try_lower_expand(*true_inst, 0, true_context.live());
   ASSERT_EQ(true_replacement.size(), 1u);
   expect_rdna3_s_mov_b64(true_replacement[0], 20, kExecLo);
+
+  const auto cmpx_true_source = make_cdna4_vop3_cmp(183, 21);
+  SemanticInstructionContext cmpx_true_context(cmpx_true_source);
+  ASSERT_TRUE(cmpx_true_context.is_valid());
+  const auto *cmpx_true_inst = cmpx_true_context.first_instruction();
+  ASSERT_NE(cmpx_true_inst, nullptr);
+  ASSERT_EQ(std::string_view(cmpx_true_inst->mnemonic()), "v_cmpx_t_i16");
+  auto cmpx_true_replacement =
+      translator.try_lower_expand(*cmpx_true_inst, 0, cmpx_true_context.live());
+  ASSERT_EQ(cmpx_true_replacement.size(), 1u);
+  expect_rdna3_s_mov_b64(cmpx_true_replacement[0], 21, kExecLo);
 
   const auto cmpx_false_source = make_cdna4_vop3_cmp(176, 22);
   SemanticInstructionContext cmpx_false_context(cmpx_false_source);

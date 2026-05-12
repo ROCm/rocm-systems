@@ -18,6 +18,7 @@
 #include <bit>
 #include <cassert>
 #include <cstring>
+#include <optional>
 #include <string_view>
 
 namespace rocjitsu {
@@ -183,6 +184,21 @@ enum class CompareMaskUpdate {
                                          : CompareMaskUpdate::VccOnly;
 }
 
+[[nodiscard]] std::optional<uint8_t> compare_mask_destination(const Instruction &inst) {
+  if (inst.num_dst_operands() == 0)
+    return kVccLo;
+
+  const auto *dst = inst.dst_operand(0);
+  if (!dst || dst->size_bits() != 64)
+    return std::nullopt;
+
+  if (!inst.raw_encoding() || inst.size() < 8)
+    return std::nullopt;
+  cdna4::Vop3MachineInst src{};
+  std::memcpy(&src, inst.raw_encoding(), sizeof(src));
+  return static_cast<uint8_t>(src.vdst);
+}
+
 [[nodiscard]] bool is_cdna4_matrix_or_accvgpr(std::string_view mnemonic) {
   return mnemonic.starts_with("v_mfma_") || mnemonic.starts_with("v_smfmac_") ||
          mnemonic.starts_with("v_accvgpr_");
@@ -252,28 +268,25 @@ std::vector<uint32_t> lower_removed_compare_predicate(const Instruction &inst,
   if (predicate == RemovedComparePredicate::None)
     return {};
 
-  const auto *raw = inst.raw_encoding();
-  if (!raw)
+  if (!inst.raw_encoding())
     return {};
 
-  uint8_t dest = kVccLo;
-  if (!mnemonic.ends_with("_e32")) {
-    if (inst.size() < 8)
-      return {};
-    cdna4::Vop3MachineInst src{};
-    std::memcpy(&src, raw, sizeof(src));
-    dest = src.vdst;
-  }
+  const auto dest = compare_mask_destination(inst);
+  if (!dest)
+    return {};
 
   std::vector<uint32_t> words;
+  const auto mask_update = compare_mask_update(mnemonic);
   switch (predicate) {
   case RemovedComparePredicate::AlwaysFalse:
-    words.push_back(build_s_mov_b64(dest, kInlineConst0));
-    if (compare_mask_update(mnemonic) == CompareMaskUpdate::ExecAndVcc && dest != kExecLo)
+    words.push_back(build_s_mov_b64(*dest, kInlineConst0));
+    if (mask_update == CompareMaskUpdate::ExecAndVcc && *dest != kExecLo)
       words.push_back(build_s_mov_b64(kExecLo, kInlineConst0));
     break;
   case RemovedComparePredicate::AlwaysTrue:
-    words.push_back(build_s_mov_b64(dest, kExecLo));
+    words.push_back(build_s_mov_b64(*dest, kExecLo));
+    // v_cmpx also updates EXEC. For an always-true predicate the EXEC result is
+    // the incoming EXEC mask, so no separate EXEC write is required.
     break;
   case RemovedComparePredicate::None:
     return {};

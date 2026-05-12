@@ -108,12 +108,15 @@ bool CodeObjectPatcher::text_range_has_relocation(uint64_t start, uint64_t end) 
     return false;
   const auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image_.data() + ehdr->e_shoff);
 
-  // Real code objects report relocation offsets as virtual addresses; the
-  // synthetic tests use text-relative offsets. Accept both forms.
+  // Real code objects report relocation offsets as virtual addresses. Synthetic
+  // tests with no text virtual address use text-relative offsets.
   const auto relocation_text_offset = [this](uint64_t r_offset, uint64_t &text_offset) {
-    if (r_offset >= text_vaddr_ && r_offset - text_vaddr_ < text_size_) {
-      text_offset = r_offset - text_vaddr_;
-      return true;
+    if (text_vaddr_ != 0) {
+      if (r_offset >= text_vaddr_ && r_offset - text_vaddr_ < text_size_) {
+        text_offset = r_offset - text_vaddr_;
+        return true;
+      }
+      return false;
     }
     if (r_offset < text_size_) {
       text_offset = r_offset;

@@ -88,7 +88,7 @@ Bucket notes:
   `v_accvgpr_read`, and `v_accvgpr_write`. The detailed matrix/AccVGPR strategy and
   unsupported disposition are in `cdna4-to-rdna3-mfma-accvgpr-strategy.md`.
 - MTBUF lowering resolves the residual by packing CDNA4 `dfmt`/`nfmt` into
-  RDNA3 `format`, remapping `sc0`/`sc1`/`nt` to `glc`/`slc`/`dlc`, and
+  RDNA3 `format`, remapping `sc0` to `glc` and `sc1`/`nt` to `slc`, and
   canonicalizing the D16 mnemonic-order rename to same-size lower rows. CDNA4
   MTBUF with `acc=1` remains tied to the AccVGPR virtualization gap
   (AccVGPR remapping) because RDNA3 MTBUF has no accumulator selector field.
@@ -109,8 +109,8 @@ transfer for ordinary SMEM, MUBUF, FLAT, FLAT_GLBL-to-FLAT_GLOBAL,
 FLAT_SCRATCH, and DS rows whose source-only domain bits are clear. Targeted
 tests cover representative SMEM buffer loads, MUBUF loads and atomics, FLAT
 flat/scratch/global segment routing, DS atomics, null scalar operand remapping,
-and GFX940-to-GFX11 coherency remapping (`sc0 -> glc`, `sc1 -> slc`,
-`nt -> dlc`).
+and GFX940-to-GFX11 coherency remapping (`sc0 -> glc`, `sc1/nt -> slc`;
+`dlc` remains clear).
 
 CDNA4 source-only memory-domain fields that RDNA3 cannot represent in the same
 instruction are now explicit residuals rather than silent drops:

@@ -35,7 +35,7 @@ struct CoherencyGfx9 {
 /// @brief GFX11 (RDNA3/3.5) coherency bits: glc, dlc, slc.
 struct CoherencyGfx11 {
   uint8_t glc; ///< Globally coherent; bypass L1.
-  uint8_t dlc; ///< Device-level coherent.
+  uint8_t dlc; ///< DLC/MALL control bit.
   uint8_t slc; ///< System-level coherent; bypass L2.
 };
 
@@ -47,12 +47,14 @@ struct CoherencyGfx12 {
 
 /// @brief Remap GFX940 coherency bits to GFX11.
 ///
-/// @details Mapping: sc0 → glc, sc1 → slc, nt → dlc.
+/// @details Mapping: sc0 -> glc, sc1/nt -> slc, dlc clear. CDNA4 nt is a
+/// non-temporal cache hint; on RDNA3 slc is the closest available cache
+/// streaming/evict behavior for translated FLAT/MUBUF memory operations.
 ///
 /// @param c  GFX940 coherency bits.
 /// @returns Equivalent GFX11 coherency bits.
 inline constexpr CoherencyGfx11 remap_gfx940_to_gfx11(CoherencyGfx940 c) {
-  return {c.sc0, c.nt ? uint8_t(1) : uint8_t(0), c.sc1};
+  return {c.sc0, uint8_t(0), static_cast<uint8_t>(c.sc1 | c.nt)};
 }
 
 /// @brief Remap GFX940 coherency bits to GFX12.
