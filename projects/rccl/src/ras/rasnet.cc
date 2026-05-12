@@ -37,7 +37,12 @@ static struct rasLinkConn* rasLinkConnFind(const struct rasLink* link, const str
 // Functions related to the RAS connections. //
 ///////////////////////////////////////////////
 
-// Allocates a new entry in the rasConnections list.
+struct rasLink rasNextLink = {1}, rasPrevLink = {-1};
+struct rasConnection* rasConnsHead;
+struct rasConnection* rasConnsTail;
+struct rasSocket *rasSocketsHead;
+struct rasSocket *rasSocketsTail;
+
 ncclResult_t getNewConnEntry(struct rasConnection** pConn) {
   struct rasConnection* conn;
 
