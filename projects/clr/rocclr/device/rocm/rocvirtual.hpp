@@ -286,7 +286,7 @@ class VirtualGPU : public device::VirtualDevice {
     void AddExternalSignal(ProfilingSignal* signal) { external_signals_.push_back(signal); }
 
     //! Get the last active signal on the queue
-    ProfilingSignal* GetLastSignal() const;
+    ProfilingSignal* GetLastSignal() const { return signal_list_[current_id_]; }
 
     //! Clear external signals
     void ClearExternalSignals() { external_signals_.clear(); }
@@ -524,7 +524,7 @@ class VirtualGPU : public device::VirtualDevice {
 
   void hasPendingDispatch() { hasPendingDispatch_ = true; }
   bool IsPendingDispatch() const { return (hasPendingDispatch_) ? true : false; }
-  void addSystemScope() override {
+  void addSystemScope() {
     addSystemScope_ = true;
     fence_state_ = amd::Device::CacheState::kCacheStateInvalid;
   }

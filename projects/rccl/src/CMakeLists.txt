@@ -19,6 +19,7 @@ set(SRC_FILES
   channel.cc
   collectives.cc
   commDump.cc
+  mem_manager.cc
   debug.cc
   dev_runtime.cc
   enqueue.cc
@@ -105,6 +106,7 @@ set(SRC_FILES
   include/ibvwrap.h
   include/info.h
   include/ipcsocket.h
+  include/mem_manager.h
   include/mnnvl.h
   include/nccl_common.h
   include/nccl_device.h

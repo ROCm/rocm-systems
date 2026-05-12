@@ -203,8 +203,8 @@ if(BUILD_TESTS)
 
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
+      MiscTests.cpp
       RomeTopoConsensusTests.cpp
-      CommTests.cpp
       EnqueueCountTests.cpp
       device/TestOp128.cpp
       common/main_fixtures.cpp
@@ -235,6 +235,7 @@ if(BUILD_TESTS)
       ProxyTests.cpp
       RcclWrapTests.cpp
       TransportTests.cpp
+      mem_manager/MemManagerTests.cpp
       graph/XmlTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
@@ -280,7 +281,9 @@ if(BUILD_TESTS)
       transport/NetIbMPI/CastTests.cpp
       transport/GinMPI/GinMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
+      CommMPITests.cpp
       RegistrationMPITests.cpp
+      mem_manager/SuspendResumeMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
