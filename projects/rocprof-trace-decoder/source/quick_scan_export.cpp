@@ -20,8 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "rocprof_trace_decoder/rocprof_trace_decoder.h"
@@ -87,7 +89,11 @@ inline bool is_gfx9_header(uint64_t header)
 }
 
 rocprofiler_thread_trace_decoder_status_t quick_scan_gfx9(
-    const uint8_t* tokens, uint64_t tokens_size, rocprof_trace_decoder_trace_callback_t trace_callback, void* userdata
+    CSRegisterHandler& csregister,
+    const uint8_t* tokens,
+    uint64_t tokens_size,
+    rocprof_trace_decoder_trace_callback_t trace_callback,
+    void* userdata
 )
 {
     // Cap matches the 32k generously-sized hint in the mi400 scanner — most
@@ -105,7 +111,6 @@ rocprofiler_thread_trace_decoder_status_t quick_scan_gfx9(
     // see COMPUTE_DISPATCH_INITIATOR with the launch bit set, we have all
     // the previously-latched dispatch state (entry point, thread dims, lds
     // size, dispatch packet addr) ready to publish.
-    CSRegisterHandler csregister;
 
     for (size_t i = 0; i < n; ++i)
     {
@@ -168,20 +173,49 @@ rocprof_trace_decoder_quick_scan(
     if (!data || data_size < 8 || !trace_callback)
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    auto decoder = Handle::get_handle_data(handle);
-    if (!decoder) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
     int gfxip = 0;
+    auto csregister = std::shared_ptr<CSRegisterHandler>{nullptr};
+
+    if (chunk_index == 0)
     {
-        auto lk = std::unique_lock{decoder->mut};
-        if (decoder->gfxip == 0 || chunk_index == 0)
-            decoder->gfxip = is_gfx9_header(static_cast<const uint64_t*>(data)[0]) ? 9 : 0;
-        gfxip = decoder->gfxip;
+        gfxip = is_gfx9_header(static_cast<const uint64_t*>(data)[0]) ? 9 : 0;
+
+        auto decoder = HandleData::get_write_handle(handle);
+        if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+        csregister = std::make_shared<CSRegisterHandler>();
+        decoder->gfxip = gfxip;
     }
+    else
+    {
+        auto decoder = HandleData::get_read_handle(handle);
+        if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+        bool ready = decoder->cv.wait_for(
+            decoder.lk,
+            std::chrono::milliseconds(100),
+            [&]() { return decoder->pipestate.find(chunk_index) != decoder->pipestate.end(); }
+        );
+        if (!ready) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES;
+
+        gfxip = decoder->gfxip;
+        csregister = decoder->pipestate.at(chunk_index);
+    }
+
+    if (csregister == nullptr) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES;
 
     const uint8_t* buf = static_cast<const uint8_t*>(data);
 
-    if (gfxip == 9) return quick_scan_gfx9(buf, data_size, trace_callback, userdata);
+    rocprofiler_thread_trace_decoder_status_t status;
+    if (gfxip == 9)
+        status = quick_scan_gfx9(*csregister, buf, data_size, trace_callback, userdata);
+    else
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 
-    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+    auto decoder = HandleData::get_write_handle(handle);
+    if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    decoder->pipestate[chunk_index + 1] = std::move(csregister);
+    decoder->cv.notify_all();
+    return status;
 }

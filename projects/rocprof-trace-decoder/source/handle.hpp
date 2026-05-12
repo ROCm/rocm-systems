@@ -27,26 +27,44 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <condition_variable>
 
-namespace Handle
-{
 #ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
 using AddressTable = rocprof_trace_decoder::codeobj::CodeobjAddressTranslate;
 using Instruction = rocprof_trace_decoder::codeobj::Instruction;
+#endif
 
-struct DecoderInstance
+template<typename T>
+class ReadLock
 {
-    std::mutex mtx{};
-    AddressTable table{};
+public:
+    ReadLock(std::shared_ptr<T> instance, std::shared_mutex& mut): value(instance), lk(std::shared_lock{mut}) {}
+
+    bool valid() const { return value != nullptr; }
+    const T* operator->() const { if(!value) throw std::runtime_error("Invalid lock"); return value.get(); }
+
+    std::shared_lock<std::shared_mutex> lk;
+private:
+    std::shared_ptr<const T> value;
 };
-#endif
 
-struct HandleData
+template<typename T>
+class WriteLock
 {
-    std::mutex mtx;
-#ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
-    std::shared_ptr<DecoderInstance> instance;
-#endif
+public:
+    WriteLock(std::shared_ptr<T> instance, std::shared_mutex& mut): value(instance), lk(std::unique_lock{mut}) {}
+
+    bool valid() const { return value != nullptr; }
+    T* operator->() { if(!value) throw std::runtime_error("Invalid lock"); return value.get(); }
+
+    std::unique_lock<std::shared_mutex> lk;
+private:
+    std::shared_ptr<T> value;
+};
+
+class HandleData
+{
+public:
     rocprof_trace_decoder_isa_callback_t isa_cb{nullptr};
     void* isa_userdata{nullptr};
 
@@ -54,12 +72,53 @@ struct HandleData
     void* se_data_userdata{nullptr};
 
     // quick_scan state data
-    std::mutex mut{};
+    mutable std::condition_variable_any cv;
     int gfxip = 0;
-    std::unordered_map<uint64_t, std::unique_ptr<class CSRegisterHandler>> pipestate{};
+    std::unordered_map<uint64_t, std::shared_ptr<CSRegisterHandler>> pipestate{};
+
+#ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
+    WriteLock<AddressTable> decoder() { return {instance, decoder_mut}; }
+#endif
+
+    static std::mutex& get_map_mutex()
+    {
+        static std::mutex mtx;
+        return mtx;
+    }
+
+    static std::unordered_map<uint64_t, std::shared_ptr<HandleData>>& get_map()
+    {
+        static std::unordered_map<uint64_t, std::shared_ptr<HandleData>> map;
+        return map;
+    }
+
+    static ReadLock<HandleData> get_read_handle(rocprof_trace_decoder_handle_t handle)
+    {
+        static std::shared_mutex dummy_mut{};
+    
+        std::lock_guard<std::mutex> lock(get_map_mutex());
+        auto& map = get_map();
+        auto it = map.find(handle.handle);
+        if (it != map.end()) return ReadLock<HandleData>{it->second, it->second->mtx};
+        return {nullptr, dummy_mut};
+    }
+
+    static WriteLock<HandleData> get_write_handle(rocprof_trace_decoder_handle_t handle)
+    {
+        static std::shared_mutex dummy_mut{};
+    
+        std::lock_guard<std::mutex> lock(get_map_mutex());
+        auto& map = get_map();
+        auto it = map.find(handle.handle);
+        if (it != map.end()) return WriteLock<HandleData>{it->second, it->second->mtx};
+        return {nullptr, dummy_mut};
+    }
+
+private:
+    std::shared_mutex mtx;
+
+#ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
+    std::shared_mutex decoder_mut{};
+    std::shared_ptr<AddressTable> instance;
+#endif
 };
-
-using HandleMap = std::unordered_map<uint64_t, std::shared_ptr<HandleData>>;
-
-std::shared_ptr<HandleData> get_handle_data(rocprof_trace_decoder_handle_t handle);
-}
