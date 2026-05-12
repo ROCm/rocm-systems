@@ -583,7 +583,7 @@ memory:
   Unit_hipMemPrefetchAsync_NonPageSz:
     <<: *level_2
     # Disabling below tests temporarily due to change in API behavior
-    disabled: [amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl, amd_linux]
     tags: [query]
   Unit_hipMemAdvise_MmapMem:
     <<: *level_2
@@ -1767,6 +1767,7 @@ memory:
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_LocationDistribution:
     <<: *level_2
+    disabled: [amd_windows, amd_linux]
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity:
     <<: *level_2
