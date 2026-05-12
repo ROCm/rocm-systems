@@ -1254,6 +1254,91 @@ write_rocpd_via_sna(
     ensure_queue(rocprofiler_queue_id_t{.handle = 0});
     (void) ensure_stream;
     (void) ensure_queue;
+
+    for(const auto& itr : tool_metadata.get_code_objects())
+    {
+        if(itr.size == 0) continue;
+
+        const auto* _agent = tool_metadata.get_agent(itr.rocp_agent);
+        auto        json_data =
+            get_json_string([](auto& ar, const auto oitr) { cereal::save(ar, oitr); }, itr);
+
+        auto code_object = writer_types::code_object_info_t{};
+        code_object.id   = itr.code_object_id;
+        code_object.uri =
+            (itr.uri != nullptr) ? std::optional<std::string_view>{itr.uri} : std::nullopt;
+        code_object.load_base  = itr.load_base;
+        code_object.load_size  = itr.load_size;
+        code_object.load_delta = static_cast<size_t>(itr.load_delta);
+        code_object.extdata    = json_data;
+        code_object.node_id    = this_nid;
+        code_object.process_id = this_pid;
+        if(_agent != nullptr) code_object.agent_id = make_agent_unique_id(*_agent);
+        writer.register_code_object_info(code_object);
+    }
+
+    for(const auto& itr : tool_metadata.get_kernel_symbols())
+    {
+        if(itr.kernel_id == 0 && itr.code_object_id == 0) continue;
+
+        auto json_data =
+            get_json_string([](auto& ar, const auto& oitr) { cereal::save(ar, oitr); }, itr);
+
+        auto kernel_symbol                      = writer_types::kernel_symbol_info_t{};
+        kernel_symbol.id                        = itr.kernel_id;
+        kernel_symbol.name                      = std::string_view{itr.kernel_name};
+        kernel_symbol.display_name              = std::string_view{itr.formatted_kernel_name};
+        kernel_symbol.kernel_object             = itr.kernel_object;
+        kernel_symbol.kernarg_segment_size      = itr.kernarg_segment_size;
+        kernel_symbol.kernarg_segment_alignment = itr.kernarg_segment_alignment;
+        kernel_symbol.group_segment_size        = itr.group_segment_size;
+        kernel_symbol.private_segment_size      = itr.private_segment_size;
+        kernel_symbol.sgpr_count                = itr.sgpr_count;
+        kernel_symbol.arch_vgpr_count           = itr.arch_vgpr_count;
+        kernel_symbol.accum_vgpr_count          = itr.accum_vgpr_count;
+        kernel_symbol.extdata                   = json_data;
+        kernel_symbol.node_id                   = this_nid;
+        kernel_symbol.process_id                = this_pid;
+        kernel_symbol.code_obj_id               = itr.code_object_id;
+        writer.register_kernel_symbol_info(kernel_symbol);
+    }
+
+    {
+        auto recorded = std::unordered_set<rocprofiler_counter_id_t>{};
+        for(const auto& itr : tool_metadata.agent_counter_info)
+        {
+            const auto* agent = tool_metadata.get_agent(itr.first);
+            if(agent == nullptr) continue;
+
+            auto agent_uid = make_agent_unique_id(*agent);
+            auto json_data = get_json_string([agent](auto& ar) { cereal::save(ar, *agent); });
+
+            for(const auto& aitr : itr.second)
+            {
+                if(!recorded.emplace(aitr.id).second) continue;
+
+                auto pmc_info      = writer_types::pmc_info_t{};
+                pmc_info.unique_id = writer_types::pmc_info_unique_id_t{
+                    std::string_view{aitr.name},
+                    agent_uid,
+                };
+                pmc_info.target_arch = std::string_view{"GPU"};
+                pmc_info.symbol      = std::string_view{aitr.name};
+                if(aitr.name != nullptr) pmc_info.description = std::string_view{aitr.description};
+                pmc_info.component  = std::string_view{"rocm"};
+                pmc_info.value_type = std::string_view{"ABS"};
+                if(aitr.block != nullptr) pmc_info.block = std::string_view{aitr.block};
+                if(aitr.expression != nullptr)
+                    pmc_info.expression = std::string_view{aitr.expression};
+                pmc_info.is_constant = aitr.is_constant;
+                pmc_info.is_derived  = aitr.is_derived;
+                pmc_info.extdata     = json_data;
+                pmc_info.node_id     = this_nid;
+                pmc_info.process_id  = this_pid;
+                writer.register_pmc_info(pmc_info);
+            }
+        }
+    }
 }
 }  // namespace
 
