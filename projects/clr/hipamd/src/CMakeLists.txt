@@ -92,6 +92,7 @@ if(NOT WIN32)
 endif()
 
 target_sources(amdhip64 PRIVATE
+  ${HIP_VERSION_RUNTIME_SOURCE}
   hip_activity.cpp
   hip_code_object.cpp
   hip_context.cpp
@@ -128,6 +129,8 @@ target_sources(amdhip64 PRIVATE
   hip_library.cpp
   profiler/hip_clr_profiler.cpp
   profiler/hip_clr_dispatch_wrappers.cpp)
+
+set_source_files_properties(${HIP_VERSION_RUNTIME_SOURCE} PROPERTIES GENERATED TRUE)
 
 if(WIN32)
   target_sources(amdhip64 PRIVATE hip_runtime.cpp)
@@ -168,6 +171,7 @@ endif()
 target_include_directories(amdhip64
   PRIVATE
     ${HIP_COMMON_INCLUDE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_BINARY_DIR}/include)
 

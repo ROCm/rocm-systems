@@ -9,14 +9,14 @@
 #include "hip/hip_runtime.h"
 #include "hip_internal.hpp"
 #include "hip_code_object.hpp"
+#include "hip_runtime_version.hpp"
 #include "platform/program.hpp"
-#include <hip/hip_version.h>
 
-const char* amd_dbgapi_get_build_name(void) { return HIP_VERSION_BUILD_NAME; }
+const char* amd_dbgapi_get_build_name(void) { return hip::runtime_version::kBuildName; }
 
-const char* amd_dbgapi_get_git_hash() { return HIP_VERSION_GITHASH; }
+const char* amd_dbgapi_get_git_hash() { return hip::runtime_version::kGitHash; }
 
-size_t amd_dbgapi_get_build_id() { return HIP_VERSION_BUILD_ID; }
+size_t amd_dbgapi_get_build_id() { return hip::runtime_version::kBuildId; }
 
 #ifdef __HIP_ENABLE_PCH
 extern const char __hip_pch_wave32[];
