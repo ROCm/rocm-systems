@@ -9,7 +9,9 @@
 #include "comm.h"
 #include "utils.h"
 #include "param.h"
-#include "net.h"
+
+bool rcclUseAinic();
+
 RCCL_PARAM_DECLARE(PxnOptQpUsage);  // RCCL_PXN_OPT_QP_USAGE: uses batch stride 8 instead of 1 to reduce QP usage when p2p-batching is disabled
 
 #include <algorithm>
