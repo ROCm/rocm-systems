@@ -441,10 +441,10 @@ The current liveness pass does not parameterize on `wf_size`, because it does no
 
 DBI in the AMDGPU context means patching an HSA code object's `.text` section in-place (before it is loaded into device memory) to insert calls into user-supplied instrumentation functions. The challenges unique to this architecture are:
 
-1. **No caller-save convention at the wave level.** There is no equivalent of x86 `call`/`ret` for in-wave subroutines. We must use `s_swappc_b64` as the inter-function call primitive, but all registers are caller-managed.
+1. **No general caller/callee-save convention at the wave level.** There is no equivalent of x86 `call`/`ret` for in-wave subroutines. We must use `s_swappc_b64` as the inter-function call primitive, and the trampoline is responsible for saving every register it cares about (live SGPRs, live VGPRs, EXEC) to scratch around the call. The one register the probe is required to preserve is `link_pair`, the SGPR pair holding its return PC — the probe consumes it via `s_setpc_b64 link_pair` to return to the trampoline.
 2. **Scratch memory is the only safe spill target.** SGPRs and VGPRs cannot be pushed to any stack; the private segment (flat scratch) must be used.
 3. **EXEC must be preserved.** Many instrumentation points live inside control-flow regions where EXEC is not all-ones. The trampoline must save/restore EXEC.
-4. **`s_swappc_b64` requires a free SGPR pair.** The trampoline call instruction needs two consecutive live SGPRs to hold the return address; if all SGPRs are live, spill is required.
+4. **`s_swappc_b64` requires a free SGPR pair.** The trampoline call instruction needs two consecutive dead SGPRs to hold the return address; if all SGPRs are live, spill is required.
 5. **Instruction size changes require branch-offset fixup** across the entire function.
 
 ### 2.2 New File Layout
@@ -470,18 +470,7 @@ Additionally, when calculating the spill set at a patch site containing an MFMA 
 NOTE (05/06/2026): SpillManager was implemented in Phase 5. Accounting for 
 AccVGPR ranges clobbered by the MFMA has been deferred.
 
-The per-lane base address is:
-
-```
-flat_scratch_base_byte_addr[lane] = FLAT_SCRATCH_INIT + lane * private_segment_fixed_size
-```
-
-`v_readlane_b32` allows the scalar domain to read the VGPR holding the lane's flat scratch pointer into an SGPR:
-
-```asm
-; lane 0's scratch base into s_tmp
-v_readlane_b32 s_tmp, v_flat_scratch_addr, 0
-```
+Per-lane scratch addressing differs by ISA family. The actual per-lane address formulas live in `shared/addr_calc_scalar.h` (SMEM, MUBUF, MTBUF, DS) and `shared/addr_calc_flat.h` (FLAT/GLOBAL/SCRATCH), with per-ISA thin wrappers in `{isa}/addr_calc.cpp`. `SpillManager` is layout-only; the trampoline emitter (per-ISA `TrampolineBuilder` subclass) is the consumer that must select the right addressing scheme. See §3.2 (ISA Capability Matrix, "Flat scratch" row) for the per-family summary.
 
 The `SpillManager` allocates slots within a reserved zone appended to the existing private segment. It must also update the kernel descriptor's `private_segment_fixed_size` field to account for the new slots.
 
@@ -515,6 +504,15 @@ public:
   /// @returns Byte offset of the first slot.
   uint32_t allocate_slots(RegisterRef reg, int width);
 
+  /// @brief Allocate slots for every register in @p set in one call.
+  /// @details Performs an upfront capacity check across all NEW registers
+  ///          (cache misses) before mutating any state, so a partially-completed
+  ///          allocation is never visible: either all required slots fit and are
+  ///          assigned, or no state changes.
+  /// @param set  Set of registers to reserve. Already-cached registers are no-ops.
+  /// @returns true on success, false if the upfront capacity check fails.
+  bool reserve(const RegisterSet &set);
+
   /// @brief Total size of the per-lane scratch after DBI slots are added.
   uint32_t total_private_bytes() const { return total_bytes_; }
 
@@ -534,24 +532,54 @@ private:
 
 ### 2.4 Trampoline Code Structure
 
-Each instrumentation site is patched with a call-site stub that transfers control to a per-site trampoline emitted into a new `.rj_trampolines` section. The generic structure of a trampoline is:
+Each instrumentation site is patched with a call-site stub that **overwrites the original instruction in `.text`** with a same-byte-length `s_branch` to the trampoline. The trampoline body is emitted into a new `.rj_trampolines` section. Because the call-site stub preserves byte size, no surrounding branch offsets shift — `BranchFixup` is **not** required for DBI (contra older drafts of §2.6 / §2.8 / §3.3.2 that suggested otherwise; both DBT and DBI preserve byte size in `.text`).
+
+Both `s_branch` legs (call-site stub → trampoline, trampoline → kernel) are PC-relative SOPP with a signed 16-bit dword field (≈ ±128 KB reach). If either direction overflows that range, the Instrumentor falls back to PASSTHROUGH for the site rather than synthesizing a far stub — DBI deliberately avoids islands (see §3.3.2).
+
+The call-site stub uses `s_branch` rather than `s_call_b64` because the trampoline returns via its own `s_branch <pc-rel-back-to-call_site_va+4>` (the trampoline is per-site, so the return target is known at build time). No outer return PC needs preserving across the probe call; consequently `link_pair` is required only as the `s_swappc_b64` target for the probe call — it carries the **probe's** return PC into the trampoline, not the kernel's return PC into the trampoline. This matches §2.1's framing of "the trampoline call instruction needs two consecutive [dead] SGPRs to hold the return address" (the probe's return address).
+
+**The original instruction is not displaced from program flow — its bytes are spliced into the trampoline body** so that it executes there in place of the slot the stub now occupies in `.text`. The caller (`Instrumentor`, §2.5) passes the original bytes to `TrampolineBuilder::build_trampoline` along with a `DisplacedPosition`. The trampoline splices those bytes verbatim at the appropriate slot:
+
+- `BeforeProbe` (corresponds to `RJ_CODE_INSTR_AFTER_INST`): displaced runs **before** the save/probe/restore block, so the probe observes the post-original wave state.
+- `AfterProbe` (corresponds to `RJ_CODE_INSTR_BEFORE_INST`): displaced runs **after** the save/probe/restore block but before the final return, so the probe observes the pre-original wave state and the original then runs under the restored EXEC mask.
+
+The trampoline itself does **not** decode or rewrite the displaced bytes — they must be position-independent. The `Instrumentor` is responsible for skipping any patch site whose original is PC-relative (`InstFlags::BRANCH | COND_BRANCH | INDIRECT_BRANCH`) or larger than the call-site stub (literal-bearing instructions). PC-rel rewrite for displaced instructions is a future enhancement; never NOP-pad an embedded literal to fit the stub.
+
+EXEC is saved across the probe call using a `SpillManager`-allocated scratch slot, keyed on `RegisterRef{RegClass::EXEC, 0, w}` (w=2 for wave64, w=1 for wave32). The `Instrumentor` allocates the slot before invoking `build_trampoline`; the trampoline reads the offset via `spill_mgr.offset_for(...)` and emits matched scratch_store/load instructions around the probe call. `link_pair` doubles as the transient register that stages EXEC into and out of scratch (it is reloaded with `probe_va` immediately after the spill, and then re-clobbered by `s_swappc_b64`, so this reuse is safe).
+
+The generic structure of a trampoline (showing both displaced-position slots — only one is populated for any given site, per `DisplacedPosition`):
 
 ```
 Trampoline for site S:
-  ┌─────────────────────────────────────┐
-  │ [Save EXEC register]                │
-  │ [Spill live SGPRs to scratch]       │
-  │ [Spill live VGPRs to scratch]       │
-  │ [Optionally set EXEC = all-lanes]   │
-  │ [Load probe function address]       │
-  │ [Call probe via indirect call]      │
-  │ [Restore VGPRs from scratch]        │  ← while EXEC still all-lanes active
-  │ [s_waitcnt vmcnt(0)]                │  ← wait for all VGPR loads to complete
-  │ [Restore EXEC]                      │  ← after vmcnt==0, so EXEC write races no loads
-  │ [Restore SGPRs from scratch]        │
-  │ [Return to original code]           │
-  └─────────────────────────────────────┘
+  ┌─────────────────────────────────────────────────────┐
+  │ [Displaced original bytes]                          │  ← BeforeProbe slot (under original EXEC)
+  │ s_mov_b64 link_pair, exec                           │  ← stage EXEC into link_pair (SGPR pair)
+  │ [Spill link_pair to spill.offset_for(EXEC)]         │  ← per-ISA: SMEM scalar store, or VGPR-staged scratch_store
+  │ [Spill live SGPRs to scratch]                       │  ← same SGPR-data constraint as the EXEC spill above
+  │ [Spill live VGPRs to scratch]                       │
+  │ [Optionally s_mov_b64 exec, -1]                     │  ← force_full_exec
+  │ [Load probe_va literal → link_pair]                 │
+  │ s_swappc_b64 link_pair, link_pair                   │  ← probe runs
+  │ [Wait for SMEM/scratch loads issued by the probe]   │
+  │ [Restore VGPRs from scratch]                        │  ← while EXEC still all-lanes active
+  │ [Wait for VGPR-load completion]                     │
+  │ [Reload link_pair from spill.offset_for(EXEC)]      │  ← per-ISA: matches the spill instruction family
+  │ [Wait for the EXEC-slot reload]
+  │ s_mov_b64 exec, link_pair                           │  ← restore EXEC
+  │ [Restore SGPRs from scratch]                        │
+  │ [Displaced original bytes]                          │  ← AfterProbe slot (under restored EXEC)
+  │ s_branch <pc-rel-back-to-call_site_va+4>            │  ← return to kernel
+  └─────────────────────────────────────────────────────┘
 ```
+
+**Concrete vs. bracketed lines in the diagram.** Lines without brackets (`s_mov_b64`, `s_swappc_b64`, `s_branch`) are conceptually portable mnemonics — per-ISA `TrampolineBuilder` subclasses still emit the correct binary encoding for their family from `{isa}/machine_insts.h` (opcodes and field layouts differ per family — see §3.2 ISA Capability Matrix). Bracketed lines name an *operation*, not an instruction; the per-ISA subclass picks the right instruction(s) for its family. Two operations that hide non-trivial choices:
+
+- **Spill/reload of an SGPR-domain value to scratch** (the EXEC slot, plus every SGPR in the user spill set). SCRATCH-family stores (`scratch_store_*`) take a VGPR data operand on every AMDGPU family, so SGPR-source data must either go through a VGPR staging register or use SMEM (`s_buffer_store_dwordx2` against a flat-scratch SRD), depending on what the per-ISA subclass chooses. The waitcnt counter that drains the operation likewise depends on the chosen family (`vmcnt`/`loadcnt` for VMEM, `lgkmcnt`/`kmcnt` for SMEM).
+- **Wait operations** (`[Wait for ...]`). On GFX9–GFX11 these are `s_waitcnt` with the appropriate counter mask; on GFX12 they are split-counter mnemonics (`s_wait_loadcnt 0`, `s_wait_kmcnt 0`, `s_wait_storecnt 0`, etc.); the GFX12 split also means a single conceptual "wait for everything between point A and point B" may need more than one emitted instruction. Per-ISA subclass selects.
+
+Per-ISA subclasses are also responsible for inserting any **inter-instruction hazard mitigation** their family's MR-ISA spec requires. The most important case for the trampoline is the EXEC→VALU dependency window after `s_mov_b64 exec, link_pair` (the EXEC restore): on some families a subsequent VALU instruction must be separated from the EXEC write by an `s_nop` (or equivalent) to avoid stale-EXEC reads. If the displaced bytes contain a VALU instruction, this hazard applies; the `TrampolineBuilder` subclass must emit the right mitigation rather than relying on the diagram's bare sequence.
+
+**Probe-VA materialization.** v0 emits a pair of `s_mov_b32 link_lo/link_hi, lit32` instructions (16 bytes total) to load the 64-bit `probe_va` literal into `link_pair`. Full 64-bit reach, no memory dependency. PC-relative (`s_getpc_b64` + adds) and rodata-load alternatives are deferred as future size optimizations.
 
 `TrampolineBuilder` is an abstract class. ISA-specific subclasses (created via `TrampolineBuilder::create(arch)`) emit the actual machine instructions using their ISA's machine instruction layout types from `{isa}/machine_insts.h`. No instruction encodings, opcodes, or register numbers appear in the generic class.
 
@@ -562,42 +590,74 @@ namespace rocjitsu {
 
 /// @brief Abstract interface for emitting ISA-specific trampoline sequences.
 ///
-/// The call-site stub overwrites the original instruction at the patch point.
-/// The trampoline body lives in a .rj_trampolines section; it saves all live
-/// registers, calls the probe device function, restores registers, and returns.
+/// The call-site stub overwrites the original instruction at the patch point with
+/// a same-byte-length s_branch to the trampoline. The trampoline body lives in a
+/// .rj_trampolines section; it splices in a copy of the original instruction (so
+/// it still executes), saves all live registers + EXEC, calls the probe device
+/// function, restores registers, and returns to the instruction following the
+/// patch site via its own s_branch.
 class TrampolineBuilder {
 public:
   virtual ~TrampolineBuilder() = default;
 
-  /// @brief Factory: returns the correct ISA-specific subclass for @p arch.
+  /// Position of the displaced original instruction inside the trampoline body,
+  /// expressed relative to the probe call. Maps to InstrumentationPoint::kind:
+  ///   BeforeProbe ⇔ RJ_CODE_INSTR_AFTER_INST  (probe sees post-original state)
+  ///   AfterProbe  ⇔ RJ_CODE_INSTR_BEFORE_INST (probe sees pre-original state)
+  enum class DisplacedPosition { BeforeProbe, AfterProbe };
+
+  /// @brief Factory: returns the correct ISA-specific subclass for @p arch, or nullptr.
   static std::unique_ptr<TrampolineBuilder> create(rj_code_arch_t arch);
 
-  /// @brief Size in bytes of the call-site stub that replaces the patched instruction.
+  /// @brief Size in bytes of the call-site stub that overwrites the patched instruction.
+  ///        Sites whose original is not exactly this size are skipped by the Instrumentor.
   virtual uint32_t call_site_size() const = 0;
 
   /// @brief Emit the call-site stub bytes (overwrites the patched instruction in .text).
+  ///        The stub is an s_branch PC-rel jump to the trampoline body — no return-PC
+  ///        recording needed, since the trampoline returns via its own s_branch.
+  /// @param patch_site_va  Virtual address of the patched instruction.
   /// @param trampoline_va  Virtual address of the trampoline body in .rj_trampolines.
-  /// @param link_pair      SGPR pair index for storing the return address.
-  virtual std::vector<uint8_t> build_call_site(uint64_t trampoline_va,
-                                                uint32_t link_pair) const = 0;
+  /// @returns Empty vector on failure (e.g., trampoline_va out of PC-rel range).
+  virtual std::vector<uint8_t> build_call_site(uint64_t patch_site_va,
+                                                uint64_t trampoline_va) const = 0;
 
   /// @brief Emit the full trampoline body for one patch site.
-  /// @param spill_mgr       Scratch slot assignments for live registers.
-  /// @param live_regs       Registers live at the patch point (from LivenessAnalysis).
-  ///                        Must NOT include link_pair (s_swappc_b64 overwrites it;
-  ///                        it is a TrampolineBuilder output, not a live input).
-  /// @param probe_va        Virtual address of the probe device function.
-  /// @param link_pair       Even-indexed SGPR pair for storing the return address.
-  ///                        Caller must ensure link_pair is NOT in live_regs and
-  ///                        link_pair is even (required for s_swappc_b64).
-  /// @param force_full_exec If true, set all execution lanes active before calling probe.
-  /// @returns Non-empty byte vector on success, or empty vector on failure (e.g., if
-  ///          spill slots are exhausted — caller should fall back to PASSTHROUGH).
+  /// @param spill_mgr        Scratch slot assignments for live registers AND for EXEC.
+  ///                         Caller must call spill_mgr.reserve(live_regs) AND
+  ///                         spill_mgr.allocate_slots(RegisterRef{RegClass::EXEC, 0, w})
+  ///                         where w=2 for wave64, w=1 for wave32, before invoking
+  ///                         build_trampoline. The trampoline reads slot offsets via
+  ///                         offset_for(); it does not allocate.
+  /// @param live_regs        Registers live at the patch point (from LivenessAnalysis).
+  ///                         Must NOT include link_pair. Caller picks live-before for
+  ///                         AfterProbe and live-after for BeforeProbe.
+  /// @param probe_va         Virtual address of the probe device function.
+  /// @param call_site_va     Virtual address of the patched instruction. Used to encode
+  ///                         the trampoline-end s_branch PC-rel offset back to the kernel.
+  /// @param trampoline_va    Virtual address of the trampoline body in .rj_trampolines.
+  ///                         Used to encode the trampoline-end s_branch PC-rel offset.
+  /// @param link_pair        Even-indexed dead SGPR pair. Holds the probe's return PC
+  ///                         after s_swappc_b64 (the probe consumes it via s_setpc_b64).
+  ///                         Does NOT carry the kernel-to-trampoline return PC; that
+  ///                         transfer uses s_branch (no link recorded).
+  /// @param force_full_exec  If true, set all execution lanes active before calling probe.
+  /// @param displaced_bytes  Bytes of the original instruction the call-site stub
+  ///                         overwrote. Spliced into the trampoline body verbatim.
+  ///                         MUST be position-independent (no PC-relative addressing) —
+  ///                         the Instrumentor enforces this by skipping branch sites.
+  /// @param displaced_pos    Where to splice displaced_bytes within the body.
+  /// @returns Non-empty byte vector on success, or empty vector on failure (no EXEC slot
+  ///          reserved; trampoline-end s_branch out of PC-rel range; etc.).
   virtual std::vector<uint8_t> build_trampoline(const SpillManager &spill_mgr,
                                                  const RegisterSet &live_regs,
                                                  uint64_t probe_va,
+                                                 uint64_t call_site_va,
+                                                 uint64_t trampoline_va,
                                                  uint32_t link_pair,
-                                                 bool force_full_exec) const = 0;
+                                                 bool force_full_exec,
+                                                 std::span<const uint8_t> displaced_bytes,
+                                                 DisplacedPosition displaced_pos) const = 0;
 };
 
 } // namespace rocjitsu
@@ -605,7 +665,7 @@ public:
 
 ISA-specific subclasses (e.g., `Cdna3TrampolineBuilder` in `isa/arch/amdgpu/cdna3/trampoline_builder.cpp`) implement `build_call_site` and `build_trampoline` using their ISA's machine instruction structs and opcode constants from `{isa}/machine_insts.h`. The choice of call instruction, spill/restore instruction family (SMEM vs flat-scratch), and EXEC register encoding are all ISA-specific and contained entirely within those subclasses.
 
-**Probe calling convention.** The probe is a non-kernel `__device__` function called via `s_swappc_b64`. On the AMDGPU CC, non-kernel functions receive only their explicit arguments (no kernel-implicit SGPRs such as dispatch pointer or queue pointer), provided the function does not use scratch. The probe is compiled at `-O2` with a small, spill-free body by design — `TrampolineBuilder::build_trampoline` reads the probe code object's `COMPUTE_PGM_RSRC1.GRANULATED_WAVEFRONT_SGPR_COUNT` and `VGPR_COUNT` to verify this before emitting the call sequence. With no scratch, argument registers are:
+**Probe calling convention.** The probe is a non-kernel `__device__` function called via `s_swappc_b64`. On the AMDGPU CC, non-kernel functions receive only their explicit arguments (no kernel-implicit SGPRs such as dispatch pointer or queue pointer), provided the function does not use scratch. The probe is compiled at `-O2` with a small, spill-free body by design — `TrampolineBuilder::build_trampoline` reads the probe code object's `COMPUTE_PGM_RSRC1.GRANULATED_WAVEFRONT_SGPR_COUNT` and `VGPR_COUNT` (and possibly other fields) to verify this before emitting the call sequence. With no scratch, argument registers are:
 
 | Argument | Register | Notes |
 |---|---|---|
@@ -614,27 +674,35 @@ ISA-specific subclasses (e.g., `Cdna3TrampolineBuilder` in `isa/arch/amdgpu/cdna
 | `inst_byte_offset` (32-bit constant) | `s[3]` | Baked in by `TrampolineBuilder` per site |
 | `payload` (64-bit; uniform or per-lane) | `s[4:5]` or `v[0:1]` | Scalar if uniform (e.g., workgroup ID); vector if per-lane (e.g., effective address). Probe variants are compiled for both cases; the trampoline selects the correct symbol. |
 
-The trampoline diagram gains two entries:
+The `s[buf_lo:buf_hi]` source for `hdr` is supplied by `BufferInjector` (§2.7). `BufferInjector` has two modes: when a free user SGPR pair is available, it allocates one and the kernel-entry prologue loads the buffer VA into it once, so it remains live for the kernel body. When all 16 user SGPRs are already allocated (the `USER_SGPR_COUNT == 16` fallback in §2.7), no persistent pair is available — in that mode each trampoline must re-issue the `s_load_dwordx2` from the reserved kernarg slot itself, and `s[buf_lo:buf_hi]` is just a transient pair the trampoline picks at emission time. The Instrumentor reads `BufferInjector::Result` to know which mode applies and emits the right marshalling sequence. In the persistent mode, the chosen pair must also be excluded from `select_link_pair()` and from `live_regs` so the trampoline does not clobber it.
+
+The logging variant is the canonical trampoline above with one additional **probe-arg marshalling block** inserted between the EXEC=all-lanes flip and the probe-VA load. Marshalling happens after spills (so s[0:5] and v[0:1] are safe to overwrite) and before `link_pair` is loaded with `probe_va` (so writes to `s[0:1]` for `hdr` don't conflict with the swappc target — `select_link_pair` already starts at s[6:7] to avoid this; see §2.5):
 
 ```
 Trampoline for site S (logging variant):
-  ┌─────────────────────────────────────────────┐
-  │ [Save EXEC register]                        │
-  │ [Spill live SGPRs to scratch]               │
-  │ [Spill live VGPRs to scratch]               │
-  │ [Optionally set EXEC = all-lanes]           │
-  │ [Copy s[buf_lo:buf_hi] → s[0:1]]            │  ← buf VA for probe
-  │ [Load record_type constant → s[2]]          │  ← per-site constant
-  │ [Load inst_byte_offset constant → s[3]]     │  ← per-site constant
-  │ [Collect payload → s[4:5] or v[0:1]]        │  ← probe-kind specific
-  │ [Load probe function address]               │
-  │ [Call probe via s_swappc_b64]               │
-  │ [Restore VGPRs from scratch]                │  ← while EXEC still all-lanes active
-  │ [s_waitcnt vmcnt(0)]                        │  ← wait for all VGPR loads to complete
-  │ [Restore EXEC]                              │  ← after vmcnt==0, so EXEC write races no loads
-  │ [Restore SGPRs from scratch]                │
-  │ [Return to original code]                   │
-  └─────────────────────────────────────────────┘
+  ┌─────────────────────────────────────────────────────┐
+  │ [Displaced original bytes]                          │  ← BeforeProbe slot (under original EXEC)
+  │ s_mov_b64 link_pair, exec                           │  ← stage EXEC into link_pair (SGPR pair)
+  │ [Spill link_pair to spill.offset_for(EXEC)]         │  ← per-ISA: SMEM scalar store, or VGPR-staged scratch_store
+  │ [Spill live SGPRs to scratch]                       │  ← same SGPR-data constraint as the EXEC spill above
+  │ [Spill live VGPRs to scratch]                       │
+  │ [Optionally s_mov_b64 exec, -1]                     │  ← force_full_exec
+  │ [Copy s[buf_lo:buf_hi] → s[0:1]]                    │  ← buf VA for probe (or s_load_dwordx2 in fallback mode)
+  │ [Load record_type constant → s[2]]                  │  ← per-site constant
+  │ [Load inst_byte_offset constant → s[3]]             │  ← per-site constant
+  │ [Collect payload → s[4:5] or v[0:1]]                │  ← per InstrumentationPoint::payload_kind
+  │ [Load probe_va literal → link_pair]                 │
+  │ s_swappc_b64 link_pair, link_pair                   │  ← probe runs
+  │ [Wait for SMEM/scratch loads issued by the probe]   │
+  │ [Restore VGPRs from scratch]                        │  ← while EXEC still all-lanes active
+  │ [Wait for VGPR-load completion]                     │
+  │ [Reload link_pair from spill.offset_for(EXEC)]      │  ← per-ISA: matches the spill instruction family
+  │ [Wait for the EXEC-slot reload]
+  │ s_mov_b64 exec, link_pair                           │  ← restore EXEC
+  │ [Restore SGPRs from scratch]                        │
+  │ [Displaced original bytes]                          │  ← AfterProbe slot (under restored EXEC)
+  │ s_branch <pc-rel-back-to-call_site_va+4>            │  ← return to kernel
+  └─────────────────────────────────────────────────────┘
 ```
 
 ### 2.5 `Instrumentor` Class
@@ -645,6 +713,29 @@ Trampoline for site S (logging variant):
 #include "rocjitsu/code/rj_code.h"  // rj_code_instrument_kind_t
 
 namespace rocjitsu {
+
+/// @brief Payload variant a probe expects in its `payload` argument register(s).
+/// Selects which probe symbol the trampoline calls and which payload expression
+/// it materializes. See §2.4 probe-arg table for the destination register(s).
+enum class PayloadKind {
+  None,    ///< No payload argument; trampoline does not write s[4:5] or v[0:1].
+  Sgpr64,  ///< 64-bit uniform value in s[4:5] (e.g., workgroup ID, dispatch ID).
+  Vgpr64,  ///< 64-bit per-lane value in v[0:1] (e.g., effective address of a memory op).
+};
+
+/// @brief Source of a payload value, evaluated by the trampoline at the patch point.
+/// Concrete sources are ISA-/site-specific; common cases:
+///   - For `Vgpr64` at a memory op: the effective-address VGPR pair derived from the
+///     anchor instruction's address operand(s).
+///   - For `Sgpr64`: a kernel-implicit SGPR pair (workgroup ID, dispatch pointer).
+/// Empty (`PayloadKind::None`) when the probe takes no payload.
+struct PayloadSource {
+  // Implementation-defined: the Instrumentor consults this descriptor when
+  // emitting the payload-marshalling sequence into the trampoline. Specific
+  // shape (operand index, SGPR pair, custom callback) is left to the
+  // Instrumentor implementation; the field exists here so the API surface
+  // is stable.
+};
 
 /// @brief Instrumentation point descriptor: describes one location in the kernel to patch.
 struct InstrumentationPoint {
@@ -665,8 +756,18 @@ struct InstrumentationPoint {
   /// @brief Symbol name of the probe device function in probe_obj.
   /// The probe is a GPU device function; its calling convention is defined by the trampoline:
   /// all registers live at the patch point are saved before the call and restored after.
-  /// The probe may freely use any register; it receives no explicit arguments by default.
+  /// The probe variant that matches @ref payload_kind must exist in @ref probe_obj
+  /// — the user is responsible for compiling the right variant(s) and naming
+  /// the symbol consistently with the chosen @ref payload_kind.
   std::string probe_symbol;
+
+  /// @brief Which payload variant of the probe to call (selects ABI register).
+  /// Must match the probe symbol's expected calling convention. See §2.4.
+  PayloadKind payload_kind = PayloadKind::None;
+
+  /// @brief How to derive the payload value at this site, when @ref payload_kind != None.
+  /// Ignored when payload_kind == None.
+  PayloadSource payload_source = {};
 
   /// @brief If true, restore exec to -1 before calling the probe (all lanes active).
   bool force_full_exec = false;
@@ -685,10 +786,27 @@ struct PatchedCodeObject {
 ///
 /// Workflow:
 ///   1. Run LivenessAnalysis on the target function.
-///   2. For each InstrumentationPoint, allocate spill slots via SpillManager.
+///   2. For each InstrumentationPoint:
+///      a. Reserve spill slots for the live register set:
+///         spill_mgr.reserve(live_regs).
+///      b. Reserve a scratch slot for EXEC save (per §2.4):
+///         spill_mgr.allocate_slots(RegisterRef{RegClass::EXEC, 0, w})
+///         where w=2 for wave64 and w=1 for wave32.
+///      c. Skip the site if the original instruction is PC-relative
+///         (InstFlags::BRANCH | COND_BRANCH | INDIRECT_BRANCH) or its byte
+///         length doesn't match TrampolineBuilder::call_site_size().
+///      d. Pick a dead even-aligned SGPR pair via select_link_pair(); if none
+///         is available, fall back to PASSTHROUGH for this site.
 ///   3. Build a trampoline sequence via TrampolineBuilder.
-///   4. Patch the .text section via CodeObjectPatcher.
-///   5. Re-emit the ELF with updated kernel descriptors.
+///   4. Patch the .text section via CodeObjectPatcher (overwrite_at the patch
+///      site with the call-site stub; append the trampoline body to the
+///      .rj_trampolines section).
+///   5. After all sites are patched, call patcher.emit_note(...) to write the
+///      .note.rocjitsu section. The note records the kind (instrument), the
+///      arch, and a SHA256 of the original .text — the load-time hook reads
+///      this to skip re-patching on reload (idempotency).
+///   6. Re-emit the ELF with updated kernel descriptors (private_segment_fixed_size
+///      now reflects the EXEC slot + any user-spill slots SpillManager allocated).
 class Instrumentor {
 public:
   /// @brief Construct an instrumentor for the given code object.
@@ -701,30 +819,66 @@ public:
 
   /// @brief Execute all patches and return the modified ELF.
   ///
-  /// Patch sites are processed in increasing byte-offset order. LivenessAnalysis
-  /// is computed once over the original instruction sequence and remains valid for
-  /// each site at its original position; liveness for site N is consumed before
-  /// the patch at site N shifts subsequent offsets. Branch fixup happens last,
-  /// after all insertions are complete.
+  /// LivenessAnalysis is computed once per kernel CFG scope and queried at each
+  /// patch site's anchor instruction. Because the call-site stub is a same-byte-
+  /// length `s_branch` overwrite of the patched instruction (§2.4), no `.text`
+  /// offsets shift between sites and no branch fixup pass is required — sites
+  /// can be patched in any order without invalidating each other's liveness or
+  /// branch-target encodings.
   ///
-  /// May fail if not enough free registers/scratch space can be found,
-  /// or if a branch fixup range would overflow.
+  /// May fail if any site cannot be patched (no eligible link_pair, scratch
+  /// limit exhausted, trampoline out of `s_branch` PC-rel range from its call
+  /// site, etc.). Per-site failure falls back to PASSTHROUGH for that site
+  /// and appends a descriptive entry (kernel + byte offset + reason) to
+  /// PatchedCodeObject::warnings; the overall patch() call still succeeds.
+  /// Global failure (e.g., ELF write error) returns an empty PatchedCodeObject.
   /// @returns Empty PatchedCodeObject (elf_bytes.empty() == true) on failure.
   PatchedCodeObject patch();
 
   /// **Link pair selection** (called internally by patch() for each site):
-  /// Finds the lowest even-indexed SGPR pair that is dead at the patch site.
+  /// Finds the lowest even-indexed SGPR pair that is dead at the patch site AND
+  /// disjoint from the probe argument-register window.
+  ///
+  /// `link_pair` is loaded with `probe_va` immediately before `s_swappc_b64`
+  /// (and clobbered by it). Probe-argument marshalling (§2.4 logging variant)
+  /// writes to s[0:1], s[2], s[3], and s[4:5] *before* the swappc. If the
+  /// trampoline picked link_pair = s[0:1], the probe-VA load would overwrite
+  /// the marshalled buffer pointer (or the probe-VA load would be overwritten
+  /// by the marshalling, depending on emission order). Either way the probe
+  /// gets garbage. The link pair must therefore start above the probe-arg
+  /// window. The probe ABI defined in §2.4 reserves s[0:5]; the first safe
+  /// even-indexed pair is s[6:7].
+  ///
+  /// `link_pair` must additionally be disjoint from the **BufferInjector
+  /// persistent SGPR pair** when §2.7's BufferInjector ran in persistent mode
+  /// (i.e., a free user SGPR pair was available and the kernel-entry prologue
+  /// loaded the buffer VA into it). That pair stays live for the whole kernel
+  /// body and is read by the trampoline's `Copy s[buf_lo:buf_hi] → s[0:1]`
+  /// step. The Instrumentor consults `BufferInjector::Result` to learn the
+  /// pair (or that no persistent pair exists) and excludes it from
+  /// `select_link_pair` consideration — typically by adding it to the
+  /// effective live set passed in. In fallback mode the exclusion is a no-op.
+  ///
   /// ```cpp
+  /// // kProbeArgSgprEnd = 6 (matches the §2.4 probe ABI: s[0:5] reserved).
   /// int select_link_pair(const RegisterSet &live_regs) {
-  ///   for (int s = 0; s <= 102; s += 2) {   // only even indices for s_swappc_b64
+  ///   // Caller (Instrumentor) has already augmented live_regs with the
+  ///   // BufferInjector persistent pair when applicable.
+  ///   for (int s = kProbeArgSgprEnd; s <= 102; s += 2) {  // even, post probe-arg window
   ///     if (!live_regs.test(RegClass::SGPR, s) &&
   ///         !live_regs.test(RegClass::SGPR, s + 1))
   ///       return s;
   ///   }
-  ///   return -1;  // all SGPR pairs live — spill required before link_pair can be used
+  ///   return -1;  // no eligible dead pair — site falls back to PASSTHROUGH
   /// }
   /// ```
   /// If -1 is returned, patch() falls back to PASSTHROUGH for that site.
+  ///
+  /// Note: trampoline variants that don't perform probe-arg marshalling (the
+  /// minimal "save / call / restore" path used by Phase 6 before Phase 7's
+  /// BufferInjector lands) can technically use a lower starting index, but
+  /// the Instrumentor uses the same selector across all variants for simplicity
+  /// and forward-compatibility with the logging variant.
 
 private:
   const AmdGpuCodeObject &obj_;
@@ -2268,7 +2422,7 @@ Island allocation rules:
 - One `.rj_islands` section is inserted for each contiguous 128 KB span of `.text` that contains at least one far stub.
 - Section size = `num_far_stubs_in_span × 16 bytes`. Maximum 4096 entries per island (= 64 KB island, still reachable by the ±128 KB near branch from the span's far stub).
 - If `num_far_stubs_in_span > 4096`, `BinaryTranslator::translate()` returns an error (non-empty `errors` field): the kernel is too large/dense for DBT and the caller falls back to PASSTHROUGH.
-- **DBI does NOT use far stubs or islands.** DBI trampolines are inserted directly into `.text` via `CodeObjectPatcher::insert_at()`, growing the section in-place; there is no separate `.rj_translations` section and no branch-range constraint (the inserted call stub is adjacent to the patched instruction). Island logic is a DBT-only concern.
+- **DBI does NOT use far stubs or islands.** DBI overwrites the patched instruction in `.text` with a same-byte-length `s_branch` stub via `CodeObjectPatcher::overwrite_at()` (no insertion, no `.text` growth — see §2.4). The trampoline body lives in a separate `.rj_trampolines` section reached by that `s_branch`. Branch range can still constrain trampoline placement (`s_branch` simm16 is signed 16-bit dwords ≈ ±128 KB), but if it overflows the Instrumentor falls back to PASSTHROUGH for that site rather than synthesizing an island. Island logic is a DBT-only concern.
 - For 8-byte source instructions the 16-byte far stub does not fit in-place either; these also use an island entry.
 
 In practice this path is only needed for exceptionally large shaders (>128 KB `.text`).
@@ -2824,7 +2978,7 @@ private:
 
 The code cave strategy (§3.3.2) ensures that every legalization action writes exactly `inst.size()` bytes in-place in `.text`. No instruction ever grows or shrinks in-place, so no instruction's address changes, and no existing branch offset in `.text` is invalidated.
 
-The `patch_branch_offset` virtual method and `BranchReloc` types defined in §2.6 are still used by `CodeObjectPatcher` for the **DBI** path (where `insert_at()` genuinely inserts bytes and shifts subsequent code). They are not needed by `BinaryTranslator`.
+The `patch_branch_offset` virtual method and `BranchReloc` types defined in §2.6 are **not** required by either DBI or DBT under the current design — both pillars preserve `.text` byte size in place (DBT via the code-cave invariant; DBI via `overwrite_at()` with a same-size `s_branch` stub). They remain in `CodeObjectPatcher`'s API surface for any future caller (`insert_at()`-using flow) that genuinely shifts bytes.
 
 The only branch-offset work `BinaryTranslator` performs is computing the two-instruction offsets inside each cave entry (`s_branch <return_offset>`) and inside each cave stub (`s_branch <cave_offset>`), both of which are computed locally at cave-assembly time with no need to scan the surrounding text.
 
@@ -5017,7 +5171,7 @@ python -m amdisa --multi cdna4:cdna4.xml rdna4:rdna4.xml --gen-legalization \
 | `rj_code_translate()` C API: opaque handle interface via `rj_code_internal.h`; creates `BinaryTranslator`, returns translated code object | `dbt/rj_code_translate.cpp` |
 | ELF flag patching: `elf_mach_for_arch()` maps `rj_code_arch_t` to `EF_AMDGPU_MACH` constants for all 9 ISAs | `amdgpu_elf.h` additions |
 
-Note: `BranchFixup` is not needed for DBT — the code cave invariant (§3.3.2) ensures no instruction in `.text` ever changes its address, so all branch offsets remain valid. The `BranchReloc` infrastructure defined in §2.6 is used only by the DBI path (`CodeObjectPatcher::insert_at()`).
+Note: `BranchFixup` is not needed for DBT — the code cave invariant (§3.3.2) ensures no instruction in `.text` ever changes its address, so all branch offsets remain valid. DBI similarly preserves `.text` byte layout (it overwrites the patched instruction with a same-size `s_branch` stub via `CodeObjectPatcher::overwrite_at()`; see §2.4), so `BranchFixup` is not needed there either. The `BranchReloc` / `patch_branch_offset` infrastructure defined in §2.6 remains in the patcher API for future callers that genuinely shift bytes via `insert_at()`.
 
 **Tests:** *(DBT milestone)* 21 tests covering: coherency remap (GFX940→GFX12, GFX9→GFX12), encoding field preservation (SOP1/SOP2/SOPP/SMEM/VOP3), decode-encode round-trip, legalization lookup, zero-ILLEGAL invariant across all 27 ISA pairs, waitcnt decode/encode (6 tests including vmcnt-only, lgkmcnt-only, full, zero-all, expcnt-only, multi-counter).
 
