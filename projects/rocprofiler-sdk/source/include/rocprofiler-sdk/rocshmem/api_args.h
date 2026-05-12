@@ -67,15 +67,15 @@ typedef union rocprofiler_rocshmem_api_args_t
     struct
     {
         hipStream_t stream;
-    } rocshmem_barrier_all_on_stream;
+    } barrier_all_on_stream;
     struct
     {
         hipStream_t stream;
-    } rocshmem_quiet_on_stream;
+    } quiet_on_stream;
     struct
     {
         hipStream_t stream;
-    } rocshmem_sync_all_on_stream;
+    } sync_all_on_stream;
     struct
     {
         rocshmem_team_t team;
@@ -83,7 +83,7 @@ typedef union rocprofiler_rocshmem_api_args_t
         const void*     source;
         size_t          size;
         hipStream_t     stream;
-    } rocshmem_alltoallmem_on_stream;
+    } alltoallmem_on_stream;
     struct
     {
         rocshmem_team_t team;
@@ -92,7 +92,7 @@ typedef union rocprofiler_rocshmem_api_args_t
         size_t          nelems;
         int             pe_root;
         hipStream_t     stream;
-    } rocshmem_broadcastmem_on_stream;
+    } broadcastmem_on_stream;
     struct
     {
         void*       dest;
@@ -100,7 +100,7 @@ typedef union rocprofiler_rocshmem_api_args_t
         size_t      nelems;
         int         pe;
         hipStream_t stream;
-    } rocshmem_getmem_on_stream;
+    } getmem_on_stream;
     struct
     {
         void*       dest;
@@ -108,7 +108,7 @@ typedef union rocprofiler_rocshmem_api_args_t
         size_t      nelems;
         int         pe;
         hipStream_t stream;
-    } rocshmem_putmem_on_stream;
+    } putmem_on_stream;
     struct
     {
         void*       dest;
@@ -119,14 +119,14 @@ typedef union rocprofiler_rocshmem_api_args_t
         int         sig_op;
         int         pe;
         hipStream_t stream;
-    } rocshmem_putmem_signal_on_stream;
+    } putmem_signal_on_stream;
     struct
     {
         uint64_t*   sig_addr;
         int         cmp;
         uint64_t    cmp_value;
         hipStream_t stream;
-    } rocshmem_signal_wait_until_on_stream;
+    } signal_wait_until_on_stream;
 } rocprofiler_rocshmem_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI
