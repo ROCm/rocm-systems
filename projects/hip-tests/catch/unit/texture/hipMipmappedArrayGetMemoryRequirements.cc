@@ -39,4 +39,10 @@ HIP_TEST_CASE(Unit_hipMipmappedArrayGetMemoryRequirements_Negative_Parameters) {
   SECTION("mipmap is nullptr") {
     HIP_CHECK_ERROR(hipMipmappedArrayGetMemoryRequirements(&memoryRequirements, nullptr, device_id), hipErrorInvalidHandle);
   }
+
+#if HT_AMD
+  HIP_CHECK(hipMipmappedArrayDestroy(array));
+#elif HT_NVIDIA
+  HIP_CHECK(hipFreeMipmappedArray(array));
+#endif
 }
