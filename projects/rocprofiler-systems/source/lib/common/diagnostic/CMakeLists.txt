@@ -17,12 +17,14 @@ set(diagnostic_sources
     ${CMAKE_CURRENT_LIST_DIR}/color.cpp
     ${CMAKE_CURRENT_LIST_DIR}/stacktrace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/format_exception.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/exception.cpp
 )
 
 set(diagnostic_headers
     ${CMAKE_CURRENT_LIST_DIR}/color.hpp
     ${CMAKE_CURRENT_LIST_DIR}/stacktrace.hpp
     ${CMAKE_CURRENT_LIST_DIR}/format_exception.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/exception.hpp
 )
 
 add_library(rocprofiler-systems-diagnostic-library STATIC)

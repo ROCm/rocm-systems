@@ -7,6 +7,7 @@ add_library(
     test_color.cpp
     test_stacktrace.cpp
     test_format_exception.cpp
+    test_exception.cpp
 )
 
 target_link_libraries(

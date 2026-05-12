@@ -3,6 +3,7 @@
 
 #include "common/diagnostic/format_exception.hpp"
 #include "common/diagnostic/color.hpp"
+#include "common/diagnostic/exception.hpp"
 
 #include <cstdio>
 #include <sstream>
@@ -122,24 +123,32 @@ format_exception(const std::exception& e, exception_format_options opt)
     std::ostringstream inner;
     inner << trim_what(e.what());
 
-    if(opt.capture_trace_at_call_site)
+    // Prefer an embedded trace when the exception is a rocprofsys::exception:
+    // it was captured at the throw site, which is what the user wants to see.
+    // Otherwise capture at format-time (still useful, but points at the
+    // catch-formatting site, not the throw).
+    std::string rendered;
+    if(const auto* re = dynamic_cast<const ::rocprofsys::exception*>(&e); re != nullptr)
+    {
+        rendered = re->trace().to_string(opt.trace_options);
+    }
+    else if(opt.capture_trace_at_call_site)
     {
         // skip 1 to drop format_exception's own frame.
-        auto trace    = stacktrace::capture(/*skip_frames=*/1);
-        auto rendered = trace.to_string(opt.trace_options);
+        auto trace = stacktrace::capture(/*skip_frames=*/1);
+        rendered   = trace.to_string(opt.trace_options);
+    }
 
-        // Drop a single trailing newline from the trace render so the
-        // side-bar prefixer doesn't append a phantom bare-bar line under
-        // the last frame.
-        if(!rendered.empty() && rendered.back() == '\n')
-        {
-            rendered.pop_back();
-        }
+    // Drop a single trailing newline from the trace render so the side-bar
+    // prefixer doesn't append a phantom bare-bar line under the last frame.
+    if(!rendered.empty() && rendered.back() == '\n')
+    {
+        rendered.pop_back();
+    }
 
-        if(!rendered.empty())
-        {
-            inner << "\n\n" << rendered;
-        }
+    if(!rendered.empty())
+    {
+        inner << "\n\n" << rendered;
     }
 
     return wrap_in_sidebar(inner.str(), color_on);
