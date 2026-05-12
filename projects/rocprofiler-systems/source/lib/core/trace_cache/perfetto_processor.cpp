@@ -594,6 +594,19 @@ perfetto_processor_t::finalize_processing()
     }
 }
 
+template <typename CategoryT, typename FuncT, typename... Args>
+::perfetto::Track
+perfetto_processor_t::get_or_create_track(CategoryT, FuncT&& desc_gen, Args&&... args)
+{
+    const auto _uuid = tracing::get_perfetto_category_uuid<CategoryT>(args...);
+    auto       it    = m_track_cache.find(_uuid);
+    if(it != m_track_cache.end()) return it->second;
+    auto _track = tracing::get_perfetto_track(CategoryT{}, std::forward<FuncT>(desc_gen),
+                                              std::forward<Args>(args)...);
+    m_track_cache.emplace(_uuid, _track);
+    return _track;
+}
+
 void
 perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
 {
@@ -642,8 +655,8 @@ perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
     };
 
     auto _make_queue_track = [&] {
-        return tracing::get_perfetto_track(category::rocm_kernel_dispatch{}, _track_desc,
-                                           _agent_device_id, _queue_id_handle);
+        return get_or_create_track(category::rocm_kernel_dispatch{}, _track_desc,
+                                   _agent_device_id, _queue_id_handle);
     };
     emit_grouped_event(_group_by_queue, category::rocm_kernel_dispatch{},
                        _make_queue_track, _stream_handle, kernel_name.c_str(),
@@ -709,8 +722,7 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
     };
 
     auto _make_queue_track = [&] {
-        return tracing::get_perfetto_track(category::rocm_scratch_memory{},
-                                           _track_desc_events);
+        return get_or_create_track(category::rocm_scratch_memory{}, _track_desc_events);
     };
     emit_grouped_event(_group_by_queue, category::rocm_scratch_memory{},
                        _make_queue_track, _stream_id, _name.c_str(), "", _beg_ts, _end_ts,
@@ -759,8 +771,8 @@ perfetto_processor_t::handle(const memory_copy_sample& _mcs)
     };
 
     auto _make_queue_track = [&] {
-        return tracing::get_perfetto_track(category::rocm_memory_copy{}, _track_desc,
-                                           _dst_agent_log_node_id, _thrd_id);
+        return get_or_create_track(category::rocm_memory_copy{}, _track_desc,
+                                   _dst_agent_log_node_id, _thrd_id);
     };
     emit_grouped_event(_group_by_queue, category::rocm_memory_copy{}, _make_queue_track,
                        _stream_id, _name.c_str(), "", _beg_ts, _end_ts, _corr_id,
