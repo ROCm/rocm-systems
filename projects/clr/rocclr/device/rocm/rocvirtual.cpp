@@ -1241,17 +1241,12 @@ void VirtualGPU::AnalyzeAqlQueue() const {
   uint64_t index = Hsa::queue_load_write_index_relaxed(gpu_queue_);
   uint64_t read = Hsa::queue_load_read_index_relaxed(gpu_queue_);
 
-  uint64_t scan_start = read;
-  if (index == read && index > 0) {
-    scan_start = index - 1;
-  }
-
-  if (index > read || (index == read && index > 0)) {
+  if (index > read) {
     int valid_packet_idx = 0;
     constexpr int kAqlSearchWindow = 32;
     while (valid_packet_idx < kAqlSearchWindow) {
       auto aql_loc = &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
-          gpu_queue_->base_address))[(scan_start + valid_packet_idx) & queueMask];
+          gpu_queue_->base_address))[(read + valid_packet_idx) & queueMask];
       if (extractAqlBits((*aql_loc).header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE) ==
           HSA_PACKET_TYPE_INVALID) {
         if (index == read) {
