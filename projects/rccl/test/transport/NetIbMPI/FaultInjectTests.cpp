@@ -148,26 +148,9 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorIsFatal) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-
-    // Drain any outstanding recv request before closing the comm.
-    // Note: recv may not complete if sender faulted — that is expected here.
-    if (rank == 0 && !recvDone && recvReq != nullptr) {
-        for (int poll = 0; poll < 500; poll++) {
-            int done = 0, sz = 0;
-            if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
-            if (done) break;
-            usleep(kPollIntervalUs);
-        }
-    }
-
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !recvDone)
+        DrainRecvRequest(recvReq);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -197,6 +180,8 @@ TEST_F(NetIbMPITest, FaultInjCastSlowQpRebalances) {
     const int rank = MPIEnvironment::world_rank;
 
     CAST_ENV_CHECK_OR_SKIP();
+    if (GetSplitDataMin() == 0)
+        GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: kMsgSz = GetSplitDataMin()-1 would underflow";
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
@@ -315,14 +300,7 @@ TEST_F(NetIbMPITest, FaultInjCastSlowQpRebalances) {
         EXPECT_LE(st.activeTotTokens, st.initTotTokens);
     }
 
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -389,14 +367,7 @@ TEST_F(NetIbMPITest, FaultInjCastDelayDataIntegrity) {
             << "data corruption with 2 ms QP 0 delay (50 sends)";
     }
 
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -462,7 +433,7 @@ TEST_F(NetIbMPITest, FaultInjCastSingleQpErrorIsFatal) {
         // Concentrate all tokens on QP 0: tokens[0]=1, tokens[1..n-1]=0.
         std::vector<int> tokens(actualNqps, 0);
         tokens[0] = 1;
-        ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps);
+        EXPECT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
         r1.setErrRet = static_cast<int>(ncclIbCastFaultSetQpError(sendComm, targetQp, /*inject=*/true));
     }
     MPI_Barrier(MPI_COMM_WORLD);
@@ -529,24 +500,9 @@ TEST_F(NetIbMPITest, FaultInjCastSingleQpErrorIsFatal) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-
-    if (rank == 0 && !recvDone && recvReq != nullptr) {
-        for (int poll = 0; poll < 500; poll++) {
-            int done = 0, sz = 0;
-            if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
-            if (done) break;
-            usleep(kPollIntervalUs);
-        }
-    }
-
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !recvDone)
+        DrainRecvRequest(recvReq);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -602,22 +558,27 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
 
     if (rank == 1) {
         for (int q = 0; q < actualNqps; ++q)
-            ncclIbCastFaultSetQpError(sendComm1, q, /*inject=*/true);
+            ASSERT_EQ(ncclIbCastFaultSetQpError(sendComm1, q, /*inject=*/true), ncclSuccess);
     }
     MPI_Barrier(MPI_COMM_WORLD);
 
     // Trigger the fault (rank 0 posts recv, rank 1 posts send that will fail).
+    // rank 1 forwards its fault result to rank 0 so we can assert the fault
+    // was actually observed before testing recovery in phase 2.
+    static constexpr int kPhase1MpiTag = 9882;
+    FaultInjectResult p1 = {};
+    void* recvReq1 = nullptr;
+    bool  recvDone1 = false;
     if (rank == 0) {
         void*  bufs[1]    = {buf1};
         size_t sizes[1]   = {kMsgSize};
         int    tags[1]    = {501};
         void*  handles[1] = {mhandle1};
-        void* recvReq = nullptr;
-        ASSERT_EQ(PostRecv(recvComm1, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+        ASSERT_EQ(PostRecv(recvComm1, 1, bufs, sizes, tags, handles, &recvReq1), ncclSuccess);
         for (int poll = 0; poll < 100; poll++) {
             int done = 0, sz = 0;
-            if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
-            if (done) break;
+            if (TestRequest(recvReq1, &done, &sz) != ncclSuccess) break;
+            if (done) { recvDone1 = true; break; }
             usleep(kPollIntervalUs);
         }
     } else {
@@ -628,29 +589,38 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
             if (sendRet != ncclSuccess || sendReq != nullptr) break;
             usleep(kPollIntervalUs);
         }
+        int fatalCount = 0;
         if (sendRet == ncclSuccess && sendReq != nullptr) {
             for (int poll = 0; poll < 200; poll++) {
                 int done = 0, sz = 0;
-                int fc = 0;
                 TestRequest(sendReq, &done, &sz);
-                ncclIbCastFaultGetFatalCount(sendComm1, &fc);
-                if (done || fc > 0) break;
+                ncclIbCastFaultGetFatalCount(sendComm1, &fatalCount);
+                if (done || fatalCount > 0) break;
                 usleep(kPollIntervalUs);
             }
+        } else {
+            ncclIbCastFaultGetFatalCount(sendComm1, &fatalCount);
         }
-        ncclIbCastFaultClear(sendComm1);
+        p1.sendRet    = static_cast<int>(sendRet);
+        p1.fatalCount = fatalCount;
+        EXPECT_EQ(ncclIbCastFaultClear(sendComm1), ncclSuccess);
+        MPI_Send(&p1, sizeof(p1), MPI_BYTE, 0, kPhase1MpiTag, MPI_COMM_WORLD);
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    ASSERT_EQ(DeregisterMemory(comm1, mhandle1), ncclSuccess);
     if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm1), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm1), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm1), ncclSuccess);
+        MPI_Recv(&p1, sizeof(p1), MPI_BYTE, 1, kPhase1MpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+        bool isendFailed = (p1.sendRet != static_cast<int>(ncclSuccess));
+        EXPECT_TRUE(isendFailed || p1.fatalCount > 0)
+            << "Phase 1: fault injection did not trigger — isend returned "
+            << p1.sendRet << ", fatalCount=" << p1.fatalCount
+            << "; recovery test is meaningless without a confirmed fault";
     }
+
     MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !recvDone1)
+        DrainRecvRequest(recvReq1);
+    TeardownConnection(recvComm1, listenComm1, sendComm1, mhandle1);
 
     // ── Phase 2: open fresh connection, verify it works cleanly ──────────
     constexpr int    kNMsgs   = 20;
@@ -692,14 +662,7 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
             << "new connection has non-zero fatalErrorCount after FaultClear on previous connection";
     }
 
-    ASSERT_EQ(DeregisterMemory(comm2, mhandle2), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm2), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm2), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm2), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm2, listenComm2, sendComm2, mhandle2);
 }
 
 #endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */

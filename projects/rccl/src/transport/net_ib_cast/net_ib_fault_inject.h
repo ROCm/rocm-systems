@@ -22,16 +22,14 @@ extern "C" {
 /*
  * Test-only per-QP fault injection API for the net-ib CAST transport.
  *
- * Implemented in src/transport/net_ib_cast.cc (CAST multi-QP path).
- *
- * NCCL_IB_MAX_QPS is defined in net_ib_cast_inspect.h; guard against
- * double-definition when both headers are included together.
+ * Implemented in src/transport/net_ib_cast/p2p.cc (CAST multi-QP path).
  */
-#ifndef NCCL_IB_MAX_QPS
-#define NCCL_IB_MAX_QPS 128
+#include "net_ib_cast_inspect.h"
+#ifdef __cplusplus
+static_assert(NCCL_IB_MAX_QPS == 128, "fault injection arrays sized for 128 QPs; update if NCCL_IB_MAX_QPS changes");
 #endif
 
-/* ── CAST path (net_ib_cast.cc) ───────────────────────────────────────── */
+/* ── CAST path (src/transport/net_ib_cast/p2p.cc) ────────────────────── */
 
 /* Set an artificial delay (microseconds) on a specific QP index.
  * qpIdx must be in [0, NCCL_IB_MAX_QPS).
@@ -39,7 +37,7 @@ extern "C" {
 ncclResult_t ncclIbCastFaultSetQpDelay(void* sendComm, int qpIdx, uint32_t delayUs);
 
 /* Arm error injection on a specific QP index.
- * When armed, the hook calls ncclIbStatsFatalError and then returns
+ * When armed, the hook calls IbCastStatsFatalError and then returns
  * ncclSystemError instead of calling wrap_ibv_post_send.
  * Set inject=false to disarm. */
 ncclResult_t ncclIbCastFaultSetQpError(void* sendComm, int qpIdx, bool inject);

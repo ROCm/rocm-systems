@@ -298,7 +298,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       const uint32_t faultDelay = comm->base.faultQpDelayUs[qpIndex];
       if (faultDelay) usleep(faultDelay);
       if (comm->base.faultQpError[qpIndex]) {
-        ncclIbStatsFatalError(&comm->base.stats);
+        IbCastStatsFatalError(&comm->base.stats);
         return ncclSystemError;
       }
     }
@@ -1105,7 +1105,7 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
 ncclResult_t ncclIbCastFaultSetQpDelay(void* sendComm, int qpIdx, uint32_t delayUs) {
   if (!sendComm) return ncclInvalidArgument;
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
-  if (qpIdx < 0 || qpIdx >= NCCL_IB_MAX_QPS) return ncclInvalidArgument;
+  if (qpIdx < 0 || qpIdx >= comm->base.nqps) return ncclInvalidArgument;
   comm->base.faultQpDelayUs[qpIdx] = delayUs;
   return ncclSuccess;
 }
@@ -1113,7 +1113,7 @@ ncclResult_t ncclIbCastFaultSetQpDelay(void* sendComm, int qpIdx, uint32_t delay
 ncclResult_t ncclIbCastFaultSetQpError(void* sendComm, int qpIdx, bool inject) {
   if (!sendComm) return ncclInvalidArgument;
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
-  if (qpIdx < 0 || qpIdx >= NCCL_IB_MAX_QPS) return ncclInvalidArgument;
+  if (qpIdx < 0 || qpIdx >= comm->base.nqps) return ncclInvalidArgument;
   comm->base.faultQpError[qpIdx] = inject;
   return ncclSuccess;
 }
@@ -1123,6 +1123,7 @@ ncclResult_t ncclIbCastFaultClear(void* sendComm) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
   memset(comm->base.faultQpDelayUs, 0, sizeof(comm->base.faultQpDelayUs));
   memset(comm->base.faultQpError, 0, sizeof(comm->base.faultQpError));
+  __atomic_store_n(&comm->base.stats.fatalErrorCount, 0, __ATOMIC_RELEASE);
   return ncclSuccess;
 }
 
