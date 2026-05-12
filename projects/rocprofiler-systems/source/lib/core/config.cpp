@@ -2541,8 +2541,12 @@ get_output_absolute_path(std::string_view basename, std::string_view extension,
 {
     const auto* pwd = getenv("PWD");
 
+    // compose_output_filename treats dir as a directory only if it ends in "/".
+    std::string dir_str{ dir };
+    if(!dir_str.empty() && dir_str.back() != '/') dir_str.push_back('/');
+
     auto cfg = settings::compose_filename_config{ settings::use_output_suffix(), tag,
-                                                  false, std::string{ dir } };
+                                                  false, std::move(dir_str) };
 
     auto result = settings::compose_output_filename(std::string{ basename },
                                                     std::string{ extension }, cfg);
