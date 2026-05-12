@@ -72,6 +72,7 @@
  * - 1.19 - hsa_amd_agent_preload
  * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
  * - 1.21 - hsa_amd_signal_get_event_id
+ * - 1.22 - hsa_amd_queue_get_info: per-queue VM fault state queries
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
 #define HSA_AMD_INTERFACE_VERSION_MINOR 21
@@ -4326,6 +4327,28 @@ typedef enum {
    * The type of this attribute is uint8_t[8].
    */
   HSA_AMD_QUEUE_INFO_PROPERTIES,
+
+  /*
+   * Per-queue VM fault state — populated after a GPU memory fault.
+   */
+
+  /*
+   * Whether this queue has experienced a VM fault.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS,
+  /*
+   * The virtual address that caused the VM fault on this queue.
+   * Only valid when HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS is true.
+   * The type of this attribute is uint64_t.
+   */
+  HSA_AMD_QUEUE_INFO_VM_FAULT_ADDRESS,
+  /*
+   * A bitmask of HSA_AMD_MEMORY_FAULT_* flags describing the reason for the
+   * VM fault on this queue.  Only valid when HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS
+   * is true.  The type of this attribute is uint32_t.
+   */
+  HSA_AMD_QUEUE_INFO_VM_FAULT_REASON,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,

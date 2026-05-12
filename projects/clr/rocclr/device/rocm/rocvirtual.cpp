@@ -1134,17 +1134,15 @@ static inline void packet_store_release(uint32_t* packet, uint16_t header, uint1
 void VirtualGPU::AnalyzeAqlQueue() const {
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
-  const uint32_t sw_queue_size = queueMask;
   uint64_t index = Hsa::queue_load_write_index_relaxed(gpu_queue_);
   uint64_t read = Hsa::queue_load_read_index_relaxed(gpu_queue_);
+
   if (index > read) {
     int valid_packet_idx = 0;
     constexpr int kAqlSearchWindow = 32;
     while (valid_packet_idx < kAqlSearchWindow) {
-      // Read AQL packet header and check if it's invalid, which means it's done
       auto aql_loc = &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
           gpu_queue_->base_address))[(read + valid_packet_idx) & queueMask];
-      // If the packet is invalid, then continue search
       if (extractAqlBits((*aql_loc).header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE) ==
           HSA_PACKET_TYPE_INVALID) {
         valid_packet_idx++;
@@ -1153,50 +1151,83 @@ void VirtualGPU::AnalyzeAqlQueue() const {
       }
     }
     if (valid_packet_idx == kAqlSearchWindow) {
-      printf("VGPU(%p) Queue(%p). Couldn't find the hang AQL packet!\n", this, gpu_queue_);
+      fprintf(stderr, "VGPU(%p) Queue(%p). Couldn't find the hang AQL packet!\n", this, gpu_queue_);
       return;
     }
-    // Read AQL packet and check if it's a kernel dispatch
     auto aql_loc = &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
         gpu_queue_->base_address))[(read + valid_packet_idx) & queueMask];
     auto packet = *aql_loc;
     auto header = packet.header;
-    if (extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE) ==
-        HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-      auto it = dev().KernelMap().find(packet.kernel_object);
+    auto pkt_type = extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
+
+    auto printKernelName = [&](uint64_t kernel_object) {
+      auto it = dev().KernelMap().find(kernel_object);
       if (it != dev().KernelMap().end()) {
-        // @note: It's possible to demangle the name with comgr
-        printf("Kernel Name: %s\n", it->second.name().c_str());
+        fprintf(stderr, "Kernel Name: %s\n", it->second.name().c_str());
       } else {
-        printf("VGPU(%p) Queue(%p). Couldn't find kernel\n", this, gpu_queue_);
+        fprintf(stderr, "VGPU(%p) Queue(%p). Couldn't find kernel\n", this, gpu_queue_);
       }
-      printf("VGPU=%p SWq=%p, HWq=%p, id=%" PRIu64
-             "\n\tDispatch Header ="
-             "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-             "setup=%d\n\tgrid=[%u, %u, %u], workgroup=[%u, %u, %u]\n\tprivate_seg_size=%u, "
-             "group_seg_size=%u\n\tkernel_obj=0x%" PRIx64
-             ", "
-             "kernarg_address=0x%p\n\tcompletion_signal=0x%" PRIx64
-             ", "
-             "correlation_id=%" PRIu64 "\n\trptr=%" PRIu64 ", wptr=%" PRIu64 "\n ",
-             this, gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, header,
+    };
+
+    auto printHeader = [&](const char* label) {
+      fprintf(stderr, "VGPU=%p SWq=%p, HWq=%p, id=%" PRIu64 "\n\t%s Header ="
+             "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), ",
+             this, gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, label, header,
              extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
              extractAqlBits(header, HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
              extractAqlBits(header, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
                             HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
              extractAqlBits(header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
-                            HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
-             0, packet.grid_size_x, packet.grid_size_y, packet.grid_size_z, packet.workgroup_size_x,
-             packet.workgroup_size_y, packet.workgroup_size_z, packet.private_segment_size,
-             packet.group_segment_size, packet.kernel_object, packet.kernarg_address,
+                            HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE));
+    };
+
+    if (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
+      auto* vendor_hdr = reinterpret_cast<const hsa_amd_vendor_packet_header_t*>(aql_loc);
+      if (vendor_hdr->AmdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH) {
+        auto* ext = reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(aql_loc);
+        printKernelName(ext->kernel_object);
+        printHeader("Ext Dispatch");
+        fprintf(stderr,
+               "amd_format=%d, setup=%d\n\tcluster_count=[%u, %u, %u], "
+               "cluster_size=[%u, %u, %u], workgroup=[%u, %u, %u]\n\t"
+               "private_seg_size=%u, group_seg_size=%u\n\t"
+               "kernel_obj=0x%" PRIx64 ", kernarg_address=0x%p\n\t"
+               "dep_signal=0x%" PRIx64 ", completion_signal=0x%" PRIx64
+               "\n\trptr=%" PRIu64 ", wptr=%" PRIu64 "\n",
+               (int)ext->amd_format, ext->setup,
+               ext->cluster_count_x, ext->cluster_count_y, ext->cluster_count_z,
+               ext->cluster_size_x, ext->cluster_size_y, ext->cluster_size_z,
+               ext->workgroup_size_x, ext->workgroup_size_y, ext->workgroup_size_z,
+               ext->private_segment_size, ext->group_segment_size,
+               ext->kernel_object, ext->kernarg_address,
+               ext->dep_signal.handle, ext->completion_signal.handle, read, index);
+      } else {
+        fprintf(stderr, "VGPU(%p) Queue(%p) rptr=%" PRIu64 ", wptr=%" PRIu64
+               ". Vendor packet (amd_format=%d)\n",
+               this, gpu_queue_, read, index, (int)vendor_hdr->AmdFormat);
+      }
+    } else if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH ||
+               (index == read && packet.kernel_object != 0)) {
+      printKernelName(packet.kernel_object);
+      printHeader("Dispatch");
+      fprintf(stderr,
+             "setup=%d\n\tgrid=[%u, %u, %u], workgroup=[%u, %u, %u]\n\t"
+             "private_seg_size=%u, group_seg_size=%u\n\t"
+             "kernel_obj=0x%" PRIx64 ", kernarg_address=0x%p\n\t"
+             "completion_signal=0x%" PRIx64 ", correlation_id=%" PRIu64
+             "\n\trptr=%" PRIu64 ", wptr=%" PRIu64 "\n",
+             packet.setup, packet.grid_size_x, packet.grid_size_y, packet.grid_size_z,
+             packet.workgroup_size_x, packet.workgroup_size_y, packet.workgroup_size_z,
+             packet.private_segment_size, packet.group_segment_size,
+             packet.kernel_object, packet.kernarg_address,
              packet.completion_signal.handle, packet.reserved2, read, index);
     } else {
-      printf("VGPU(%p) Queue(%p) rptr=%" PRIu64 ", wptr=%" PRIu64
+      fprintf(stderr, "VGPU(%p) Queue(%p) rptr=%" PRIu64 ", wptr=%" PRIu64
              ". A barrier packet in the queue!\n",
              this, gpu_queue_, read, index);
     }
   } else {
-    printf("VGPU(%p) Queue(%p) is idle\n", this, gpu_queue_);
+    fprintf(stderr, "VGPU(%p) Queue(%p) is idle\n", this, gpu_queue_);
   }
 }
 
