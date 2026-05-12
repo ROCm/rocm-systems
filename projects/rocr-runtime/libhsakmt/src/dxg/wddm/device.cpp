@@ -69,6 +69,10 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
 
   NTSTATUS ret = ParseDeviceInfo();
   device_info_.hwsInfo.hwsMask.aql_queue &= !dxg_runtime->use_pm4_;
+  pr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%d\n",
+           device_info_.hwsInfo.hwsMask.aql_queue,
+           device_info_.hwsInfo.hwsMask.computeHwsEnabled,
+           dxg_runtime->use_pm4_);
 
   if (ret == STATUS_OBJECT_NAME_NOT_FOUND || ret == STATUS_REVISION_MISMATCH) {
     // Skip adapter
