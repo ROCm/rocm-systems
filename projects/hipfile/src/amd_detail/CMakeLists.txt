@@ -32,6 +32,7 @@ set(HIPFILE_SOURCES
     stats.cpp
     stream.cpp
     sys.cpp
+    thread-pool.cpp
 )
 
 # Create hipfile target
