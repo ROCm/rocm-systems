@@ -30,6 +30,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - `rocprof-sys-instrument` diagnostic file dumps (available, instrumented, excluded, coverage, overlapping) are now gated behind the `--dump-info` flag instead of being generated unconditionally.
 - Preset flags changed from `--balanced` to `--preset=balanced` syntax. The old `--<preset-name>` flags are still supported and handled within `preset_registry`.
 - Removed the `ROCPROFSYS_USE_ROCM` CMake option. ROCm is now required for building the ROCm Systems Profiler.
+- `rocprof-sys-sample` - Aligned flags with `rocprof-sys-run`. Renamed `--freq`, `--cputime` and `--realtime` to `--sampling-freq`, `--sampling-cputime` and `--sampling-realtime`, respectively. Old flags are still handled as a part of backward compatibility.
 
 ### Resolved issues
 

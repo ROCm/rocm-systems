@@ -3,12 +3,17 @@
 
 #pragma once
 
+#include "common/environment.hpp"
+
 #include <timemory/settings/vsettings.hpp>
 #include <timemory/utility/argparse.hpp>
 
 #include <functional>
 #include <set>
+#include <string>
+#include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys
@@ -35,24 +40,54 @@ default_environ_filter(std::string_view, const parser_data&);
 bool
 default_grouping_filter(std::string_view, const parser_data&);
 
+struct env_snapshot
+{
+    std::unordered_set<std::string> initial = {};
+    std::vector<std::string>        current = {};
+    // Owns its keys: callers may pass temporaries (e.g. std::string{key}) into
+    // update_env, so storing string_view here would dangle once they die.
+    std::unordered_set<std::string> updated      = {};
+    std::string                     dl_libpath   = {};
+    std::string                     omni_libpath = {};
+
+    // Convenience wrapper: hides the (current, updated, initial) plumbing
+    // and the join delimiter, so callers stop reaching into three fields.
+    template <typename Tp>
+    void set(
+        std::string_view key, Tp&& value,
+        rocprofsys::common::update_mode mode = rocprofsys::common::update_mode::REPLACE,
+        std::string_view                join_delim = ":")
+    {
+        rocprofsys::common::update_env(current, key, std::forward<Tp>(value), mode,
+                                       join_delim, updated, initial);
+    }
+};
+
+struct parse_outcome
+{
+    std::vector<std::string> command    = {};
+    std::string              launcher   = {};
+    bool                     monochrome = false;
+    bool                     debug      = false;
+    bool                     fork_exec  = false;
+    int                      verbose    = 0;
+};
+
+struct registration_config
+{
+    vsettings_set_t                 processed_settings = {};
+    std::unordered_set<std::string> processed_environs = {};
+    std::unordered_set<std::string> processed_groups   = {};
+    grouping_filter_t               grouping_filter    = default_grouping_filter;
+    setting_filter_t                setting_filter     = default_setting_filter;
+    environ_filter_t                environ_filter     = default_environ_filter;
+};
+
 struct parser_data
 {
-    bool                                 monochrome         = false;
-    bool                                 debug              = false;
-    int                                  verbose            = 0;
-    std::string                          dl_libpath         = {};
-    std::string                          omni_libpath       = {};
-    std::string                          launcher           = {};
-    vsettings_set_t                      processed_settings = {};
-    std::unordered_set<std::string>      processed_environs = {};
-    std::unordered_set<std::string>      processed_groups   = {};
-    std::vector<char*>                   current            = {};
-    std::vector<char*>                   command            = {};
-    std::unordered_set<std::string_view> updated            = {};
-    std::unordered_set<std::string>      initial            = {};
-    grouping_filter_t                    grouping_filter    = default_grouping_filter;
-    setting_filter_t                     setting_filter     = default_setting_filter;
-    environ_filter_t                     environ_filter     = default_environ_filter;
+    env_snapshot        env = {};
+    parse_outcome       out = {};
+    registration_config reg = {};
 };
 
 parser_data&

@@ -135,18 +135,16 @@ get_updated_envs()
     return updated_envs;
 }
 
-std::vector<char*>
+std::vector<std::string>
 get_initial_environment()
 {
-    auto _env = std::vector<char*>{};
+    auto _env = std::vector<std::string>{};
     if(environ != nullptr)
     {
-        int idx = 0;
-        while(environ[idx] != nullptr)
+        for(int idx = 0; environ[idx] != nullptr; ++idx)
         {
-            auto* _v = environ[idx++];
-            original_envs.emplace(_v);
-            _env.emplace_back(strdup(_v));
+            original_envs.emplace(environ[idx]);
+            _env.emplace_back(environ[idx]);
         }
     }
 
@@ -202,7 +200,7 @@ prepare_command_for_run(char* _exe, std::vector<char*>& _argv)
 }
 
 void
-prepare_environment_for_run(std::vector<char*>& _env)
+prepare_environment_for_run(std::vector<std::string>& _env)
 {
     if(launcher.empty())
     {
@@ -218,7 +216,7 @@ prepare_environment_for_run(std::vector<char*>& _env)
 
 template <typename Tp>
 void
-update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
+update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _env_val,
            bool _append, std::string_view _join_delim)
 {
     auto _mode = _append ? update_mode::APPEND : update_mode::REPLACE;
@@ -228,25 +226,24 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
 
 template <typename Tp>
 void
-add_default_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val)
+add_default_env(std::vector<std::string>& _environ, std::string_view _env_var,
+                Tp&& _env_val)
 {
-    // Check if already exists
     auto       _key = join("", _env_var, "=");
     const auto exists =
-        std::any_of(_environ.begin(), _environ.end(), [&_key](const char* itr) {
-            return itr && std::string_view{ itr }.find(_key) == 0;
+        std::any_of(_environ.begin(), _environ.end(), [&_key](const std::string& entry) {
+            return std::string_view{ entry }.find(_key) == 0;
         });
 
     if(exists) return;
 
-    // If not exists, use common::update_env
     rocprofsys::common::update_env(_environ, _env_var, std::forward<Tp>(_env_val),
                                    update_mode::REPLACE, ":", updated_envs,
                                    original_envs);
 }
 
 std::vector<char*>
-parse_args(int argc, char** argv, std::vector<char*>& _env,
+parse_args(int argc, char** argv, std::vector<std::string>& _env,
            std::vector<std::map<std::string_view, std::string>>& _causal_envs)
 {
     using parser_t     = argparse::argument_parser;
@@ -732,19 +729,21 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
         };
 
         auto _omni_env_m = std::map<std::string, std::string>{};
-        for(auto* itr : _env)
+        for(const auto& itr : _env)
         {
             if(_is_omni_cfg(itr))
             {
-                auto _env_var = std::string{ itr };
-                auto _pos     = _env_var.find('=');
-                auto _env_val = _env_var.substr(_pos + 1);
-                _env_var      = _env_var.substr(0, _pos);
-                _omni_env_m.emplace(_env_var, _env_val);
+                auto _pos     = itr.find('=');
+                auto _env_var = itr.substr(0, _pos);
+                auto _env_val = itr.substr(_pos + 1);
+                _omni_env_m.emplace(std::move(_env_var), std::move(_env_val));
             }
         }
 
-        _env.erase(std::remove_if(_env.begin(), _env.end(), _is_omni_cfg), _env.end());
+        _env.erase(
+            std::remove_if(_env.begin(), _env.end(),
+                           [&](const std::string& entry) { return _is_omni_cfg(entry); }),
+            _env.end());
 
         auto _omni_env = std::vector<std::pair<std::string, std::string>>{};
         // make sure that ROCPROFSYS_CONFIG_FILE is the first entry
@@ -809,5 +808,5 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
 
 // explicit instantiation for usage in rocprof-sys-causal.cpp
 template void
-update_env(std::vector<char*>&, std::string_view, const std::string& _env_val,
+update_env(std::vector<std::string>&, std::string_view, const std::string& _env_val,
            bool _append, std::string_view);
