@@ -116,6 +116,10 @@ NCCL_PARAM(P2pDrainFenceProbe, "P2P_DRAIN_FENCE_PROBE", 0);
 NCCL_PARAM(AllocFenceProbe, "ALLOC_FENCE_PROBE", 0);
 // ROCM-21766 diagnostic: drain after the per-channel devRingUserRanks loop to test if the loop is the offender. Remove before merge.
 NCCL_PARAM(ChanLoopFenceProbe, "CHAN_LOOP_FENCE_PROBE", 0);
+// ROCM-21766 diagnostic: drain after the rankToLocalRank H2D memcpy and before the per-channel loop. Remove before merge.
+NCCL_PARAM(RankFenceProbe, "RANK_FENCE_PROBE", 0);
+// ROCM-21766 diagnostic: drain inside the per-channel loop, after each devRingUserRanks H2D memcpy. Remove before merge.
+NCCL_PARAM(InLoopFenceProbe, "IN_LOOP_FENCE_PROBE", 0);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
 
@@ -910,6 +914,13 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   NCCLCHECKGOTO(ncclCudaCallocAsync(&tmpCommAndChans.comm.rankToLocalRank, comm->nRanks, deviceStream), ret, fail);
   ncclCommPushCudaFree(comm, tmpCommAndChans.comm.rankToLocalRank);
   NCCLCHECKGOTO(ncclCudaMemcpyAsync(tmpCommAndChans.comm.rankToLocalRank, comm->rankToLocalRank, comm->nRanks, deviceStream), ret, fail);
+  // ROCM-21766 diagnostic: optionally drain after the rankToLocalRank H2D memcpy
+  // and before the per-channel devRingUserRanks loop. Bisects the AllocFence (~:909)
+  // and ChanLoopFence (~:1006) window to localize the offender. Use cudaDeviceSynchronize
+  // for cross-AID coverage. Remove before merge.
+  if (ncclParamRankFenceProbe()) {
+    CUDACHECKGOTO(cudaDeviceSynchronize(), ret, fail);
+  }
   comm->devComm = &devCommAndChans->comm;
   tmpCommAndChans.comm.rank = comm->rank;
   tmpCommAndChans.comm.nRanks = nRanks;
@@ -995,6 +1006,13 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
 
     if (comm->channels[c].ring.userRanks != nullptr) {
       NCCLCHECKGOTO(ncclCudaMemcpyAsync(tmpCommAndChans.channels[c].ring.userRanks, comm->channels[c].ring.userRanks, nRanks, deviceStream), ret, fail);
+      // ROCM-21766 diagnostic: optionally drain after each per-channel devRingUserRanks
+      // H2D memcpy to bisect within the loop and isolate which iteration (or whether the
+      // loop itself) triggers the fault. Use cudaDeviceSynchronize for cross-AID coverage.
+      // Remove before merge.
+      if (ncclParamInLoopFenceProbe()) {
+        CUDACHECKGOTO(cudaDeviceSynchronize(), ret, fail);
+      }
     }
   }
 
