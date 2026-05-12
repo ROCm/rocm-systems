@@ -13,7 +13,7 @@ env:
   AIS_MOUNT_PATH: /mnt/ais/ext4
   AIS_PKG_MGR: >-
     ${{
-      inputs.platform == 'rocky' && 'dnf' ||
+      startsWith(inputs.platform, 'rocky') && 'dnf' ||
       inputs.platform == 'suse' && 'zypper' ||
       inputs.platform == 'ubuntu' && 'apt'
     }}
