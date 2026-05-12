@@ -15,6 +15,20 @@ include(Compilers)
 include(FindPackageHandleStandardArgs)
 include(MacroUtilities)
 
+# Auto-wire ccache when present so warm rebuilds hit cache.
+# Skip if user has already set a compiler launcher (don't clobber distcc, sccache, etc.).
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM AND NOT DEFINED CMAKE_C_COMPILER_LAUNCHER)
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE STRING "C compiler launcher")
+endif()
+if(CCACHE_PROGRAM AND NOT DEFINED CMAKE_CXX_COMPILER_LAUNCHER)
+    set(CMAKE_CXX_COMPILER_LAUNCHER
+        "${CCACHE_PROGRAM}"
+        CACHE STRING
+        "C++ compiler launcher"
+    )
+endif()
+
 rocprofiler_systems_add_option(
     ROCPROFSYS_BUILD_DEVELOPER "Extra build flags for development like -Werror"
     ${ROCPROFSYS_BUILD_CI}
