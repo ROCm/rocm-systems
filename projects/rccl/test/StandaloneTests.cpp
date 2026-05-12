@@ -6,9 +6,11 @@
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
+#include <hip/hip_runtime.h>
 
 #include "TestBed.hpp"
 #include "StandaloneUtils.hpp"
+#include "common/ProcessIsolatedTestRunner.hpp"
 
 namespace RcclUnitTesting
 {
@@ -369,5 +371,100 @@ namespace RcclUnitTesting
     // Clean up comms
     for (auto& comm : comms)
       NCCLCHECK(ncclCommDestroy(comm));
+  }
+
+  /**
+   * \brief Verify ncclCommInitAll does not leak a sticky HIP error into the
+   *        caller's thread. (Regression test for PR #1864: the cudaGetLastError()
+   *        drain added to ncclInitKernelsForDevice.)
+   * ******************************************************************************************/
+  TEST(Standalone, CommInitDoesNotLeakStickyHipError)
+  {
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 1) {
+      GTEST_SKIP() << "No devices available.";
+    }
+
+    HIPCALL(hipSetDevice(0));
+    (void)hipGetLastError();
+
+    std::vector<ncclComm_t> comms(numDevices);
+    NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+
+    for (int i = 0; i < numDevices; i++) {
+      HIPCALL(hipSetDevice(i));
+      hipError_t lastErr = hipGetLastError();
+      ASSERT_EQ(lastErr, hipSuccess)
+          << "Device " << i
+          << ": sticky HIP error leaked from ncclCommInitAll: "
+          << hipGetErrorString(lastErr);
+    }
+
+    for (int i = 0; i < numDevices; i++) {
+      HIPCALL(hipSetDevice(i));
+      void* dummy = nullptr;
+      HIPCALL(hipMalloc(&dummy, 256));
+      HIPCALL(hipMemset(dummy, 0, 256));
+      HIPCALL(hipDeviceSynchronize());
+      HIPCALL(hipFree(dummy));
+    }
+
+    for (auto& comm : comms)
+      NCCLCHECK(ncclCommDestroy(comm));
+  }
+
+  /**
+   * \brief Verify that a real GPU memory-access fault IS correctly reported
+   *        through hipGetLastError / hipDeviceSynchronize.  Complements the
+   *        positive drain test above: the drain must clear internal errors but
+   *        must NOT mask legitimate user-facing errors.
+   *
+   *        Uses RUN_ISOLATED_TEST because the GPU context is left in a fatal
+   *        state after the fault and cannot be reused by later tests.
+   * ******************************************************************************************/
+  TEST(Standalone, GpuMemoryFaultReportsError)
+  {
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 1) {
+      GTEST_SKIP() << "No devices available.";
+    }
+
+    RUN_ISOLATED_TEST("GpuMemoryFaultReportsError", []() {
+      ASSERT_EQ(hipSetDevice(0), hipSuccess);
+      (void)hipGetLastError();
+
+      hipStream_t stream;
+      ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+
+      int* d_buf = nullptr;
+      ASSERT_EQ(hipMalloc(&d_buf, sizeof(int)), hipSuccess);
+      ASSERT_NE(d_buf, nullptr);
+
+      ASSERT_EQ(hipFree(d_buf), hipSuccess);
+
+      hipMemsetAsync(d_buf, 0xAB, 1ULL << 20, stream);
+
+      hipError_t syncErr = hipStreamSynchronize(stream);
+      hipError_t lastErr = hipGetLastError();
+
+      bool errorReported = (syncErr != hipSuccess || lastErr != hipSuccess);
+
+      if (!errorReported) {
+        hipMemcpyAsync(d_buf, (void*)0x1, sizeof(int),
+                       hipMemcpyDeviceToDevice, stream);
+        syncErr = hipStreamSynchronize(stream);
+        lastErr = hipGetLastError();
+        errorReported = (syncErr != hipSuccess || lastErr != hipSuccess);
+      }
+
+      EXPECT_TRUE(errorReported)
+          << "Expected GPU memory fault to be reported as an error";
+
+      printf("[ INFO     ] syncErr=%d (%s), lastErr=%d (%s)\n",
+             syncErr, hipGetErrorString(syncErr),
+             lastErr, hipGetErrorString(lastErr));
+    });
   }
 }
