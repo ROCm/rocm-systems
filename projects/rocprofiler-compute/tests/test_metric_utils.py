@@ -393,6 +393,62 @@ class TestEvaluationPipeline:
             )
         assert metric_df.loc["1.1.0", "Average"] == ""
 
+    def test_eval_metric_noise_clamp(self):
+        """eval_metric emits per-metric variance warning + summary on clamp."""
+        from utils.metrics.noise_clamper import (
+            clear_noise_clamp_warnings,
+            get_noise_clamp_warnings,
+        )
+
+        # Negative DIFF over a positive REF crosses the 1% threshold and bumps
+        # the noise-clamp counter when to_noise_clamp evaluates the expression.
+        metric_df, dfs, dfs_type, sys_info, _ = self._build_eval_metric_inputs(
+            metric_fields={
+                "Value": (
+                    "to_noise_clamp("
+                    "to_min(raw_pmc_df['pmc_perf']['DIFF']), "
+                    "to_max(raw_pmc_df['pmc_perf']['REF']))"
+                ),
+            }
+        )
+        raw_pmc_df = {
+            "pmc_perf": pd.DataFrame({
+                "GRBM_GUI_ACTIVE": [1000],
+                "DIFF": [-100.0],
+                "REF": [1000.0],
+            })
+        }
+
+        clear_noise_clamp_warnings()
+        with (
+            patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}),
+            patch(
+                "utils.metrics.evaluation_pipeline.console_warning"
+            ) as mock_console_warning,
+            patch(
+                "utils.metrics.evaluation_pipeline.print_noise_clamp_summary"
+            ) as mock_print_summary,
+        ):
+            eval_metric(
+                dfs,
+                dfs_type,
+                sys_info,
+                pd.DataFrame(),
+                raw_pmc_df,
+                debug=False,
+                config={},
+            )
+
+        assert get_noise_clamp_warnings()["count"] >= 1
+        variance_calls = [
+            call_args
+            for call_args in mock_console_warning.call_args_list
+            if "Variance corrected for metric:" in call_args.args[0]
+        ]
+        assert len(variance_calls) == 1
+        assert "Test Metric" in variance_calls[0].args[0]
+        mock_print_summary.assert_called_once()
+
 
 # =============================================================================
 # Tests for utils.metrics.metric_evaluator
