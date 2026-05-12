@@ -286,3 +286,8 @@ be the same size.
 
    cmake --preset release -D ROCPROFSYS_PYTHON_ROOT_DIRS="/usr/bin;/usr/bin" -D ROCPROFSYS_PYTHON_VERSIONS="3.10;3.12"
 
+Post-installation
+=================
+
+See :ref:`post-installation-steps` and :ref:`post-installation-troubleshooting`
+for more information.
