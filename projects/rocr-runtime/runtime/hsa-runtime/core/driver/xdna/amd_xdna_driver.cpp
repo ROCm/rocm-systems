@@ -241,6 +241,87 @@ static hsa_status_t xdna_ioctl(int fd, unsigned long request, void* arg) {
   }
 }
 
+/// @brief Destroy a BO.
+///
+/// @note This function will unmap the virtual address and close the BO, even if the former fails.
+///
+/// @param[in] fd driver file descriptor
+/// @param[in,out] bo_handle BO handle to destroy
+static hsa_status_t DestroyBO(int fd, XdnaDriver::BOHandle& bo_handle) {
+  if (!bo_handle.IsValid()) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  hsa_status_t unmap_err = HSA_STATUS_SUCCESS;
+
+  // Unmap the memory.
+  if (bo_handle.unmap_vaddr) {
+    if (munmap(bo_handle.vaddr, bo_handle.size) != 0) {
+      unmap_err = HSA_STATUS_ERROR;
+      assert(false && "Failed to unmap BO memory.");
+    } else {
+      bo_handle.unmap_vaddr = false;
+      bo_handle.vaddr = nullptr;
+      bo_handle.size = 0;
+    }
+  }
+
+  // Close the BO handle.
+  drm_gem_close close_bo_args = {};
+  close_bo_args.handle = bo_handle.handle;
+  hsa_status_t ioctl_err = xdna_ioctl(fd, DRM_IOCTL_GEM_CLOSE, &close_bo_args);
+  bo_handle.handle = AMDXDNA_INVALID_BO_HANDLE;
+
+  if (ioctl_err != HSA_STATUS_SUCCESS) {
+    return ioctl_err;
+  }
+  return unmap_err;
+}
+
+
+/// @brief Create a command BO object.
+///
+/// @param[in] fd driver file descriptor
+/// @param[in] size size of the command BO
+/// @param[out] cmd_bo_handle command BO handle
+static hsa_status_t CreateCmdBO(int fd, uint32_t size, XdnaDriver::BOHandle& cmd_bo_handle) {
+  amdxdna_drm_create_bo create_cmd_bo = {};
+  create_cmd_bo.type = AMDXDNA_BO_CMD;
+  create_cmd_bo.size = size;
+  hsa_status_t err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_CREATE_BO, &create_cmd_bo);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
+
+  XdnaDriver::BOHandle tmp_cmd_bo_handle;
+  tmp_cmd_bo_handle.handle = create_cmd_bo.handle;
+  tmp_cmd_bo_handle.size = size;
+
+  // Unmap and close the BO in case of error.
+  MAKE_NAMED_SCOPE_GUARD(tmp_cmd_bo_handle_guard, [&] { DestroyBO(fd, tmp_cmd_bo_handle); });
+
+  amdxdna_drm_get_bo_info cmd_bo_get_bo_info = {};
+  cmd_bo_get_bo_info.handle = tmp_cmd_bo_handle.handle;
+  err = xdna_ioctl(fd, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &cmd_bo_get_bo_info);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
+
+  void* mem = mmap(nullptr, tmp_cmd_bo_handle.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+                   cmd_bo_get_bo_info.map_offset);
+  if (mem == MAP_FAILED) {
+    return HSA_STATUS_ERROR;
+  }
+  tmp_cmd_bo_handle.vaddr = mem;
+  tmp_cmd_bo_handle.unmap_vaddr = true;
+
+  tmp_cmd_bo_handle_guard.Dismiss();
+
+  cmd_bo_handle = tmp_cmd_bo_handle;
+
+  return HSA_STATUS_SUCCESS;
+}
+
 /// @brief Per hardware context PDI cache.
 class PDICache {
  private:
@@ -296,6 +377,37 @@ struct CmdBOPool {
   static constexpr uint32_t kEntryByteSize = 4096;
   std::vector<XdnaDriver::BOHandle> entries = {};
   size_t next = 0;
+
+  /// @brief Initializes the command BO pool by creating the specified number of command BOs.
+  ///
+  /// @param[in] fd driver file descriptor
+  /// @param[in] count number of command BOs to create for the pool
+  hsa_status_t Initialize(int fd, size_t count) {
+    entries.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+      XdnaDriver::BOHandle bo_handle;
+      hsa_status_t err = CreateCmdBO(fd, kEntryByteSize, bo_handle);
+      if (err != HSA_STATUS_SUCCESS) {
+        Finalize(fd);
+        return err;
+      }
+      entries.push_back(std::move(bo_handle));
+    }
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Finalizes the command BO pool by destroying all command BOs and clearing the pool.
+  hsa_status_t Finalize(int fd) {
+    hsa_status_t err = HSA_STATUS_SUCCESS;
+    for (auto& bo : entries) {
+      hsa_status_t destroy_err = DestroyBO(fd, bo);
+      if (destroy_err != HSA_STATUS_SUCCESS) {
+        err = destroy_err;
+      }
+    }
+    entries.clear();
+    return err;
+  }
 
   XdnaDriver::BOHandle& AcquireCmdBO() {
     auto idx = next & (entries.size() - 1);
@@ -710,7 +822,7 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
   bo_handle.size = size;
 
   // Close the BO in case of error.
-  MAKE_NAMED_SCOPE_GUARD(bo_guard, [&] { DestroyBOHandle(bo_handle); });
+  MAKE_NAMED_SCOPE_GUARD(bo_guard, [&] { DestroyBO(fd_, bo_handle); });
 
   amdxdna_drm_get_bo_info get_bo_info_args = {};
   get_bo_info_args.handle = create_bo_args.handle;
@@ -762,7 +874,7 @@ hsa_status_t XdnaDriver::FreeMemory(void* mem, size_t size) {
   }
 
   auto& bo_handle = it->second;
-  hsa_status_t err = DestroyBOHandle(bo_handle);
+  hsa_status_t err = DestroyBO(fd_, bo_handle);
   vmem_addr_mappings.erase(it);
   return err;
 }
@@ -796,14 +908,9 @@ hsa_status_t XdnaDriver::CreateKernelModeQueue(size_t queue_size, void** queue_m
   }
 
   const size_t pooled_cmd_bo_count = 2 * queue_size;
-  kmq_metadata->cmd_bo_pool.entries.reserve(pooled_cmd_bo_count);
-  for (size_t i = 0; i < pooled_cmd_bo_count; ++i) {
-    BOHandle bo_handle;
-    err = CreateCmdBO(CmdBOPool::kEntryByteSize, bo_handle);
-    if (err != HSA_STATUS_SUCCESS) {
-      return err;
-    }
-    kmq_metadata->cmd_bo_pool.entries.push_back(std::move(bo_handle));
+  err = kmq_metadata->cmd_bo_pool.Initialize(fd_, pooled_cmd_bo_count);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
   }
 
   *queue_metadata = kmq_metadata.release();
@@ -820,20 +927,18 @@ hsa_status_t XdnaDriver::DestroyKernelModeQueue(void* queue_metadata) const {
   std::unique_ptr<KmqMetadata> kmq_metadata;
   kmq_metadata.reset(static_cast<KmqMetadata*>(queue_metadata));
 
-  // Destroy command BO pool entries.
-  for (auto& bo : kmq_metadata->cmd_bo_pool.entries) {
-    DestroyBOHandle(bo);
-  }
+  // Finalize command BO pool.
+  hsa_status_t err = kmq_metadata->cmd_bo_pool.Finalize(fd_);
 
   // Destroy hardware context associated with the queue.
-  hsa_status_t err = DestroyHwCtx(fd_, kmq_metadata->hw_ctx_handle);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
+  hsa_status_t destroy_err = DestroyHwCtx(fd_, kmq_metadata->hw_ctx_handle);
+  if (destroy_err != HSA_STATUS_SUCCESS) {
+    err = destroy_err;
   }
   kmq_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
   kmq_metadata->syncobj_handle = 0;
 
-  return HSA_STATUS_SUCCESS;
+  return err;
 }
 
 hsa_status_t XdnaDriver::SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
@@ -1005,7 +1110,7 @@ hsa_status_t XdnaDriver::InitDeviceHeap() {
   dev_heap_handle.handle = create_bo_args.handle;
 
   // Unmap memory and close the BO in case of error.
-  MAKE_NAMED_SCOPE_GUARD(dev_heap_handle_guard, [&] { DestroyBOHandle(dev_heap_handle); });
+  MAKE_NAMED_SCOPE_GUARD(dev_heap_handle_guard, [&] { DestroyBO(fd_, dev_heap_handle); });
 
   amdxdna_drm_get_bo_info get_bo_info_args = {};
   get_bo_info_args.handle = dev_heap_handle.handle;
@@ -1040,48 +1145,10 @@ hsa_status_t XdnaDriver::InitDeviceHeap() {
 }
 
 hsa_status_t XdnaDriver::FreeDeviceHeap() {
-  hsa_status_t err = DestroyBOHandle(dev_heap_handle);
+  hsa_status_t err = DestroyBO(fd_, dev_heap_handle);
   assert(err == HSA_STATUS_SUCCESS && "Failed to destroy device heap BO handle.");
   dev_heap_aligned = nullptr;
   return err;
-}
-
-hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) const {
-  amdxdna_drm_create_bo create_cmd_bo = {};
-  create_cmd_bo.type = AMDXDNA_BO_CMD;
-  create_cmd_bo.size = size;
-  hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_BO, &create_cmd_bo);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
-  }
-
-  BOHandle tmp_cmd_bo_handle;
-  tmp_cmd_bo_handle.handle = create_cmd_bo.handle;
-  tmp_cmd_bo_handle.size = size;
-
-  // Unmap and close the command BO in case of error.
-  MAKE_NAMED_SCOPE_GUARD(tmp_cmd_bo_handle_guard, [&] { DestroyBOHandle(tmp_cmd_bo_handle); });
-
-  amdxdna_drm_get_bo_info cmd_bo_get_bo_info = {};
-  cmd_bo_get_bo_info.handle = tmp_cmd_bo_handle.handle;
-  err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &cmd_bo_get_bo_info);
-  if (err != HSA_STATUS_SUCCESS) {
-    return err;
-  }
-
-  void* mem = mmap(nullptr, tmp_cmd_bo_handle.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_,
-                   cmd_bo_get_bo_info.map_offset);
-  if (mem == MAP_FAILED) {
-    return HSA_STATUS_ERROR;
-  }
-  tmp_cmd_bo_handle.vaddr = mem;
-  tmp_cmd_bo_handle.unmap_vaddr = true;
-
-  tmp_cmd_bo_handle_guard.Dismiss();
-
-  cmd_bo_handle = tmp_cmd_bo_handle;
-
-  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
@@ -1303,37 +1370,6 @@ hsa_status_t XdnaDriver::IsModelEnabled(bool* enable) const {
   // AIE does not support a driver model.
   *enable = false;
   return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t XdnaDriver::DestroyBOHandle(BOHandle& bo_handle) const {
-  if (!bo_handle.IsValid()) {
-    return HSA_STATUS_SUCCESS;
-  }
-
-  hsa_status_t unmap_err = HSA_STATUS_SUCCESS;
-
-  // Unmap the memory.
-  if (bo_handle.unmap_vaddr) {
-    if (munmap(bo_handle.vaddr, bo_handle.size) != 0) {
-      unmap_err = HSA_STATUS_ERROR;
-      assert(false && "Failed to unmap BO memory.");
-    } else {
-      bo_handle.unmap_vaddr = false;
-      bo_handle.vaddr = nullptr;
-      bo_handle.size = 0;
-    }
-  }
-
-  // Close the BO handle.
-  drm_gem_close close_bo_args = {};
-  close_bo_args.handle = bo_handle.handle;
-  hsa_status_t ioctl_err = xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_bo_args);
-  bo_handle.handle = AMDXDNA_INVALID_BO_HANDLE;
-
-  if (ioctl_err != HSA_STATUS_SUCCESS) {
-    return ioctl_err;
-  }
-  return unmap_err;
 }
 
 XdnaDriver::BOHandle XdnaDriver::FindBOHandle(void* mem) const {
