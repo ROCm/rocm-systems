@@ -223,12 +223,6 @@ class Pm4Factory {
   virtual int GetAccumLowID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
   virtual int GetAccumHiID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
 
-  // SQG block accumulator event IDs (SQG_PERF_SEL_ACCUM_PREV). Mirrors the SQ
-  // accumulator helpers above but for SQG block counters. Architectures that
-  // expose SQG_ACCUM_PREV must override these.
-  virtual int GetSqgAccumLowID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
-  virtual int GetSqgAccumHiID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
-
  protected:
   explicit Pm4Factory(const BlockInfoMap& map)
       : cmd_builder_(NULL),

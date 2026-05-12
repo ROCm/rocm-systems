@@ -78,15 +78,6 @@ uint32_t HandleSQFlagsBlock(Pm4Factory* pm4_factory, const aqlprofile_pmc_event_
   return visible_id;
 }
 
-uint32_t HandleSQGFlagsBlock(Pm4Factory* pm4_factory, const aqlprofile_pmc_event_t& event) {
-  auto visible_id = event.event_id;
-  if (event.flags.sq_flags.accum == AQLPROFILE_ACCUMULATION_LO_RES)
-    visible_id = pm4_factory->GetSqgAccumLowID();
-  if (event.flags.sq_flags.accum == AQLPROFILE_ACCUMULATION_HI_RES)
-    visible_id = pm4_factory->GetSqgAccumHiID();
-  return visible_id;
-}
-
 counter_des_t GetCounter(Pm4Factory* pm4_factory, EventRequest& event,
                          std::map<block_des_t, uint32_t, lt_block_des>& index_map) {
   const GpuBlockInfo* block_info = pm4_factory->GetBlockInfo(event.block_name);
@@ -106,8 +97,6 @@ counter_des_t GetCounter(Pm4Factory* pm4_factory, EventRequest& event,
   if (event.flags.raw) {
     if (event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ) {
       visible_id = HandleSQFlagsBlock(pm4_factory, event);
-    } else if (static_cast<uint32_t>(event.block_name) == AQLPROFILE_BLOCK_NAME_SQG) {
-      visible_id = HandleSQGFlagsBlock(pm4_factory, event);
     } else {
       throw HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
