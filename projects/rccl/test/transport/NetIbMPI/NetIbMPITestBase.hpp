@@ -606,11 +606,9 @@ protected:
 };
 
 // ============================================================================
-// CTS hw_counters helpers (for CtsDepthStress and friends)
-//
-// Read per-IB-device InfiniBand hw_counters from
-// /sys/class/infiniband/<dev>/ports/1/hw_counters and compute deltas for
-// CTS-relevant counters (cts_pkts, cts_retx, cts_ack_timeout, ...).
+// CTS hw_counters helpers (for CtsDepthStress and friends).
+// Snapshots /sys/class/infiniband/<dev>/ports/<N>/hw_counters/ and the
+// device-level /sys/class/infiniband/<dev>/hw_counters/ for CTS deltas.
 // ============================================================================
 namespace NetIbCts {
 
@@ -628,41 +626,56 @@ inline const std::vector<std::string>& kCtsKeywords() {
 }
 
 inline bool isCtsRelevant(const std::string& name) {
-    std::string lower = name;
-    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    std::string lower(name.size(), '\0');
+    std::transform(name.begin(), name.end(), lower.begin(),
+                   [](char c) { return static_cast<char>(
+                       std::tolower(static_cast<unsigned char>(c))); });
     for (const auto& kw : kCtsKeywords())
         if (lower.find(kw) != std::string::npos) return true;
     return false;
 }
 
-inline CounterMap readHwCounters(const std::string& ibdev) {
-    CounterMap result;
-    const std::string base =
-        "/sys/class/infiniband/" + ibdev + "/ports/1/hw_counters";
-    DIR* dir = opendir(base.c_str());
-    if (!dir) return result;
+inline void readCountersDir(const std::string& dir,
+                            const std::string& keyPrefix,
+                            CounterMap& out) {
+    DIR* d = opendir(dir.c_str());
+    if (!d) return;
     struct dirent* ent;
-    while ((ent = readdir(dir)) != nullptr) {
+    while ((ent = readdir(d)) != nullptr) {
         if (ent->d_name[0] == '.') continue;
-        std::ifstream f(base + "/" + ent->d_name);
+        std::ifstream f(dir + "/" + ent->d_name);
         long long val = 0;
         if (f >> val)
-            result[ibdev + "/" + ent->d_name] = val;
+            out[keyPrefix + "/" + ent->d_name] = val;
     }
-    closedir(dir);
+    closedir(d);
+}
+
+inline std::vector<std::string> listDirEntries(const std::string& dir) {
+    std::vector<std::string> entries;
+    DIR* d = opendir(dir.c_str());
+    if (!d) return entries;
+    struct dirent* ent;
+    while ((ent = readdir(d)) != nullptr)
+        if (ent->d_name[0] != '.') entries.push_back(ent->d_name);
+    closedir(d);
+    std::sort(entries.begin(), entries.end());
+    return entries;
+}
+
+inline CounterMap readHwCounters(const std::string& ibdev) {
+    CounterMap result;
+    const std::string devBase = "/sys/class/infiniband/" + ibdev;
+    for (const auto& portName : listDirEntries(devBase + "/ports")) {
+        readCountersDir(devBase + "/ports/" + portName + "/hw_counters",
+                        ibdev + "/port" + portName, result);
+    }
+    readCountersDir(devBase + "/hw_counters", ibdev + "/dev", result);
     return result;
 }
 
 inline std::vector<std::string> listIbDevices() {
-    std::vector<std::string> devs;
-    DIR* dir = opendir("/sys/class/infiniband");
-    if (!dir) return devs;
-    struct dirent* ent;
-    while ((ent = readdir(dir)) != nullptr)
-        if (ent->d_name[0] != '.') devs.push_back(ent->d_name);
-    closedir(dir);
-    std::sort(devs.begin(), devs.end());
-    return devs;
+    return listDirEntries("/sys/class/infiniband");
 }
 
 inline CounterMap takeSnapshot() {
@@ -672,6 +685,10 @@ inline CounterMap takeSnapshot() {
         snap.insert(m.begin(), m.end());
     }
     return snap;
+}
+
+inline std::string formatSignedDelta(long long delta) {
+    return (delta >= 0 ? "+" : "") + std::to_string(delta);
 }
 
 inline void printDelta(int rank,
@@ -707,7 +724,7 @@ inline void printDelta(int rank,
         std::cout << "  " << std::left  << std::setw(wName)  << r.name
                   <<         std::right << std::setw(wVal)   << r.vb
                   <<         std::right << std::setw(wVal)   << r.va
-                  <<         std::right << std::setw(wDelta) << ("+" + std::to_string(r.delta))
+                  <<         std::right << std::setw(wDelta) << formatSignedDelta(r.delta)
                   << "\n";
     std::cout << std::flush;
 }
