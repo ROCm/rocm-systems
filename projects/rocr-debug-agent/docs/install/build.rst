@@ -10,7 +10,7 @@
 Build ROCr Debug Agent from source
 ==================================
 
-This topic provides information required to build and install ROCR Debug Agent (ROCdebug-agent) library.
+This topic provides information required to build and install ROCr Debug Agent library.
 
 System requirements
 -------------------
@@ -70,20 +70,20 @@ To specify the location for the installation, use ``CMAKE_INSTALL_PREFIX``. The 
 
 To specify a list of paths (separated by semicolons) that are used to locate the ``cmake`` modules, use ``CMAKE_MODULE_PATH``. It is used to locate the HIP ``cmake`` modules required to build the tests. The default location is ``/opt/rocm/hip/cmake``.
 
-The built ROCdebug-agent library is placed in ``build/librocm-debug-agent.so.2*``.
+The built ROCr Debug Agent library is placed in ``build/librocm-debug-agent.so.2*``.
 
-To install the ROCdebug-agent library, use:
+To install the ROCr Debug Agent library, use:
 
 .. code:: shell
 
     make install
 
-The installed ROCdebug-agent library and tests are placed in:
+The installed ROCr Debug Agent library and tests are placed in:
 
 - <install-prefix>/lib/librocm-debug-agent.so.2*
-- <install-prefix>/share/rocm-debug-agent/LICENSE.txt
-- <install-prefix>/share/rocm-debug-agent/README.md
-- <install-prefix>/src/rocm-debug-agent-test/*
+- <install-prefix>/doc/rocm-debug-agent/LICENSE.txt
+- <install-prefix>/share/doc/rocm-debug-agent/README.md
+- <install-prefix>/tests/rocm-debug-agent/*
 
 Test
 -----
