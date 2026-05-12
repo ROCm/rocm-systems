@@ -234,12 +234,12 @@ std::optional<uint16_t> LivenessAnalysis::find_free_sgpr_pair(const Instruction 
     return std::nullopt;
 
   const RegisterSet &live = live_it->second;
-  uint16_t base = search_start;
+  size_t base = search_start;
   if (base % 2 != 0)
     ++base; // even-align for s_mov_b64-style pair moves.
   for (; base + 1 < REGISTER_SET_ALLOCATABLE_SGPRS; base += 2) {
     if (!any_live_in_range(live, RegClass::SGPR, base, 2))
-      return base;
+      return static_cast<uint16_t>(base);
   }
   return std::nullopt;
 }
