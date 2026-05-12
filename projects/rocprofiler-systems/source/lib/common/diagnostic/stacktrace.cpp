@@ -5,6 +5,7 @@
 #include "common/diagnostic/color.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
