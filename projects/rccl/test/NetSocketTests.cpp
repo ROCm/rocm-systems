@@ -1598,4 +1598,194 @@ TEST_F(NetSocketTests, TestIflushAlwaysFails) {
   TEST_INFO("TestIflushAlwaysFails completed");
 }
 
+// ---------------------------------------------------------------------------
+// NCCL_SOCKET_POLL_TIMEOUT_MSEC behavioural tests (NCCL v2.29.2-1).
+//
+// The upstream change rewrites socketWait() in src/misc/socket.cc from a tight
+// progress-only spin loop into a poll()-backed wait when the new param
+//   NCCL_PARAM(PollTimeOut, "SOCKET_POLL_TIMEOUT_MSEC", 0)
+// is set to a non-zero value.
+//
+// We assert the *observable consequence* of that change without doing any
+// LD_PRELOAD-style syscall interposition: when a receiver thread is forced
+// to wait for data, the receiver thread's CPU time should be near zero in
+// the poll() path and a large fraction of wall-clock time in the spin path.
+// Three tests:
+//   * Default (param unset)   -> spin, high thread CPU usage.
+//   * Param set to 50         -> park, low thread CPU usage.
+//   * Param set to 50         -> bytes still arrive intact (correctness).
+//
+// These tests run entirely in-process over a localhost ncclSocket pair and
+// finish in well under a second each, keeping unit-test latency low.
+//
+// On current develop the tests fail because socketWait always spins.
+//
+// ncclParamPollTimeOut() caches the env-var value in a function-local static
+// on first call (see NCCL_PARAM in src/include/param.h), so each behavioural
+// test must run in a fresh process. We rely on RUN_ISOLATED_TEST_WITH_ENV to
+// fork before the cache is touched.
+// ---------------------------------------------------------------------------
+#include "socket.h"
+#include "common/ProcessIsolatedTestRunner.hpp"
+#include <chrono>
+#include <ctime>
+#include <thread>
+
+namespace {
+
+constexpr const char* kPollEnv = "NCCL_SOCKET_POLL_TIMEOUT_MSEC";
+constexpr int kPayloadBytes = 64;
+constexpr int kStallMs = 200;
+
+struct SocketPair {
+  ncclSocket listenSock{};
+  ncclSocket sendSock{};
+  ncclSocket recvSock{};
+};
+
+// Create a connected ncclSocket pair on the loopback interface. Returns true
+// if the pair was successfully established.
+bool MakeLoopbackPair(SocketPair& pair) {
+  union ncclSocketAddress addr{};
+  addr.sin.sin_family = AF_INET;
+  addr.sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin.sin_port = 0; // ephemeral
+
+  if (ncclSocketInit(&pair.listenSock, &addr, NCCL_SOCKET_MAGIC,
+                     ncclSocketTypeBootstrap) != ncclSuccess) return false;
+  if (ncclSocketListen(&pair.listenSock) != ncclSuccess) return false;
+
+  union ncclSocketAddress connectAddr{};
+  if (ncclSocketGetAddr(&pair.listenSock, &connectAddr) != ncclSuccess) return false;
+  if (ncclSocketInit(&pair.sendSock, &connectAddr, NCCL_SOCKET_MAGIC,
+                     ncclSocketTypeBootstrap) != ncclSuccess) return false;
+
+  std::thread connector([&]() { ncclSocketConnect(&pair.sendSock); });
+  ncclResult_t accepted = ncclSocketAccept(&pair.recvSock, &pair.listenSock);
+  connector.join();
+  return accepted == ncclSuccess;
+}
+
+void ClosePair(SocketPair& pair) {
+  ncclSocketClose(&pair.sendSock);
+  ncclSocketClose(&pair.recvSock);
+  ncclSocketClose(&pair.listenSock);
+}
+
+// CPU time consumed by the *current thread* in milliseconds.
+double ThreadCpuMs() {
+  struct timespec ts{};
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+  return ts.tv_sec * 1000.0 + ts.tv_nsec / 1.0e6;
+}
+
+// Receive kPayloadBytes while a sender thread drips them out slowly. Returns
+// the receiver-thread CPU usage as a fraction of the wall-clock duration of
+// the recv. payloadOk reports whether the bytes round-tripped intact.
+double MeasureRecvCpuFraction(SocketPair& pair, bool& payloadOk) {
+  std::vector<char> txBuf(kPayloadBytes);
+  for (int i = 0; i < kPayloadBytes; ++i) txBuf[i] = static_cast<char>(i);
+  std::vector<char> rxBuf(kPayloadBytes, 0);
+
+  std::thread sender([&]() {
+    // Trickle the payload out in two halves, separated by a stall, so the
+    // receiver is forced to wait inside socketWait.
+    int sent = 0;
+    ncclSocketSend(&pair.sendSock, txBuf.data(), kPayloadBytes / 2);
+    sent += kPayloadBytes / 2;
+    std::this_thread::sleep_for(std::chrono::milliseconds(kStallMs));
+    ncclSocketSend(&pair.sendSock, txBuf.data() + sent, kPayloadBytes - sent);
+  });
+
+  double cpuStart = ThreadCpuMs();
+  auto wallStart = std::chrono::steady_clock::now();
+  ncclResult_t rc = ncclSocketRecv(&pair.recvSock, rxBuf.data(), kPayloadBytes);
+  auto wallEnd = std::chrono::steady_clock::now();
+  double cpuEnd = ThreadCpuMs();
+  sender.join();
+
+  payloadOk = (rc == ncclSuccess) && (rxBuf == txBuf);
+
+  double wallMs = std::chrono::duration<double, std::milli>(wallEnd - wallStart).count();
+  if (wallMs <= 0.0) return 0.0;
+  return (cpuEnd - cpuStart) / wallMs;
+}
+
+} // namespace
+
+TEST_F(NetSocketTests, SocketPollTimeoutMsec_DefaultZero_SpinsHighCpu) {
+  // Isolated subprocess: ensures the static cache inside ncclParamPollTimeOut()
+  // is uninitialised and that the unset env var produces the spin path.
+  RUN_ISOLATED_TEST(
+      "SocketPollTimeoutMsec_DefaultZero_SpinsHighCpu",
+      []() {
+        unsetenv(kPollEnv);
+        SocketPair pair;
+        if (!MakeLoopbackPair(pair)) {
+          GTEST_SKIP() << "Could not establish loopback ncclSocket pair";
+        }
+        bool payloadOk = false;
+        double cpuFraction = MeasureRecvCpuFraction(pair, payloadOk);
+        ClosePair(pair);
+
+        EXPECT_TRUE(payloadOk) << "Bytes did not round-trip intact in spin path";
+        // Spinning in socketWait should keep the receiver thread busy almost
+        // the entire stall window. Use a generous lower bound to absorb
+        // scheduler noise.
+        EXPECT_GT(cpuFraction, 0.5)
+            << "Expected the spinning receiver to consume >50% of wall clock "
+            << "as thread CPU time, observed " << cpuFraction;
+      });
+}
+
+TEST_F(NetSocketTests, SocketPollTimeoutMsec_NonZero_ParksLowCpu) {
+  // Fresh subprocess so the param cache picks up NCCL_SOCKET_POLL_TIMEOUT_MSEC.
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "SocketPollTimeoutMsec_NonZero_ParksLowCpu",
+      []() {
+        SocketPair pair;
+        if (!MakeLoopbackPair(pair)) {
+          GTEST_SKIP() << "Could not establish loopback ncclSocket pair";
+        }
+        bool payloadOk = false;
+        double cpuFraction = MeasureRecvCpuFraction(pair, payloadOk);
+        ClosePair(pair);
+
+        EXPECT_TRUE(payloadOk) << "Bytes did not round-trip intact in poll path";
+        // With poll() parking the thread during the stall, CPU usage should
+        // be a small fraction of wall clock. 0.2 is a permissive ceiling.
+        EXPECT_LT(cpuFraction, 0.2)
+            << "Expected the polling receiver to consume <20% of wall clock "
+            << "as thread CPU time, observed " << cpuFraction;
+      },
+      {{kPollEnv, "50"}});
+}
+
+TEST_F(NetSocketTests, SocketPollTimeoutMsec_NonZero_TransferStillCorrect) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "SocketPollTimeoutMsec_NonZero_TransferStillCorrect",
+      []() {
+        SocketPair pair;
+        if (!MakeLoopbackPair(pair)) {
+          GTEST_SKIP() << "Could not establish loopback ncclSocket pair";
+        }
+        // Single shot, no artificial stall: pure correctness check that the
+        // new poll branch does not corrupt or drop bytes.
+        std::vector<char> txBuf(kPayloadBytes);
+        for (int i = 0; i < kPayloadBytes; ++i) txBuf[i] = static_cast<char>(0xA5 ^ i);
+        std::vector<char> rxBuf(kPayloadBytes, 0);
+
+        std::thread sender([&]() {
+          ncclSocketSend(&pair.sendSock, txBuf.data(), kPayloadBytes);
+        });
+        ncclResult_t rc = ncclSocketRecv(&pair.recvSock, rxBuf.data(), kPayloadBytes);
+        sender.join();
+        ClosePair(pair);
+
+        EXPECT_EQ(rc, ncclSuccess);
+        EXPECT_EQ(rxBuf, txBuf);
+      },
+      {{kPollEnv, "50"}});
+}
+
 } // namespace RcclUnitTesting

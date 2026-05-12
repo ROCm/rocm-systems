@@ -1,0 +1,63 @@
+{
+  "system_configurations": {
+    "name": "RCCL-SocketPollTimeout",
+    "description": "Tests for NCCL_SOCKET_POLL_TIMEOUT_MSEC (NCCL v2.29.2-1). Expected to fail on develop until the upstream socketWait poll() change is sync'd into RCCL."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-/path/to/rccl}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}",
+    "test_binary_dir": "${RCCL_TEST_BIN_DIR}"
+  },
+  "env_variables": {
+    "NCCL_DEBUG": "WARN"
+  },
+  "test_configurations": {
+    "socket_poll_unit_tests": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "timeout": 60,
+      "tests": [
+        {
+          "name": "SocketPollTimeout_ParamParsing",
+          "description": "ZOMBIES coverage of NCCL_SOCKET_POLL_TIMEOUT_MSEC parsing in ncclParamPollTimeOut().",
+          "test_filter": "ParamTests.SocketPollTimeoutMsec_*"
+        },
+        {
+          "name": "SocketPollTimeout_Behaviour",
+          "description": "Loopback socket pair tests asserting that socketWait spins when the param is unset and parks (low CPU) when it is non-zero, plus a correctness check.",
+          "test_filter": "NetSocketTests.SocketPollTimeoutMsec_*"
+        }
+      ]
+    },
+    "socket_poll_perf": {
+      "is_gtest": false,
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "timeout": 600,
+      "tests": [
+        {
+          "name": "SocketPollTimeout_CpuUsage",
+          "description": "End-to-end CPU usage assertion: drives sendrecv_perf twice (poll unset vs =10) and fails if the poll run does not reduce child CPU time meaningfully. Slow / GPU + MPI required.",
+          "test_binary_dir": "${WORKDIR}/tools/scripts/test_runner/lib",
+          "binary": "socket_poll_cpu_check.py",
+          "command_args": "--num-ranks 2 --poll-timeout 10 --ratio-threshold 0.7"
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "Socket Poll Timeout Unit Tests",
+      "config": "socket_poll_unit_tests",
+      "enabled": true
+    },
+    {
+      "name": "Socket Poll Timeout Perf",
+      "config": "socket_poll_perf",
+      "enabled": true
+    }
+  ]
+}
