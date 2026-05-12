@@ -120,7 +120,7 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation") {
  *    2. Each operation to different location (numPrefetchLocs=count)
  *    3. Mixed grouped locations (some to location A, others to B)
  */
-TEST_CASE("Unit_hipMemPrefetchBatchAsync_LocationDistribution") {
+HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_LocationDistribution) {
   REQUIRE_MANAGED_ACCESS_DEVICE(device);
 
   enum class DistributionPattern { AllSame, EachDifferent, MixedGrouped };

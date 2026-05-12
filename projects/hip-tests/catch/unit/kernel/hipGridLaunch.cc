@@ -181,7 +181,7 @@ TEST_CASE("Unit_hipGridLaunch_MaxGridDim_GetDeviceAttribute") {
   }
 }
 
-TEST_CASE("Unit_hipGridLaunch_ExceedMaxGridDim_Negative") {
+HIP_TEST_CASE(Unit_hipGridLaunch_ExceedMaxGridDim_Negative) {
   const unsigned int maxGridX = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0);
   const unsigned int maxGridY = GetDeviceAttribute(hipDeviceAttributeMaxGridDimY, 0);
   const unsigned int maxGridZ = GetDeviceAttribute(hipDeviceAttributeMaxGridDimZ, 0);
