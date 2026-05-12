@@ -42,7 +42,6 @@ namespace amd {
 class Command;
 class HostQueue;
 union ComputeCommand;
-namespace roc { struct GraphSignalPool; }
 
 /*! \brief Encapsulates the status of a command.
  *
@@ -311,7 +310,6 @@ class Command : public Event {
   GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
   address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
   const std::string** capturedKernelName_ = nullptr;  //!< Kernel under capture
-  roc::GraphSignalPool* graph_signal_pool_ = nullptr;  //!< Graph-owned signal pool for this command
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
 
@@ -461,11 +459,6 @@ class Command : public Event {
 
   //! Check if this command(should be a marker) requires CPU wait
   bool CpuWaitRequested() const { return cpu_wait_; }
-
-  //! Set graph signal pool for graph-owned signal allocation
-  void SetGraphSignalPool(roc::GraphSignalPool* pool) { graph_signal_pool_ = pool; }
-  //! Get graph signal pool (nullptr for non-graph commands)
-  roc::GraphSignalPool* graphSignalPool() const { return graph_signal_pool_; }
 };
 
 class UserEvent : public Command {
@@ -1509,8 +1502,6 @@ class AccumulateCommand : public Command {
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
-  //! Graph signal pool owned by this command (deleted after GPU completion)
-  roc::GraphSignalPool* owned_graph_signal_pool_ = nullptr;
 
  public:
   //! Create a new Marker
@@ -1533,9 +1524,6 @@ class AccumulateCommand : public Command {
       }
     }
   }
-
-  //! Transfer ownership of graph signal pool for cleanup after GPU completion
-  void SetOwnedGraphSignalPool(roc::GraphSignalPool* pool) { owned_graph_signal_pool_ = pool; }
 
   //! Add kernel name to the list if available
   void addKernelName(const std::string* kernelName) { kernelNames_.push_back(kernelName); }
