@@ -89,17 +89,17 @@ class IpcOnImpl {
   __device__ void ipcGpuInit(Backend *gpu_backend, Context *ctx, int thread_id);
 
   template <MemcpyKind Kind = MemcpyKind::Put>
-  __device__ void ipcCopy(void *dst, void *src, size_t size) {
+  __device__ void ipcCopy(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
     memcpy_lane<Kind>(dst, src, size);
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size) {
+  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
     memcpy_wg<Kind>(dst, src, size);
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size) {
+  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
     memcpy_wave<Kind>(dst, src, size);
   }
 
@@ -230,39 +230,39 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   __host__ void ipcHostStop();
 
-  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe,
-                          bool blocking = false) {
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
       auto* handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
       assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
-      if (blocking) handle->quietAll();
+      if constexpr (is_blocking(Kind)) handle->quietAll();
       return;
     }
     memcpy_lane(dst, src, size);
   }
 
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe,
-                             bool blocking = false) {
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
       anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_block()) {
         handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
         assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
-        if (blocking) handle->quietAll();
+        if constexpr (is_blocking(Kind)) handle->quietAll();
       }
       return;
     }
     memcpy_wg(dst, src, size);
   }
 
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe,
-                               bool blocking = false) {
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe) {
     if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
       anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_wave()) {
         handle = sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
         assert(nullptr != handle /* Assuming sdma is available to all pes uniformely */);
-        if (blocking) handle->quietAll();
+        if constexpr (is_blocking(Kind)) handle->quietAll();
       }
       return;
     }
