@@ -220,6 +220,9 @@ private:
             // Field-by-field. Must take precedence over the trivially_copyable
             // memcpy shortcut so structs with internal alignment padding match
             // the legacy field-by-field wire bytes.
+            // const_cast required because the same serialize<Archive> member must
+            // work for both output_archive (writes; const T) and input_archive
+            // (reads; non-const T); the cast is safe here as serialize() only reads.
             const_cast<D&>(v).serialize(*this);
         }
         else if constexpr(std::is_arithmetic_v<D> || std::is_enum_v<D>)
@@ -418,6 +421,9 @@ private:
         }
         else if constexpr(std::is_class_v<D> && has_member_serialize_v<size_archive, D>)
         {
+            // const_cast required because the same serialize<Archive> member must
+            // work for both output_archive (writes; const T) and input_archive
+            // (reads; non-const T); the cast is safe here as serialize() only reads.
             const_cast<D&>(v).serialize(*this);
         }
         else if constexpr(std::is_arithmetic_v<D> || std::is_enum_v<D>)

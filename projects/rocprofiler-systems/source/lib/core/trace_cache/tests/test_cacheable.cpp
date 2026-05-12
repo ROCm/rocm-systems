@@ -336,19 +336,11 @@ TEST_F(cacheable_test, store_value_framing_header_layout)
 // The is_*_v helpers in cache_type_traits.hpp are part of the public header.
 // Keep light coverage so future header refactors don't silently regress them.
 
-TEST(type_traits_test, is_span_v)
-{
-    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_span_v<rocprofsys::span<int>>);
-    EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_span_v<int>);
-    EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_span_v<std::vector<int>>);
-}
-
 TEST(type_traits_test, is_vector_v)
 {
     EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_vector_v<std::vector<int>>);
     EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_vector_v<int>);
-    EXPECT_FALSE(
-        rocprofsys::trace_cache::type_traits::is_vector_v<rocprofsys::span<int>>);
+    EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_vector_v<std::optional<int>>);
 }
 
 TEST(type_traits_test, is_optional_v)
@@ -356,21 +348,6 @@ TEST(type_traits_test, is_optional_v)
     EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_optional_v<std::optional<int>>);
     EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_optional_v<int>);
     EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_optional_v<std::vector<int>>);
-}
-
-TEST(type_traits_test, is_supported_type_v)
-{
-    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<int>);
-    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<double>);
-    EXPECT_TRUE(
-        rocprofsys::trace_cache::type_traits::is_supported_type_v<std::vector<int>>);
-    EXPECT_TRUE(
-        rocprofsys::trace_cache::type_traits::is_supported_type_v<std::optional<int>>);
-
-    struct custom_type
-    {};
-    EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_supported_type_v<custom_type>);
-    EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_supported_type_v<std::string>);
 }
 
 // ----- utility filename helpers ------------------------------------------

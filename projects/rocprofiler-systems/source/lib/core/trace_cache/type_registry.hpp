@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <variant>
 
 namespace rocprofsys
 {
