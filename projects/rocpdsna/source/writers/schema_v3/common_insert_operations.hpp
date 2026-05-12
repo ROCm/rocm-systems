@@ -118,11 +118,9 @@ public:
 
     void register_string(std::string_view str)
     {
-        if(str.empty())
-        {
-            throw std::runtime_error("Trying to register empty string");
-        }
-
+        // Empty string is a valid TEXT NOT NULL value; callers (e.g. the
+        // rocprofiler-sdk write_rocpd path) seed an empty string at id=0 as a
+        // sentinel for "absent name" foreign-key references.
         auto& string_info_utility = m_ctx->registry->string_info();
 
         if(string_info_utility.is_entry_registered(str))

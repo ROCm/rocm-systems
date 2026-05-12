@@ -801,9 +801,22 @@ TEST_F(writer_test, register_string_inserts_to_database)
     EXPECT_TRUE(found);
 }
 
-TEST_F(writer_test, register_string_empty_throws)
+TEST_F(writer_test, register_string_accepts_empty_string)
 {
-    EXPECT_THROW(m_writer->register_string(""), std::runtime_error);
+    m_writer->register_string("");
+    m_writer->register_string("nonempty");
+    m_writer->register_string("");
+    m_writer->flush_in_memory_data_to_disk();
+
+    auto count_empty = query_database(m_database_path,
+                                      "SELECT COUNT(*) FROM rocpd_string_" + m_uuid +
+                                          " WHERE string = ''");
+    EXPECT_EQ(count_empty.rows[0][0], "1");
+
+    auto count_nonempty = query_database(m_database_path,
+                                         "SELECT COUNT(*) FROM rocpd_string_" + m_uuid +
+                                             " WHERE string = 'nonempty'");
+    EXPECT_EQ(count_nonempty.rows[0][0], "1");
 }
 
 TEST_F(writer_test, register_string_duplicate_is_ignored)
@@ -1978,13 +1991,6 @@ TEST_F(writer_test, insert_memory_alloc_with_null_type)
                                                      .track_name = std::nullopt };
 
     EXPECT_NO_THROW(m_writer->insert_memory_alloc_data(memory_alloc, environment));
-}
-
-// --------------------- Empty String Edge Case ---------------------
-
-TEST_F(writer_test, register_string_empty_string_throws)
-{
-    EXPECT_THROW(m_writer->register_string(""), std::runtime_error);
 }
 
 // ============================================================================
