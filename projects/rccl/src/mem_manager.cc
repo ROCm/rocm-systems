@@ -39,7 +39,7 @@ ncclResult_t ncclMemManagerInit(struct ncclComm* comm) {
 
   mgr->entries = nullptr;
   mgr->numEntries = 0;
-  mgr->released = 0;
+  __atomic_store_n(&mgr->released, 0, __ATOMIC_RELEASE);
   mgr->refCount = 1;
   mgr->totalPersist = 0;
   mgr->totalPersistImported = 0;
@@ -438,7 +438,7 @@ ncclResult_t ncclCommMemSuspend(struct ncclComm* comm) {
   if (comm->memManager == nullptr) return ncclInvalidUsage;
   ncclMemManager* manager = comm->memManager;
 
-  if (manager->released) {
+  if (__atomic_load_n(&manager->released, __ATOMIC_ACQUIRE)) {
     WARN("MemManager: Already suspended");
     return ncclInvalidUsage;
   }
@@ -576,7 +576,7 @@ ncclResult_t ncclCommMemSuspend(struct ncclComm* comm) {
   // down. Otherwise leave released=0 so the caller can either retry Suspend
   // (Active entries that failed will be revisited) or fall through to Destroy.
   if (ret == ncclSuccess) {
-    manager->released = 1;
+    __atomic_store_n(&manager->released, 1, __ATOMIC_RELEASE);
     INFO(NCCL_ALLOC, "MemManager: rank %d suspended %d local + %d peer entries (scratch=%zu, offload=%zu, peerImport=%zu, cpuBackup=%zu)",
          comm->rank, releasedCount, peerImportCount, releasedScratch, releasedOffload, releasedPeerImport, manager->cpuBackupUsage);
   } else {
@@ -607,7 +607,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
   if (comm->memManager == nullptr) return ncclInvalidUsage;
   ncclMemManager* manager = comm->memManager;
 
-  if (!manager->released) {
+  if (!__atomic_load_n(&manager->released, __ATOMIC_ACQUIRE)) {
     WARN("MemManager: Not in suspended state");
     return ncclInvalidUsage;
   }
@@ -991,13 +991,13 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
   // RCCL: only flip released back to 0 when every entry was restored. Each
   // failing peer-import branch above leaves the entry in ncclDynMemStateReleased
   if(ret == ncclSuccess) {
-    manager->released = 0;
+    __atomic_store_n(&manager->released, 0, __ATOMIC_RELEASE);
   } else {
     WARN("MemManager: rank %d Resume completed with errors "
          "(restored %d local + %d peer entries before first failure); "
          "manager left in suspended state, retry Resume or call Destroy",
          comm->rank, restoredLocalCount, restoredPeerCount);
-    manager->released = 1;
+    __atomic_store_n(&manager->released, 1, __ATOMIC_RELEASE);
   }
 
   // Final barrier to ensure all ranks have completed peer import setup

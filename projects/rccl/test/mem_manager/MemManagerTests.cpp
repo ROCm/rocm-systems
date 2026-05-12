@@ -2053,4 +2053,88 @@ TEST(MemManagerAllocator, AllocTrackerAndManager_Offload_AreIndependent)
     });
 }
 
+// Persistent VMM has no linked-list entry, so the skip-on-suspended path
+// in ncclCuMemFree must NOT short-circuit it. Otherwise Destroy-while-Suspended
+// leaks the handle / VA reservation (ncclMemManagerDestroy only walks entries).
+TEST(MemManagerAllocator, CuMemFree_Suspended_FreesUntrackedPersist)
+{
+    RUN_ISOLATED_TEST("MemManagerAllocator_CuMemFree_Suspended_FreesUntrackedPersist", []() {
+        if(!ncclCuMemEnable()) {
+            GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 or VMM unsupported by runtime";
+        }
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+        ncclComm* comm = new ncclComm();
+        comm->cudaDev  = 0;
+        ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+
+        constexpr size_t                kSize = 1u << 20;
+        void*                           ptr   = nullptr;
+        hipMemGenericAllocationHandle_t handle{};
+        ASSERT_EQ(ncclCuMemAlloc(&ptr, &handle, hipMemHandleTypePosixFileDescriptor,
+                                 kSize, comm->memManager, ncclMemPersist),
+                  ncclSuccess);
+        expectTrackedOnce(comm->memManager, ptr, kSize, ncclMemPersist);
+
+        // Simulate Suspended state: persist has no entry, so the helper returns
+        // false and ncclCuMemFree must run the full teardown + Untrack.
+        __atomic_store_n(&comm->memManager->released, 1, __ATOMIC_RELEASE);
+
+        ASSERT_EQ(ncclCuMemFree(ptr, comm->memManager), ncclSuccess);
+
+        // Full free path ran: counter decremented back to zero.
+        expectFullyUntracked(comm->memManager, ncclMemPersist);
+
+        __atomic_store_n(&comm->memManager->released, 0, __ATOMIC_RELEASE);
+        ASSERT_EQ(ncclMemManagerDestroy(comm), ncclSuccess);
+        delete comm;
+    });
+}
+
+// Tracked entry torn down by Suspend (state==Released) MUST be skipped by
+// ncclCuMemFree; the physical handle / mapping are already gone and
+// ncclMemManagerDestroy is the one that reclaims its VA reservation.
+TEST(MemManagerAllocator, CuMemFree_Suspended_SkipsReleasedTrackedEntry)
+{
+    RUN_ISOLATED_TEST("MemManagerAllocator_CuMemFree_Suspended_SkipsReleasedTrackedEntry", []() {
+        if(!ncclCuMemEnable()) {
+            GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 or VMM unsupported by runtime";
+        }
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+        ncclComm* comm = new ncclComm();
+        comm->cudaDev  = 0;
+        ASSERT_EQ(ncclMemManagerInit(comm), ncclSuccess);
+
+        constexpr size_t                kSize = 1u << 20;
+        void*                           ptr   = nullptr;
+        hipMemGenericAllocationHandle_t handle{};
+        ASSERT_EQ(ncclCuMemAlloc(&ptr, &handle, hipMemHandleTypePosixFileDescriptor,
+                                 kSize, comm->memManager, ncclMemScratch),
+                  ncclSuccess);
+        expectTrackedOnce(comm->memManager, ptr, kSize, ncclMemScratch);
+
+        // Mimic ncclCommMemSuspend: unmap+release the physical handle and
+        // mark the entry Released. VA reservation is intentionally left in
+        // place; ncclMemManagerDestroy reclaims it.
+        ncclDynMemEntry* entry = comm->memManager->entries;
+        ASSERT_NE(entry, nullptr);
+        ASSERT_EQ(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(entry->ptr), entry->size),
+                  hipSuccess);
+        ASSERT_EQ(hipMemRelease(entry->handle), hipSuccess);
+        entry->handle = 0;
+        entry->state  = ncclDynMemStateReleased;
+        __atomic_store_n(&comm->memManager->released, 1, __ATOMIC_RELEASE);
+
+        // Free must short-circuit: entry stays in the list for Destroy to finalize.
+        ASSERT_EQ(ncclCuMemFree(ptr, comm->memManager), ncclSuccess);
+        EXPECT_EQ(comm->memManager->numEntries, 1);
+        EXPECT_EQ(totalCounter(comm->memManager, ncclMemScratch), kSize);
+
+        // Destroy reclaims the VA reservation for Released entries.
+        ASSERT_EQ(ncclMemManagerDestroy(comm), ncclSuccess);
+        delete comm;
+    });
+}
+
 } // namespace RcclUnitTesting

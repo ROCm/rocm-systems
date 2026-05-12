@@ -509,13 +509,11 @@ static inline ncclResult_t ncclCuMemFree(void *ptr, struct ncclMemManager* manag
     return ncclSuccess;
   }
 
-  // RCCL: skip teardown when the comm is Suspended. Suspend has already
-  // released physical memory and unmapped the VA; ncclMemManagerDestroy
-  // takes care of cuMemAddressFree for every Released entry
-  if(manager != nullptr && __atomic_load_n(&manager->released, __ATOMIC_ACQUIRE))
-  {
-      INFO(NCCL_ALLOC, "ncclCuMemFree: comm suspended, leaving %p to ncclMemManagerDestroy", ptr);
-      return ncclSuccess;
+  // RCCL: skip only tracked entries already torn down by Suspend; persistent
+  // and other untracked pointers must still be freed here.
+  if (ncclMemEntryAlreadyReleased(manager, ptr)) {
+    INFO(NCCL_ALLOC, "ncclCuMemFree: %p already released by Suspend", ptr);
+    return ncclSuccess;
   }
 
   ncclResult_t result = ncclSuccess;
@@ -741,16 +739,11 @@ ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegment
     return ncclSuccess;
   }
 
-  // RCCL: ncclCommDestroy may be invoked while the comm is in the Suspended
-  // state. Suspend has already done cuMemUnmap + cuMemRelease on every tracked
-  // entry, and ncclMemManagerDestroy reclaims the VA reservation for each
-  // Released entry.
-  if(manager != nullptr && __atomic_load_n(&manager->released, __ATOMIC_ACQUIRE))
-  {
-      INFO(NCCL_ALLOC,
-           "ncclCudaFree: comm suspended, leaving %p to ncclMemManagerDestroy",
-           (void*)ptr);
-      return ncclSuccess;
+  // RCCL: skip only tracked entries already torn down by Suspend; persistent
+  // and other untracked pointers must still be freed here.
+  if (ncclMemEntryAlreadyReleased(manager, (void*)ptr)) {
+    INFO(NCCL_ALLOC, "ncclCudaFree: %p already released by Suspend", (void*)ptr);
+    return ncclSuccess;
   }
 
   ncclResult_t result = ncclSuccess;

@@ -192,4 +192,21 @@ ncclResult_t ncclCommMemStats_impl(ncclComm_t comm, ncclCommMemStat_t stat, uint
 }
 #endif
 
+#ifdef __cplusplus
+// RCCL: true if a tracked entry for `ptr` was already torn down by Suspend
+// (state==Released). ncclCuMemFree / ncclCudaFree use it to skip the real
+// teardown for Suspended entries while still freeing persistent / untracked
+// pointers on Destroy-while-Suspended.
+static inline bool ncclMemEntryAlreadyReleased(struct ncclMemManager* manager,
+                                               void* ptr) {
+  if (manager == nullptr) return false;
+  if (!__atomic_load_n(&manager->released, __ATOMIC_ACQUIRE)) return false;
+  std::lock_guard<std::mutex> lock(manager->lock);
+  for (ncclDynMemEntry* e = manager->entries; e != nullptr; e = e->next) {
+    if (e->ptr == ptr) return e->state == ncclDynMemStateReleased;
+  }
+  return false;
+}
+#endif
+
 #endif /* NCCL_MEM_MANAGER_H_ */

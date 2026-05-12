@@ -649,22 +649,24 @@ ncclResult_t p2pRecvConnect(struct ncclComm* comm, struct ncclConnect* connectIn
 
 ncclResult_t p2pSendFree(struct ncclComm* comm, struct ncclConnector* send) {
   struct p2pResources* resources = (struct p2pResources*)send->transportResources;
+  // RCCL: check if the communicator was provided
+  struct ncclMemManager* mgr = comm ? comm->memManager : nullptr;
   if (resources) {
     if (ncclCuMemEnable()) {
       // cuMem API support
       if (resources->sendMemIpc) {
         if (resources->sendMemSameProc) {
-          NCCLCHECK(ncclCuMemFreeAddr(resources->sendMemIpc, comm->memManager));
+          NCCLCHECK(ncclCuMemFreeAddr(resources->sendMemIpc, mgr));
         } else {
-          NCCLCHECK(ncclCudaFree(resources->sendMemIpc, comm->memManager));
+          NCCLCHECK(ncclCudaFree(resources->sendMemIpc, mgr));
         }
       }
 
       if (resources->recvMemIpc) {
         if (resources->recvMemSameProc) {
-          NCCLCHECK(ncclCuMemFreeAddr(resources->recvMemIpc, comm->memManager));
+          NCCLCHECK(ncclCuMemFreeAddr(resources->recvMemIpc, mgr));
         } else {
-          NCCLCHECK(ncclCudaFree(resources->recvMemIpc, comm->memManager));
+          NCCLCHECK(ncclCudaFree(resources->recvMemIpc, mgr));
         }
       }
     }
@@ -679,22 +681,24 @@ ncclResult_t p2pSendFree(struct ncclComm* comm, struct ncclConnector* send) {
 
 ncclResult_t p2pRecvFree(struct ncclComm* comm, struct ncclConnector* recv) {
   struct p2pResources* resources = (struct p2pResources*)recv->transportResources;
+  // RCCL: check if the communicator was provided
+  struct ncclMemManager* mgr = comm ? comm->memManager : nullptr;
   if (resources) {
     if (ncclCuMemEnable()) {
       // cuMem API support
       if (resources->sendMemIpc) {
         if (resources->sendMemSameProc) {
-          NCCLCHECK(ncclCuMemFreeAddr(resources->sendMemIpc, comm->memManager));
+          NCCLCHECK(ncclCuMemFreeAddr(resources->sendMemIpc, mgr));
         } else {
-          NCCLCHECK(ncclCudaFree(resources->sendMemIpc, comm->memManager));
+          NCCLCHECK(ncclCudaFree(resources->sendMemIpc, mgr));
         }
       }
 
       if (resources->recvMemIpc) {
         if (resources->recvMemSameProc) {
-          NCCLCHECK(ncclCuMemFreeAddr(resources->recvMemIpc, comm->memManager));
+          NCCLCHECK(ncclCuMemFreeAddr(resources->recvMemIpc, mgr));
         } else {
-          NCCLCHECK(ncclCudaFree(resources->recvMemIpc, comm->memManager));
+          NCCLCHECK(ncclCudaFree(resources->recvMemIpc, mgr));
         }
       }
     }

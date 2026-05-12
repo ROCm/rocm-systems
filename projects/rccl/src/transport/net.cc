@@ -784,6 +784,8 @@ static ncclResult_t recvConnect(struct ncclComm* comm, struct ncclConnect* conne
 
 static ncclResult_t sendFree(struct ncclComm* comm, struct ncclConnector* send) {
   struct connectMap* map = (struct connectMap*)(send->transportResources);
+  // RCCL: check if the communicator was provided
+  struct ncclMemManager* mgr = comm ? comm->memManager : nullptr;
   if (map) {
     int cudaDev;
     CUDACHECK(cudaGetDevice(&cudaDev));
@@ -791,7 +793,7 @@ static ncclResult_t sendFree(struct ncclComm* comm, struct ncclConnector* send) 
       if (ncclCuMemEnable()) {
         // cuMem API support
         NCCLCHECK(ncclP2pFreeShareableBuffer(&map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc));
-        NCCLCHECK(ncclCuMemFree(map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, comm->memManager));
+        NCCLCHECK(ncclCuMemFree(map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, mgr));
       } else {
         // Legacy CUDA IPC support
         CUDACHECK(cudaIpcCloseMemHandle(map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr));
