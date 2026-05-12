@@ -25,6 +25,36 @@ from pathlib import Path
 sys.stdout.reconfigure(line_buffering=True)
 
 
+def glob_filter_matches(name: str, pattern_str: str) -> bool:
+    """Return True if *name* matches the gtest-style glob filter *pattern_str*.
+
+    Syntax (same as GTest's --gtest_filter):
+      *     matches any substring
+      ?     matches any single character
+      :     separates patterns (OR)
+      -     prefix on a token negates it (exclude)
+
+    Matching is anchored to the full name and is case-sensitive.
+
+    Examples:
+      glob_filter_matches("P2P_AllTests", "P2P_*")          → True
+      glob_filter_matches("SHM_Basic",    "P2P_*")          → False
+      glob_filter_matches("P2P_AllTests", "*:-P2P*")        → False  (excluded)
+      glob_filter_matches("SHM_Basic",    "P2P_*:SHM_*")   → True   (OR)
+    """
+    def _to_re(pat: str) -> re.Pattern:
+        escaped = re.sub(r'([.+^${}()|\\])', r'\\\1', pat)
+        return re.compile('^' + escaped.replace('*', '.*').replace('?', '.') + '$')
+
+    pos, neg = [], []
+    for token in pattern_str.split(':'):
+        (neg if token.startswith('-') else pos).append(_to_re(token.lstrip('-')))
+
+    if neg and any(p.match(name) for p in neg):
+        return False
+    return (not pos) or any(p.match(name) for p in pos)
+
+
 class ExitCode(IntEnum):
     """Exit codes for processes"""
     EXIT_SUCCESS = 0
@@ -740,13 +770,23 @@ class TestExecutor:
         # Setup environment
         env = os.environ.copy()
 
-        # Build LD_LIBRARY_PATH with build dir and MPI lib (if available)
-        mpi_path = self.paths.get("mpi_path", "")
+        # Build LD_LIBRARY_PATH.  Priority order (highest → lowest):
+        #   1. build_dir          – always first so the test-built librccl.so wins
+        #   2. caller environment – LD_LIBRARY_PATH already set in the shell lets
+        #                           users point at a custom libamdhip64.so.7 without
+        #                           any special variable:
+        #                             LD_LIBRARY_PATH=/path/to/hip python3 test_runner.py ...
+        #   3. {rocm_path}/lib    – default ROCm/HIP fallback
+        #   4. mpi_path/lib       – MPI runtime
+        mpi_path  = self.paths.get("mpi_path", "")
+        rocm_path = self.paths.get("rocm_path", "/opt/rocm")
+
         ld_library_path_parts = [self.build_dir]
+        if env.get('LD_LIBRARY_PATH'):
+            ld_library_path_parts.append(env['LD_LIBRARY_PATH'])
+        ld_library_path_parts.append(os.path.join(rocm_path, "lib"))
         if mpi_path:
             ld_library_path_parts.append(os.path.join(mpi_path, "lib"))
-        if env.get('LD_LIBRARY_PATH'):
-            ld_library_path_parts.append(env.get('LD_LIBRARY_PATH'))
         env['LD_LIBRARY_PATH'] = ":".join(ld_library_path_parts)
 
         # Set LLVM_PROFILE_FILE for code coverage (prevents default.profraw
@@ -757,9 +797,16 @@ class TestExecutor:
         if self.args.coverage_report:
             env['LLVM_PROFILE_FILE'] = "rccl_tests_%p_%m.profraw"
 
-        # Add test-specific env vars
+        # Add test-specific env vars.
+        # LD_LIBRARY_PATH is treated specially: a value coming from the JSON
+        # config is prepended to the already-constructed path so that the
+        # user-supplied directory wins over the {rocm_path}/lib default without
+        # losing build_dir (which must always remain first for librccl.so).
         for key, value in merged_env.items():
-            env[key] = str(value)
+            if key == 'LD_LIBRARY_PATH' and env.get('LD_LIBRARY_PATH'):
+                env[key] = str(value) + ":" + env['LD_LIBRARY_PATH']
+            else:
+                env[key] = str(value)
 
         # Build command based on test type
         if num_ranks == 1:
@@ -983,9 +1030,9 @@ class TestExecutor:
                     print(f"\nStopping test suite execution due to rerun failure (--stop-on-rerun-failure)")
                 break
 
-            # Filter by test name if specified
+            # Filter by test name if specified (gtest-style glob; see glob_filter_matches).
             test_name = test.get("name")
-            if self.args.test_name and test_name != self.args.test_name:
+            if self.args.test_name and not glob_filter_matches(test_name, self.args.test_name):
                 skipped_count += 1
                 continue
 
