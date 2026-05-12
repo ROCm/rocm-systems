@@ -118,6 +118,10 @@
   .set TTMP11_FXPTR_SHIFT                          , 14
   .set TTMP11_REPLAY_W64H_SHIFT                    , 21
   .set TTMP11_FIRST_REPLAY_SHIFT                   , 22
+
+  .set SQ_WAVE_MODE_MSB_SHIFT                      , 12
+  .set SQ_WAVE_MODE_MSB_SIZE                       , 8
+  .set TTMP11_WAVE_MODE_MSB_MASK                   , ((1 << SQ_WAVE_MODE_MSB_SIZE) - 1)
 .endif
 
 .if .amdgcn.gfx_generation_minor == 0
@@ -435,12 +439,12 @@
 
 .if .amdgcn.gfx_generation_minor == 5
   // MI450, save MODE.MSB to ttmp11[7:0], and clear MODE.MSB
-  s_getreg_b32 ttmp2, hwreg(HW_REG_WAVE_MODE, 12, 8)
-  s_andn2_b32 ttmp11, ttmp11, ((1 << 8) - 1)
+  s_getreg_b32 ttmp2, hwreg(HW_REG_WAVE_MODE, SQ_WAVE_MODE_MSB_SHIFT, SQ_WAVE_MODE_MSB_SIZE)
+  s_andn2_b32 ttmp11, ttmp11, TTMP11_WAVE_MODE_MSB_MASK
   s_or_b32 ttmp11, ttmp11, ttmp2
 
   s_mov_b32 ttmp2, 0
-  s_setreg_b32 hwreg(HW_REG_WAVE_MODE, 12, 8), ttmp2
+  s_setreg_b32 hwreg(HW_REG_WAVE_MODE, SQ_WAVE_MODE_MSB_SHIFT, SQ_WAVE_MODE_MSB_SIZE), ttmp2
 .endif
 
 .else
@@ -1052,7 +1056,7 @@
 .if .amdgcn.gfx_generation_minor >= 5
 .if  .amdgcn.gfx_generation_minor == 5
   // Restore MODE.MSB
-  s_setreg_b32 hwreg(HW_REG_WAVE_MODE, 12, 8), ttmp11
+  s_setreg_b32 hwreg(HW_REG_WAVE_MODE, SQ_WAVE_MODE_MSB_SHIFT, SQ_WAVE_MODE_MSB_SIZE), ttmp11
 .endif
   // Restore XNACK_MASK
   s_setreg_b32 hwreg(HW_REG_XNACK_MASK), ttmp12
@@ -1290,8 +1294,11 @@
   // Restore SQ_WAVE_STATE_PRIV: only SCC (bit 9), as the trap handler
   // does not modify other SQ_WAVE_STATE_PRIV bits.
   // SCC was saved in ttmp6[31] at trap entry.
-  s_lshr_b32        ttmp2, ttmp6, TTMP6_SCC_SHIFT
-  s_setreg_b32      hwreg(HW_REG_STATE_PRIV, SQ_WAVE_STATE_PRIV_SCC_SHIFT, 1), ttmp2
+  s_lshr_b32        ttmp3, ttmp6, TTMP6_SCC_SHIFT
+  s_setreg_b32      hwreg(HW_REG_STATE_PRIV, SQ_WAVE_STATE_PRIV_SCC_SHIFT, 1), ttmp3
+
+  // Zero out bit 31 in a persistent ttmp6 register before s_rfe.
+  s_bitset0_b32     ttmp6, TTMP6_SCC_SHIFT
 
 .if .amdgcn.gfx_generation_minor == 0
   s_setreg_b32      hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2), ttmp2
