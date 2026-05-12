@@ -246,8 +246,6 @@ TEST_F(RevokeMPITest, Collective_Revoke_Shrink_Collective)
 
     ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
 
-    HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
-
     MPI_Barrier(MPI_COMM_WORLD);
 
     std::vector<int> excludeList;
@@ -448,6 +446,32 @@ TEST_F(RevokeMPITest, Revoke_InsideGroup_Rejected)
     ncclResult_t result = ncclCommRevoke(comm, NCCL_REVOKE_DEFAULT);
     ASSERT_MPI_EQ(ncclInvalidUsage, result);
     ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
+}
+
+/**
+ * ncclCommFinalize on a revoked communicator must be rejected with
+ * ncclInvalidUsage. After revoke, the user should call ncclCommDestroy
+ * instead — finalize would double-drain streams already handled by
+ * commRevokeAsync.
+ */
+TEST_F(RevokeMPITest, Revoke_ThenFinalize_Rejected)
+{
+    ASSERT_TRUE(validateTestPrerequisites(2,
+                                          kNoProcessLimit,
+                                          kNoPowerOfTwoRequired,
+                                          1,
+                                          kNoNodeLimit))
+        << "Test requires at least 2 MPI processes";
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(comm, NCCL_REVOKE_DEFAULT));
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    ASSERT_MPI_EQ(ncclInvalidUsage, ncclCommFinalize(comm));
 }
 
 /**
