@@ -93,8 +93,6 @@ def build_dfs(
                             if key != "metric":
                                 headers.append(tile)
 
-                    headers.append("coll_level")
-
                     # Only add Metrics Description column if it is defined in the panel
                     if "metrics_description" in panel:
                         headers.append("Description")
@@ -131,20 +129,16 @@ def build_dfs(
                                         for bv in simple_box.values():
                                             values.append(bv[0] + v + bv[1])
                                     else:
-                                        if k not in {"coll_level", "alias"}:
+                                        if k != "alias":
                                             values.append(v)
                             else:
                                 for k, v in entries.items():
-                                    if k not in {"coll_level", "alias"}:
+                                    if k != "alias":
                                         values.append(v)
                                         eqn_content.append(v)
 
                             if "alias" in entries.keys():
                                 values.append(entries["alias"])
-
-                            values.append(
-                                entries.get("coll_level", schema.PMC_PERF_FILE_PREFIX)
-                            )
 
                             if "metrics_description" in panel:
                                 values.append(panel["metrics_description"].get(key, ""))
@@ -215,7 +209,7 @@ def apply_filters(
     # Apply node filter
     if workload.filter_nodes:
         filtered_df = filtered_df.loc[
-            filtered_df[schema.PMC_PERF_FILE_PREFIX]["Node"]
+            filtered_df["Node"]
             .astype(str)
             .isin(normalize_filter_to_str_list(workload.filter_nodes))
         ]
@@ -225,7 +219,7 @@ def apply_filters(
     # Apply GPU ID filter
     if workload.filter_gpu_ids:
         filtered_df = filtered_df.loc[
-            filtered_df[schema.PMC_PERF_FILE_PREFIX]["GPU_ID"]
+            filtered_df["GPU_ID"]
             .astype(str)
             .isin(normalize_filter_to_str_list(workload.filter_gpu_ids))
         ]
@@ -284,13 +278,11 @@ def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataF
             kernel_top_dataframe.loc[kernel_id, "Selected"] = "*"
 
         if selected_kernels:
-            df = df.loc[
-                df[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"].isin(selected_kernels)
-            ]
+            df = df.loc[df["Kernel_Name"].isin(selected_kernels)]
 
     elif all(isinstance(kernel_id, str) for kernel_id in workload.filter_kernel_ids):
         # Handle string kernel names
-        cleaned_dataframe = df[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"].apply(
+        cleaned_dataframe = df["Kernel_Name"].apply(
             lambda kernel_name: (
                 kernel_name.strip() if isinstance(kernel_name, str) else kernel_name
             )
@@ -320,10 +312,7 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
         and ">" in workload.filter_dispatch_ids[0]
     ):
         dispatch_match = re.match(r"\>\s*(\d+)", workload.filter_dispatch_ids[0])
-        df = df[
-            df[schema.PMC_PERF_FILE_PREFIX]["Dispatch_ID"]
-            > int(dispatch_match.group(1))
-        ]
+        df = df[df["Dispatch_ID"] > int(dispatch_match.group(1))]
     else:
         selected_dispatches = [
             int(dispatch_str) for dispatch_str in workload.filter_dispatch_ids
@@ -900,7 +889,6 @@ def load_table_data(
     dir_path: str,
     is_gui: bool,
     args: argparse.Namespace,
-    config: dict,
     skip_kernel_top: bool = False,
 ) -> None:
     """
@@ -918,7 +906,6 @@ def load_table_data(
         workload.roofline_peaks,
         apply_filters(workload, dir_path, is_gui, args.debug),
         args.debug,
-        config,
     )
 
 

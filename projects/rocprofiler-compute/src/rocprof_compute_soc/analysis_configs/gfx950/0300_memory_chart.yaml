@@ -11,9 +11,8 @@ Panel Config:
         value: Value
       metric:
         Wavefront Occupancy:
-          value: ROUND(SUM(SQ_ACCUM_PREV_HIRES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $numActiveCUs),
+          value: ROUND(SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $numActiveCUs),
             0)
-          coll_level: SQ_LEVEL_WAVES
         Wave Life:
           value: ROUND(SUM(4 * SQ_WAVE_CYCLES) / SUM(SQ_WAVES), 0)
         SALU:
@@ -55,8 +54,7 @@ Panel Config:
         LDS Util:
           value: ROUND(SUM(100 * SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu), 0)
         LDS Latency:
-          value: ROUND(SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQ_INSTS_LDS),0)
-          coll_level: SQ_INST_LEVEL_LDS
+          value: ROUND(SUM(SQ_INST_LEVEL_LDS_ACCUM) / SUM(SQ_INSTS_LDS),0)
         VL1 Rd:
           value: ROUND(SUM(TCP_TOTAL_READ_sum) / SUM($denom), 0)
         VL1 Wr:
@@ -82,8 +80,7 @@ Panel Config:
         sL1D Hit:
           value: ROUND((SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_REQ) * 100), 0)
         sL1D Lat:
-          value: ROUND((SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQC_DCACHE_REQ) * 100), 0)
-          coll_level: SQC_DCACHE_INFLIGHT_LEVEL
+          value: ROUND((SUM(SQC_DCACHE_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_DCACHE_REQ) * 100), 0)
         sL1D_L2 Rd:
           value: ROUND(SUM(SQC_TC_DATA_READ_REQ) / SUM($denom), 0)
         sL1D_L2 Wr:
@@ -95,8 +92,7 @@ Panel Config:
         IL1 Hit:
           value: ROUND((SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_REQ) * 100), 0)
         IL1 Lat:
-          value: ROUND((SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQC_ICACHE_REQ) * 100), 0)
-          coll_level: SQC_ICACHE_INFLIGHT_LEVEL
+          value: ROUND((SUM(SQC_ICACHE_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_ICACHE_REQ) * 100), 0)
         IL1_L2 Rd:
           value: ROUND(SUM(SQC_TC_INST_REQ) / SUM($denom), 0)
         L2 Rd:

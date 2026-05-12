@@ -2000,7 +2000,6 @@ def test_list_available_metrics_with_block(
 def test_comprehensive_error_paths():
     """Simplified test for error path coverage"""
 
-    from utils.metrics.expression import build_eval_string
     from utils.parser import build_comparable_columns
     from utils.utils_common import calc_builtin_var
 
@@ -2021,12 +2020,6 @@ def test_comprehensive_error_paths():
 
     result = calc_builtin_var("$total_l2_chan", sys_info)
     assert result == 16
-
-    try:
-        build_eval_string("test", None, config={})
-        assert False, "Should raise exception for None coll_level"
-    except Exception as e:
-        assert "coll_level can not be None" in str(e)
 
 
 @pytest.mark.live_attach_detach

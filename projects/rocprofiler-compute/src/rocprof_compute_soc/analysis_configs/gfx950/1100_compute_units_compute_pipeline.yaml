@@ -131,17 +131,15 @@ Panel Config:
           max: MAX(SQ_VALU_MFMA_BUSY_CYCLES / SQ_INSTS_MFMA)
           unit: Cycles per Instruction
         VMEM Latency:
-          avg: SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQ_INSTS_VMEM)
-          min: MIN(SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM)
-          max: MAX(SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM)
+          avg: SUM(SQ_INST_LEVEL_VMEM_ACCUM) / SUM(SQ_INSTS_VMEM)
+          min: MIN(SQ_INST_LEVEL_VMEM_ACCUM / SQ_INSTS_VMEM)
+          max: MAX(SQ_INST_LEVEL_VMEM_ACCUM / SQ_INSTS_VMEM)
           unit: Cycles
-          coll_level: SQ_INST_LEVEL_VMEM
         SMEM Latency:
-          avg: SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQ_INSTS_SMEM)
-          min: MIN(SQ_ACCUM_PREV_HIRES / SQ_INSTS_SMEM)
-          max: MAX(SQ_ACCUM_PREV_HIRES / SQ_INSTS_SMEM)
+          avg: SUM(SQ_INST_LEVEL_SMEM_ACCUM) / SUM(SQ_INSTS_SMEM)
+          min: MIN(SQ_INST_LEVEL_SMEM_ACCUM / SQ_INSTS_SMEM)
+          max: MAX(SQ_INST_LEVEL_SMEM_ACCUM / SQ_INSTS_SMEM)
           unit: Cycles
-          coll_level: SQ_INST_LEVEL_SMEM
   - metric_table:
       id: 1103
       title: Arithmetic Operations

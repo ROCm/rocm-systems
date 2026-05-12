@@ -324,7 +324,6 @@ def calc_ceilings(
 def calc_ai_analyze(
     workload: schema.Workload,
     pmc_df: pd.DataFrame,
-    config: dict[str, Any],
     arch_config: schema.ArchConfig,
 ) -> dict[str, Union[list[list[float]], list[str]]]:
     """
@@ -373,13 +372,11 @@ def calc_ai_analyze(
         console_debug("roofline", f"Processing kernel {kernel_id}: {kernel_name[:50]}")
 
         # filter PMC data for specific kernel
-        kernel_pmc_df = pmc_df[pmc_df["pmc_perf"]["Kernel_Name"] == kernel_name]
+        kernel_pmc_df = pmc_df[pmc_df["Kernel_Name"] == kernel_name]
 
         if kernel_pmc_df.empty:
             console_debug("roofline", f"No PMC data for kernel {kernel_id}")
             continue
-
-        kernel_only_data = {"pmc_perf": kernel_pmc_df["pmc_perf"]}
 
         kernel_dfs: dict[int, pd.DataFrame] = {}
         kernel_dfs_type: dict[int, str] = {}
@@ -395,9 +392,8 @@ def calc_ai_analyze(
             kernel_dfs_type,
             workload.sys_info.iloc[0],
             workload.roofline_peaks,
-            kernel_only_data,
+            kernel_pmc_df,
             debug=False,
-            config=config,
         )
 
         ai_hbm = ai_l2 = ai_l1 = performance = 0
