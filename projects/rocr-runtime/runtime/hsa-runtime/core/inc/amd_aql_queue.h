@@ -80,6 +80,22 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Destroy ref counted queue
   void Destroy() override;
 
+  /// @brief Invoke the per-queue error callback if one is registered
+  /// and it is not the default handler.
+  void InvokeErrorCallback(hsa_status_t error) {
+    if (errors_callback_ != nullptr &&
+        errors_callback_ != core::Queue::DefaultErrorHandler) {
+      errors_callback_(error, public_handle(), errors_data_);
+    }
+  }
+
+  void MarkVMFaulted() { vm_faulted_.store(true, std::memory_order_release); }
+  bool IsVMFaulted() const { return vm_faulted_.load(std::memory_order_acquire); }
+  void SetVMFaultDetails(uint64_t address, uint32_t reason) {
+    vm_fault_address_ = address;
+    vm_fault_reason_ = reason;
+  }
+
   /// @brief Atomically reads the Read index of with Acquire semantics
   ///
   /// @return uint64_t Value of read index
@@ -334,6 +350,12 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
 
   // Exception notification signal
   Signal* exception_signal_;
+
+  // Per-queue VM fault state, set by ExceptionHandler and stamped
+  // with address/reason by VMFaultHandler.
+  std::atomic<bool> vm_faulted_{false};
+  uint64_t          vm_fault_address_{0};
+  uint32_t          vm_fault_reason_{0};
 
   // CU mask lock
   std::mutex mask_lock_;
