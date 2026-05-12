@@ -24,23 +24,17 @@
 
 #include <cstring>
 
-#include "gfx9token.h"  // gfx9::sqtt_token_type_t (TOKEN_REG, TOKEN_REG_CS)
+#include "gfx9token.h"
 #include "rocprof_trace_decoder/trace_decoder_instrument.h"
-#include "trace_parser.hpp" // CSRegisterHandler, sqtt_token_reg_t, address_range_t
+#include "trace_parser.hpp"
 
 namespace gfx9::build_standalone
 {
 namespace
 {
 
-// USERDATA register address used for instrumentation (codeobj load/unload
-// markers, ROCM format header). Mirrors CSRegisterHandler::USERDATA_ADDR_2.
 constexpr uint16_t USERDATA2_ADDR = 0xC342;
 
-// Encode a TOKEN_REG_CS (nibble 5, 6 bytes total). regaddr is 7 bits.
-// Layout (low bit first): type[0:3]=5, delta[4]=0, pipe[5:6], encoded_me[7:8]
-// where (encoded_me+1)&1 == real_me, regaddr[9:15], regdata[16:47]. See
-// gfx9::RegCs in source/gfx9/gfx9token.h:86.
 inline StatusToken encode_reg_cs(uint8_t me, uint8_t pipe, uint8_t regaddr, uint32_t regdata)
 {
     const uint64_t enc_me = (1u - (me & 1u)) & 1u;
@@ -50,10 +44,6 @@ inline StatusToken encode_reg_cs(uint8_t me, uint8_t pipe, uint8_t regaddr, uint
     return {v, 6};
 }
 
-// Encode a TOKEN_REG (nibble 2, 8 bytes total). regaddr is 16 bits.
-// Layout: type[0:3]=2, delta[4]=0, pipe[5:6], encoded_me[7:8], !disable[15]=1
-// (we always emit enabled writes), regaddr[16:31], regdata[32:63]. See
-// gfx9::Reg in source/gfx9/gfx9token.h:73.
 inline StatusToken encode_reg(uint8_t me, uint8_t pipe, uint16_t regaddr, uint32_t regdata)
 {
     const uint64_t enc_me = (1u - (me & 1u)) & 1u;
@@ -63,12 +53,6 @@ inline StatusToken encode_reg(uint8_t me, uint8_t pipe, uint16_t regaddr, uint32
     return {v, 8};
 }
 
-// Helper: emit a header-then-payload pair on USERDATA2 for the codeobj
-// state machine in CSRegisterHandler::UpdateRegNoCS. The header sets
-// `userdata_state` to `marker_type`; the next USERDATA2 write is then
-// consumed as the payload for that field. me=0/pipe=0 throughout — the
-// active_codeobj_id table is shared across (me,pipe), so a single channel
-// suffices to repopulate it.
 inline void emit_codeobj_field(std::vector<StatusToken>& out, uint32_t marker_type, uint32_t payload)
 {
     rocprof_trace_decoder_packet_header_t hdr{};
@@ -84,13 +68,8 @@ inline void emit_codeobj_field(std::vector<StatusToken>& out, uint32_t marker_ty
 std::vector<StatusToken> build_status_tokens(const CSRegisterHandler& reg)
 {
     std::vector<StatusToken> out;
+    out.reserve(32 + 6 + 1 + reg.active_codeobjs.read().size() * 14);
 
-    // Conservative reservation: 8 (me,pipe) * 4 LO/HI = 32 REG_CS, plus 6
-    // scalar REG_CS, plus 1 ROCM header, plus 14 USERDATA2 writes per
-    // active code object.
-    out.reserve(32 + 6 + 1 + reg.active_codeobj_id.size() * 14);
-
-    // Per-(me,pipe) latched 64-bit register pairs.
     for (uint8_t me = 0; me < 2; ++me)
     {
         for (uint8_t pipe = 0; pipe < 4; ++pipe)
@@ -112,8 +91,6 @@ std::vector<StatusToken> build_status_tokens(const CSRegisterHandler& reg)
         }
     }
 
-    // Scalar latches (last-write-wins in CSRegisterHandler — channel choice
-    // doesn't matter, we use me=0/pipe=0).
     out.push_back(encode_reg_cs(0, 0, COMPUTE_NUM_THREAD_X, reg.num_thread_x));
     out.push_back(encode_reg_cs(0, 0, COMPUTE_NUM_THREAD_Y, reg.num_thread_y));
     out.push_back(encode_reg_cs(0, 0, COMPUTE_NUM_THREAD_Z, reg.num_thread_z));
@@ -121,9 +98,6 @@ std::vector<StatusToken> build_status_tokens(const CSRegisterHandler& reg)
     out.push_back(encode_reg_cs(0, 0, COMPUTE_PGM_RSRC2, reg.rsrc2));
     out.push_back(encode_reg_cs(0, 0, COMPUTE_PGM_RSRC3, reg.rsrc3));
 
-    // Code-object table replay. Skip entirely if no instrumentation was
-    // ever observed on this handler — emitting the ROCM header
-    // unconditionally would flip downstream state.
     if (reg.bIsROCMFormat)
     {
         rocprof_trace_decoder_instrument_enable_t enable{};
@@ -133,18 +107,11 @@ std::vector<StatusToken> build_status_tokens(const CSRegisterHandler& reg)
         enable.char4 = 'C';
         out.push_back(encode_reg(0, 0, USERDATA2_ADDR, enable.u32All));
 
-        for (const auto& kv : reg.active_codeobj_id)
+        for (const auto& co : reg.active_codeobjs.read())
         {
-            uint64_t id   = kv.first;
-            uint64_t addr = kv.second;
-
-            // Recover size from the address translator (the only place we
-            // stored it — CSRegisterHandler keeps the per-pipe size scratch
-            // but discards it after the TAIL).
-            address_range_t arange{};
-            CodeobjTableTranslator& mut_table = const_cast<CodeobjTableTranslator&>(reg.table);
-            if (!mut_table.find_codeobj_in_range(addr, arange)) continue;
-            uint64_t size = arange.size;
+            uint64_t id   = co.id;
+            uint64_t addr = co.addr;
+            uint64_t size = co.size;
 
             emit_codeobj_field(
                 out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ID_LO, static_cast<uint32_t>(id)
@@ -167,8 +134,8 @@ std::vector<StatusToken> build_status_tokens(const CSRegisterHandler& reg)
 
             rocprof_trace_decoder_codeobj_marker_tail_t tail{};
             tail.isUnload   = 0;
-            tail.bFromStart = 1; // load happened "before" the standalone trace begins
-            tail.legacy_id  = 0; // use the ID we just latched via ID_LO/HI
+            tail.bFromStart = 1;
+            tail.legacy_id  = 0;
             emit_codeobj_field(out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_TAIL, tail.raw);
         }
     }
@@ -181,9 +148,6 @@ size_t write_tokens(uint8_t* out, const std::vector<StatusToken>& tokens)
     size_t off = 0;
     for (const auto& t : tokens)
     {
-        // The token bits live in the low 48/64 bits of `t.bits`; a
-        // little-endian byte copy of the low `t.bytes` bytes lands the
-        // payload exactly as the scanner expects to find it.
         std::memcpy(out + off, &t.bits, t.bytes);
         off += t.bytes;
     }

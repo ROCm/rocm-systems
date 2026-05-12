@@ -22,23 +22,38 @@
 
 #pragma once
 
-#include <cstddef>
-#include <cstdint>
-#include <vector>
+#include <memory>
+#include <utility>
 
-class CSRegisterHandler;
-
-namespace gfx9::build_standalone
+template <typename T>
+class CowPtr
 {
+public:
+    CowPtr() = default;
 
-struct StatusToken
-{
-    uint64_t bits;
-    uint8_t  bytes;
+    const T& read() const
+    {
+        if (!ptr_) return empty();
+        return *ptr_;
+    }
+
+    T& write()
+    {
+        if (!ptr_)
+            ptr_ = std::make_shared<T>();
+        else if (ptr_.use_count() > 1)
+            ptr_ = std::make_shared<T>(*ptr_);
+        return const_cast<T&>(*ptr_);
+    }
+
+    bool null() const { return !ptr_; }
+
+private:
+    static const T& empty()
+    {
+        static const T value{};
+        return value;
+    }
+
+    std::shared_ptr<const T> ptr_{};
 };
-
-std::vector<StatusToken> build_status_tokens(const CSRegisterHandler& reg);
-
-size_t write_tokens(uint8_t* out, const std::vector<StatusToken>& tokens);
-
-} // namespace gfx9::build_standalone

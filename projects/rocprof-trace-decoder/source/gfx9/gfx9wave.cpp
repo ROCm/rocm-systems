@@ -560,7 +560,7 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
             {
                 auto& sm = SIMD[token.fields.inst_pc.simd][token.fields.inst_pc.wave];
                 empty_wave_check(sm.size());
-                sm.back().apply_pc(token, csregister.table);
+                sm.back().apply_pc(token, csregister.table.write());
                 break;
             }
             case TOKEN_REG_CS:

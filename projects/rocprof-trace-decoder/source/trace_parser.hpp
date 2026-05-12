@@ -35,6 +35,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "cow_ptr.hpp"
 #include "rocprof_trace_decoder/cxx/common.hpp"
 #include "rocprof_trace_decoder/trace_decoder_instrument.h"
 #include "segment.hpp"
@@ -305,14 +306,18 @@ public:
     template <typename T2> void sethi(const T2& token) { sethi(token, token.regdata); }
 };
 
+// Register-state tracker shared by quick_scan, build_standalone, and the
+// full wave decoder. The heavy members (active codeobj log, address-indexed
+// translator tables) are wrapped in CowPtr so per-chunk pipestate copies just
+// bump shared_ptr refcounts in the steady state — the underlying vector and
+// CodeobjTableTranslators only fork on the rare chunk that actually loads or
+// unloads a codeobj. The single class is used by every code path (no
+// base/derived split): quick_scan and build_standalone never touch the
+// translator tables, so their snapshots leave those CowPtrs null and pay
+// zero alloc cost.
 class CSRegisterHandler
 {
 public:
-    CodeobjTableTranslator table{};
-    CodeobjTableTranslator table_from_start{};
-
-    std::unordered_map<size_t, uint64_t> active_codeobj_id{};
-
     PipeArray64 wave_start_addr{};
     PipeArray64 current_codeobj_size{};
     PipeArray64 current_codeobj_addr{};
@@ -327,18 +332,18 @@ public:
     uint32_t rsrc3{0};
     uint32_t dispatch_initiator{0};
 
-    std::vector<att_decoder_realtime_t> realtime{};
-
     uint64_t realtime_frequency{0};
     uint64_t counter_frequency{0};
 
     bool bIsROCMFormat = false;
-    int userdata_state{};
+    int  userdata_state{};
 
-    // Single event returned by UpdateRegNoCS. At most one of these is produced
-    // per register write; the caller dispatches on `kind` to surface
-    // CODE_OBJECT_LOAD / CODE_OBJECT_UNLOAD events or to react to a
-    // counter-frequency change (which used to be the bool return).
+    CowPtr<std::vector<address_range_t>> active_codeobjs{};
+    CowPtr<CodeobjTableTranslator>       table{};
+    CowPtr<CodeobjTableTranslator>       table_from_start{};
+
+    std::vector<att_decoder_realtime_t> realtime{};
+
     struct RegUpdateEvent
     {
         enum Kind
@@ -353,7 +358,6 @@ public:
     };
 
     template <typename TokenType> uint32_t get_regaddr(const TokenType& token) { return token.regaddr; }
-
     template <typename TokenType> uint32_t get_regdata(const TokenType& token) { return token.regdata; }
 
     template <typename TokenType> rocprof_trace_decoder_packet_header_t UserdataF(const TokenType& token)
@@ -403,7 +407,8 @@ public:
     bool IsUserdata1(size_t addr) { return addr == USERDATA_ADDR_1; }
     bool IsUserdata2(size_t addr) { return addr == USERDATA_ADDR_2; }
     bool IsUserdata3(size_t addr) { return addr == USERDATA_ADDR_3; }
-    virtual ~CSRegisterHandler() = default;
+
+    ~CSRegisterHandler() = default;
 
     template <typename TokenType> void UpdateRegCS(const TokenType& token)
     {
@@ -433,7 +438,7 @@ public:
         if (!bIsROCMFormat && isUserdataHeader(token))
         {
             userdata_state = ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_LAST;
-            bIsROCMFormat = true;
+            bIsROCMFormat  = true;
             return {};
         }
 
@@ -458,26 +463,34 @@ public:
                 if (id == 0) // If not using legacy code ID
                     id = current_codeobj_id.at_reg(token);
 
-                auto it = active_codeobj_id.find(id);
-                if (!header.isUnload && it == active_codeobj_id.end())
+                bool active = false;
+                for (const auto& co : active_codeobjs.read())
+                    if (co.id == id) { active = true; break; }
+
+                if (!header.isUnload && !active)
                 {
-                    uint64_t base_addr = current_codeobj_addr.at_reg(token);
-                    active_codeobj_id.emplace(id, base_addr);
-                    address_range_t arange = {base_addr, current_codeobj_size.at_reg(token), id};
-                    table.insert(arange);
-                    if (header.bFromStart) table_from_start.insert(arange);
+                    uint64_t        base_addr = current_codeobj_addr.at_reg(token);
+                    uint64_t        size      = current_codeobj_size.at_reg(token);
+                    address_range_t arange{base_addr, size, id};
+                    active_codeobjs.write().push_back(arange);
+                    table.write().insert(arange);
+                    if (header.bFromStart) table_from_start.write().insert(arange);
                     event = {RegUpdateEvent::CODEOBJ_LOAD, id};
                 }
-                else if (header.isUnload && it != active_codeobj_id.end())
+                else if (header.isUnload && active)
                 {
-                    try
+                    auto& v = active_codeobjs.write();
+                    for (auto it = v.begin(); it != v.end(); ++it)
                     {
-                        table.remove(active_codeobj_id.at(id));
-                        active_codeobj_id.erase(id);
-                        event = {RegUpdateEvent::CODEOBJ_UNLOAD, id};
+                        if (it->id == id)
+                        {
+                            uint64_t addr = it->addr;
+                            v.erase(it);
+                            try { table.write().remove(addr); } catch (...) {}
+                            break;
+                        }
                     }
-                    catch (...)
-                    {}
+                    event = {RegUpdateEvent::CODEOBJ_UNLOAD, id};
                 }
                 break;
             }
@@ -495,20 +508,20 @@ public:
         return event;
     }
 
-    template <typename TokenType> pcinfo_t get_wave_start(const TokenType& token)
-    {
-        constexpr uint64_t BITMASK = (1ul << 48) - 1;
-        return ToPcV2(table, (wave_start_addr.at_reg(token) << 8) & BITMASK);
-    }
-
-    rocprofiler_thread_trace_decoder_dispatch_t PopulateDispatch(int time, int me, int pipe, int tt_version = 0)
+    rocprofiler_thread_trace_decoder_dispatch_t
+    PopulateDispatch(int time, int me, int pipe, int tt_version = 0)
     {
         rocprofiler_thread_trace_decoder_dispatch_t event{};
         event.size = sizeof(rocprofiler_thread_trace_decoder_dispatch_t);
         event.time = time;
         event.me_id = me;
         event.pipe_id = pipe;
-        event.entry_point = ToPcV2(table, wave_start_addr.at(me).at(pipe) << 8);
+
+        uint64_t pc = wave_start_addr.at(me).at(pipe) << 8;
+        event.entry_point = pcinfo_t{.address = pc, .code_object_id = 0};
+        for (const auto& co : active_codeobjs.read())
+            if (co.inrange(pc)) { event.entry_point = {pc - co.addr, co.id}; break; }
+
         event.thread_dim_x = num_thread_x;
         event.thread_dim_y = num_thread_y;
         event.thread_dim_z = num_thread_z;
@@ -535,7 +548,13 @@ public:
         return event;
     }
 
-    pcinfo_t get_wave_start_delayed(uint64_t addr) { return ToPcV2(table_from_start, addr); }
+    template <typename TokenType> pcinfo_t get_wave_start(const TokenType& token)
+    {
+        constexpr uint64_t BITMASK = (1ul << 48) - 1;
+        return ToPcV2(table.write(), (wave_start_addr.at_reg(token) << 8) & BITMASK);
+    }
+
+    pcinfo_t get_wave_start_delayed(uint64_t addr) { return ToPcV2(table_from_start.write(), addr); }
 };
 
 template <typename WaveArray> struct AnalysisReturnData
