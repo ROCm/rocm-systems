@@ -3,6 +3,7 @@
 
 #include "library/process_sampler.hpp"
 #include "common/diagnostic/exception.hpp"
+#include "common/diagnostic/format_exception.hpp"
 #include "core/config.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
@@ -56,6 +57,7 @@ get_sampler_is_sampling()
 
 void
 sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
+try
 {
     threading::offset_this_id(true);
     threading::set_thread_name("omni.sampler");
@@ -107,6 +109,15 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
 
     LOG_DEBUG("Thread sampler polling completed...");
 
+    if(polling_finished) polling_finished->set_value();
+} catch(const std::exception& e)
+{
+    LOG_ERROR("process_sampler thread aborted: {}\n{}", e.what(),
+              ::rocprofsys::common::diagnostic::format_exception(e));
+    if(polling_finished) polling_finished->set_value();
+} catch(...)
+{
+    LOG_ERROR("process_sampler thread aborted with unknown exception");
     if(polling_finished) polling_finished->set_value();
 }
 

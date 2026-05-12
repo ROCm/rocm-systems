@@ -69,6 +69,7 @@ ci_timeout_backtrace(int)
 void
 ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
                             std::promise<void> _ci_timeout_ready)
+try
 {
     _ci_timeout_ready.set_value();
 
@@ -157,6 +158,13 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
     }
 
     LOG_WARNING("Timeout thread exiting...");
+} catch(const std::exception& e)
+{
+    LOG_ERROR("ci-timeout thread aborted: {}\n{}", e.what(),
+              ::rocprofsys::common::diagnostic::format_exception(e));
+} catch(...)
+{
+    LOG_ERROR("ci-timeout thread aborted with unknown exception");
 }
 }  // namespace
 

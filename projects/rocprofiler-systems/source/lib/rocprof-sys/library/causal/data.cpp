@@ -8,6 +8,7 @@
 #include "binary/link_map.hpp"
 #include "binary/scope_filter.hpp"
 #include "common/diagnostic/exception.hpp"
+#include "common/diagnostic/format_exception.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/config.hpp"
 #include "core/containers/c_array.hpp"
@@ -445,6 +446,7 @@ auto eligible_pc_candidates = std::atomic<size_t>{ 0 };
 
 void
 perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
+try
 {
     using clock_type      = std::chrono::high_resolution_clock;
     using duration_nsec_t = std::chrono::duration<double, std::nano>;
@@ -669,6 +671,13 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
 
         if(_exceeded_duration()) return;
     }
+} catch(const std::exception& e)
+{
+    LOG_ERROR("causal experiment thread aborted: {}\n{}", e.what(),
+              ::rocprofsys::common::diagnostic::format_exception(e));
+} catch(...)
+{
+    LOG_ERROR("causal experiment thread aborted with unknown exception");
 }
 
 // latest_eligible_pcs is an array of unwind_depth size -> samples will

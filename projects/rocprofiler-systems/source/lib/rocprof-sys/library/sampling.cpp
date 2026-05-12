@@ -3,6 +3,7 @@
 
 #include "library/sampling.hpp"
 #include "common/diagnostic/exception.hpp"
+#include "common/diagnostic/format_exception.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -551,36 +552,47 @@ start_duration_thread()
         auto _end  = _now + std::chrono::nanoseconds{ static_cast<std::uint64_t>(
                                config::get_sampling_duration() * units::sec) };
         auto _func = [_end]() {
-            thread_info::init(true);
-            threading::set_thread_name("omni.samp.dur");
-            get_is_duration_thread() = true;
-            bool _wait               = true;
-            while(_wait)
+            try
             {
-                _wait = false;
-                std::unique_lock<std::mutex> _lk{ get_duration_mutex(), std::defer_lock };
-                if(!_lk.owns_lock()) _lk.lock();
-                get_duration_cv().wait_until(_lk, _end);
-                auto _premature = (std::chrono::steady_clock::now() < _end);
-                auto _finalized = (get_state() >= State::Finalized);
-                if(_premature && !_finalized)
+                thread_info::init(true);
+                threading::set_thread_name("omni.samp.dur");
+                get_is_duration_thread() = true;
+                bool _wait               = true;
+                while(_wait)
                 {
-                    // protect against spurious wakeups
-                    LOG_WARNING("Spurious wakeup of sampling duration thread...");
-                    _wait = true;
+                    _wait = false;
+                    std::unique_lock<std::mutex> _lk{ get_duration_mutex(),
+                                                      std::defer_lock };
+                    if(!_lk.owns_lock()) _lk.lock();
+                    get_duration_cv().wait_until(_lk, _end);
+                    auto _premature = (std::chrono::steady_clock::now() < _end);
+                    auto _finalized = (get_state() >= State::Finalized);
+                    if(_premature && !_finalized)
+                    {
+                        // protect against spurious wakeups
+                        LOG_WARNING("Spurious wakeup of sampling duration thread...");
+                        _wait = true;
+                    }
+                    else if(_finalized)
+                    {
+                        break;
+                    }
+                    else
+                    {
+                        get_duration_disabled().store(true);
+                        LOG_INFO("Sampling duration of {:.6f} seconds has elapsed. "
+                                 "Shutting down sampling...",
+                                 config::get_sampling_duration());
+                        configure(false, 0);
+                    }
                 }
-                else if(_finalized)
-                {
-                    break;
-                }
-                else
-                {
-                    get_duration_disabled().store(true);
-                    LOG_INFO("Sampling duration of {:.6f} seconds has elapsed. "
-                             "Shutting down sampling...",
-                             config::get_sampling_duration());
-                    configure(false, 0);
-                }
+            } catch(const std::exception& e)
+            {
+                LOG_ERROR("sampling-duration thread aborted: {}\n{}", e.what(),
+                          ::rocprofsys::common::diagnostic::format_exception(e));
+            } catch(...)
+            {
+                LOG_ERROR("sampling-duration thread aborted with unknown exception");
             }
         };
 

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/categories.hpp"
+
+#include "common/diagnostic/format_exception.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
 #include "core/constraint.hpp"
@@ -98,13 +100,25 @@ setup()
 
         auto _promise = std::promise<void>();
         std::thread{ [_trace_specs, _trace_stages](std::promise<void>* _prom) {
-                        // ensure all categories are disabled before proceeding
-                        // if a delay is requested
-                        if(_trace_specs.front().delay > 1.0e-3)
-                            disable_categories(config::get_enabled_categories());
-                        _prom->set_value();
-                        for(const auto& itr : _trace_specs)
-                            itr(_trace_stages);
+                        try
+                        {
+                            // ensure all categories are disabled before proceeding
+                            // if a delay is requested
+                            if(_trace_specs.front().delay > 1.0e-3)
+                                disable_categories(config::get_enabled_categories());
+                            _prom->set_value();
+                            for(const auto& itr : _trace_specs)
+                                itr(_trace_stages);
+                        } catch(const std::exception& e)
+                        {
+                            LOG_ERROR(
+                                "categories trace thread aborted: {}\n{}", e.what(),
+                                ::rocprofsys::common::diagnostic::format_exception(e));
+                        } catch(...)
+                        {
+                            LOG_ERROR("categories trace thread aborted with unknown "
+                                      "exception");
+                        }
                     },
                      &_promise }
             .detach();

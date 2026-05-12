@@ -3,6 +3,7 @@
 
 #include "core/trace_cache/post_processor.hpp"
 
+#include "common/diagnostic/format_exception.hpp"
 #include "core/agent_manager.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
@@ -160,9 +161,22 @@ post_processor::run_multithreaded(
         // Capture the callback by value: it holds a shared_ptr to the bar,
         // and bar::on_advance is thread-safe, so concurrent calls are fine.
         processing_threads.emplace_back([this, cfg, &formats, _progress_cb] {
-            const auto _filename =
-                utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
-            process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb);
+            try
+            {
+                const auto _filename =
+                    utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
+                process_buffered_storage(cfg, _filename, formats, m_registry,
+                                         _progress_cb);
+            } catch(const std::exception& e)
+            {
+                LOG_ERROR("post_processor thread (pid={}) aborted: {}\n{}", cfg->_pid,
+                          e.what(),
+                          ::rocprofsys::common::diagnostic::format_exception(e));
+            } catch(...)
+            {
+                LOG_ERROR("post_processor thread (pid={}) aborted with unknown exception",
+                          cfg->_pid);
+            }
         });
     }
 

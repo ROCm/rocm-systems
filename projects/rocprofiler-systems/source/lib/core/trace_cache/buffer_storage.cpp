@@ -4,6 +4,7 @@
 #include "buffer_storage.hpp"
 
 #include "common/diagnostic/exception.hpp"
+#include "common/diagnostic/format_exception.hpp"
 #include "logger/debug.hpp"
 
 #include <memory>
@@ -55,20 +56,30 @@ flush_worker_t::start(const pid_t& current_pid)
     m_worker_synchronization->is_running    = true;
 
     m_flushing_thread = std::make_unique<std::thread>([&]() {
-        LOG_TRACE("Flush worker thread started for pid={}",
-                  m_worker_synchronization->origin_pid);
-        while(m_worker_synchronization->is_running)
+        try
         {
-            m_worker_function(m_ofs, false);
-            std::unique_lock _lock{ m_worker_synchronization->is_running_mutex };
-            m_worker_synchronization->is_running_condition.wait_for(
-                _lock, CACHE_FILE_FLUSH_TIMEOUT,
-                [&]() { return !m_worker_synchronization->is_running; });
-        }
+            LOG_TRACE("Flush worker thread started for pid={}",
+                      m_worker_synchronization->origin_pid);
+            while(m_worker_synchronization->is_running)
+            {
+                m_worker_function(m_ofs, false);
+                std::unique_lock _lock{ m_worker_synchronization->is_running_mutex };
+                m_worker_synchronization->is_running_condition.wait_for(
+                    _lock, CACHE_FILE_FLUSH_TIMEOUT,
+                    [&]() { return !m_worker_synchronization->is_running; });
+            }
 
-        LOG_TRACE("Flush worker thread performing final flush");
-        m_worker_function(m_ofs, true);
-        m_ofs.close();
+            LOG_TRACE("Flush worker thread performing final flush");
+            m_worker_function(m_ofs, true);
+            m_ofs.close();
+        } catch(const std::exception& e)
+        {
+            LOG_ERROR("flush_worker thread aborted: {}\n{}", e.what(),
+                      ::rocprofsys::common::diagnostic::format_exception(e));
+        } catch(...)
+        {
+            LOG_ERROR("flush_worker thread aborted with unknown exception");
+        }
         {
             std::lock_guard _lock{ m_worker_synchronization->exit_finished_mutex };
             m_worker_synchronization->exit_finished = true;
