@@ -52,7 +52,7 @@ system specs.
 Bandwidth and cache POP rows
 ----------------------------
 
-TCP, GL1C, GL2C, and SQC throughput POP values use heuristic ceilings (bytes per
+TCP, GL1, GL2, and SQC throughput POP values use heuristic ceilings (bytes per
 cycle × instance count × clock). They are not tied to a single public RDNA 3.5 table—
 treat Pct of Peak as indicative, not exact.
 
