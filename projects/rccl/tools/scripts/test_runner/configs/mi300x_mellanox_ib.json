@@ -11,6 +11,7 @@
   "env_variables": {
     "HSA_NO_SCRATCH_RECLAIM": "1",
     "NCCL_SOCKET_IFNAME": "eth0,eth1",
+    "NCCL_IB_HCA": "^mlx5_1,mlx5_6",
     "NCCL_DEBUG": "INFO"
   },
   "build_configuration": {
@@ -797,7 +798,10 @@
         {
           "name": "Cast_EnableDisableSched",
           "description": "Toggle schedEnable mid-connection: enabled=1 token, disabled=0 tokens, re-enabled=1 token",
-          "test_filter": "NetIbMPITest.CastEnableDisableSched"
+          "test_filter": "NetIbMPITest.CastEnableDisableSched",
+          "env_variables": {
+            "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "60000000"
+          }
         },
         {
           "name": "Cast_SendRecvMultipleSizes",
@@ -828,7 +832,10 @@
         {
           "name": "Cast_WeightsDistributionOneRound",
           "description": "Two-phase WRR distribution: equal then triangular weights — both exhaust all active tokens after one full round",
-          "test_filter": "NetIbMPITest.CastWeightsDistributionOneRound"
+          "test_filter": "NetIbMPITest.CastWeightsDistributionOneRound",
+          "env_variables": {
+            "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "60000000"
+          }
         },
         {
           "name": "Cast_SchedParmsReflectEnvVars",
@@ -838,12 +845,18 @@
         {
           "name": "Cast_AlternatingWrrNonWrr",
           "description": "Toggle doWrr mid-connection (3×10 sends): WRR consumes tokens in phases 1&3, zero in phase 2",
-          "test_filter": "NetIbMPITest.CastAlternatingWrrNonWrr"
+          "test_filter": "NetIbMPITest.CastAlternatingWrrNonWrr",
+          "env_variables": {
+            "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "60000000"
+          }
         },
         {
           "name": "Cast_EnableDisableSplitData",
           "description": "Toggle splitData mid-connection at threshold boundary: WRR/split path alternates, 1/0/1 tokens consumed",
-          "test_filter": "NetIbMPITest.CastEnableDisableSplitData"
+          "test_filter": "NetIbMPITest.CastEnableDisableSplitData",
+          "env_variables": {
+            "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "60000000"
+          }
         }
       ]
     },
@@ -1262,6 +1275,12 @@
       "name": "NET IB - Stress (2-rank)",
       "description": "Resource exhaustion, connection lifecycle, endurance, bidirectional, GPU stress",
       "config": "net_ib_stress",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Branch Coverage",
+      "description": "Targeted branch-coverage tests: irecv overflow, MR cache ref-count, send-size clamping, null-comm close, setAttr no-op",
+      "config": "net_ib_branch_coverage",
       "enabled": true
     },
     {

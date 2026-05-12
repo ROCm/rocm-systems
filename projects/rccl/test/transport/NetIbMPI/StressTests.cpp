@@ -19,9 +19,8 @@
 //  Group E: Branch-coverage (2-rank)
 // =====================================================================
 
-// E0.  InvalidRecvCount — calls ncclIbIrecv with n > NCCL_NET_IB_MAX_RECVS (8).
-//      Covers the early-return branch at net_ib.cc:2731.
-//      Requires a live recvComm (ready==1); the call must not crash.
+// E0.  InvalidRecvCount — ncclIbIrecv with n > NCCL_NET_IB_MAX_RECVS (8)
+//      must reject the request without crashing on a live recvComm.
 TEST_F(NetIbMPITest, InvalidRecvCount) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
@@ -46,12 +45,9 @@ TEST_F(NetIbMPITest, InvalidRecvCount) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
-// E1.  MrCacheRefCount — registers the same host buffer twice on the same comm.
-//      On the second RegisterMemory call the MR cache finds the range and increments
-//      refs to 2 (ncclIbRegMrDmaBufInternal L2276). The first DeregMr decrements
-//      refs to 1 without freeing (ncclIbDeregMrInternal refs>0 branch). The second
-//      DeregMr decrements to 0 and actually calls wrap_ibv_dereg_mr.
-//      Covers ncclIbDeregMrInternal L2326 "refs > 0" path.
+// E1.  MrCacheRefCount — registers the same host buffer twice on the same
+//      comm: cache hit bumps refs to 2, two Dereg calls bring it back to 0
+//      (covers the refs>0 branch in ncclIbDeregMrInternal).
 TEST_F(NetIbMPITest, MrCacheRefCount) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
@@ -87,9 +83,8 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
-// E2.  SendSizeClamping — sender posts a buffer larger than the receiver's posted size.
-//      Covers the ncclIbIsend L2543 branch: if (size > slots[r].size) size = slots[r].size.
-//      The transfer should complete cleanly; only recv_size bytes are transferred.
+// E2.  SendSizeClamping — sender posts a buffer larger than the receiver's
+//      posted size; isend must clamp to recv_size and complete cleanly.
 TEST_F(NetIbMPITest, SendSizeClamping) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
@@ -131,9 +126,11 @@ TEST_F(NetIbMPITest, SendSizeClamping) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     if (rank == 1) {
-        // Post send with kSendSize > kRecvSize — ncclIbIsend will clamp to kRecvSize
+        // Post send with kSendSize > kRecvSize — ncclIbIsend will clamp to kRecvSize.
+        // PostSendWithRetry already calls FAIL() internally if it exhausts retries;
+        // a redundant ASSERT_NE here would exit rank 1 before MPI_Barrier, leaving
+        // rank 0 hung on WaitForCompletion.
         PostSendWithRetry(cp.sendComm, sendBuf.get(), kSendSize, kTag, sendMh, &req);
-        ASSERT_NE(req, nullptr);
     }
 
     int sizes[1] = {0};
@@ -155,10 +152,8 @@ TEST_F(NetIbMPITest, SendSizeClamping) {
     if (rank == 1 && sendMh) DeregisterMemory(cp.sendComm, sendMh);
 }
 
-// E3.  NullCommClose — closes a NULL send/recv comm pointer.
-//      Covers the ncclIbCloseSend/ncclIbCloseRecv null-guard branch
-//      (net_ib.cc:3063 and 3083: if (comm) {...}).
-//      The API must return ncclSuccess without crashing.
+// E3.  NullCommClose — ncclIbCloseSend/Recv on NULL must return
+//      ncclSuccess without crashing (null-guard branch).
 TEST_F(NetIbMPITest, NullCommClose) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
@@ -202,8 +197,8 @@ TEST_F(NetIbMPITest, TagZeroReuse) {
 }
 
 // E5.  AdaptiveRoutingThresholdBoundary — sizes around AR_THRESHOLD (8192).
-//      When AR is enabled and size > threshold, ncclIbMultiSend adds a
-//      0-byte RDMA_WRITE_WITH_IMM work request (net_ib.cc:2396).
+//      When AR is enabled and size > threshold, ncclIbMultiSend appends a
+//      0-byte RDMA_WRITE_WITH_IMM work request.
 TEST_F(NetIbMPITest, AdaptiveRoutingThresholdBoundary) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
@@ -324,9 +319,9 @@ TEST_F(NetIbMPITest, MixedSizeBarrage) {
 //  Group A: Resource exhaustion (2-rank)
 // =====================================================================
 
-// A2.  FifoPressureSenderFast — receiver deliberately slow, sender in
+// A1.  FifoPressureSenderFast — receiver deliberately slow, sender in
 //      tight loop.  Verifies that isend returns *request==NULL when the
-//      FIFO slot is not ready (backpressure, net_ib.cc:2535).
+//      FIFO slot is not ready (backpressure).
 TEST_F(NetIbMPITest, FifoPressureSenderFast) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
@@ -349,6 +344,10 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
     static constexpr int kMsgs = 50;
     static constexpr int kRecvDelayUs = 200000; // 200ms
 
+    // Both ranks operate in independent loops with only one MPI_Barrier at the end.
+    // ASSERT_ inside these loops would cause one rank to exit before the final barrier,
+    // leaving the other rank hung (deadlock) or waiting up to kStressTimeoutMs per
+    // unmatched recv (long hang). Use EXPECT_ throughout so both ranks reach the barrier.
     if (rank == 0) {
         // Receiver: deliberately slow
         for (int i = 0; i < kMsgs; i++) {
@@ -356,7 +355,7 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
             void* req = nullptr;
             PostSingleRecv(cp.recvComm, buf.get(), sz, /*tag=*/i, mh, &req);
             int rsz = 0;
-            ASSERT_EQ(WaitForCompletion(req, &rsz, kStressTimeoutMs), ncclSuccess);
+            EXPECT_EQ(WaitForCompletion(req, &rsz, kStressTimeoutMs), ncclSuccess);
         }
     } else {
         // Sender: tight loop, count NULL-request returns
@@ -367,18 +366,23 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
             void* req = nullptr;
             int attempts = 0;
             do {
-                ASSERT_EQ(PostSend(cp.sendComm, buf.get(), sz, /*tag=*/i, mh, &req), ncclSuccess);
+                ncclResult_t r = PostSend(cp.sendComm, buf.get(), sz, /*tag=*/i, mh, &req);
+                EXPECT_EQ(r, ncclSuccess);
+                if (r != ncclSuccess) break;
                 if (!req) {
                     nullCount++;
                     usleep(1000); // 1ms
                 }
                 if (++attempts > 100000) {
-                    FAIL() << "PostSend stuck at msg " << i;
+                    ADD_FAILURE() << "PostSend stuck at msg " << i;
+                    break;
                 }
             } while (!req);
 
-            int rsz = 0;
-            ASSERT_EQ(WaitForCompletion(req, &rsz, kStressTimeoutMs), ncclSuccess);
+            if (req) {
+                int rsz = 0;
+                EXPECT_EQ(WaitForCompletion(req, &rsz, kStressTimeoutMs), ncclSuccess);
+            }
         }
         // Backpressure must have been observed at least once
         EXPECT_GT(nullCount, 0) << "Expected at least one NULL-request (FIFO backpressure)";
@@ -386,7 +390,7 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
-// A1.  RequestSlotExhaustion — post NCCL_NET_MAX_REQUESTS (32) irecvs,
+// A2.  RequestSlotExhaustion — post NCCL_NET_MAX_REQUESTS (32) irecvs,
 //      then drain all via matching sends, then verify slots are recycled.
 TEST_F(NetIbMPITest, RequestSlotExhaustion) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
@@ -546,32 +550,56 @@ TEST_F(NetIbMPITest, ConcurrentMultiConnectionStress) {
         void* mh  = nullptr;
     };
     std::vector<ConnInfo> conns(kNumConns);
+    // Track per-connection setup success so the transfer loop can skip broken
+    // connections without rank skew on MPI_Barrier counts.
+    std::vector<bool> conn_ok(kNumConns, false);
 
-    // Setup all connections with unique MPI tags
+    // Setup all connections with unique MPI tags.
+    // Use EXPECT_ (non-fatal) throughout so both ranks always reach MPI_Barrier.
+    // On rank 0 failure we still call MPI_Send (with a zeroed handle) to unblock
+    // rank 1 which is waiting on MPI_Recv — ASSERT_ before MPI_Send would leave
+    // rank 1 hung indefinitely.
     for (int c = 0; c < kNumConns; c++) {
+        bool ok = true;
         if (rank == 0) {
-            ASSERT_EQ(CreateListenComm(0, &conns[c].pair.handle, &conns[c].pair.listenComm), ncclSuccess);
+            ncclResult_t r = CreateListenComm(0, &conns[c].pair.handle, &conns[c].pair.listenComm);
+            EXPECT_EQ(r, ncclSuccess) << "CreateListenComm failed for conn " << c;
+            ok = (r == ncclSuccess && conns[c].pair.listenComm != nullptr);
+            // Always send handle to unblock rank 1; zeroed handle causes ConnectToRemote
+            // to fail on rank 1 so both ranks end up with ok=false consistently.
+            if (!ok) memset(&conns[c].pair.handle, 0, sizeof(conns[c].pair.handle));
             MPI_Send(&conns[c].pair.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 1, 500 + c, MPI_COMM_WORLD);
-            for (int a = 0; a < kMaxRetryAttempts && !conns[c].pair.recvComm; a++) {
-                AcceptConnection(conns[c].pair.listenComm, &conns[c].pair.recvComm);
-                if (!conns[c].pair.recvComm) usleep(kPollIntervalUs);
+            if (ok) {
+                for (int a = 0; a < kMaxRetryAttempts && !conns[c].pair.recvComm; a++) {
+                    AcceptConnection(conns[c].pair.listenComm, &conns[c].pair.recvComm);
+                    if (!conns[c].pair.recvComm) usleep(kPollIntervalUs);
+                }
+                EXPECT_NE(conns[c].pair.recvComm, nullptr) << "Accept failed for conn " << c;
+                ok = (conns[c].pair.recvComm != nullptr);
             }
-            ASSERT_NE(conns[c].pair.recvComm, nullptr);
         } else {
             MPI_Recv(&conns[c].pair.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 0, 500 + c, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             for (int a = 0; a < kMaxRetryAttempts && !conns[c].pair.sendComm; a++) {
                 ConnectToRemote(0, &conns[c].pair.handle, &conns[c].pair.sendComm);
                 if (!conns[c].pair.sendComm) usleep(kPollIntervalUs);
             }
-            ASSERT_NE(conns[c].pair.sendComm, nullptr);
+            EXPECT_NE(conns[c].pair.sendComm, nullptr) << "Connect failed for conn " << c;
+            ok = (conns[c].pair.sendComm != nullptr);
         }
         MPI_Barrier(MPI_COMM_WORLD);
 
-        // Allocate + register buffer per connection
-        conns[c].buf = malloc(sz);
-        ASSERT_NE(conns[c].buf, nullptr);
-        void* comm = (rank == 0) ? conns[c].pair.recvComm : conns[c].pair.sendComm;
-        ASSERT_EQ(RegisterMemory(comm, conns[c].buf, sz, NCCL_PTR_HOST, &conns[c].mh), ncclSuccess);
+        if (ok) {
+            conns[c].buf = malloc(sz);
+            EXPECT_NE(conns[c].buf, nullptr) << "malloc failed for conn " << c;
+            ok = (conns[c].buf != nullptr);
+        }
+        if (ok) {
+            void* comm = (rank == 0) ? conns[c].pair.recvComm : conns[c].pair.sendComm;
+            EXPECT_EQ(RegisterMemory(comm, conns[c].buf, sz, NCCL_PTR_HOST, &conns[c].mh), ncclSuccess)
+                << "RegisterMemory failed for conn " << c;
+            ok = (conns[c].mh != nullptr);
+        }
+        conn_ok[c] = ok;
     }
 
     auto cleanup = makeScopeGuard([&]() {
@@ -588,11 +616,18 @@ TEST_F(NetIbMPITest, ConcurrentMultiConnectionStress) {
         }
     });
 
-    // Transfer on all 4 connections per iteration
+    // Transfer on all 4 connections per iteration.
+    // Skip connections that failed during setup; both ranks must take the same
+    // branch to keep MPI_Barrier counts consistent (DoSendRecv has one barrier,
+    // the explicit MPI_Barrier below substitutes it when skipping).
     for (int iter = 0; iter < kIters; iter++) {
         for (int c = 0; c < kNumConns; c++) {
             int tag  = iter * kNumConns + c;
             int seed = tag + 1000;
+            if (!conn_ok[c]) {
+                MPI_Barrier(MPI_COMM_WORLD);  // matches the barrier inside DoSendRecv
+                continue;
+            }
             DoSendRecv(conns[c].pair.sendComm, conns[c].pair.recvComm,
                        conns[c].buf, conns[c].buf, sz,
                        tag, conns[c].mh, conns[c].mh, seed);
@@ -600,7 +635,7 @@ TEST_F(NetIbMPITest, ConcurrentMultiConnectionStress) {
     }
 }
 
-// C3.  ConnectionChurnUnderLoad — 1000 connect→transfer→close cycles,
+// C2.  ConnectionChurnUnderLoad — 1000 connect→transfer→close cycles,
 //      with RDMA resource leak detection.
 TEST_F(NetIbMPITest, ConnectionChurnUnderLoad) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
@@ -625,8 +660,9 @@ TEST_F(NetIbMPITest, ConnectionChurnUnderLoad) {
         static constexpr int kWarmupTag = 599;
         ConnectionPair wcp;
         if (rank == 0) {
-            ASSERT_EQ(CreateListenComm(0, &wcp.handle, &wcp.listenComm), ncclSuccess);
+            ncclResult_t r = CreateListenComm(0, &wcp.handle, &wcp.listenComm);
             MPI_Send(&wcp.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 1, kWarmupTag, MPI_COMM_WORLD);
+            ASSERT_EQ(r, ncclSuccess) << "Warmup CreateListenComm failed";
             for (int a = 0; a < kMaxRetryAttempts && !wcp.recvComm; a++) {
                 AcceptConnection(wcp.listenComm, &wcp.recvComm);
                 if (!wcp.recvComm) usleep(kPollIntervalUs);
@@ -661,8 +697,9 @@ TEST_F(NetIbMPITest, ConnectionChurnUnderLoad) {
         // Setup connection
         ConnectionPair cp;
         if (rank == 0) {
-            ASSERT_EQ(CreateListenComm(0, &cp.handle, &cp.listenComm), ncclSuccess);
+            ncclResult_t r = CreateListenComm(0, &cp.handle, &cp.listenComm);
             MPI_Send(&cp.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 1, 600 + (iter % 1000), MPI_COMM_WORLD);
+            ASSERT_EQ(r, ncclSuccess) << "CreateListenComm failed at iter " << iter;
             for (int a = 0; a < kMaxRetryAttempts && !cp.recvComm; a++) {
                 AcceptConnection(cp.listenComm, &cp.recvComm);
                 if (!cp.recvComm) usleep(kPollIntervalUs);
@@ -709,7 +746,7 @@ TEST_F(NetIbMPITest, ConnectionChurnUnderLoad) {
     AssertNoRdmaLeaks(before, after, "final");
 }
 
-// C2.  ConnectionBatchCreateDestroy — create 10 connections, transfer on
+// C3.  ConnectionBatchCreateDestroy — create 10 connections, transfer on
 //      all, close all, repeat 100 times (1000 lifecycles total).
 //      RDMA checkpoints at batches 25, 50, 75, 100.
 TEST_F(NetIbMPITest, ConnectionBatchCreateDestroy) {
@@ -732,8 +769,9 @@ TEST_F(NetIbMPITest, ConnectionBatchCreateDestroy) {
         static constexpr int kWarmupTag = 699;
         ConnectionPair wcp;
         if (rank == 0) {
-            ASSERT_EQ(CreateListenComm(0, &wcp.handle, &wcp.listenComm), ncclSuccess);
+            ncclResult_t r = CreateListenComm(0, &wcp.handle, &wcp.listenComm);
             MPI_Send(&wcp.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 1, kWarmupTag, MPI_COMM_WORLD);
+            ASSERT_EQ(r, ncclSuccess) << "Warmup CreateListenComm failed";
             for (int a = 0; a < kMaxRetryAttempts && !wcp.recvComm; a++) {
                 AcceptConnection(wcp.listenComm, &wcp.recvComm);
                 if (!wcp.recvComm) usleep(kPollIntervalUs);
@@ -775,8 +813,9 @@ TEST_F(NetIbMPITest, ConnectionBatchCreateDestroy) {
         for (int c = 0; c < kPerBatch; c++) {
             int mpiTag = 700 + batch * kPerBatch + c;
             if (rank == 0) {
-                ASSERT_EQ(CreateListenComm(0, &conns[c].cp.handle, &conns[c].cp.listenComm), ncclSuccess);
+                ncclResult_t r = CreateListenComm(0, &conns[c].cp.handle, &conns[c].cp.listenComm);
                 MPI_Send(&conns[c].cp.handle, sizeof(ncclNetHandle_t), MPI_BYTE, 1, mpiTag, MPI_COMM_WORLD);
+                ASSERT_EQ(r, ncclSuccess) << "CreateListenComm failed at batch " << batch << " conn " << c;
                 for (int a = 0; a < kMaxRetryAttempts && !conns[c].cp.recvComm; a++) {
                     AcceptConnection(conns[c].cp.listenComm, &conns[c].cp.recvComm);
                     if (!conns[c].cp.recvComm) usleep(kPollIntervalUs);
@@ -836,7 +875,7 @@ TEST_F(NetIbMPITest, ConnectionBatchCreateDestroy) {
 // =====================================================================
 
 // D1.  MultiQpSplitDataStress — QPS=8, SPLIT=1, alignment boundary sizes.
-//      Exercises the split logic at net_ib.cc:2436-2441.
+//      Exercises the per-QP split logic.
 TEST_F(NetIbMPITest, MultiQpSplitDataStress) {
     const char* qps  = getenv("NCCL_IB_QPS_PER_CONNECTION");
     const char* split = getenv("NCCL_IB_SPLIT_DATA_ON_QPS");
@@ -881,8 +920,7 @@ TEST_F(NetIbMPITest, MultiQpSplitDataStress) {
     }
 }
 
-// D2.  MultiQpNoSplitStress — QPS=4, SPLIT=0.
-//      Exercises the nDataQps path (net_ib.cc:2417).
+// D2.  MultiQpNoSplitStress — QPS=4, SPLIT=0; exercises the nDataQps path.
 TEST_F(NetIbMPITest, MultiQpNoSplitStress) {
     const char* qps  = getenv("NCCL_IB_QPS_PER_CONNECTION");
     const char* split = getenv("NCCL_IB_SPLIT_DATA_ON_QPS");
@@ -928,6 +966,8 @@ TEST_F(NetIbMPITest, MultiQpNoSplitStress) {
 
 // =====================================================================
 //  Group B: Multi-rank patterns (4 ranks)
+//  B1 FanInStress, B2 FanOutStress, B3 AllToAllStress,
+//  B4 MultiQpFanIn, B5 BidirectionalMultiRank, B6 LongRunningMultiRank
 // =====================================================================
 
 // B1.  FanInStress — ranks 1,2,3 each send to rank 0, 100 iterations.
@@ -1106,7 +1146,7 @@ TEST_F(NetIbMPITest, AllToAllStress) {
     for (auto& c : conns) CloseDirectedConnection(c);
 }
 
-// D3.  MultiQpFanIn — fan-in 3→1 with QPS=4, SPLIT=1.
+// B4.  MultiQpFanIn — fan-in 3→1 with QPS=4, SPLIT=1.
 TEST_F(NetIbMPITest, MultiQpFanIn) {
     const char* qps  = getenv("NCCL_IB_QPS_PER_CONNECTION");
     const char* split = getenv("NCCL_IB_SPLIT_DATA_ON_QPS");
@@ -1170,7 +1210,7 @@ TEST_F(NetIbMPITest, MultiQpFanIn) {
     for (auto& c : conns) CloseDirectedConnection(c);
 }
 
-// G2.  BidirectionalMultiRank — all pairs bidirectional, 4 ranks, 50 iters.
+// B5.  BidirectionalMultiRank — all pairs bidirectional, 4 ranks, 50 iters.
 TEST_F(NetIbMPITest, BidirectionalMultiRank) {
     ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
@@ -1230,7 +1270,7 @@ TEST_F(NetIbMPITest, BidirectionalMultiRank) {
     for (auto& c : conns) CloseDirectedConnection(c);
 }
 
-// F2.  LongRunningMultiRank — fan-in 3→1, 1000 iterations, RDMA checkpoints.
+// B6.  LongRunningMultiRank — fan-in 3→1, 1000 iterations, RDMA checkpoints.
 TEST_F(NetIbMPITest, LongRunningMultiRank) {
     ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));
@@ -1447,8 +1487,11 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
             PostSendWithRetry(cp.sendComm, devBuf, sz, /*tag=*/cycle, mh, &req);
         }
 
+        // Use EXPECT_ (non-fatal) so both ranks always reach MPI_Barrier.
+        // ASSERT_ here would exit the failing rank before the barrier, leaving
+        // the other rank hung indefinitely.
         int rsz = 0;
-        ASSERT_EQ(WaitForCompletion(req, &rsz, kLargeTransferTimeoutMs), ncclSuccess);
+        EXPECT_EQ(WaitForCompletion(req, &rsz, kLargeTransferTimeoutMs), ncclSuccess);
         MPI_Barrier(MPI_COMM_WORLD);
 
         // Flush on receiver
@@ -1458,11 +1501,11 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
             ncclResult_t fr = FlushRecv(cp.recvComm, 1, &devBuf, &flushSz, &mh, &flushReq);
             if (fr == ncclSuccess && flushReq) {
                 int fsz = 0;
-                ASSERT_EQ(WaitForCompletion(flushReq, &fsz, kLargeTransferTimeoutMs), ncclSuccess);
+                EXPECT_EQ(WaitForCompletion(flushReq, &fsz, kLargeTransferTimeoutMs), ncclSuccess);
             }
             // Verify
             bool ok = verifyBufferData<uint8_t>(devBuf, sz, makeBytePattern(cycle));
-            ASSERT_TRUE(ok) << "GPU data mismatch at cycle " << cycle;
+            EXPECT_TRUE(ok) << "GPU data mismatch at cycle " << cycle;
         }
         MPI_Barrier(MPI_COMM_WORLD);
     }
@@ -1532,6 +1575,8 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
 // E8.  SetNetAttrNoOp — calls ncclIbSetNetAttr (the last entry in ncclNet_t).
 //      The function is a pure no-op (two (void) casts + return ncclSuccess).
 //      All it needs is a call to reach its body; FNDA shows 0 hits without this test.
+//      Placed after Group J (not adjacent to E0-E7) because it was added in a later
+//      coverage iteration; the test number is kept to preserve git blame continuity.
 TEST_F(NetIbMPITest, SetNetAttrNoOp) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit));

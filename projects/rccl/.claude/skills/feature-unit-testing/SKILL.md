@@ -69,17 +69,19 @@ calculate the realistic branch ceiling for your cluster before committing to thi
 
 ---
 
-## Test Plan as Feature Contract
+## Domain 1: Requirements & Planning
 
-Write the plan **before** implementation. It must answer:
-- What scenarios are covered, what are explicitly out of scope
-- Which edge cases and error paths are targeted
-- Hardware dependencies (RoCE vs IB, GDR, AINIC, QP count, cluster)
-- Which coverage tier is the merge bar
+Before writing any test code, create a test plan that defines:
+
+1. **Feature scope** — which internal API surface is being tested, what is explicitly out of scope
+2. **Scenario inventory** — happy path, error paths, edge cases, concurrency patterns
+3. **Hardware scope** — which NIC model, how many ports, GDR/DMA-buf availability, single-node
+   vs cross-host. Discovering that a test requires unavailable hardware after writing it wastes effort.
+4. **Coverage tier** — agree on a branch coverage target (Basic/Standard/Thorough/Critical) as
+   the merge acceptance criterion. This is the "red" phase in TDD: the bar is set before code exists.
 
 The plan becomes the PR description's Test Plan section — reviewable alongside code.
-Hardware scope assessment at planning time prevents discovering a test requires
-unavailable hardware only after it is written.
+It is a planning artifact — do not commit it as a file; keep it in the PR body.
 
 ---
 
@@ -164,6 +166,35 @@ EXPECT_EQ(PostRecv(…), ncclSuccess);
 // …
 MPI_Barrier(MPI_COMM_WORLD);  // unconditional — always reached
 ```
+
+**Timeout in poll loops (never spin forever):**
+```cpp
+// Poll loops that wait for async completion MUST have a timeout.
+// An infinite loop masks the real bug (e.g. unroutable NIC) as "test hung".
+auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+while (!comm && std::chrono::steady_clock::now() < deadline) {
+    ncclResult_t r = AcceptConnection(listenComm, &comm);
+    if (r != ncclSuccess) break;
+}
+if (!comm) { /* handle timeout — GTEST_SKIP or fail with diagnostic */ }
+```
+Track the return value of each poll iteration separately from the NULL-comm check.
+A loop that only checks `!comm` cannot distinguish "still in progress" from "API returned
+an error 10 iterations ago and will never succeed".
+
+**GTEST_SKIP() synchronization across ranks:**
+```cpp
+// When one rank detects a condition requiring SKIP (e.g. QP connect failed),
+// it MUST broadcast this to all ranks BEFORE calling GTEST_SKIP().
+// GTEST_SKIP() does a return — if rank 0 returns, rank 1 hangs on MPI_Recv.
+int skipFlag = (connectFailed ? 1 : 0);
+MPI_Allreduce(MPI_IN_PLACE, &skipFlag, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+if (skipFlag) {
+    GTEST_SKIP() << "QP connect failed on at least one rank";
+}
+```
+Without the Allreduce, a unilateral `GTEST_SKIP()` in one rank leaves the other
+rank blocked forever at its next MPI call or poll loop.
 
 ---
 
@@ -252,13 +283,13 @@ A branch is covered only when **both sides** of a conditional have been exercise
 if (result != ncclSuccess) goto fail;   // ← "fail" branch: count = 0
 ```
 
-**Real numbers from net_ib.cc** (same binary, same test run):
+**Example from net_ib.cc** (single MI300x node, Mellanox CX-7 — numbers will differ on other hardware):
 
 ```
 Metric          Before stress tests    After 14 stress tests
 ────────────────────────────────────────────────────────────
-Line coverage       71.7%                  71.9%   Δ +0.2 pp
-Branch coverage     40.6%                  41.6%   Δ +1.0 pp
+Line coverage       ~72%                   ~72%    Δ +0.2 pp
+Branch coverage     ~41%                   ~42%    Δ +1.0 pp
 ```
 
 Line coverage looks healthy at 71%. Branch coverage at 40% reveals that roughly
@@ -294,19 +325,9 @@ BRDA:1234,0,1,0  ← block 0, branch 1: taken 0 times ← THIS IS THE GAP
 A line with `DA` count > 0 but a `BRDA` count of 0 on one arm is the exact pattern
 of "line covered, branch not covered" — the most common source of false confidence.
 
-**Agreement on branch coverage tier at planning time** (not line coverage):
-
-| Tier | Branch coverage | Notes |
-|------|:--------------:|-------|
-| Basic | ≥ 35% | Minimal — only happy path exercised |
-| Standard | ≥ 50% | Main error paths and env-var configs covered |
-| Thorough | ≥ 65% | Fault injection required to proceed further |
-| Critical | ≥ 80% | Reserved for safety-critical subsystems |
-
-Branch coverage ceilings are lower than line ceilings. ~155 branches in
-`ncclIbConnect`/`ncclIbAccept` state machine require cross-host runs; ~25 require GDR
-hardware. Establish a **realistic ceiling** (branches reachable on your hardware) before
-setting a target — otherwise the target is unachievable by design.
+Agree on a branch coverage tier at planning time (see *Coverage Acceptance Tiers* above).
+Branch coverage ceilings are hardware-dependent — establish a **realistic ceiling**
+(branches reachable on your hardware) before setting a target.
 
 ---
 
@@ -366,23 +387,46 @@ Classify every uncovered branch before deciding whether to test it:
 **Ceiling calculation:** count only Trivial + Structural (with infra) + Fault injection.
 Never include Dead branches in projected delta.
 
-**What moves coverage in net_ib.cc (measured):**
+**What moves coverage in net_ib.cc (measured on one cluster — verify on yours):**
 - Multi-QP split (`NCCL_IB_SPLIT_DATA_ON_QPS=1`) — split alignment branches, QP distribution
 - MR cache stress (many `regMr`/`deregMr` cycles) — binary-search insert/expand/deref
 - Shuffled multi-recv (`PostRecv(n=8)` + non-FIFO send order) — FIFO slot scan for r > 0
 
-**Structural ceiling without special infra (~155 branches):** `ncclIbConnect`/`ncclIbAccept`
-state machine — only reachable when `ncclSocketConnect` returns before socket ready.
-On loopback this never happens. Requires cross-host (`srun -N 2`) or `tc qdisc netem`.
+**Structural ceiling without special infra:** `ncclIbConnect`/`ncclIbAccept`
+state machine branches — only reachable when `ncclSocketConnect` returns before socket
+ready. On loopback this never happens. Requires cross-host (`srun -N 2`) or `tc qdisc netem`.
+The exact count depends on the source version; use BRDA analysis to find these in your build.
 
 ---
 
 ## Hardware Capability Gating
 
+**Env-var gating:**
 ```cpp
 // Graceful SKIP (not FAIL) when hardware feature absent
 if (!getenv("NCCL_IB_GDR_LEVEL") || atoi(getenv("NCCL_IB_GDR_LEVEL")) == 0)
     GTEST_SKIP() << "GDR not enabled on this node";
+```
+
+**Network topology gating (routable GID check):**
+
+A NIC with only link-local GIDs (`fe80::`) or all-zero GIDs will pass `ibv_modify_qp`
+INIT→RTR without error — RoCE QP setup does not validate routing. But RDMA packets
+are silently dropped cross-node: no CQE, no error, just a timeout. This is a common
+source of "recv timed out" failures that look like bugs but are hardware topology.
+
+Gate on routable GIDs by reading `/sys/class/infiniband/<dev>/ports/1/gids`:
+```cpp
+// Check that the NIC has at least one routable GID (IPv4-mapped or global IPv6).
+// Skip test if the NIC can set up QPs but cannot actually deliver RDMA traffic.
+static bool HasRoutableGid(const char* devName) {
+    // Read /sys/class/infiniband/<devName>/ports/1/gids/<index>
+    // A GID is routable if it is NOT all-zero and NOT fe80:: (link-local).
+    // IPv4-mapped: 0000:0000:0000:0000:0000:ffff:xxxx:xxxx — routable.
+    ...
+}
+if (!HasRoutableGid(props.name))
+    GTEST_SKIP() << devName << " has no routable GID (link-local only)";
 ```
 
 Makes the same test suite portable across clusters. Hardware-specific gaps are
@@ -409,23 +453,32 @@ expected error codes. AI's highest value is at requirements and gap-analysis pha
 
 ## MPI + SLURM Execution (this codebase)
 
+MPI/SLURM flags are **cluster-specific** — interface names, MCA parameters, GPU resource
+requests, and HPC-X paths differ across environments. The example below is a template;
+adapt to your cluster.
+
+**Reference scripts** (actual working configurations):
+- `test/transport/NetIbMPI/configs/` — runner configs per cluster/NIC combination
+- Build & test runner scripts used during development (check `~/run_*.sh` on the node)
+
 ```bash
-srun --nodelist=<NODE> --gres=gpu:<N> \
-  mpirun -np <N> --oversubscribe \
-  --mca plm_rsh_agent srun \
-  --mca oob_tcp_if_include eno8303 \
-  --mca btl_tcp_if_include eno8303 \
-  --mca btl ^openib \
+# Template — adapt interface, MCA, and path values to your cluster
+sbatch --nodes=2 --ntasks-per-node=1 --exclusive --time=00:10:00 \
+  --wrap='mpirun -np 2 --host "$NODE1,$NODE2" \
+  --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include <IFACE> \
+  --mca coll_hcoll_enable 0 --mca coll_ucc_enable 0 \
   --bind-to none \
-  -x LLVM_PROFILE_FILE=/path/to/%p.profraw \
   -x LD_LIBRARY_PATH=<build>:/opt/rocm/lib \
-  <build>/test/rccl-UnitTestsMPI --gtest_filter='NetIbMPITest.X'
+  -x LLVM_PROFILE_FILE=/path/to/%p.profraw \
+  <build>/test/rccl-UnitTestsMPI --gtest_filter="NetIbMPITest.X"'
 ```
 
-- `--gres=gpu:N` **required** — without it `/dev/kfd` absent, HIP fails, tests report SKIPPED
+- Interface name (`<IFACE>`) varies: `eth0`, `eno8303`, etc. — check `ip link` on the node
+- `--gres=gpu:N` is required only for tests that use GPU/HIP; net-ib MPI transport tests
+  do not need it — they test the IB verbs layer directly
 - `%p` in `LLVM_PROFILE_FILE` → one `.profraw` per MPI rank
-- `--mca plm_rsh_agent srun` replaces SSH for process launch on SLURM nodes
-- `--mca btl ^openib` disables legacy OpenMPI IB verbs (use TCP for MPI control plane)
+- `--mca pml ob1 --mca btl tcp,self` — use TCP for MPI control plane, not IB verbs
+- HPC-X paths (`OPAL_PREFIX`, `LD_PRELOAD` for UCX) depend on the installed version
 
 ### Background builds and cron monitoring
 
@@ -436,12 +489,14 @@ Then set a `CronCreate` job to poll for completion.
 ```bash
 # 1. Submit build as sbatch, output to NFS log
 BUILDLOG=<build_dir>/build_$(date +%Y%m%d_%H%M%S).log
-sbatch --nodelist=<NODE> --gres=gpu:1 --cpus-per-task=64 \
+sbatch --nodelist=<NODE> --cpus-per-task=64 \
   --output="$BUILDLOG" \
   --wrap='cd <build_dir> && cmake --build . --target rccl-UnitTestsMPI -- -j64'
 # → prints "Submitted batch job <JOBID>"
+```
 
-# 2. Create cron to monitor (every 2 min)
+Then create a Claude `CronCreate` tool call (not a shell command) to monitor:
+```
 CronCreate(
   cron="*/2 * * * *",
   prompt="Check job <JOBID>: run squeue --me. If gone, read last 30 lines of $BUILDLOG
@@ -449,9 +504,9 @@ CronCreate(
           'still building, N min elapsed' silently.",
   recurring=true
 )
-
-# 3. When done, CronDelete the monitoring job
 ```
+
+When the job completes, `CronDelete` the monitoring job.
 
 **Always specify `-j64` (or `-- -j64` after `cmake --build`)** — SLURM allocates 1 CPU by
 default; without `--cpus-per-task=64` and `-j64`, `$(nproc)` returns 1 and the build
@@ -459,9 +514,10 @@ serialises. The `-- -j64` form passes the flag through cmake to the underlying m
 
 **Same pattern for test runs** — any `mpirun`/`srun` that takes > 30 s:
 ```bash
-sbatch --nodelist=<NODE> --gres=gpu:<N> --cpus-per-task=8 \
+sbatch --nodes=2 --ntasks-per-node=1 --exclusive --time=00:10:00 \
   --output=<logfile> \
-  --wrap='mpirun -np <N> ... rccl-UnitTestsMPI --gtest_filter=...'
+  --wrap='mpirun -np 2 ... rccl-UnitTestsMPI --gtest_filter=...'
+# Add --gres=gpu:<N> only for GPU-using tests.
 ```
 
 ---
@@ -473,13 +529,14 @@ sbatch --nodelist=<NODE> --gres=gpu:<N> --cpus-per-task=8 \
 | Assume branch uncovered without reading BRDA | Write redundant test | Check `count` in lcov first |
 | `ASSERT_NE(req, nullptr)` after `isend` | Spurious failures | Use retry loop; NULL is normal |
 | `ASSERT_` before `MPI_Barrier` in multi-rank helper | Deadlock on failure | `EXPECT_` + unconditional barrier |
-| Forget `--gres=gpu:N` in srun | All tests SKIPPED silently | Always include GPU resource request |
+| Forget `--gres=gpu:N` in srun (GPU tests) | GPU tests SKIPPED silently | Include GPU resource request for HIP-using tests; net-ib MPI tests don't need it |
 | Mix profraws from different builds | Corrupt coverage data | One build dir per coverage run |
 | Wrong binary path in srun/mpirun | "No such file" on remote node | Binary is in `build/test/`, not `build/`; NFS not mounted on all nodes |
 | `llvm-profdata` version mismatch | "unsupported profile format" | Use `/opt/rocm-X.Y.Z/lib/llvm/bin/llvm-profdata` matching the compiler |
 | Run tests expecting to cover already-covered paths | +0 delta, wasted effort | Check BRDA count field before writing — if >0, path is already covered |
 | Count structural/dead branches in projected delta | Overestimate ceiling | Classify before projecting |
 | Read line number without source context | Wrong technique chosen | Always read ±10 lines |
+| `GTEST_SKIP()` in one rank without MPI sync | Other rank hangs at next barrier/recv | `MPI_Allreduce` a skip flag across all ranks before any `GTEST_SKIP()` |
 | Write tests before test plan | No merge criterion | Plan first, including hardware scope |
 
 ---
@@ -504,44 +561,55 @@ sbatch --nodelist=<NODE> --gres=gpu:<N> --cpus-per-task=8 \
 
 Updated after each testing iteration. Add new patterns and anti-patterns here as they emerge.
 
-**Current baseline** (2026-05-07, `build_debug_fault_inject`, net_ib.cc, 1821 lcov branches excluding exception pseudobranches):
+**Coverage numbers below are approximate.** Exact values depend on hardware (NIC model,
+number of ports, GDR/DMA-buf support), cluster topology (single-node loopback vs cross-host),
+compiler version (affects branch count — C++ exception pseudobranches inflate the denominator),
+and which env-var combinations were exercised. Re-measure on your hardware; do not treat
+these numbers as universal targets.
 
-| Milestone | Branch | Line | Notes |
-|-----------|-------:|-----:|-------|
-| Before stress tests | 40.6% (740/1821) | 71.7% | 18 GeneralTests |
-| After 14 stress tests | 41.6% (757/1821) | 71.9% | +17 branches |
-| After MultiRecv (standalone) | ~42.5% (774/1821) | — | nreqs>1 path covered: BRDA:2387,0,1,255 |
-| After SendSizeClamping (E2) | 42.5% (773+1=774/1821) | — | BRDA:2544,0,0 — size clamping |
-| After NullCommClose (E3) | 42.6% (776/1821) | 72.7% | BRDA:3064,3084,3114 — NULL comm guards |
-| After SetNetAttrNoOp (E5) | 42.6% (776/1821) | 72.9% | FNDA:2 ncclIbSetNetAttr — 0 branch delta |
-| After NCCL_IB_SL=2 + NCCL_IB_TC=5 | 42.7% (778/1821) | — | BRDA:1716,0,0 + 1717,0,0 |
-| After tc netem delay 200ms (loopback) | 42.8% (780/1821) | — | BRDA:1566,0,0 (SendDevList reentry) |
-| After NCCL_IB_ECE_ENABLE=0 | 42.9% (781/1821) | — | BRDA:1652,0,1 — ECE disabled path |
-| After NCCL_IB_MERGE_VFS=0 | 43.0% (783/1821) | — | BRDA:492,0,1 + 512,0,1 — VFS merge disabled |
-| After RCCL_FORCE_ENABLE_DMABUF=1 | 43.8% (797/1821) | 74.1% | misc init branches |
-| After 4-rank loopback (k13-41 single node) | 43.88% (799/1821) | 74.4% | FanIn/FanOut/AllToAll/Bidirectional/LongRunning |
-| After env-var batch 2 (RELAXED_ORDERING, INLINE, TIMEOUT, FIFO_TC, AR=0, HCA, DISABLE) | **44.54% (811/1821)** | **74.5%** | +14 branches, +8 lines |
+**Approximate baseline progression** (net_ib.cc, ~1800 lcov branches, single MI300x node with Mellanox CX-7):
 
-**Total tests in StressTests.cpp: 27** (14 stress + 13 branch-coverage)
+| Phase | Branch (approx) | Line (approx) | What moved the needle |
+|-------|:---------------:|:--------------:|----------------------|
+| GeneralTests only | ~40% | ~72% | 18 basic functional tests |
+| + 14 stress tests | ~42% | ~72% | Resource churn, multi-connection, bidirectional |
+| + branch-coverage tests | ~43% | ~73% | Targeted BRDA gaps: size clamping, NULL comm, nreqs>1 |
+| + env-var sweeps | ~44–45% | ~74–75% | MERGE_VFS, ECE, SL/TC, DMABUF, RELAXED_ORDERING, etc. |
+| + multi-rank (4-rank loopback) | ~44–45% | ~74–75% | FanIn/FanOut/AllToAll — diminishing returns on loopback |
 
-**Reference files on k13-41:** `~/coverage/dmabuf/with_dmabuf_netib.lcov.info` — current best.
+**Total tests:** ~27 in StressTests.cpp (14 stress + 13 branch-coverage) + GeneralTests.
 
-**Note on denominators**: genhtml `--branch-coverage` shows 1821 (exception pseudobranches excluded); raw lcov export has 1954. Use consistent tool.
+**Note on denominators**: genhtml `--branch-coverage` shows ~1821 branches (exception
+pseudobranches excluded); raw `llvm-cov export` shows ~1954. Use one tool consistently
+within a comparison — mixing denominators makes deltas meaningless.
 
-**Resolved puzzle** (documented 2026-05-07): `BRDA:2387,0,1` (nreqs>1 in `ncclIbMultiSend`) showed 0 in `full_combined.profdata` because that profdata was built from runs that didn't include a proper `MultiRecv` execution. Running `MultiRecv` standalone showed `BRDA:2387,0,1,255`. The branch IS covered — the old profdata was incomplete.
+**Resolved puzzle**: Always verify BRDA counts against a profdata that actually includes the
+relevant test execution. A branch showing `count=0` may just mean the profdata was built
+from an incomplete run — not that the branch is uncovered.
 
-**Coverage ceiling analysis** (1821 total branches, 797 covered):
-- ~30 uncovered: State machine mid-transitions (`ncclIbConnect` L1567,1569,1571; `ncclIbAccept` L1881,1883,1885) — require real cross-host run or `tc netem` on recv path
-- ~100 uncovered: RoCE/GID selection paths (L408-479) — require RoCE hardware  
-- ~50 uncovered: GDR/DMA-buf paths (L2035-2177) — require GDR kernel module
-- ~30 uncovered: WC error / fatal-error paths (L2916,2921,2968) — require LD_PRELOAD shim
-- ~600 uncovered: NCCLCHECK error fallback branches — require injected failures
-- Realistic ceiling without LD_PRELOAD or cross-host or GDR: **~44-45%**
+### Hardware-dependent coverage ceiling
 
-**Env-var technique summary** — run existing tests with these env vars to cover new branches:
-- `NCCL_IB_SL=N NCCL_IB_TC=N` — covers ternary in ncclIbConnect L1715-1716
-- `NCCL_IB_ECE_ENABLE=0` — covers ECE disabled path in connect loop
-- `NCCL_IB_MERGE_VFS=0` — covers VFS merge disabled paths in init
-- `RCCL_FORCE_ENABLE_DMABUF=1` — covers forceDmaBuf branch in accept
-- `sudo tc qdisc add dev lo root netem delay Xms` + remove after — covers SendDevList reentry on loopback
-- Each env-var run should be merged with the existing profdata, not treated as a standalone baseline.
+The coverage ceiling is determined by what hardware and infrastructure are available.
+Most uncovered branches fall into categories that require specific capabilities:
+
+| Category | Approx branches | Requirement |
+|----------|:--------------:|-------------|
+| Connect/Accept state machine mid-transitions | ~30 | Cross-host run or `tc netem` latency injection |
+| RoCE/GID selection paths | ~100 | Multiple RoCE port types or IB fabric |
+| GDR/DMA-buf paths | ~50 | GDR kernel module + GPU direct RDMA support |
+| WC error / fatal-error paths | ~30 | LD_PRELOAD shim to inject bad work completions |
+| NCCLCHECK error fallback branches | ~600 | Systematic fault injection at each call site |
+
+**Realistic ceiling without LD_PRELOAD shims or GDR hardware: ~44–45%.** This is not a
+quality problem — it reflects that ~55% of branches are error/fault/hardware paths that
+cannot be reached without special infrastructure. Establish the ceiling for your specific
+hardware before setting a target; otherwise the target is unachievable by design.
+
+**Env-var technique** — run existing tests with specific env vars to cover additional branches
+without writing new tests:
+- `NCCL_IB_SL=N NCCL_IB_TC=N` — SL/TC configuration branches
+- `NCCL_IB_ECE_ENABLE=0` — ECE disabled path in connect loop
+- `NCCL_IB_MERGE_VFS=0` — VFS merge disabled paths in init
+- `RCCL_FORCE_ENABLE_DMABUF=1` — forceDmaBuf branch in accept
+- `sudo tc qdisc add dev lo root netem delay Xms` — SendDevList reentry on loopback
+- Each env-var run should be merged with the existing profdata, not treated as standalone.
