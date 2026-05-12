@@ -371,45 +371,38 @@ int main(int argc, char* argv[]) {
   }
 
   // Demonstrate tile_get API
-  // Allocate buffer for fetched tile (4×4 = 16 elements) - COLLECTIVE
-  int* d_tile_buffer_get = (int*)rocshmem_malloc(16 * sizeof(int));
-
+  // Fetch directly into A_tensor instead of using a separate buffer
   if (n_pes > 1 && my_pe == 0) {
     std::cout << "\n--- Tile API Demo (tile_get) ---" << std::endl;
-    std::cout << "PE 0 fetching 4×4 tile from PE 1's matrix A..." << std::endl;
+    std::cout << "PE 0 fetching 4×4 tile from PE 1's matrix A directly into A_tensor..." << std::endl;
     std::cout << "PE 0's d_A_local = " << d_A_local << std::endl;
     std::cout << "PE 0's d_B = " << d_B << std::endl;
     std::cout << "PE 0's d_C_local = " << d_C_local << std::endl;
 
-    std::vector<int> h_tile_buffer_get(16);
-
     if (M_local >= 4 && K >= 4) {
-      // Zero out the destination buffer to distinguish between garbage and no transfer
-      CHECK_HIP(hipMemset(d_tile_buffer_get, 0, 16 * sizeof(int)));
-      CHECK_HIP(hipStreamSynchronize(0));
+      std::cout << "\nFetching 4×4 tile from PE 1's A[0:4, 0:4] into PE 0's A_tensor[0:4, 0:4]" << std::endl;
 
-      // Create tensor descriptors
-      Tensor2D<int> tile_buf(d_tile_buffer_get, 4, 4);   // 4×4 tile buffer
-
-      // Fetch 4×4 tile from PE 1 (starting at row 0, col 0) from A matrix
+      // Fetch 4×4 tile from PE 1 directly into A_tensor at position [0,0]
+      // This will overwrite PE 0's original A values in that region
       hipLaunchKernelGGL(tile_get_kernel, 1, 1, 0, 0,
-                        tile_buf, A_tensor, 0, 0, 4, 4, 1);
+                        A_tensor, A_tensor, 0, 0, 4, 4, 1);
       CHECK_HIP(hipStreamSynchronize(0));
 
-      // Copy tile back to host for verification
-      CHECK_HIP(hipMemcpy(h_tile_buffer_get.data(), d_tile_buffer_get, 16 * sizeof(int),
+      // Copy the modified A_tensor region back to host for verification
+      std::vector<int> h_A_local(M_local * K);
+      CHECK_HIP(hipMemcpy(h_A_local.data(), d_A_local, M_local * K * sizeof(int),
                           hipMemcpyDeviceToHost));
 
-      // Verify: the tile should match PE 1's A matrix values
+      // Verify: A_tensor[0:4, 0:4] should now contain PE 1's A matrix values
       int pe1_row_offset = 1 * M_local;
 
       bool tile_correct = true;
-      std::cout << "\nExpected vs Actual values for 4×4 tile (tile_get from A matrix):" << std::endl;
+      std::cout << "\nExpected vs Actual values for 4×4 tile (fetched into A_tensor):" << std::endl;
       for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
           int global_row = pe1_row_offset + i;
           int expected = (global_row % 10) + (j % 10) + 1;
-          int actual = h_tile_buffer_get[i * 4 + j];
+          int actual = h_A_local[i * K + j];  // A_tensor is row-major with stride K
 
           std::cout << "  [" << i << "," << j << "] expected=" << expected
                     << " actual=" << actual;
@@ -425,7 +418,7 @@ int main(int argc, char* argv[]) {
 
       if (tile_correct) {
         std::cout << "✓ Tile_get verification PASSED" << std::endl;
-        std::cout << "  Successfully fetched correct 4×4 region from PE 1" << std::endl;
+        std::cout << "  Successfully fetched 4×4 region from PE 1 directly into A_tensor" << std::endl;
       } else {
         std::cout << "✗ Tile_get verification FAILED" << std::endl;
       }
@@ -436,7 +429,6 @@ int main(int argc, char* argv[]) {
   rocshmem_barrier_all();
 
   // Cleanup - all collective operations
-  rocshmem_free(d_tile_buffer_get);
   rocshmem_free(d_A_local);
   rocshmem_free(d_B);
   rocshmem_free(d_C_local);
