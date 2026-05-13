@@ -36,6 +36,7 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
 #include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
+#include "lib/rocprofiler-sdk/rocshmem/rocshmem.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -46,6 +47,7 @@
 #include <rocprofiler-sdk/rccl/table_id.h>
 #include <rocprofiler-sdk/rocdecode/table_id.h>
 #include <rocprofiler-sdk/rocjpeg/table_id.h>
+#include <rocprofiler-sdk/rocshmem/table_id.h>
 
 #include <atomic>
 #include <cstdint>
@@ -304,8 +306,7 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
         }
         case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
         {
-            // rocSHMEM service is wired in via lib/rocprofiler-sdk/rocshmem in
-            // a follow-up commit; until then operation names are unresolved.
+            val = rocprofiler::rocshmem::name_by_id<ROCPROFILER_ROCSHMEM_TABLE_ID>(operation);
             break;
         }
     };
@@ -459,8 +460,7 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         }
         case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
         {
-            // rocSHMEM service is wired in via lib/rocprofiler-sdk/rocshmem in
-            // a follow-up commit; until then no operations are enumerated.
+            ops = rocprofiler::rocshmem::get_ids<ROCPROFILER_ROCSHMEM_TABLE_ID>();
             break;
         }
     };
