@@ -63,26 +63,26 @@ class NativeToolFinder:
         return self.__find_file_by_glob_pattern(self.root_path, pattern)
 
     def _generate_cmake(self, src_path: Path) -> None:
-        build_command = (
-            "cmake "
-            + f"-S {src_path}/{self.sources_dir_name} "
-            + f"-B {src_path}/{self.sources_dir_name}/{self.sources_build_subdir_name}"
-        )
-        console_log(f"Building native tool using command: {build_command}")
-        self.__execute_command(build_command)
-
-    def _build_cmake(self, src_path: Path) -> None:
         generate_command = (
-            "cmake --build "
-            + f"{src_path}/{self.sources_dir_name}/{self.sources_build_subdir_name} "
-            + "--parallel"
+            "cmake "
+            f"-S {src_path}/{self.sources_dir_name} "
+            f"-B {src_path}/{self.sources_dir_name}/{self.sources_build_subdir_name}"
         )
         console_log(f"Generating native tool project using command: {generate_command}")
         self.__execute_command(generate_command)
 
+    def _build_cmake(self, src_path: Path) -> None:
+        build_command = (
+            "cmake --build "
+            f"{src_path}/{self.sources_dir_name}/{self.sources_build_subdir_name} "
+            "--parallel"
+        )
+        console_log(f"Building native tool using command: {build_command}")
+        self.__execute_command(build_command)
+
     def __execute_command(self, command: str) -> None:
-        success, output = capture_subprocess_output(shlex.split(command))
-        console_debug(f"Build output: {output}")
+        # Output is logged when enable_logging=False is not provided
+        success, _ = capture_subprocess_output(shlex.split(command))
         if not success:
             msg = f"Failed to execute command: {command}"
             raise RuntimeError(msg)
