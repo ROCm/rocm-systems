@@ -95,7 +95,7 @@ foreach(OPENMP_EXAMPLE IN LISTS OPENMP_EXAMPLES)
     endif()
 endforeach()
 
-add_subdirectory(external)
+add_subdirectory(fortran)
 
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     if(NOT "openmp-target" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)

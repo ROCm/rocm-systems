@@ -15,9 +15,12 @@ This directory contains NAS Parallel Benchmarks (NPB) implemented with OpenMP th
 - `target/main.cpp` - OpenMP target offloading example demonstrating GPU computation via `#pragma omp target`.
 - `target/library.cpp` - Companion library for target offloading tests.
 
-### OpenMP Validation and Verification (ompvv)
+### OpenMP Fortran Host and Offload Programs
 
-- `external/ompvv/` - Git submodule containing the [OpenMP V&V](https://github.com/OpenMP-Validation-and-Verification/OpenMP_VV) test suite for verifying OpenMP offloading correctness. Initialize with `git submodule update --init`.
+- `fortran/host.f90` - OpenMP host example that uses two CPU threads to update an integer array in round-robin order.
+- `fortran/offload.f90` - OpenMP target offload example that launches a GPU target region to transpose a matrix.
+
+These Fortran examples require `amdflang` version 20 or newer.
 
 ## Prerequisites
 
