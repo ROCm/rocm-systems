@@ -26,6 +26,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <type_traits>
 
 /**
  * @namespace MPIHelpers
@@ -242,8 +243,14 @@ struct TestLogAssertionOptions
     int mpi_rank{0};
 
     bool capture_nccl_debug_file{false};
-    /** If capture_nccl_debug_file and empty, uses /tmp/rccl_assert_nccl_rank_<r>_pid_<p>.log */
+    /** If capture_nccl_debug_file and empty, auto-path is:
+     *    GTest binary : /tmp/rccl_<Suite>.<Test>_rank<R>.log   (human-readable)
+     *    Standalone   : /tmp/rccl_nccl_rank<R>_pid<P>.log      (pid-based fallback)
+     *  Path is derived from GTest current_test_info() at construction time. */
     std::string nccl_debug_file_path;
+    /** When true, the log file is unlinked after a PASSING test.
+     *  Failing tests always keep their log so it is available for post-mortem
+     *  inspection.  Set RCCL_KEEP_TEST_LOGS=1 to keep all logs regardless. */
     bool unlink_auto_generated_nccl_path{true};
     bool unlink_explicit_nccl_path{false};
 
@@ -283,6 +290,7 @@ public:
 private:
     TestLogAssertionOptions opts_;
     std::string             nccl_path_;
+    std::string             test_label_;           ///< "Suite/Test" or "pid_<P>" for standalone
     std::string             saved_nccl_debug_env_;
     bool                    saved_nccl_debug_present_{false};
     bool                    env_modified_{false};
@@ -301,6 +309,73 @@ TestLogAssertionOptions makePerRankStderrAssertionOptions(int mpi_rank);
 
 /** Both: NCCL debug file + per-rank stderr log (either read may contain the line) */
 TestLogAssertionOptions makeCombinedAssertionLogOptions(int mpi_rank);
+
+/**
+ * @brief Return the effective value of a numeric NCCL env var (mirrors NCCL_PARAM semantics).
+ * @param name        Env var name (e.g. "NCCL_CTA_POLICY").
+ * @param ncclDefault NCCL compiled-in default (returned when the var is unset).
+ */
+template<typename T>
+inline T getEnvParam(const char* name, T ncclDefault)
+{
+    static_assert(std::is_integral_v<T>, "getEnvParam: T must be an integer type");
+    const char* v = std::getenv(name);
+    if(!v) return ncclDefault;
+    if constexpr(std::is_unsigned_v<T>)
+        return static_cast<T>(std::strtoull(v, nullptr, 10));
+    else
+        return static_cast<T>(std::strtoll(v, nullptr, 10));
+}
+
+/** RAII scoped set/restore of a single env var; restores (or unsets) on destruction.
+ *
+ *  If the variable was already set to a *different* value (e.g. by the test runner's
+ *  suite/test env_variables config), a one-line warning is printed to stderr so the
+ *  caller knows the in-test override is active.  The original value is always restored
+ *  on destruction regardless of test outcome.
+ */
+struct MpiEnvGuard
+{
+    const char* name;
+    std::string saved;
+    bool        had{false};
+
+    MpiEnvGuard(const char* n, const char* v) : name(n)
+    {
+        const char* prev = std::getenv(n);
+        had              = (prev != nullptr);
+        if(had)
+        {
+            saved = prev;
+            if(saved != v)
+            {
+                // Avoid <mpi.h> dependency; try common MPI rank env vars.
+                const char* rankEnv = nullptr;
+                for(const char* var :
+                    {"OMPI_COMM_WORLD_RANK", "PMI_RANK", "PMIX_RANK", "SLURM_PROCID"})
+                {
+                    rankEnv = std::getenv(var);
+                    if(rankEnv)
+                        break;
+                }
+                fprintf(stderr,
+                        "[MpiEnvGuard rank %s] overriding %s: '%s' -> '%s' (will restore on scope exit)\n",
+                        rankEnv ? rankEnv : "?", n, saved.c_str(), v);
+            }
+        }
+        ::setenv(n, v, /*overwrite=*/1);
+    }
+    ~MpiEnvGuard()
+    {
+        if(had)
+            ::setenv(name, saved.c_str(), 1);
+        else
+            ::unsetenv(name);
+    }
+
+    MpiEnvGuard(const MpiEnvGuard&)            = delete;
+    MpiEnvGuard& operator=(const MpiEnvGuard&) = delete;
+};
 
 } // namespace MPIHelpers
 
