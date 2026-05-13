@@ -453,14 +453,39 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
             std::string pattern    = (envPattern && *envPattern)
                                          ? envPattern
                                          : "default_%m.profraw";
+            // Ensure %p is present so each child gets its own file.
             if(pattern.find("%p") == std::string::npos)
             {
-                // Inject %p before the extension to keep child files unique.
                 auto dot = pattern.rfind('.');
                 if(dot == std::string::npos)
                     pattern += "_%p";
                 else
                     pattern.insert(dot, "_%p");
+            }
+            // The LLVM profile runtime caches getpid() at first init in the
+            // parent, so its own %p expansion would yield the parent PID in
+            // every child. Substitute %p ourselves with the child's real
+            // pid, leaving %m (binary signature) for the runtime to expand.
+            {
+                char            pidbuf[32];
+                std::snprintf(pidbuf, sizeof(pidbuf), "%d",
+                              static_cast<int>(getpid()));
+                std::string out;
+                out.reserve(pattern.size() + 16);
+                for(size_t i = 0; i < pattern.size();)
+                {
+                    if(i + 1 < pattern.size() && pattern[i] == '%'
+                       && pattern[i + 1] == 'p')
+                    {
+                        out.append(pidbuf);
+                        i += 2;
+                    }
+                    else
+                    {
+                        out.push_back(pattern[i++]);
+                    }
+                }
+                pattern.swap(out);
             }
             __llvm_profile_set_filename(pattern.c_str());
             if(libSet) libSet(pattern.c_str());
