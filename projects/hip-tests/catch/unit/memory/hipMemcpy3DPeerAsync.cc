@@ -37,19 +37,22 @@ HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_BasicFunctional) {
   hipExtent extent = make_hipExtent(numW, numH, depth);
   const auto device_count = HipTest::getDeviceCount();
   if (device_count <= 1) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
   const auto src_device = GENERATE_COPY(range(0, device_count));
   const auto dst_device = GENERATE_COPY(range(0, device_count));
   if (src_device == dst_device) {
     INFO("Src device: " << src_device << ", Dst device: " << dst_device);
-    HIP_SKIP_TEST(HipTest::SkipReason::kMemcpyPeerSameSrcDstDevice);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemcpyPeerSameSrcDstDevice);
+    return;
   }
   HIP_CHECK(hipSetDevice(src_device));
   int can_access_peer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
   if (!can_access_peer) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    return;
   }
   // Array-1 Memory allocation
   hipChannelFormatDesc channelDesc_1 = hipCreateChannelDesc<char>();

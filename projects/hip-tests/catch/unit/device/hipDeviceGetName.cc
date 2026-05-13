@@ -197,13 +197,15 @@ HIP_TEST_CASE(Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount <= 0) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    return;
   }
 
   FILE* fpipe;
   fpipe = popen("rocm_agent_enumerator", "r");
   if (fpipe == nullptr) {
-    HIP_SKIP_TEST("unable to create command file.");
+    HipTest::HIP_SKIP_TEST("unable to create command file.");
+    return;
   }
   char command_op[BUFFER_LEN];
   const char* defCpu = "gfx000";

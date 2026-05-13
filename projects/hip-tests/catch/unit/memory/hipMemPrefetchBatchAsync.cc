@@ -38,7 +38,8 @@ constexpr size_t kTestBufferBytes = kTestBufferElements * sizeof(int);
   int device_var = 0;                                                                              \
   HIP_CHECK(hipSetDevice(device_var));                                                             \
   if (!DeviceAttributesSupport(device_var, hipDeviceAttributeConcurrentManagedAccess)) {           \
-    HIP_SKIP_TEST("Device does not support concurrent managed access");                            \
+    HipTest::HIP_SKIP_TEST("Device does not support concurrent managed access");                   \
+    return;                                                                                        \
   }
 
 }  // namespace
@@ -119,7 +120,7 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation") {
  *    2. Each operation to different location (numPrefetchLocs=count)
  *    3. Mixed grouped locations (some to location A, others to B)
  */
-TEST_CASE("Unit_hipMemPrefetchBatchAsync_LocationDistribution") {
+HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_LocationDistribution) {
   REQUIRE_MANAGED_ACCESS_DEVICE(device);
 
   enum class DistributionPattern { AllSame, EachDifferent, MixedGrouped };
@@ -574,7 +575,8 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_MultiDevice") {
   HIP_CHECK(hipGetDeviceCount(&device_count));
 
   if (device_count < 2) {
-    HIP_SKIP_TEST("Multi-device test requires at least 2 GPUs");
+    HipTest::HIP_SKIP_TEST("Multi-device test requires at least 2 GPUs");
+    return;
   }
 
   std::vector<int> supported_devices;
@@ -585,7 +587,9 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_MultiDevice") {
   }
 
   if (supported_devices.size() < 2) {
-    HIP_SKIP_TEST("Multi-device test requires at least 2 GPUs with concurrent managed access");
+    HipTest::HIP_SKIP_TEST(
+        "Multi-device test requires at least 2 GPUs with concurrent managed access");
+    return;
   }
 
   int device = supported_devices[0];

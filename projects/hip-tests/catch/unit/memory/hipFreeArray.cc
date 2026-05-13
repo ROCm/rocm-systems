@@ -43,7 +43,8 @@ HIP_TEST_CASE(Unit_hipFreeArray_NegativeArray) {
 
 HIP_TEST_CASE(Unit_hipFreeArray_DoubleFree) {
 #if HT_NVIDIA
-  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-120.");
+  HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-120.");
+  return;
 #endif
 
   CHECK_IMAGE_SUPPORT

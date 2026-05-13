@@ -191,7 +191,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemFreeNode_Functional) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HIP_SKIP_TEST("Runtime doesn't support Memory Pool. Skip the test case.");
+    HipTest::HIP_SKIP_TEST(
+        "Runtime doesn't support Memory Pool."
+        " Skip the test case.");
+    return;
   }
 
   constexpr size_t Nbytes = 512 * 1024 * 1024;

@@ -105,7 +105,8 @@ HIP_TEST_CASE(Unit_hipDeviceTotalMem_ValidateTotalMem) {
 HIP_TEST_CASE(Unit_hipDeviceTotalMem_NonSelectedDevice) {
   auto deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   for (int i = 1; i < deviceCount; i++) {

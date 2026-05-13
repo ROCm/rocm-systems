@@ -313,6 +313,22 @@ extern struct allocationTracker allocTracker[];
 
 #include "rocmwrap.h"
 
+// Helper function to map memory and set access permissions for a device
+static inline ncclResult_t ncclCuMemMapAndSetAccess(void *ptr, size_t size,
+  CUmemGenericAllocationHandle handle,
+  int cudaDev) {
+  ncclResult_t result = ncclSuccess;
+  // Map the virtual address range to the physical allocation
+  CUCHECK(cuMemMap((CUdeviceptr)ptr, size, 0, handle, 0));
+  // Set access permissions for the device
+  CUmemAccessDesc accessDesc = {};
+  accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  accessDesc.location.id = cudaDev;
+  accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+  CUCHECK(cuMemSetAccess((CUdeviceptr)ptr, size, &accessDesc, 1));
+  return result;
+}
+
 // ncclCuMemAllocAddr takes memory handle and size and returns the mapped address pointer
 static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocationHandle *handleIn, size_t size) {
   ncclResult_t result = ncclSuccess;
@@ -516,6 +532,12 @@ static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocation
 }
 
 static inline ncclResult_t ncclCuMemFreeAddr(void *ptr) {
+  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
+  return ncclInternalError;
+}
+
+static inline ncclResult_t ncclCuMemMapAndSetAccess(void *ptr, size_t size,
+  CUmemGenericAllocationHandle handle, int cudaDev) {
   WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }

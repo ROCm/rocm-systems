@@ -43,7 +43,7 @@ Contains wrappers for the validation scripts and other helper functions that can
 These fixtures run as **subtests**, meaning multiple validations within a single test are independently reported (one can fail without blocking others). They are automatically injected into `RocprofsysTest` via its `_setup` fixture, so test methods access them as `self.assert_regex(...)`, `self.assert_perfetto(...)`, etc.
 
 | Fixture | Description |
-|---------|-------------|
+| --------- | ------------- |
 | `assert_regex` | Validates test output against pass/fail regex patterns. Patterns can be per-mode (e.g., different patterns for `binary_rewrite` vs `sampling`). |
 | `assert_file_regex` | Like `assert_regex` but validates against a file's contents. |
 | `assert_perfetto` | Validates that a Perfetto trace was generated and optionally checks its contents. |

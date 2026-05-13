@@ -69,7 +69,7 @@ HIP_TEST_CASE(Unit_BuiltinAtomics_fmaxCoherentGlobalMem) {
   std::string gfxName(prop.gcnArchName);
   if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
     if (prop.canMapHostMemory != 1) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       double *A_h, *B_h;
       double* A_d;
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Unit_BuiltinAtomics_fmaxCoherentGlobalMem) {
           "Memory model feature is only supported for gfx90a, Hence"
           "skipping the testcase for this GPU ") +
           std::to_string(device);
-      HIP_SKIP_TEST(skip_gfx_msg.c_str());
+      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
     }
   }
 }
@@ -120,7 +120,7 @@ HIP_TEST_CASE(Unit_BuiltinAtomics_fmaxNonCoherentGlobalFlatMem) {
   std::string gfxName(prop.gcnArchName);
   if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
     if (prop.canMapHostMemory != 1) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       double *A_h, *B_h;
       double* A_d;
@@ -154,7 +154,7 @@ HIP_TEST_CASE(Unit_BuiltinAtomics_fmaxNonCoherentGlobalFlatMem) {
           "Memory model feature is only supported for gfx90a, Hence"
           "skipping the testcase for this GPU ") +
           std::to_string(device);
-      HIP_SKIP_TEST(skip_gfx_msg.c_str());
+      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
     }
   }
 }
@@ -173,7 +173,7 @@ HIP_TEST_CASE(Unit_BuiltinAtomicsRTC_fmaxCoherentGlobalMem) {
   std::string gfxName(prop.gcnArchName);
   if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
     if (prop.canMapHostMemory != 1) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       hiprtcProgram prog;
       hiprtcCreateProgram(&prog,          // prog
@@ -236,7 +236,7 @@ HIP_TEST_CASE(Unit_BuiltinAtomicsRTC_fmaxCoherentGlobalMem) {
           "Memory model feature is only supported for gfx90a, Hence"
           "skipping the testcase for this GPU ") +
           std::to_string(device);
-      HIP_SKIP_TEST(skip_gfx_msg.c_str());
+      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
     }
   }
 }
@@ -258,7 +258,7 @@ HIP_TEST_CASE(Unit_BuiltinAtomicsRTC_fmaxNonCoherentGlobalFlatMem) {
   std::string gfxName(prop.gcnArchName);
   if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
     if (prop.canMapHostMemory != 1) {
-      HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       hiprtcProgram prog;
       if (mem_type) {
@@ -331,7 +331,7 @@ HIP_TEST_CASE(Unit_BuiltinAtomicsRTC_fmaxNonCoherentGlobalFlatMem) {
           "Memory model feature is only supported for gfx90a, Hence"
           "skipping the testcase for this GPU ") +
           std::to_string(device);
-      HIP_SKIP_TEST(skip_gfx_msg.c_str());
+      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
     }
   }
 }

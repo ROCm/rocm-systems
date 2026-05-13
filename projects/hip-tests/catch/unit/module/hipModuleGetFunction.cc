@@ -60,7 +60,8 @@ HIP_TEST_CASE(Unit_hipModuleGetFunction_DiffDevice) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 
   auto mg = ModuleGuard::InitModule("get_function_module.code");
