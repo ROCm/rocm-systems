@@ -99,6 +99,11 @@ hipify:
 	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/latency_profiler/*.h
 	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/plugin/*.h
 	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/src/device/include/*.h
+	# The nccl_device/ subtree was added by the NCCL 2.28.9 sync and has its
+	# own subdirectories (impl/, gin/, gin/proxy/, gin/gdaki/). Hipify it
+	# recursively so future additions are covered automatically.
+	find hipify_rccl/include/nccl_device -type f -name '*.h' \
+	    -exec $(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) {} +
 	# PATCH 1: Fix device includes - remove "device/" prefix since files are in same directory
 	sed -i 's|#include "device/|#include "|g' hipify_rccl/src/device/include/*.h
 	sed -i 's|#include "device/|#include "|g' hipify_rccl/include/*.h
