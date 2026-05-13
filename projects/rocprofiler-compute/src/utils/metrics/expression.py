@@ -91,7 +91,6 @@ class CodeTransformer(ast.NodeTransformer):
 def build_eval_string(
     equation: str,
     coll_level: str = "",
-    config: dict | None = None,
 ) -> str:
     """
     Convert user defined equation string to eval executable string.
@@ -271,7 +270,6 @@ def build_metric_value_string(
     dfs: dict,
     dfs_type: dict,
     normal_unit: str,
-    profiling_config: dict | None = None,
 ) -> None:
     """Apply the real eval string to its field in the metric_table df."""
     for table_id, df in dfs.items():
@@ -298,7 +296,6 @@ def build_metric_value_string(
                                 df.at[row_idx_label, expr] = build_eval_string(
                                     df.at[row_idx_label, expr],
                                     coll_level,
-                                    profiling_config,
                                 )
 
                 elif expr.lower() == "unit" or expr.lower() == "units":

@@ -101,7 +101,6 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
 
 def calc_builtin_vars(
     pmc_cache: PmcDataCache,
-    config: dict | None,
     sys_vars: dict[str, int | float],
 ) -> dict[str, Optional[str | float | int]]:
     """Calculate built-in variables."""
@@ -118,7 +117,6 @@ def calc_builtin_vars(
         eval_string = build_eval_string(
             variable_value,
             schema.PMC_PERF_FILE_PREFIX,
-            config,
         )
         try:
             # Create temporary evaluator for this calculation
@@ -140,7 +138,6 @@ def calc_builtin_vars(
         eval_string = build_eval_string(
             variable_value,
             schema.PMC_PERF_FILE_PREFIX,
-            config,
         )
         try:
             # Merge sys_vars with builtin_vars_collection for second pass
@@ -165,7 +162,6 @@ def eval_metric(
     empirical_peaks_df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
     debug: bool,
-    config: dict | None = None,
 ) -> None:
     """Execute the expr string for each metric in the df."""
     # Build the PmcDataCache from the raw_pmc_df.
@@ -183,7 +179,7 @@ def eval_metric(
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
-    builtin_vars = calc_builtin_vars(pmc_cache, config, sys_vars)
+    builtin_vars = calc_builtin_vars(pmc_cache, sys_vars)
     sys_vars.update(builtin_vars)
 
     # Clear any previous noise clamp warnings before this analysis
