@@ -54,27 +54,43 @@ typedef void (*quiet_on_stream_fn_t)(hipStream_t stream);
 
 typedef void (*sync_all_on_stream_fn_t)(hipStream_t stream);
 
-typedef void (*alltoallmem_on_stream_fn_t)(rocshmem_team_t team, void* dest,
-                                           const void* source, size_t size,
-                                           hipStream_t stream);
+typedef void (*alltoallmem_on_stream_fn_t)(rocshmem_team_t team,
+                                           void*           dest,
+                                           const void*     source,
+                                           size_t          size,
+                                           hipStream_t     stream);
 
-typedef void (*broadcastmem_on_stream_fn_t)(rocshmem_team_t team, void* dest,
-                                            const void* source, size_t nelems,
-                                            int pe_root, hipStream_t stream);
+typedef void (*broadcastmem_on_stream_fn_t)(rocshmem_team_t team,
+                                            void*           dest,
+                                            const void*     source,
+                                            size_t          nelems,
+                                            int             pe_root,
+                                            hipStream_t     stream);
 
-typedef void (*getmem_on_stream_fn_t)(void* dest, const void* source, size_t nelems,
-                                      int pe, hipStream_t stream);
+typedef void (*getmem_on_stream_fn_t)(void*       dest,
+                                      const void* source,
+                                      size_t      nelems,
+                                      int         pe,
+                                      hipStream_t stream);
 
-typedef void (*putmem_on_stream_fn_t)(void* dest, const void* source, size_t nelems,
-                                      int pe, hipStream_t stream);
+typedef void (*putmem_on_stream_fn_t)(void*       dest,
+                                      const void* source,
+                                      size_t      nelems,
+                                      int         pe,
+                                      hipStream_t stream);
 
-typedef void (*putmem_signal_on_stream_fn_t)(void* dest, const void* source,
-                                             size_t nelems, uint64_t* sig_addr,
-                                             uint64_t signal, int sig_op, int pe,
+typedef void (*putmem_signal_on_stream_fn_t)(void*       dest,
+                                             const void* source,
+                                             size_t      nelems,
+                                             uint64_t*   sig_addr,
+                                             uint64_t    signal,
+                                             int         sig_op,
+                                             int         pe,
                                              hipStream_t stream);
 
-typedef void (*signal_wait_until_on_stream_fn_t)(uint64_t* sig_addr, int cmp,
-                                                 uint64_t cmp_value,
+typedef void (*signal_wait_until_on_stream_fn_t)(uint64_t*   sig_addr,
+                                                 int         cmp,
+                                                 uint64_t    cmp_value,
                                                  hipStream_t stream);
 
 typedef struct rocshmemApiFuncTable

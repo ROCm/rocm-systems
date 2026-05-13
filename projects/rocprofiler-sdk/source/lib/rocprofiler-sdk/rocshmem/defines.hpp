@@ -24,8 +24,8 @@
 
 #include "lib/common/defines.hpp"
 
-#define ROCSHMEM_API_INFO_DEFINITION_0(ROCSHMEM_TABLE, ROCSHMEM_API_ID, ROCSHMEM_FUNC,             \
-                                       ROCSHMEM_FUNC_PTR)                                          \
+#define ROCSHMEM_API_INFO_DEFINITION_0(                                                            \
+    ROCSHMEM_TABLE, ROCSHMEM_API_ID, ROCSHMEM_FUNC, ROCSHMEM_FUNC_PTR)                             \
     namespace rocprofiler                                                                          \
     {                                                                                              \
     namespace rocshmem                                                                             \
@@ -104,8 +104,8 @@
     }                                                                                              \
     }
 
-#define ROCSHMEM_API_INFO_DEFINITION_V(ROCSHMEM_TABLE, ROCSHMEM_API_ID, ROCSHMEM_FUNC,             \
-                                       ROCSHMEM_FUNC_PTR, ...)                                    \
+#define ROCSHMEM_API_INFO_DEFINITION_V(                                                            \
+    ROCSHMEM_TABLE, ROCSHMEM_API_ID, ROCSHMEM_FUNC, ROCSHMEM_FUNC_PTR, ...)                        \
     namespace rocprofiler                                                                          \
     {                                                                                              \
     namespace rocshmem                                                                             \
