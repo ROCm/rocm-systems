@@ -173,16 +173,7 @@ namespace impl {
     int nextBit = laneId;
     unsigned long long mask = ~0ull;
 
-    if constexpr (impl::isCoalescedGroup<TyGroup>::value) {
-      // for coalesced_groups, the mask is simply the activemask
-      mask &= __activemask();
-    } else {
-      // we cannot simply just use the __activemask() here, because more than one tile could have active
-      // threads at a time; we need to mask away the threads that not part of this tile first
-      mask >>= (64 - group.num_threads());
-      mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
-    }
-
+    mask = impl::groupMask(group);
     maskNumBits = __popcll(mask);
     maskIdx = __popcll(((1ul << laneId) - 1) & mask);
 

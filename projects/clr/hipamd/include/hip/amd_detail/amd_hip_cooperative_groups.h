@@ -1398,6 +1398,25 @@ template <class T>
 struct isBooleanFunc<T, cooperative_groups::bit_xor<T>> : __hip_internal::true_type {
 };
 
+// calculates the necessary warp mask for cooperative groups that support reduce(), or
+// inclusive/exlcusive_scan()
+template <typename TyGroup>
+__CG_QUALIFIER__ unsigned long long groupMask(const TyGroup& group)
+{
+  unsigned long long mask;
+
+  if constexpr (impl::isCoalescedGroup<TyGroup>::value) {
+    // for coalesced_groups, the mask is simply the activemask
+    mask &= __activemask();
+  } else {
+    // we cannot simply just use the __activemask() here, because more than one tile could have active
+    // threads at a time; we need to mask away the threads that not part of this tile first
+    mask >>= (64 - group.num_threads());
+    mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
+  }
+
+  return mask;
+}
 
 }  // namespace impl
 #endif
