@@ -131,6 +131,10 @@ namespace RcclUnitTesting
     size_t         numInputElementsAllocated;
     size_t         numOutputElementsAllocated;
 
+    bool           useSymmetric  = false;
+    ncclWindow_t   inputWindow   = nullptr;
+    ncclWindow_t   outputWindow  = nullptr;
+
     // Bias data for fused AllReduce+Bias operations
     PtrUnion       biasGpu;           // Bias buffer on GPU
     PtrUnion       biasCpu;           // Bias buffer on CPU (for initialization/validation)
@@ -153,7 +157,8 @@ namespace RcclUnitTesting
     // When inPlace is true, input and output share the same memory
     ErrCode AllocateMem(bool   const inPlace,
                         bool   const useManagedMem,
-                        bool   const userRegistered);
+                        bool   const userRegistered,
+                        bool   const useSymmetric = false);
 
     // Execute the provided data preparation function to fill input and compute expected results
     ErrCode PrepareData(CollFuncPtr const prepareDataFunc);

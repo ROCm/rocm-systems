@@ -21,22 +21,25 @@ namespace RcclUnitTesting
     // These are commands that can be given to the child process
     enum
     {
-      CHILD_GET_UNIQUE_ID    = 0,  // GetUniqueId()
-      CHILD_INIT_COMMS       = 1,  // InitComms()
-      CHILD_SET_COLL_ARGS    = 2,  // SetCollectiveArgs()
-      CHILD_ALLOCATE_MEM     = 3,  // AllocateMem()
-      CHILD_PREPARE_DATA     = 4,  // PrepareData()
-      CHILD_EXECUTE_COLL     = 5,  // ExecuteCollectives()
-      CHILD_VALIDATE_RESULTS = 6,  // ValidateResults()
-      CHILD_LAUNCH_GRAPHS    = 7,  // LaunchGraphs()
-      CHILD_DEALLOCATE_MEM   = 8,  // DeallocateMem()
-      CHILD_DESTROY_COMMS    = 9,  // DestroyComms()
-      CHILD_DESTROY_GRAPHS   = 10, // DestroyGraphs()
-      CHILD_STOP             = 11, // Stop()
-      NUM_CHILD_COMMANDS     = 12
+      CHILD_GET_UNIQUE_ID           = 0,  // GetUniqueId()
+      CHILD_INIT_COMMS              = 1,  // InitComms()
+      CHILD_SET_COLL_ARGS           = 2,  // SetCollectiveArgs()
+      CHILD_ALLOCATE_MEM            = 3,  // AllocateMem()
+      CHILD_PREPARE_DATA            = 4,  // PrepareData()
+      CHILD_EXECUTE_COLL            = 5,  // ExecuteCollectives()
+      CHILD_VALIDATE_RESULTS        = 6,  // ValidateResults()
+      CHILD_LAUNCH_GRAPHS           = 7,  // LaunchGraphs()
+      CHILD_DEALLOCATE_MEM          = 8,  // DeallocateMem()
+      CHILD_DESTROY_COMMS           = 9,  // DestroyComms()
+      CHILD_DESTROY_GRAPHS          = 10, // DestroyGraphs()
+      CHILD_REGISTER_SYM_WINDOWS    = 11, // RegisterSymWindows()
+      CHILD_DEREGISTER_SYM_WINDOWS  = 12, // DeregisterSymWindows()
+      CHILD_QUERY_SYM_SUPPORT       = 13, // QuerySymSupport()
+      CHILD_STOP                    = 14, // Stop()
+      NUM_CHILD_COMMANDS            = 15
     };
 
-    char const ChildCommandNames[NUM_CHILD_COMMANDS][20] =
+    char const ChildCommandNames[NUM_CHILD_COMMANDS][24] =
     {
       "GET_UNIQUE_ID",
       "INIT_COMMS",
@@ -49,6 +52,9 @@ namespace RcclUnitTesting
       "DEALLOCATE_MEM",
       "DESTROY_COMMS",
       "DESTROY_GRAPHS",
+      "REGISTER_WINDOWS",
+      "DEREGISTER_WINDOWS",
+      "QUERY_SYM_SUPPORT",
       "STOP"
     };
 
@@ -78,7 +84,7 @@ namespace RcclUnitTesting
     std::vector<std::vector<std::vector<CollectiveArgs>>> collArgs;   // Info for each collective for each rank per group call
     std::vector<std::vector<std::vector<hipGraph_t>>> graphs;         // Graphs for executing collectives per group call
     std::vector<std::vector<std::vector<hipGraphExec_t>>> graphExecs; // GraphExecs for executing collectives per group call
-    std::vector<std::vector<std::vector<bool>>> graphEnabled; 
+    std::vector<std::vector<std::vector<bool>>> graphEnabled;
 
     // Constructor
     TestBedChild(int const childId, bool const verbose, int const printValues, bool const useRankThreading);
@@ -122,5 +128,14 @@ namespace RcclUnitTesting
 
     // Destroys graphs
     ErrCode DestroyGraphs();
+
+    // Register symmetric windows
+    ErrCode RegisterSymWindows();
+
+    // Deregister symmetric windows
+    ErrCode DeregisterSymWindows();
+
+    // Read comm->symmetricSupport for the specified rank
+    ErrCode QuerySymSupport(std::vector<char>& retValBuf);
   };
 }

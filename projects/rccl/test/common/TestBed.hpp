@@ -30,6 +30,7 @@ namespace RcclUnitTesting
     int                        numActiveChildren;     // List of active children (with usable RCCL comms)
     int                        numActiveRanks;        // Current # of ranks in use
     bool                       useBlocking;           // RCCL communication with blocking or non-blocking option
+    bool                       symWindowsRegistered;  // Whether symmetric windows are registered
     EnvVars                    ev;                    // Environment variables
 
     // Constructor - Creates one child process per detected GPU device that waits for further commands
@@ -80,7 +81,8 @@ namespace RcclUnitTesting
                      int    const groupId  = -1,
                      int    const collId   = -1,
                      int    const rank     = -1,
-                     bool   const userRegistered = false);
+                     bool   const userRegistered = false,
+                     bool   const useSymmetric   = false);
 
     // Initialize input and compute expected results
     // - requires that SetCollectiveArgs and AllocateMemory have already been called
@@ -107,6 +109,9 @@ namespace RcclUnitTesting
 
     // Release allocated memory
     void DeallocateMem(int const groupId = -1, int const collId = -1, int const rank = -1);
+
+    // Query symmetric memory support for all active ranks
+    void HasSymmetricSupport(bool& outSupported);
 
     // Release the RCCL comms
     void DestroyComms();
@@ -172,7 +177,8 @@ namespace RcclUnitTesting
                         std::vector<bool>           const& inPlaceList,
                         std::vector<bool>           const& managedMemList,
                         std::vector<bool>           const& useHipGraphList,
-                        bool                        const& enableSweep = true);
+                        bool                        const& enableSweep   = true,
+                        bool                        const  useSymmetric  = false);
 
     // Wait for user-input if in interactive mode
     void InteractiveWait(std::string message);

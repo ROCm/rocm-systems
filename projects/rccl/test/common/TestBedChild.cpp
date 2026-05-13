@@ -6,6 +6,15 @@
 
 #include "TestBedChild.hpp"
 
+// comm.h exposes the full struct layout of ncclComm so the child can read
+// comm->symmetricSupport directly. We never call internal functions —
+// struct layout is kept in sync with the main rccl target via
+// RCCL_COMMON_COMPILE_DEFS in test/CMakeLists.txt, which inherits rccl's
+// PRIVATE compile defs (ENABLE_COLLTRACE, ENABLE_WARP_SPEED,
+// ENABLE_FAULT_INJECTION, ...) through get_target_property(rccl
+// COMPILE_DEFINITIONS).
+#include "comm.h"
+
 #include <thread>
 #include <execinfo.h>
 #ifdef ENABLE_OPENMP
@@ -117,18 +126,21 @@ namespace RcclUnitTesting
       std::vector<char> retValBuf;
       switch(command)
       {
-      case CHILD_GET_UNIQUE_ID   : status = GetUniqueId(retValBuf); break;
-      case CHILD_INIT_COMMS      : status = InitComms();            break;
-      case CHILD_SET_COLL_ARGS   : status = SetCollectiveArgs();    break;
-      case CHILD_ALLOCATE_MEM    : status = AllocateMem();          break;
-      case CHILD_PREPARE_DATA    : status = PrepareData();          break;
-      case CHILD_EXECUTE_COLL    : status = ExecuteCollectives();   break;
-      case CHILD_VALIDATE_RESULTS: status = ValidateResults();      break;
-      case CHILD_LAUNCH_GRAPHS   : status = LaunchGraphs();         break;
-      case CHILD_DEALLOCATE_MEM  : status = DeallocateMem();        break;
-      case CHILD_DESTROY_COMMS   : status = DestroyComms();         break;
-      case CHILD_DESTROY_GRAPHS  : status = DestroyGraphs();        break;
-      case CHILD_STOP            : goto stop;
+      case CHILD_GET_UNIQUE_ID      : status = GetUniqueId(retValBuf);     break;
+      case CHILD_INIT_COMMS         : status = InitComms();                break;
+      case CHILD_SET_COLL_ARGS      : status = SetCollectiveArgs();        break;
+      case CHILD_ALLOCATE_MEM       : status = AllocateMem();              break;
+      case CHILD_PREPARE_DATA       : status = PrepareData();              break;
+      case CHILD_EXECUTE_COLL       : status = ExecuteCollectives();       break;
+      case CHILD_VALIDATE_RESULTS   : status = ValidateResults();          break;
+      case CHILD_LAUNCH_GRAPHS      : status = LaunchGraphs();             break;
+      case CHILD_DEALLOCATE_MEM     : status = DeallocateMem();            break;
+      case CHILD_DESTROY_COMMS      : status = DestroyComms();             break;
+      case CHILD_DESTROY_GRAPHS     : status = DestroyGraphs();            break;
+      case CHILD_REGISTER_SYM_WINDOWS   : status = RegisterSymWindows();      break;
+      case CHILD_DEREGISTER_SYM_WINDOWS : status = DeregisterSymWindows();    break;
+      case CHILD_QUERY_SYM_SUPPORT  : status = QuerySymSupport(retValBuf); break;
+      case CHILD_STOP               : goto stop;
       default: exit(0);
       }
 
@@ -381,6 +393,7 @@ namespace RcclUnitTesting
     bool   inPlace;
     bool   useManagedMem;
     bool   userRegistered;
+    bool   useSymmetric;
     int    groupId;
 
     PIPE_READ(globalRank);
@@ -388,6 +401,7 @@ namespace RcclUnitTesting
     PIPE_READ(inPlace);
     PIPE_READ(useManagedMem);
     PIPE_READ(userRegistered);
+    PIPE_READ(useSymmetric);
     PIPE_READ(groupId);
 
     if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
@@ -403,14 +417,15 @@ namespace RcclUnitTesting
       if (collId == -1 || collId == collIdx)
       {
         CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
-        CHECK_CALL(collArg.AllocateMem(inPlace, useManagedMem, userRegistered));
+        CHECK_CALL(collArg.AllocateMem(inPlace, useManagedMem, userRegistered, useSymmetric));
         if (collArg.userRegistered && (collArg.funcType == ncclCollSend || collArg.funcType == ncclCollRecv))
           CHILD_NCCL_CALL(ncclCommRegister(this->comms[localRank], collArg.inputGpu.ptr, collArg.numInputBytesAllocated, &(collArg.commRegHandle)),"ncclCommRegister");
-        if (this->verbose) TEST_INFO("Rank %d on child %d allocates memory for collective %d in group %d on device %d (%s,%s,%s) Input: %p Output %p",
+        if (this->verbose) TEST_INFO("Rank %d on child %d allocates memory for collective %d in group %d on device %d (%s,%s,%s,%s) Input: %p Output %p",
                                 globalRank, this->childId, collIdx, groupId, this->deviceIds[localRank],
                                 inPlace ? "in-place" : "out-of-place",
                                 useManagedMem ? "managed" : "unmanaged",
                                 userRegistered ? "user registered buffer" : "internal copy",
+                                useSymmetric ? "symmetric" : "no symmetric window",
                                 collArg.inputGpu.ptr,
                                 collArg.outputGpu.ptr);
       }
@@ -1016,6 +1031,112 @@ namespace RcclUnitTesting
     this->graphEnabled[groupId].clear();
 
     if (this->verbose) TEST_INFO("Child %d finishes DestroyGraphs", this->childId);
+    return TEST_SUCCESS;
+  }
+
+  ErrCode TestBedChild::RegisterSymWindows()
+  {
+    if (this->verbose) TEST_INFO("Child %d begins RegisterSymWindows()", this->childId);
+
+    int registered = 0;
+    CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart");
+    for (int groupId = 0; groupId < this->numGroupCalls; ++groupId)
+    {
+      for (int localRank = 0; localRank < (int)this->deviceIds.size(); ++localRank)
+      {
+        CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+        for (auto& collArg : this->collArgs[groupId][localRank])
+        {
+          if (!collArg.useSymmetric)          continue;
+          if (collArg.inputWindow != nullptr) continue;
+
+          CHILD_NCCL_CALL(ncclCommWindowRegister(this->comms[localRank],
+                                                 collArg.inputGpu.ptr,
+                                                 collArg.numInputBytesAllocated,
+                                                 &collArg.inputWindow,
+                                                 NCCL_WIN_COLL_SYMMETRIC),
+                          "ncclCommWindowRegister(input)");
+          if (!collArg.inPlace)
+          {
+            CHILD_NCCL_CALL(ncclCommWindowRegister(this->comms[localRank],
+                                                   collArg.outputGpu.ptr,
+                                                   collArg.numOutputBytesAllocated,
+                                                   &collArg.outputWindow,
+                                                   NCCL_WIN_COLL_SYMMETRIC),
+                            "ncclCommWindowRegister(output)");
+          }
+          ++registered;
+        }
+      }
+    }
+    CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd");
+
+    if (this->verbose)
+      TEST_INFO("Child %d finishes RegisterSymWindows() (%d window(s))",
+                this->childId, registered);
+    return TEST_SUCCESS;
+  }
+
+  ErrCode TestBedChild::DeregisterSymWindows()
+  {
+    if (this->verbose) TEST_INFO("Child %d begins DeregisterSymWindows()", this->childId);
+
+    int deregistered = 0;
+    CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart");
+    for (int groupId = 0; groupId < this->numGroupCalls; ++groupId)
+    {
+      for (int localRank = 0; localRank < (int)this->deviceIds.size(); ++localRank)
+      {
+        CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+        for (auto& collArg : this->collArgs[groupId][localRank])
+        {
+          if (!collArg.useSymmetric) continue;
+          if (collArg.outputWindow != nullptr)
+          {
+            CHILD_NCCL_CALL(ncclCommWindowDeregister(this->comms[localRank], collArg.outputWindow),
+                            "ncclCommWindowDeregister(output)");
+            collArg.outputWindow = nullptr;
+          }
+          if (collArg.inputWindow != nullptr)
+          {
+            CHILD_NCCL_CALL(ncclCommWindowDeregister(this->comms[localRank], collArg.inputWindow),
+                            "ncclCommWindowDeregister(input)");
+            collArg.inputWindow = nullptr;
+            ++deregistered;
+          }
+        }
+      }
+    }
+    CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd");
+
+    if (this->verbose)
+      TEST_INFO("Child %d finishes DeregisterSymWindows() (%d window(s))",
+                this->childId, deregistered);
+    return TEST_SUCCESS;
+  }
+
+  ErrCode TestBedChild::QuerySymSupport(std::vector<char>& retValBuf)
+  {
+    if (this->verbose) TEST_INFO("Child %d begins QuerySymSupport()", this->childId);
+
+    int globalRank;
+    PIPE_READ(globalRank);
+
+    if (globalRank < this->rankOffset || (this->rankOffset + (int)comms.size() <= globalRank))
+    {
+      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
+      return TEST_FAIL;
+    }
+    int const localRank = globalRank - this->rankOffset;
+
+    int const supported = (this->comms[localRank] != nullptr)
+                          ? this->comms[localRank]->symmetricSupport
+                          : 0;
+    retValBuf.resize(sizeof(int));
+    memcpy(retValBuf.data(), &supported, sizeof(int));
+
+    if (this->verbose) TEST_INFO("Rank %d on child %d: symmetricSupport=%d",
+                                  globalRank, this->childId, supported);
     return TEST_SUCCESS;
   }
 }

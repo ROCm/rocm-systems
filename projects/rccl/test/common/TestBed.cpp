@@ -257,7 +257,8 @@ namespace RcclUnitTesting
                             int    const groupId,
                             int    const collId,
                             int    const rank,
-                            bool   const userRegistered)
+                            bool   const userRegistered,
+                            bool   const useSymmetric)
   {
     InteractiveWait("Starting AllocateMem");
 
@@ -283,10 +284,24 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, inPlace);
         PIPE_WRITE(childId, useManagedMem);
         PIPE_WRITE(childId, userRegistered);
+        PIPE_WRITE(childId, useSymmetric);
         PIPE_WRITE(childId, currGroup);
         PIPE_CHECK(childId);
       }
     }
+
+    if (useSymmetric)
+    {
+      // ncclCommWindowRegister completes inside one ncclGroupStart/End.
+      int const regCmd = TestBedChild::CHILD_REGISTER_SYM_WINDOWS;
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+        PIPE_WRITE(childId, regCmd);
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+        PIPE_CHECK(childId);
+
+      this->symWindowsRegistered = true;
+    }
+
     InteractiveWait("Finishing AllocateMem");
   }
 
@@ -451,6 +466,17 @@ namespace RcclUnitTesting
     for (int i = 0; i < this->numGroupCalls; ++i)
       if (groupId == -1 || groupId == i) groupList.push_back(i);
 
+    if (this->symWindowsRegistered)
+    {
+      int const dregCmd = TestBedChild::CHILD_DEREGISTER_SYM_WINDOWS;
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+        PIPE_WRITE(childId, dregCmd);
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+        PIPE_CHECK(childId);
+
+      this->symWindowsRegistered = false;
+    }
+
     int const cmd = TestBedChild::CHILD_DEALLOCATE_MEM;
 
     for (auto currGroup : groupList)
@@ -469,6 +495,33 @@ namespace RcclUnitTesting
     InteractiveWait("Finishing DeallocateMem");
   }
 
+  void TestBed::HasSymmetricSupport(bool& outSupported)
+  {
+    InteractiveWait("Starting HasSymmetricSupport");
+
+    outSupported = (this->numActiveRanks > 0);
+
+    int const cmd = TestBedChild::CHILD_QUERY_SYM_SUPPORT;
+    for (int currRank = 0; currRank < this->numActiveRanks; ++currRank)
+    {
+      int const childId = rankToChildMap[currRank];
+      PIPE_WRITE(childId, cmd);
+      PIPE_WRITE(childId, currRank);
+    }
+
+    for (int currRank = 0; currRank < this->numActiveRanks; ++currRank)
+    {
+      int const childId = rankToChildMap[currRank];
+      PIPE_CHECK(childId);
+
+      int supported = 0;
+      PIPE_READ(childId, supported);
+      if (!supported) outSupported = false;
+    }
+
+    InteractiveWait("Finishing HasSymmetricSupport");
+  }
+
   void TestBed::DestroyComms()
   {
     InteractiveWait("Starting DestroyComms");
@@ -482,6 +535,8 @@ namespace RcclUnitTesting
       // Wait for child acknowledgement
       PIPE_CHECK(childId);
     }
+
+    this->symWindowsRegistered = false;
 
     // Close any open child processes
     Finalize();
@@ -670,7 +725,8 @@ namespace RcclUnitTesting
                                std::vector<bool>           const& inPlaceList,
                                std::vector<bool>           const& managedMemList,
                                std::vector<bool>           const& useHipGraphList,
-                               bool                        const& enableSweep)
+                               bool                        const& enableSweep,
+                               bool                        const  useSymmetric)
   {
     // Sort numElements in descending order to cut down on # of allocations
     std::vector<int> sortedN = numElements;
@@ -710,6 +766,21 @@ namespace RcclUnitTesting
         continue;
       }
 
+      // Skip if symmetric memory is requested but unavailable on this configuration
+      if (useSymmetric)
+      {
+        bool hasSymmetricSupport = false;
+        this->HasSymmetricSupport(hasSymmetricSupport);
+        if (!hasSymmetricSupport)
+        {
+          this->DestroyComms();
+          GTEST_SKIP() << "Skipping... symmetric memory not supported on this configuration "
+                       << "(numGpus=" << numGpus << ", ranksPerGpu=" << ranksPerGpu
+                       << ", isMultiProcess=" << isMultiProcess
+                       << "). Requires NCCL_CUMEM_ENABLE=1 and a compatible platform.";
+        }
+      }
+
       for (int ftIdx = 0; ftIdx < funcTypes.size()      && isCorrect; ++ftIdx)
       for (int dtIdx = 0; dtIdx < dataTypes.size()      && isCorrect; ++dtIdx)
       {
@@ -725,6 +796,8 @@ namespace RcclUnitTesting
       for (int ipIdx = 0; ipIdx < inPlaceList.size()    && isCorrect; ++ipIdx)
       for (int mmIdx = 0; mmIdx < managedMemList.size() && isCorrect; ++mmIdx)
       {
+        // useSymmetric forces the ncclMemAlloc allocator which is incompatible with hipMallocManaged.
+        if (useSymmetric && managedMemList[mmIdx]) continue;
         for (int neIdx = 0; neIdx < numElements.size() && isCorrect; ++neIdx)
         {
           int numInputElements, numOutputElements;
@@ -754,7 +827,9 @@ namespace RcclUnitTesting
           // Only allocate once for largest size
           if (neIdx == 0)
           {
-            this->AllocateMem(inPlaceList[ipIdx], managedMemList[mmIdx]);
+            this->AllocateMem(inPlaceList[ipIdx], managedMemList[mmIdx],
+                              /*groupId=*/-1, /*collId=*/-1, /*rank=*/-1,
+                              /*userRegistered=*/false, useSymmetric);
             if (testing::Test::HasFailure())
             {
               isCorrect = false;
