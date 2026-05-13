@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <perfetto.h>
+#include <unordered_map>
 
 namespace rocprofsys
 {
@@ -60,6 +61,12 @@ private:
     void       flush(bool& perfetto_output_error);
     char_vec_t get_session_data();
 
+    // Returns a cached ::perfetto::Track for the given (category, args...) key,
+    // calling get_perfetto_track only on the first encounter to avoid the global
+    // mutex on every event in high-frequency handle() paths.
+    template <typename CategoryT, typename FuncT, typename... Args>
+    ::perfetto::Track get_or_create_track(CategoryT, FuncT&& desc_gen, Args&&... args);
+
     metadata_registry&                          m_metadata;
     std::uint64_t                               m_process_id;
     std::uint64_t                               m_parrent_pid;
@@ -68,6 +75,7 @@ private:
     std::shared_ptr<tmp_file>                   m_tmp_file{ nullptr };
     std::unique_ptr<::perfetto::TracingSession> m_tracing_session{ nullptr };
     bool                                        m_use_annotations{ false };
+    bool                                        m_default_group_by_queue{ true };
 
     std::unordered_map<size_t, pmc_track_info> m_pmc_track_map;
     // Each perfetto_processor_t instance is owned by a single consumer thread
@@ -75,9 +83,10 @@ private:
     // No synchronization is required for instance-local state below.
     // Note: m_output_registry is shared across threads; it must be internally
     // thread-safe.
-    std::unordered_map<std::uint32_t, agent_type> m_kfd_node_type_cache;
-    std::map<std::uint32_t, std::int64_t>         m_unified_memory_fault_counts;
-    output_file_registry&                         m_output_registry;
+    std::unordered_map<std::uint64_t, ::perfetto::Track> m_track_cache;
+    std::unordered_map<std::uint32_t, agent_type>        m_kfd_node_type_cache;
+    std::map<std::uint32_t, std::int64_t>                m_unified_memory_fault_counts;
+    output_file_registry&                                m_output_registry;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys
