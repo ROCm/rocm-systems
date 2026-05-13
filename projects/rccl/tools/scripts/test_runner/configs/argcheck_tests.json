@@ -1,0 +1,43 @@
+{
+  "system_configurations": {
+    "name": "RCCL ArgCheckTests",
+    "description": "Run only ArgCheckTests.cpp unit tests"
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}"
+  },
+  "env_variables": {
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "NCCL_DEBUG": "WARN"
+  },
+  "build_configuration": {
+    "install_flags": ["--debug", "-t", "-l", "--enable-code-coverage", "--no_clean"],
+    "cmake_options": "-DBUILD_LOCAL_GPU_TARGET_ONLY=ON",
+    "parallel_jobs": 64,
+    "generator": "Unix Makefiles"
+  },
+  "test_configurations": {
+    "argcheck_tests": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": ""
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "ArgCheckTest.All", "description": "All ArgCheckTests.cpp tests", "test_filter": "ArgCheckTest.*"}
+      ]
+    }
+  },
+  "test_suites": [
+    {"name": "ArgCheckTests", "config": "argcheck_tests", "enabled": true}
+  ]
+}
