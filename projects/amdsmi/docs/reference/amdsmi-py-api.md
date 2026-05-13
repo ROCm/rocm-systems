@@ -6039,8 +6039,18 @@ Output:  Dictionary with fields:
 
 Field | Description
 ---|---
-`partition_id` | ID of the partition on the GPU provided
-`partition_profile` | Dict containing partition data (TBD)
+`partition_id` | List of partition IDs; index 0 is the active partition ID for this handle
+`partition_profile` | Dict describing the active partition profile (see below)
+
+Fields in `partition_profile`:
+
+Field | Description
+---|---
+`profile_type` | Active partition mode string (e.g. `"SPX"`, `"CPX"`)
+`num_partitions` | Number of logical partitions for this profile
+`profile_index` | Index of the active profile
+`memory_caps` | List of compatible NPS modes (e.g. `["NPS1", "NPS4"]`)
+`num_resources` | Number of resource entries for this profile
 
 Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_profile` function:
 
@@ -6066,13 +6076,24 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            partition_id = amdsmi.amdsmi_get_gpu_accelerator_partition_profile(device)["partition_id"]
-            print(partition_id)
+            try:
+                result = amdsmi.amdsmi_get_gpu_accelerator_partition_profile(device)
+                pp = result["partition_profile"]
+                print("Partition ID       :", result["partition_id"][0])
+                print("Profile type       :", pp["profile_type"])
+                print("Profile index      :", pp["profile_index"])
+                print("Num partitions     :", pp["num_partitions"])
+                print("Compatible NPS     :", pp["memory_caps"])
+            except amdsmi.AmdSmiException as e:
+                print(e)
+                continue
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:
     amdsmi.amdsmi_shut_down()
 ```
+
+Refer to [amd_smi_partition_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_partition_example.py) for a complete example.
 
 ### amdsmi_get_gpu_accelerator_partition_profile_config
 
@@ -6108,7 +6129,7 @@ Each entry in `resources`:
 Field | Description
 ---|---
 `profile_index` | Profile index this resource entry belongs to
-`resource_type` | Resource type string (e.g. `"PARTITION_RESOURCE_XCC"`)
+`resource_type` | Resource type string (e.g. `"XCC"`, `"DMA"`)
 `partition_resource` | Number of this resource per partition
 `num_partitions_share_resource` | Number of partitions sharing this resource
 
@@ -6139,6 +6160,12 @@ try:
                 print("Default profile index:", config["default_profile_index"])
                 for profile in config["profiles"]:
                     print(profile["profile_type"], "index:", profile["profile_index"])
+                    for res in profile["resources"]:
+                        print(
+                            f"  {res['resource_type']}",
+                            f"per_partition={res['partition_resource']}",
+                            f"shared_by={res['num_partitions_share_resource']}",
+                        )
             except amdsmi.AmdSmiException as e:
                 print(e)
                 continue

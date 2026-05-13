@@ -343,7 +343,7 @@ Starting with **ROCm 7.0**, the driver assigns each logical partition (XCP) its 
 UUID, aligning with the CUDA specification for partitioned devices. In **ROCm 7.13.0**, AMD
 SMI further aligned `amdsmi_get_gpu_device_uuid()` with the HIP and `rocminfo` UUID format,
 so the UUID reported by AMD SMI now matches what HIP and `rocminfo` show for the same
-partition. See the [ROCm 7.13.0 changelog entry](/reference/changelog.md) for details.
+partition. See the [ROCm 7.13.0 changelog entry](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/CHANGELOG.md#amd_smi_lib-for-rocm-7130) for details.
 
 Prior to ROCm 7.0 (for example, ROCm 6.4.3), all logical partitions of the same physical
 GPU shared a single UUID reflecting the physical GPU identity. If you are running an older
@@ -375,7 +375,8 @@ Prior to ROCm 6.4.1, the `drm_card` and `drm_render` fields in `amdsmi_enumerati
 (returned by `amdsmi_get_gpu_enumeration_info()`) incorrectly reported the primary node's DRM
 render minor for all partitions, causing all partition nodes to mirror `renderD128`'s
 information. Starting with ROCm 6.4.1, each partition correctly maps to its own DRM render
-minor path. This affects what data is readable and writable per partition node.
+minor path. This affects what data is readable and writable per partition node. See the
+[ROCm 6.4.1 changelog entry](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/CHANGELOG.md#amd_smi_lib-for-rocm-641) for details.
 
 In `/dev/dri`, each XCD partition appears as a separate render device. On an MI300X in CPX
 mode, render devices start at `renderD128` and go up to `renderD135` (one per XCD). The next
@@ -429,10 +430,11 @@ Calling `amdsmi_set_gpu_memory_partition()` or `amdsmi_set_gpu_memory_partition_
 The driver reload step is mandatory. If the reload is skipped, the system continues using the old
 configuration until the next driver load.
 
-This two-step workflow was introduced in **ROCm 7.0**. Prior to that release, calling the
-set function automatically triggered an immediate driver reload. The reload was separated to
-give applications control over when the disruptive reload occurs. Additionally, as of
-**ROCm 7.13.0**, `amd-smi reset -r` is no longer available for driver reloading — use
+This two-step workflow was introduced in [**ROCm 7.0**](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/CHANGELOG.md#amd_smi_lib-for-rocm-700). Prior to that release, the
+set API automatically triggered an immediate driver reload on invocation; the CLI only
+reloaded after the user explicitly requested the partition change. The API-level reload was
+separated to give applications control over when the disruptive reload occurs. Additionally,
+as of [**ROCm 7.13.0**](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/CHANGELOG.md#amd_smi_lib-for-rocm-7130), `amd-smi reset -r` is no longer available for driver reloading — use
 `sudo modprobe -r amdgpu && sudo modprobe amdgpu` or `amdsmi_gpu_driver_reload()` instead.
 ```
 

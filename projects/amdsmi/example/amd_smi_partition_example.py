@@ -154,11 +154,10 @@ def print_current_partition(idx: int, gpu: Any) -> None:
         print(f"    Accelerator profile type : {pp.get('profile_type', 'N/A')}")
         print(f"    Profile index            : {pp.get('profile_index', 'N/A')}")
         print(f"    Num partitions           : {pp.get('num_partitions', 'N/A')}")
+        print(f"    Partition ID             : {cur_profile.get('partition_id', ['N/A'])[0]}")
+        print(f"    Compatible NPS           : {nps_caps_str(pp.get('memory_caps', []))}")
     except amdsmi.AmdSmiException as e:
         print(f"    amdsmi_get_gpu_accelerator_partition_profile: {e}")
-        print("    Accelerator profile type : N/A")
-        print("    Profile index            : N/A")
-        print("    Num partitions           : N/A")
     try:
         mem_config = amdsmi.amdsmi_get_gpu_memory_partition_config(gpu)
         print(f"    Memory partition : {mem_config.get('mp_mode', 'N/A')}")
@@ -174,7 +173,6 @@ def print_available_modes(idx: int, gpu: Any) -> None:
         print(f"    Supported NPS modes     : {nps_caps_str(caps)}")
     except amdsmi.AmdSmiException as e:
         print(f"    amdsmi_get_gpu_memory_partition_config: {e}")
-        print("    Supported NPS modes     : N/A")
     try:
         acc_config = amdsmi.amdsmi_get_gpu_accelerator_partition_profile_config(gpu)
         profiles = acc_config.get("profiles", [])
@@ -186,6 +184,12 @@ def print_available_modes(idx: int, gpu: Any) -> None:
                 f"{profile.get('num_partitions')} partition(s), "
                 f"compatible NPS: {nps_caps_str(profile.get('memory_caps', []))})"
             )
+            for r, res in enumerate(profile.get("resources", [])):
+                print(
+                    f"        Resource {r}: {res.get('resource_type')}"
+                    f", per_partition={res.get('partition_resource')}"
+                    f", shared_by={res.get('num_partitions_share_resource')}"
+                )
     except amdsmi.AmdSmiException as e:
         print(f"    amdsmi_get_gpu_accelerator_partition_profile_config: {e}")
 
