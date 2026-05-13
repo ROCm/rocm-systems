@@ -242,6 +242,14 @@ graph:
     # Note: Test disabled due to defect - EXSWHTEC-207
     disabled: [amd_windows, amd_wsl]
     tags: [exec]
+  Unit_hipGraphMemsetNodeSetParams_FlatAlloc_2D_Positive: *level_2
+  Unit_hipGraphMemsetNodeSetParams_PitchedAlloc_OverExtent_Negative: *level_2
+  Unit_hipGraphExecUpdate_FlatAlloc_2DMemset_Idempotent: *level_2
+  Unit_hipGraphExecUpdate_2DMemset_ShapeChange_Negative: *level_2
+  Unit_hipGraphExecUpdate_2DMemset_ValueAndDst_Positive: *level_2
+  Unit_hipGraphExecUpdate_FlatAlloc_2DMemset_ChildGraph: *level_2
+  Unit_hipGraphExecMemsetNodeSetParams_FlatAlloc_2D: *level_2
+  Unit_hipGraphExecNodeSetParams_Memset_FlatAlloc_2D: *level_2
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative:
     <<: *level_2
     tags: [node]

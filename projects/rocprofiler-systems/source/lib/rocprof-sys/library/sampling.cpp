@@ -1939,6 +1939,27 @@ postfork_child_cleanup()
 }
 
 void
+prefork_lock_pmc_sampler()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        pmc::prefork_lock_sampler();
+}
+
+void
+postfork_parent_unlock_pmc_sampler()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        pmc::postfork_parent_unlock_sampler();
+}
+
+void
+postfork_child_reset_pmc_sampler_lock()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        pmc::postfork_child_reset_sampler_lock();
+}
+
+void
 pause()
 {
     bool _expected = false;

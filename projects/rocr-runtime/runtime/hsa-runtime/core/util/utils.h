@@ -141,8 +141,8 @@ static __forceinline unsigned long long int strtoull(const char* str,
   do {                                                                                             \
     static std::atomic<int> count(0);                                                              \
     if (!(exp) && (limit == 0 || count < limit)) {                                                 \
-      fprintf(stderr, "Warning: " STRING(exp) " in %s, " __FILE__ ":" STRING(__LINE__) "\n"        \
-              );                                                                \
+      fprintf(stderr, "Warning: " STRING(exp) " in %s, " __FILE__ ":" STRING(__LINE__) "\n",       \
+              __FUNCSIG__);                                                                        \
       count++;                                                                                     \
     }                                                                                              \
   } while (false)
