@@ -15,7 +15,7 @@ Documentation for rocJPEG is available at
 * Simplified libva version check (single `>= 1.22` requirement).
 * Cleaned up CMake error messages.
 
-## Added
+### Added
 
 * Added a logging mechanism for core APIs that can be controlled by setting the ROCJPEG_LOG_LEVEL environment variable.
 

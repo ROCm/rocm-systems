@@ -37,7 +37,7 @@ namespace rocjpeg {
  *         or ROCJPEG_STATUS_NOT_INITIALIZED if the rocJPEG stream handle failed to initialize.
  */
 RocJpegStatus ROCJPEGAPI rocJpegStreamCreate(RocJpegStreamHandle *jpeg_stream_handle) {
-    FunctionEntryLog(g_rocjpeg_logger);
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_stream_handle));
     if (jpeg_stream_handle == nullptr) {
         CriticalLog(g_rocjpeg_logger, "Null pointer");
         FunctionExitLog(g_rocjpeg_logger);
@@ -72,7 +72,7 @@ RocJpegStatus ROCJPEGAPI rocJpegStreamCreate(RocJpegStreamHandle *jpeg_stream_ha
  *         - ROCJPEG_STATUS_BAD_JPEG if the JPEG stream is invalid.
  */
 RocJpegStatus ROCJPEGAPI rocJpegStreamParse(const unsigned char *data, size_t length, RocJpegStreamHandle jpeg_stream_handle) {
-    FunctionEntryLog(g_rocjpeg_logger);
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(data) + ", " + ROCJPEG_TOSTR(length) + ", " + RocJpegFmtPtr(jpeg_stream_handle));
     if (data == nullptr || jpeg_stream_handle == nullptr) {
         CriticalLog(g_rocjpeg_logger, "Null pointer");
         FunctionExitLog(g_rocjpeg_logger);
@@ -96,7 +96,7 @@ RocJpegStatus ROCJPEGAPI rocJpegStreamParse(const unsigned char *data, size_t le
  *         or ROCJPEG_STATUS_INVALID_PARAMETER if the input handle is nullptr.
  */
 RocJpegStatus ROCJPEGAPI rocJpegStreamDestroy(RocJpegStreamHandle jpeg_stream_handle) {
-    FunctionEntryLog(g_rocjpeg_logger);
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_stream_handle));
     if (jpeg_stream_handle == nullptr) {
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
@@ -120,7 +120,7 @@ RocJpegStatus ROCJPEGAPI rocJpegStreamDestroy(RocJpegStreamHandle jpeg_stream_ha
  *         returned by the InitializeDecoder function of the rocjpeg_decoder.
  */
 RocJpegStatus ROCJPEGAPI rocJpegCreate(RocJpegBackend backend, int device_id, RocJpegHandle *handle) {
-    FunctionEntryLog(g_rocjpeg_logger);
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, ROCJPEG_TOSTR(backend) + ", " + ROCJPEG_TOSTR(device_id) + ", " + RocJpegFmtPtr(handle));
     if (handle == nullptr) {
         CriticalLog(g_rocjpeg_logger, "Null pointer");
         FunctionExitLog(g_rocjpeg_logger);
@@ -151,7 +151,7 @@ RocJpegStatus ROCJPEGAPI rocJpegCreate(RocJpegBackend backend, int device_id, Ro
  *         or ROCJPEG_STATUS_INVALID_PARAMETER if the handle is nullptr.
  */
 RocJpegStatus ROCJPEGAPI rocJpegDestroy(RocJpegHandle handle) {
-    FunctionEntryLog(g_rocjpeg_logger);
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(handle));
     if (handle == nullptr) {
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
@@ -183,6 +183,9 @@ RocJpegStatus ROCJPEGAPI rocJpegDestroy(RocJpegHandle handle) {
  */
 RocJpegStatus ROCJPEGAPI rocJpegGetImageInfo(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, uint8_t *num_components,
     RocJpegChromaSubsampling *subsampling, uint32_t *widths, uint32_t *heights) {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(handle) + ", " + RocJpegFmtPtr(jpeg_stream_handle) + ", " +
+                             RocJpegFmtPtr(num_components) + ", " + RocJpegFmtPtr(subsampling) + ", " +
+                             RocJpegFmtPtr(widths) + ", " + RocJpegFmtPtr(heights));
     if (handle == nullptr || num_components == nullptr ||
         subsampling == nullptr || widths == nullptr || heights == nullptr) {
         return ROCJPEG_STATUS_INVALID_PARAMETER;
@@ -215,7 +218,8 @@ RocJpegStatus ROCJPEGAPI rocJpegGetImageInfo(RocJpegHandle handle, RocJpegStream
  */
 RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params,
     RocJpegImage *destination) {
-
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(handle) + ", " + RocJpegFmtPtr(jpeg_stream_handle) + ", " +
+                             RocJpegFmtPtr(decode_params) + ", " + RocJpegFmtPtr(destination));
     if (handle == nullptr || decode_params == nullptr || destination == nullptr) {
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
@@ -244,6 +248,8 @@ RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle
  * @return The status of the decoding process. Returns ROCJPEG_STATUS_SUCCESS if successful, or an error code otherwise.
  */
 RocJpegStatus ROCJPEGAPI rocJpegDecodeBatched(RocJpegHandle handle, RocJpegStreamHandle *jpeg_stream_handles, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations) {
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(handle) + ", " + RocJpegFmtPtr(jpeg_stream_handles) + ", " +
+                             ROCJPEG_TOSTR(batch_size) + ", " + RocJpegFmtPtr(decode_params) + ", " + RocJpegFmtPtr(destinations));
     if (handle == nullptr || jpeg_stream_handles == nullptr|| decode_params == nullptr || destinations == nullptr) {
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }

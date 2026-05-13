@@ -73,7 +73,7 @@ public:
             log_level_ = std::clamp(std::atoi(env_log_level), 0, static_cast<int>(kRocJpegLogLevelMax));
         }
     }
-    RocJpegLogger(int log_level) : log_level_(log_level) {};
+    RocJpegLogger(int log_level) : log_level_(std::clamp(log_level, 0, static_cast<int>(kRocJpegLogLevelMax))) {};
     ~RocJpegLogger() {};
     void SetLogLevel(int log_level) {log_level_ = std::clamp(log_level, 0, static_cast<int>(kRocJpegLogLevelMax));};
     int GetLogLevel() {return log_level_;};
@@ -97,21 +97,24 @@ inline RocJpegLogger& RocJpegGetLogger() {
 // safe for nested calls and concurrent threads sharing the same logger.
 class RocJpegFuncScopeLog {
 public:
-    RocJpegFuncScopeLog(RocJpegLogger& logger, const char* filename, int line, const char* func)
-        : logger_(logger), filename_(filename), line_(line), func_(func), start_time_(0) {
+    RocJpegFuncScopeLog(RocJpegLogger& logger, const char* filename, int line, const char* func,
+                        const std::string& args = "")
+        : logger_(logger), filename_(filename), line_(line), func_(func), args_(args), start_time_(0) {
         if (logger_.GetLogLevel() >= kRocJpegLogInfo) {
             start_time_ = GET_TIME_NS() / 1000ULL;
             OutputMsg("[" + ROCJPEG_TOSTR(kRocJpegLogInfo) + ", Info] " + ROCJPEG_STR(filename_) + ":" + ROCJPEG_TOSTR(line_) + ": " +
                       ROCJPEG_TOSTR(start_time_) + ROCJPEG_STR(" us: ") + ROCJPEG_STR("[pid:") + ROCJPEG_TOSTR(getpid()) + ROCJPEG_STR(" tid:") +
-                      ROCJPEG_TOSTR(GET_THREAD_ID()) + ROCJPEG_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCJPEG_STR("] ") + ROCJPEG_STR(func_) + "(): entry ...");     }
+                      ROCJPEG_TOSTR(GET_THREAD_ID()) + ROCJPEG_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCJPEG_STR("] ") + ROCJPEG_STR(func_) +
+                      "( " + args_ + " ): entry ...");
+        }
     }
     ~RocJpegFuncScopeLog() {
         if (logger_.GetLogLevel() >= kRocJpegLogInfo) {
             uint64_t end_time = GET_TIME_NS() / 1000ULL;
             OutputMsg("[" + ROCJPEG_TOSTR(kRocJpegLogInfo) + ", Info] " + ROCJPEG_STR(filename_) + ":" + ROCJPEG_TOSTR(line_) + ": " +
                       ROCJPEG_TOSTR(end_time) + ROCJPEG_STR(" us: ") + ROCJPEG_STR("[pid:") + ROCJPEG_TOSTR(getpid()) + ROCJPEG_STR(" tid:") +
-                      ROCJPEG_TOSTR(GET_THREAD_ID()) + ROCJPEG_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCJPEG_STR("] ") + ROCJPEG_STR(func_) + "(): exit (" +
-                      ROCJPEG_TOSTR(end_time - start_time_) + " us) ...");
+                      ROCJPEG_TOSTR(GET_THREAD_ID()) + ROCJPEG_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCJPEG_STR("] ") + ROCJPEG_STR(func_) +
+                      "( " + args_ + " ): exit (" + ROCJPEG_TOSTR(end_time - start_time_) + " us) ...");
         }
     }
     RocJpegFuncScopeLog(const RocJpegFuncScopeLog&) = delete;
@@ -123,6 +126,7 @@ private:
     const char* filename_;
     int line_;
     const char* func_;
+    std::string args_;
     uint64_t start_time_;
 };
 
@@ -161,8 +165,23 @@ private:
         } \
     } while (0)
 
+// Format a pointer argument as hex for API argument logging.
+template<typename T>
+static inline std::string RocJpegFmtPtr(T* p) {
+    if (p == nullptr) return "nullptr";
+    std::ostringstream oss;
+    oss << "0x" << std::hex << reinterpret_cast<uintptr_t>(p);
+    return oss.str();
+}
+
 #define FunctionEntryLog(logger) \
     RocJpegFuncScopeLog _rocjpeg_func_scope_log_(logger, FILENAME_ONLY, __LINE__, __func__)
+
+// Use this variant at API boundaries to include argument values in the entry log line.
+// Pass a string built with RocJpegFmtPtr() / ROCJPEG_TOSTR() for each argument, e.g.:
+//   FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(handle) + ", " + RocJpegFmtPtr(dst))
+#define FunctionEntryLogWithArgs(logger, args) \
+    RocJpegFuncScopeLog _rocjpeg_func_scope_log_(logger, FILENAME_ONLY, __LINE__, __func__, (args))
 
 // FunctionExitLog is a no-op: exit is logged automatically when the
 // RocJpegFuncScopeLog RAII object created by FunctionEntryLog goes out of scope.

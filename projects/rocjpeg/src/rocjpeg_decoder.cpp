@@ -47,7 +47,7 @@ RocJpegDecoder::~RocJpegDecoder() {
  *         - ROCJPEG_STATUS_INVALID_PARAMETER if the requested device_id is not found.
  */
 RocJpegStatus RocJpegDecoder::InitHIP(int device_id) {
-    FunctionEntryLog(g_rocjpeg_logger);
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, ROCJPEG_TOSTR(device_id));
     CHECK_HIP(hipGetDeviceCount(&num_devices_));
     if (num_devices_ < 1) {
         CriticalLog(g_rocjpeg_logger, "Failed to find any GPU!");
@@ -78,7 +78,7 @@ RocJpegStatus RocJpegDecoder::InitHIP(int device_id) {
  *         - An error code if the initialization fails.
  */
 RocJpegStatus RocJpegDecoder::InitializeDecoder() {
-    FunctionEntryLog(g_rocjpeg_logger);
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, "");
     RocJpegStatus rocjpeg_status = ROCJPEG_STATUS_SUCCESS;
     rocjpeg_status = InitHIP(device_id_);
     if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
@@ -117,7 +117,7 @@ RocJpegStatus RocJpegDecoder::InitializeDecoder() {
  * @return The status of the JPEG decoding operation.
  */
 RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination) {
-    FunctionEntryLog(g_rocjpeg_logger);
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_stream_handle) + ", " + RocJpegFmtPtr(decode_params) + ", " + RocJpegFmtPtr(destination));
     std::lock_guard<std::mutex> lock(mutex_);
     if (jpeg_stream_handle == nullptr || decode_params == nullptr || destination == nullptr) {
         CriticalLog(g_rocjpeg_logger, "Null pointer");
@@ -212,7 +212,7 @@ RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, con
  * @return A RocJpegStatus value indicating the success or failure of the decoding operation.
  */
 RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, int batch_size, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations) {
-    FunctionEntryLog(g_rocjpeg_logger);
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_streams) + ", " + ROCJPEG_TOSTR(batch_size) + ", " + RocJpegFmtPtr(decode_params) + ", " + RocJpegFmtPtr(destinations));
     std::lock_guard<std::mutex> lock(mutex_);
     if (jpeg_streams == nullptr || decode_params == nullptr || destinations == nullptr) {
         CriticalLog(g_rocjpeg_logger, "Null pointer");
@@ -329,7 +329,7 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
  *         or ROCJPEG_STATUS_INVALID_PARAMETER if any of the input parameters are invalid.
  */
 RocJpegStatus RocJpegDecoder::GetImageInfo(RocJpegStreamHandle jpeg_stream_handle, uint8_t *num_components, RocJpegChromaSubsampling *subsampling, uint32_t *widths, uint32_t *heights){
-    FunctionEntryLog(g_rocjpeg_logger);
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_stream_handle) + ", " + RocJpegFmtPtr(num_components) + ", " + RocJpegFmtPtr(subsampling) + ", " + RocJpegFmtPtr(widths) + ", " + RocJpegFmtPtr(heights));
     std::lock_guard<std::mutex> lock(mutex_);
     if (jpeg_stream_handle == nullptr || num_components == nullptr || subsampling == nullptr || widths == nullptr || heights == nullptr) {
         CriticalLog(g_rocjpeg_logger, "Null pointer");

@@ -41,7 +41,7 @@ RocJpegStreamParser::~RocJpegStreamParser() {
  * @return True if the JPEG stream was successfully parsed, false otherwise.
  */
 bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t jpeg_stream_size) {
-    FunctionEntryLog(g_rocjpeg_logger);
+    FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_stream) + ", " + ROCJPEG_TOSTR(jpeg_stream_size));
     std::lock_guard<std::mutex> lock(mutex_);
     if (jpeg_stream == nullptr) {
         CriticalLog(g_rocjpeg_logger, "Invalid argument!");
