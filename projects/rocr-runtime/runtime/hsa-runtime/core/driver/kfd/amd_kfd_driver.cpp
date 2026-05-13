@@ -582,12 +582,12 @@ void *KfdDriver::AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,
 
 bool KfdDriver::FreeKfdMemory(void *mem, size_t size) {
   if (mem == nullptr || size == 0) {
-    debug_print("Invalid free ptr:%p size:%lu\n", mem, size);
+    debug_print("Invalid free ptr:%p size:%zu\n", mem, size);
     return false;
   }
 
   if (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) != HSAKMT_STATUS_SUCCESS) {
-    debug_print("Failed to free ptr:%p size:%lu\n", mem, size);
+    debug_print("Failed to free ptr:%p size:%zu\n", mem, size);
     return false;
   }
   return true;

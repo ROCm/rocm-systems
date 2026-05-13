@@ -5,3 +5,5 @@ TypeQualifiers:
     <<: *level_2
     # SWDEV-396615 mGPUs not considered correctly
     disabled: [amd_windows, amd_wsl]
+  Unit_hipManagedKeyword_hipPointerGetAttributes_BeforeKernel: *level_2
+  Unit_hipManagedKeyword_hipPointerGetAttributes_AfterKernel: *level_2

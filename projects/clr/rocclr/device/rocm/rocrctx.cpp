@@ -88,6 +88,8 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_ipc_memory_create)
   GET_ROCR_SYMBOL(hsa_amd_ipc_memory_attach)
   GET_ROCR_SYMBOL(hsa_amd_ipc_memory_detach)
+  GET_ROCR_SYMBOL(hsa_amd_ipc_signal_create)
+  GET_ROCR_SYMBOL(hsa_amd_ipc_signal_attach)
   GET_ROCR_SYMBOL(hsa_amd_signal_create)
   GET_ROCR_SYMBOL(hsa_amd_register_system_event_handler)
   GET_ROCR_SYMBOL(hsa_amd_queue_set_priority)

@@ -53,7 +53,7 @@ class Event : public RuntimeObject {
   typedef void(CL_CALLBACK* CallBackFunction)(cl_event event, int32_t command_exec_status,
                                               void* user_data);
 
-  struct CallBackEntry : public HeapObject {
+  struct CallBackEntry {
     struct CallBackEntry* next_;  //!< the next entry in the callback list.
 
     std::atomic<CallBackFunction> callback_;  //!< callback function pointer.
@@ -1471,6 +1471,9 @@ class ExternalSemaphoreCmd : public Command {
 
 
 class Marker : public Command {
+  device::Signal* ipc_completion_signal_ = nullptr;
+  device::Signal* ipc_dep_signal_ = nullptr;
+
  public:
   //! Create a new Marker
   Marker(HostQueue& queue, bool userVisible, const EventWaitList& eventWaitList = nullWaitList,
@@ -1478,6 +1481,14 @@ class Marker : public Command {
       : Command(queue, userVisible ? CL_COMMAND_MARKER : 0, eventWaitList, 0, waitingEvent) {
     cpu_wait_ = cpu_wait;
   }
+
+  //! Attach an IPC signal as completion_signal on the barrier packet (for event record)
+  void setIpcCompletionSignal(device::Signal* s) { ipc_completion_signal_ = s; }
+  device::Signal* ipcCompletionSignal() const { return ipc_completion_signal_; }
+
+  //! Attach an IPC signal as dep_signal on the barrier packet (for stream wait)
+  void setIpcDepSignal(device::Signal* s) { ipc_dep_signal_ = s; }
+  device::Signal* ipcDepSignal() const { return ipc_dep_signal_; }
 
   //! The actual command implementation.
   virtual void submit(device::VirtualDevice& device) { device.submitMarker(*this); }

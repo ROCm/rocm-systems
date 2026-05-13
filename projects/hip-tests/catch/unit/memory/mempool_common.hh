@@ -75,8 +75,9 @@ template <typename T> __global__ void kernel_500ms_gfx11(T* host_res, int clk_ra
 template <typename T> __global__ void notifiedKernel(T* host_res, volatile unsigned int* notified) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   host_res[tid] = tid + 1;
-  __threadfence_system();
-  while (*notified == 0) { }
+  if (threadIdx.x == 0) {
+    while (*notified == 0) { }
+  }
 }
 
 template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemPools mempool_type) {
