@@ -91,9 +91,9 @@ The script auto-detects multiple iteration directories (glob with `*`) and aggre
 ### Option A: one-shot (build image, run, get results on host)
 
 ```bash
+# From the projects/rocshmem directory:
 # Build the image — compiles both develop (/app/build) and PR (/app/build4574)
-docker build --build-arg PR_NUM=4574 --tag $USER/rocshmem-pr4574 \
-  projects/rocshmem/docker/
+docker build -f docker/Dockerfile.ubuntu --build-arg PR_NUM=4574 --tag $USER/rocshmem-pr4574 docker/
 
 # Run comparison; results appear on the host at ./pr4574-results/
 mkdir -p pr4574-results
@@ -102,13 +102,8 @@ docker run --rm \
   --ipc host --group-add video --cap-add SYS_PTRACE \
   --security-opt seccomp=unconfined --privileged \
   -v "$(pwd)/pr4574-results:/results" \
-  $USER/rocshmem-pr4574 \
-  bash /app/rocm-systems/projects/rocshmem/scripts/run_perf_compare.sh \
-    --skip-build \
-    --baseline-dir /app/build \
-    --branch-dir /app/build4574 \
-    --suite heatmap --iterations 5 \
-    --outdir /results
+  $USER/rocshmem-pr4574 perf-compare --suite heatmap --iterations 5
+# Plots: ./pr4574-results/heatmap_summary.png
 ```
 
 ### Option B: interactive session (build once, re-run quickly)
@@ -122,14 +117,11 @@ docker run -d --name rocshmem-pr4574 \
   -v "$(pwd)/pr4574-results:/results" \
   $USER/rocshmem-pr4574 sleep infinity
 
+# Jump interactive, do some modifications, rebuild
+docker exec -it rocshmem-pr4574 bash
+
 # Run as many times as needed (e.g. vary --iterations or --suite)
-docker exec rocshmem-pr4574 \
-  bash /app/rocm-systems/projects/rocshmem/scripts/run_perf_compare.sh \
-    --skip-build \
-    --baseline-dir /app/build \
-    --branch-dir /app/build4574 \
-    --suite heatmap --iterations 5 \
-    --outdir /results
+docker exec rocshmem-pr4574 perf-compare --suite heatmap --iterations 5
 
 # Teardown
 docker stop rocshmem-pr4574 && docker rm rocshmem-pr4574

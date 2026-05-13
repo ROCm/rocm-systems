@@ -9,13 +9,14 @@ Building the container
 ----------------------
 
 ```bash
-docker build --tag $USER/rocshmem .
+# Run from the projects/rocshmem directory:
+docker build -f docker/Dockerfile.ubuntu --tag $USER/rocshmem docker/
 ```
 
 Build parameters:
 
-* Build a PR branch AND devel in the container: `docker build --build-arg PR_NUM=4574 --tag $USER/rocshmem-pr4574 .`
-* Use a different SSH port: `docker build --build-arg SSH_PORT=2223 --tag $USER/rocshmem .`
+* Build a PR branch AND devel in the container: `docker build -f docker/Dockerfile.ubuntu --build-arg PR_NUM=4574 --tag $USER/rocshmem-pr4574 docker/`
+* Use a different SSH port: `docker build -f docker/Dockerfile.ubuntu --build-arg SSH_PORT=2223 --tag $USER/rocshmem docker/`
 
 Moving the image to compute nodes:
 
