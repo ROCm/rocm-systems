@@ -236,16 +236,16 @@ class IPCContext : public Context {
    **************************************************************************/
 
   // RMA Operations
-  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-  __device__ int tile_put(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+  template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+  __device__ int tile_put(dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord,
                           tuple_t boundary, int pe, uint64_t flags);
 
-  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-  __device__ int tile_put_wave(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+  template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+  __device__ int tile_put_wave(dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord,
                                tuple_t boundary, int pe, uint64_t flags);
 
-  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-  __device__ int tile_put_wg(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
+  template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+  __device__ int tile_put_wg(dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord,
                              tuple_t boundary, int pe, uint64_t flags);
 
   template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>

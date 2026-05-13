@@ -191,7 +191,7 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
         Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put(ctx, src_tensor, dst_tensor, start, boundary, 1, 0);
+        rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
         break;
       }
       case TilePutRowMajorTestType: {
@@ -200,7 +200,7 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
         Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put(ctx, src_tensor, dst_tensor, start, boundary, 1, 0);
+        rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
         break;
       }
       case TilePutColumnMajorTestType: {
@@ -209,7 +209,7 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
         Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put(ctx, src_tensor, dst_tensor, start, boundary, 1, 0);
+        rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
         break;
       }
       case TilePutArbitraryTestType: {
@@ -218,7 +218,7 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
         Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 257, 3);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put(ctx, src_tensor, dst_tensor, start, boundary, 1, 0);
+        rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
         break;
       }
       case TilePutWaveContiguousTestType: {
@@ -227,7 +227,7 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
         Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put_wave(ctx, src_tensor, dst_tensor, start, boundary, 1, 0);
+        rocshmem_ctx_tile_put_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
         break;
       }
       case TilePutWGContiguousTestType: {
@@ -236,7 +236,7 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
         Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
         Tuple2D start(0, 0);
         Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put_wg(ctx, src_tensor, dst_tensor, start, boundary, 1, 0);
+        rocshmem_ctx_tile_put_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
         break;
       }
       case TileGetContiguousTestType: {
@@ -299,7 +299,7 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
         Tensor1D<float> dst_tensor(dest + offset, 1);
         Tuple1D start(0);
         Tuple1D boundary(matrix_size);
-        rocshmem_ctx_tile_put(ctx, src_tensor, dst_tensor, start, boundary, 1, 0);
+        rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
         break;
       }
       case TileGet1DTestType: {

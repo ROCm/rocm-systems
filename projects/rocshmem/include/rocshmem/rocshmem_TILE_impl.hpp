@@ -68,29 +68,29 @@ static inline __device__ ContextTy *get_internal_ctx(rocshmem_ctx_t ctx) {
  **************** RMA OPERATIONS - CONTEXT VERSIONS (5) ***********************
  *****************************************************************************/
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_ctx_tile_put(rocshmem_ctx_t ctx, src_tensor_t src,
-                                     dst_tensor_t dst, tuple_t start_coord,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_ctx_tile_put(rocshmem_ctx_t ctx, dst_tensor_t dst,
+                                     const src_tensor_t src, tuple_t start_coord,
                                      tuple_t boundary, int pe, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_put(src, dst, start_coord, boundary, pe,
+  return get_internal_ctx(ctx)->tile_put(dst, src, start_coord, boundary, pe,
                                          flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_ctx_tile_put_wave(rocshmem_ctx_t ctx, src_tensor_t src,
-                                          dst_tensor_t dst, tuple_t start_coord,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_ctx_tile_put_wave(rocshmem_ctx_t ctx, dst_tensor_t dst,
+                                          const src_tensor_t src, tuple_t start_coord,
                                           tuple_t boundary, int pe,
                                           uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_put_wave(src, dst, start_coord, boundary,
+  return get_internal_ctx(ctx)->tile_put_wave(dst, src, start_coord, boundary,
                                               pe, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_ctx_tile_put_wg(rocshmem_ctx_t ctx, src_tensor_t src,
-                                        dst_tensor_t dst, tuple_t start_coord,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_ctx_tile_put_wg(rocshmem_ctx_t ctx, dst_tensor_t dst,
+                                        const src_tensor_t src, tuple_t start_coord,
                                         tuple_t boundary, int pe,
                                         uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_put_wg(src, dst, start_coord, boundary,
+  return get_internal_ctx(ctx)->tile_put_wg(dst, src, start_coord, boundary,
                                             pe, flags);
 }
 
@@ -124,27 +124,27 @@ __device__ inline int rocshmem_ctx_tile_get_wg(rocshmem_ctx_t ctx, dst_tensor_t 
  *************** RMA OPERATIONS - DEFAULT CONTEXT WRAPPERS (5) ****************
  *****************************************************************************/
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_put(src_tensor_t src, dst_tensor_t dst,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_put(dst_tensor_t dst, const src_tensor_t src,
                                  tuple_t start_coord, tuple_t boundary, int pe,
                                  uint64_t flags) {
-  return rocshmem_ctx_tile_put(ROCSHMEM_CTX_DEFAULT, src, dst, start_coord,
+  return rocshmem_ctx_tile_put(ROCSHMEM_CTX_DEFAULT, dst, src, start_coord,
                                boundary, pe, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_put_wave(src_tensor_t src, dst_tensor_t dst,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_put_wave(dst_tensor_t dst, const src_tensor_t src,
                                       tuple_t start_coord, tuple_t boundary,
                                       int pe, uint64_t flags) {
-  return rocshmem_ctx_tile_put_wave(ROCSHMEM_CTX_DEFAULT, src, dst,
+  return rocshmem_ctx_tile_put_wave(ROCSHMEM_CTX_DEFAULT, dst, src,
                                     start_coord, boundary, pe, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_put_wg(src_tensor_t src, dst_tensor_t dst,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_put_wg(dst_tensor_t dst, const src_tensor_t src,
                                     tuple_t start_coord, tuple_t boundary,
                                     int pe, uint64_t flags) {
-  return rocshmem_ctx_tile_put_wg(ROCSHMEM_CTX_DEFAULT, src, dst, start_coord,
+  return rocshmem_ctx_tile_put_wg(ROCSHMEM_CTX_DEFAULT, dst, src, start_coord,
                                   boundary, pe, flags);
 }
 
@@ -176,143 +176,126 @@ __device__ inline int rocshmem_tile_get_wg(dst_tensor_t dst, src_tensor_t src,
  *********** COLLECTIVE ALLGATHER - CONTEXT VERSIONS (3) **********************
  *****************************************************************************/
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_ctx_tile_allgather(rocshmem_ctx_t ctx, src_tensor_t src,
-                                           dst_tensor_t dst,
-                                           tuple_t start_coord,
-                                           tuple_t boundary,
-                                           rocshmem_team_t team,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_ctx_tile_allgather(rocshmem_ctx_t ctx, rocshmem_team_t team,
+                                           dst_tensor_t dst, const src_tensor_t src,
+                                           tuple_t start_coord, tuple_t boundary,
                                            uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_allgather(src, dst, start_coord, boundary,
-                                               team, flags);
+  return get_internal_ctx(ctx)->tile_allgather(team, dst, src, start_coord,
+                                               boundary, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_allgather_wave(rocshmem_ctx_t ctx,
-                                                src_tensor_t src,
-                                                dst_tensor_t dst,
-                                                tuple_t start_coord,
-                                                tuple_t boundary,
                                                 rocshmem_team_t team,
+                                                dst_tensor_t dst, const src_tensor_t src,
+                                                tuple_t start_coord, tuple_t boundary,
                                                 uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_allgather_wave(src, dst, start_coord,
-                                                     boundary, team, flags);
+  return get_internal_ctx(ctx)->tile_allgather_wave(team, dst, src, start_coord,
+                                                     boundary, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_allgather_wg(rocshmem_ctx_t ctx,
-                                              src_tensor_t src, dst_tensor_t dst,
-                                              tuple_t start_coord,
-                                              tuple_t boundary,
                                               rocshmem_team_t team,
+                                              dst_tensor_t dst, const src_tensor_t src,
+                                              tuple_t start_coord, tuple_t boundary,
                                               uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_allgather_wg(src, dst, start_coord,
-                                                   boundary, team, flags);
+  return get_internal_ctx(ctx)->tile_allgather_wg(team, dst, src, start_coord,
+                                                   boundary, flags);
 }
 
 /******************************************************************************
  ******** COLLECTIVE ALLGATHER - DEFAULT CONTEXT WRAPPERS (3) *****************
  *****************************************************************************/
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_allgather(src_tensor_t src, dst_tensor_t dst,
-                                       tuple_t start_coord, tuple_t boundary,
-                                       rocshmem_team_t team, uint64_t flags) {
-  return rocshmem_ctx_tile_allgather(ROCSHMEM_CTX_DEFAULT, src, dst,
-                                     start_coord, boundary, team, flags);
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_allgather(rocshmem_team_t team, dst_tensor_t dst,
+                                       const src_tensor_t src, tuple_t start_coord,
+                                       tuple_t boundary, uint64_t flags) {
+  return rocshmem_ctx_tile_allgather(ROCSHMEM_CTX_DEFAULT, team, dst, src,
+                                     start_coord, boundary, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_allgather_wave(src_tensor_t src, dst_tensor_t dst,
-                                            tuple_t start_coord,
-                                            tuple_t boundary,
-                                            rocshmem_team_t team,
-                                            uint64_t flags) {
-  return rocshmem_ctx_tile_allgather_wave(ROCSHMEM_CTX_DEFAULT, src, dst,
-                                          start_coord, boundary, team, flags);
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_allgather_wave(rocshmem_team_t team, dst_tensor_t dst,
+                                            const src_tensor_t src, tuple_t start_coord,
+                                            tuple_t boundary, uint64_t flags) {
+  return rocshmem_ctx_tile_allgather_wave(ROCSHMEM_CTX_DEFAULT, team, dst, src,
+                                          start_coord, boundary, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_allgather_wg(src_tensor_t src, dst_tensor_t dst,
-                                          tuple_t start_coord, tuple_t boundary,
-                                          rocshmem_team_t team,
-                                          uint64_t flags) {
-  return rocshmem_ctx_tile_allgather_wg(ROCSHMEM_CTX_DEFAULT, src, dst,
-                                        start_coord, boundary, team, flags);
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_allgather_wg(rocshmem_team_t team, dst_tensor_t dst,
+                                          const src_tensor_t src, tuple_t start_coord,
+                                          tuple_t boundary, uint64_t flags) {
+  return rocshmem_ctx_tile_allgather_wg(ROCSHMEM_CTX_DEFAULT, team, dst, src,
+                                        start_coord, boundary, flags);
 }
 
 /******************************************************************************
  *********** COLLECTIVE BROADCAST - CONTEXT VERSIONS (3) **********************
  *****************************************************************************/
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_ctx_tile_broadcast(rocshmem_ctx_t ctx, src_tensor_t src,
-                                           dst_tensor_t dst,
-                                           tuple_t start_coord,
-                                           tuple_t boundary, int pe_root,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_ctx_tile_broadcast(rocshmem_ctx_t ctx,
                                            rocshmem_team_t team,
-                                           uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_broadcast(src, dst, start_coord, boundary,
-                                               pe_root, team, flags);
+                                           dst_tensor_t dst, const src_tensor_t src,
+                                           tuple_t start_coord, tuple_t boundary,
+                                           int pe_root, uint64_t flags) {
+  return get_internal_ctx(ctx)->tile_broadcast(team, dst, src, start_coord,
+                                               boundary, pe_root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_broadcast_wave(rocshmem_ctx_t ctx,
-                                                src_tensor_t src,
-                                                dst_tensor_t dst,
-                                                tuple_t start_coord,
-                                                tuple_t boundary, int pe_root,
                                                 rocshmem_team_t team,
-                                                uint64_t flags) {
+                                                dst_tensor_t dst, const src_tensor_t src,
+                                                tuple_t start_coord, tuple_t boundary,
+                                                int pe_root, uint64_t flags) {
   return get_internal_ctx(ctx)->tile_broadcast_wave(
-      src, dst, start_coord, boundary, pe_root, team, flags);
+      team, dst, src, start_coord, boundary, pe_root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_broadcast_wg(rocshmem_ctx_t ctx,
-                                              src_tensor_t src, dst_tensor_t dst,
-                                              tuple_t start_coord,
-                                              tuple_t boundary, int pe_root,
                                               rocshmem_team_t team,
-                                              uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_broadcast_wg(src, dst, start_coord,
-                                                   boundary, pe_root, team,
-                                                   flags);
+                                              dst_tensor_t dst, const src_tensor_t src,
+                                              tuple_t start_coord, tuple_t boundary,
+                                              int pe_root, uint64_t flags) {
+  return get_internal_ctx(ctx)->tile_broadcast_wg(team, dst, src, start_coord,
+                                                   boundary, pe_root, flags);
 }
 
 /******************************************************************************
  ******** COLLECTIVE BROADCAST - DEFAULT CONTEXT WRAPPERS (3) *****************
  *****************************************************************************/
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_broadcast(src_tensor_t src, dst_tensor_t dst,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_broadcast(rocshmem_team_t team,
+                                       dst_tensor_t dst, const src_tensor_t src,
                                        tuple_t start_coord, tuple_t boundary,
-                                       int pe_root, rocshmem_team_t team,
-                                       uint64_t flags) {
-  return rocshmem_ctx_tile_broadcast(ROCSHMEM_CTX_DEFAULT, src, dst,
-                                     start_coord, boundary, pe_root, team,
-                                     flags);
+                                       int pe_root, uint64_t flags) {
+  return rocshmem_ctx_tile_broadcast(ROCSHMEM_CTX_DEFAULT, team, dst, src,
+                                     start_coord, boundary, pe_root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_broadcast_wave(src_tensor_t src, dst_tensor_t dst,
-                                            tuple_t start_coord,
-                                            tuple_t boundary, int pe_root,
-                                            rocshmem_team_t team,
-                                            uint64_t flags) {
-  return rocshmem_ctx_tile_broadcast_wave(ROCSHMEM_CTX_DEFAULT, src, dst,
-                                          start_coord, boundary, pe_root, team,
-                                          flags);
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_broadcast_wave(rocshmem_team_t team,
+                                            dst_tensor_t dst, const src_tensor_t src,
+                                            tuple_t start_coord, tuple_t boundary,
+                                            int pe_root, uint64_t flags) {
+  return rocshmem_ctx_tile_broadcast_wave(ROCSHMEM_CTX_DEFAULT, team, dst, src,
+                                          start_coord, boundary, pe_root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_broadcast_wg(src_tensor_t src, dst_tensor_t dst,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_broadcast_wg(rocshmem_team_t team,
+                                          dst_tensor_t dst, const src_tensor_t src,
                                           tuple_t start_coord, tuple_t boundary,
-                                          int pe_root, rocshmem_team_t team,
-                                          uint64_t flags) {
-  return rocshmem_ctx_tile_broadcast_wg(ROCSHMEM_CTX_DEFAULT, src, dst,
-                                        start_coord, boundary, pe_root, team,
-                                        flags);
+                                          int pe_root, uint64_t flags) {
+  return rocshmem_ctx_tile_broadcast_wg(ROCSHMEM_CTX_DEFAULT, team, dst, src,
+                                        start_coord, boundary, pe_root, flags);
 }
 
 /******************************************************************************
@@ -338,140 +321,139 @@ __device__ inline int rocshmem_tile_collective_wait(rocshmem_team_t team,
  ******************* SUM REDUCTIONS - CONTEXT VERSIONS (6) ********************
  *****************************************************************************/
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_sum_reduce(rocshmem_ctx_t ctx,
                                             rocshmem_team_t team,
-                                            src_tensor_t src, dst_tensor_t dst,
+                                            dst_tensor_t dst, const src_tensor_t src,
                                             tuple_t start_coord,
-                                            tuple_t boundary, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_sum_reduce(src, dst, start_coord,
-                                                 boundary, team, flags);
+                                            tuple_t boundary, int root, uint64_t flags) {
+  return get_internal_ctx(ctx)->tile_sum_reduce(team, dst, src, start_coord,
+                                                 boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_sum_reduce_wave(rocshmem_ctx_t ctx,
                                                  rocshmem_team_t team,
-                                                 src_tensor_t src,
                                                  dst_tensor_t dst,
+                                                 const src_tensor_t src,
                                                  tuple_t start_coord,
                                                  tuple_t boundary,
-                                                 uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_sum_reduce_wave(src, dst, start_coord,
-                                                      boundary, team, flags);
+                                                 int root, uint64_t flags) {
+  return get_internal_ctx(ctx)->tile_sum_reduce_wave(team, dst, src, start_coord,
+                                                      boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_sum_reduce_wg(rocshmem_ctx_t ctx,
                                                rocshmem_team_t team,
-                                               src_tensor_t src,
                                                dst_tensor_t dst,
+                                               const src_tensor_t src,
                                                tuple_t start_coord,
                                                tuple_t boundary,
-                                               uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_sum_reduce_wg(src, dst, start_coord,
-                                                    boundary, team, flags);
+                                               int root, uint64_t flags) {
+  return get_internal_ctx(ctx)->tile_sum_reduce_wg(team, dst, src, start_coord,
+                                                    boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_sum_rooted_reduce(rocshmem_ctx_t ctx,
                                                    rocshmem_team_t team,
-                                                   src_tensor_t src,
                                                    dst_tensor_t dst,
+                                                   const src_tensor_t src,
                                                    tuple_t start_coord,
                                                    tuple_t boundary, int root,
                                                    uint64_t flags) {
   return get_internal_ctx(ctx)->tile_sum_rooted_reduce(
-      src, dst, start_coord, boundary, root, team, flags);
+      team, dst, src, start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_sum_rooted_reduce_wave(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, src_tensor_t src,
-    dst_tensor_t dst, tuple_t start_coord, tuple_t boundary, int root,
+    rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst,
+    const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root,
     uint64_t flags) {
   return get_internal_ctx(ctx)->tile_sum_rooted_reduce_wave(
-      src, dst, start_coord, boundary, root, team, flags);
+      team, dst, src, start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_sum_rooted_reduce_wg(rocshmem_ctx_t ctx,
                                                       rocshmem_team_t team,
-                                                      src_tensor_t src,
                                                       dst_tensor_t dst,
+                                                      const src_tensor_t src,
                                                       tuple_t start_coord,
                                                       tuple_t boundary, int root,
                                                       uint64_t flags) {
   return get_internal_ctx(ctx)->tile_sum_rooted_reduce_wg(
-      src, dst, start_coord, boundary, root, team, flags);
+      team, dst, src, start_coord, boundary, root, flags);
 }
 
 /******************************************************************************
  ************** SUM REDUCTIONS - DEFAULT CONTEXT WRAPPERS (6) *****************
  *****************************************************************************/
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_sum_reduce(src_tensor_t src, dst_tensor_t dst,
-                                        tuple_t start_coord, tuple_t boundary,
-                                        rocshmem_team_t team, uint64_t flags) {
-  return rocshmem_ctx_tile_sum_reduce(ROCSHMEM_CTX_DEFAULT, team, src, dst,
-                                      start_coord, boundary, flags);
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_sum_reduce(rocshmem_team_t team, dst_tensor_t dst,
+                                        const src_tensor_t src, tuple_t start_coord,
+                                        tuple_t boundary, int root, uint64_t flags) {
+  return rocshmem_ctx_tile_sum_reduce(ROCSHMEM_CTX_DEFAULT, team, dst, src,
+                                      start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_sum_reduce_wave(src_tensor_t src,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_sum_reduce_wave(rocshmem_team_t team,
                                              dst_tensor_t dst,
+                                             const src_tensor_t src,
                                              tuple_t start_coord,
                                              tuple_t boundary,
-                                             rocshmem_team_t team,
-                                             uint64_t flags) {
-  return rocshmem_ctx_tile_sum_reduce_wave(ROCSHMEM_CTX_DEFAULT, team, src,
-                                           dst, start_coord, boundary, flags);
+                                             int root, uint64_t flags) {
+  return rocshmem_ctx_tile_sum_reduce_wave(ROCSHMEM_CTX_DEFAULT, team, dst,
+                                           src, start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_sum_reduce_wg(src_tensor_t src, dst_tensor_t dst,
-                                           tuple_t start_coord,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_sum_reduce_wg(rocshmem_team_t team, dst_tensor_t dst,
+                                           const src_tensor_t src, tuple_t start_coord,
                                            tuple_t boundary,
-                                           rocshmem_team_t team,
-                                           uint64_t flags) {
-  return rocshmem_ctx_tile_sum_reduce_wg(ROCSHMEM_CTX_DEFAULT, team, src, dst,
-                                         start_coord, boundary, flags);
+                                           int root, uint64_t flags) {
+  return rocshmem_ctx_tile_sum_reduce_wg(ROCSHMEM_CTX_DEFAULT, team, dst, src,
+                                         start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_sum_rooted_reduce(src_tensor_t src,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_sum_rooted_reduce(rocshmem_team_t team,
                                                dst_tensor_t dst,
+                                               const src_tensor_t src,
                                                tuple_t start_coord,
                                                tuple_t boundary, int pe_root,
-                                               rocshmem_team_t team,
                                                uint64_t flags) {
-  return rocshmem_ctx_tile_sum_rooted_reduce(ROCSHMEM_CTX_DEFAULT, team, src,
-                                             dst, start_coord, boundary,
+  return rocshmem_ctx_tile_sum_rooted_reduce(ROCSHMEM_CTX_DEFAULT, team, dst,
+                                             src, start_coord, boundary,
                                              pe_root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_sum_rooted_reduce_wave(src_tensor_t src,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_sum_rooted_reduce_wave(rocshmem_team_t team,
                                                     dst_tensor_t dst,
+                                                    const src_tensor_t src,
                                                     tuple_t start_coord,
                                                     tuple_t boundary,
                                                     int pe_root,
-                                                    rocshmem_team_t team,
                                                     uint64_t flags) {
   return rocshmem_ctx_tile_sum_rooted_reduce_wave(
-      ROCSHMEM_CTX_DEFAULT, team, src, dst, start_coord, boundary, pe_root,
+      ROCSHMEM_CTX_DEFAULT, team, dst, src, start_coord, boundary, pe_root,
       flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_sum_rooted_reduce_wg(src_tensor_t src,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_sum_rooted_reduce_wg(rocshmem_team_t team,
                                                   dst_tensor_t dst,
+                                                  const src_tensor_t src,
                                                   tuple_t start_coord,
                                                   tuple_t boundary, int pe_root,
-                                                  rocshmem_team_t team,
                                                   uint64_t flags) {
   return rocshmem_ctx_tile_sum_rooted_reduce_wg(
-      ROCSHMEM_CTX_DEFAULT, team, src, dst, start_coord, boundary, pe_root,
+      ROCSHMEM_CTX_DEFAULT, team, dst, src, start_coord, boundary, pe_root,
       flags);
 }
 
@@ -479,140 +461,139 @@ __device__ inline int rocshmem_tile_sum_rooted_reduce_wg(src_tensor_t src,
  ******************* MAX REDUCTIONS - CONTEXT VERSIONS (6) ********************
  *****************************************************************************/
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_max_reduce(rocshmem_ctx_t ctx,
                                             rocshmem_team_t team,
-                                            src_tensor_t src, dst_tensor_t dst,
+                                            dst_tensor_t dst, const src_tensor_t src,
                                             tuple_t start_coord,
-                                            tuple_t boundary, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_max_reduce(src, dst, start_coord,
-                                                 boundary, team, flags);
+                                            tuple_t boundary, int root, uint64_t flags) {
+  return get_internal_ctx(ctx)->tile_max_reduce(team, dst, src, start_coord,
+                                                 boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_max_reduce_wave(rocshmem_ctx_t ctx,
                                                  rocshmem_team_t team,
-                                                 src_tensor_t src,
                                                  dst_tensor_t dst,
+                                                 const src_tensor_t src,
                                                  tuple_t start_coord,
                                                  tuple_t boundary,
-                                                 uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_max_reduce_wave(src, dst, start_coord,
-                                                      boundary, team, flags);
+                                                 int root, uint64_t flags) {
+  return get_internal_ctx(ctx)->tile_max_reduce_wave(team, dst, src, start_coord,
+                                                      boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_max_reduce_wg(rocshmem_ctx_t ctx,
                                                rocshmem_team_t team,
-                                               src_tensor_t src,
                                                dst_tensor_t dst,
+                                               const src_tensor_t src,
                                                tuple_t start_coord,
                                                tuple_t boundary,
-                                               uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_max_reduce_wg(src, dst, start_coord,
-                                                    boundary, team, flags);
+                                               int root, uint64_t flags) {
+  return get_internal_ctx(ctx)->tile_max_reduce_wg(team, dst, src, start_coord,
+                                                    boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_max_rooted_reduce(rocshmem_ctx_t ctx,
                                                    rocshmem_team_t team,
-                                                   src_tensor_t src,
                                                    dst_tensor_t dst,
+                                                   const src_tensor_t src,
                                                    tuple_t start_coord,
                                                    tuple_t boundary, int root,
                                                    uint64_t flags) {
   return get_internal_ctx(ctx)->tile_max_rooted_reduce(
-      src, dst, start_coord, boundary, root, team, flags);
+      team, dst, src, start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_max_rooted_reduce_wave(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, src_tensor_t src,
-    dst_tensor_t dst, tuple_t start_coord, tuple_t boundary, int root,
+    rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst,
+    const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root,
     uint64_t flags) {
   return get_internal_ctx(ctx)->tile_max_rooted_reduce_wave(
-      src, dst, start_coord, boundary, root, team, flags);
+      team, dst, src, start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_max_rooted_reduce_wg(rocshmem_ctx_t ctx,
                                                       rocshmem_team_t team,
-                                                      src_tensor_t src,
                                                       dst_tensor_t dst,
+                                                      const src_tensor_t src,
                                                       tuple_t start_coord,
                                                       tuple_t boundary, int root,
                                                       uint64_t flags) {
   return get_internal_ctx(ctx)->tile_max_rooted_reduce_wg(
-      src, dst, start_coord, boundary, root, team, flags);
+      team, dst, src, start_coord, boundary, root, flags);
 }
 
 /******************************************************************************
  ************** MAX REDUCTIONS - DEFAULT CONTEXT WRAPPERS (6) *****************
  *****************************************************************************/
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_max_reduce(src_tensor_t src, dst_tensor_t dst,
-                                        tuple_t start_coord, tuple_t boundary,
-                                        rocshmem_team_t team, uint64_t flags) {
-  return rocshmem_ctx_tile_max_reduce(ROCSHMEM_CTX_DEFAULT, team, src, dst,
-                                      start_coord, boundary, flags);
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_max_reduce(rocshmem_team_t team, dst_tensor_t dst,
+                                        const src_tensor_t src, tuple_t start_coord,
+                                        tuple_t boundary, int root, uint64_t flags) {
+  return rocshmem_ctx_tile_max_reduce(ROCSHMEM_CTX_DEFAULT, team, dst, src,
+                                      start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_max_reduce_wave(src_tensor_t src,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_max_reduce_wave(rocshmem_team_t team,
                                              dst_tensor_t dst,
+                                             const src_tensor_t src,
                                              tuple_t start_coord,
                                              tuple_t boundary,
-                                             rocshmem_team_t team,
-                                             uint64_t flags) {
-  return rocshmem_ctx_tile_max_reduce_wave(ROCSHMEM_CTX_DEFAULT, team, src,
-                                           dst, start_coord, boundary, flags);
+                                             int root, uint64_t flags) {
+  return rocshmem_ctx_tile_max_reduce_wave(ROCSHMEM_CTX_DEFAULT, team, dst,
+                                           src, start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_max_reduce_wg(src_tensor_t src, dst_tensor_t dst,
-                                           tuple_t start_coord,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_max_reduce_wg(rocshmem_team_t team, dst_tensor_t dst,
+                                           const src_tensor_t src, tuple_t start_coord,
                                            tuple_t boundary,
-                                           rocshmem_team_t team,
-                                           uint64_t flags) {
-  return rocshmem_ctx_tile_max_reduce_wg(ROCSHMEM_CTX_DEFAULT, team, src, dst,
-                                         start_coord, boundary, flags);
+                                           int root, uint64_t flags) {
+  return rocshmem_ctx_tile_max_reduce_wg(ROCSHMEM_CTX_DEFAULT, team, dst, src,
+                                         start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_max_rooted_reduce(src_tensor_t src,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_max_rooted_reduce(rocshmem_team_t team,
                                                dst_tensor_t dst,
+                                               const src_tensor_t src,
                                                tuple_t start_coord,
                                                tuple_t boundary, int pe_root,
-                                               rocshmem_team_t team,
                                                uint64_t flags) {
-  return rocshmem_ctx_tile_max_rooted_reduce(ROCSHMEM_CTX_DEFAULT, team, src,
-                                             dst, start_coord, boundary,
+  return rocshmem_ctx_tile_max_rooted_reduce(ROCSHMEM_CTX_DEFAULT, team, dst,
+                                             src, start_coord, boundary,
                                              pe_root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_max_rooted_reduce_wave(src_tensor_t src,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_max_rooted_reduce_wave(rocshmem_team_t team,
                                                     dst_tensor_t dst,
+                                                    const src_tensor_t src,
                                                     tuple_t start_coord,
                                                     tuple_t boundary,
                                                     int pe_root,
-                                                    rocshmem_team_t team,
                                                     uint64_t flags) {
   return rocshmem_ctx_tile_max_rooted_reduce_wave(
-      ROCSHMEM_CTX_DEFAULT, team, src, dst, start_coord, boundary, pe_root,
+      ROCSHMEM_CTX_DEFAULT, team, dst, src, start_coord, boundary, pe_root,
       flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_max_rooted_reduce_wg(src_tensor_t src,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_max_rooted_reduce_wg(rocshmem_team_t team,
                                                   dst_tensor_t dst,
+                                                  const src_tensor_t src,
                                                   tuple_t start_coord,
                                                   tuple_t boundary, int pe_root,
-                                                  rocshmem_team_t team,
                                                   uint64_t flags) {
   return rocshmem_ctx_tile_max_rooted_reduce_wg(
-      ROCSHMEM_CTX_DEFAULT, team, src, dst, start_coord, boundary, pe_root,
+      ROCSHMEM_CTX_DEFAULT, team, dst, src, start_coord, boundary, pe_root,
       flags);
 }
 
@@ -620,140 +601,139 @@ __device__ inline int rocshmem_tile_max_rooted_reduce_wg(src_tensor_t src,
  ******************* MIN REDUCTIONS - CONTEXT VERSIONS (6) ********************
  *****************************************************************************/
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_min_reduce(rocshmem_ctx_t ctx,
                                             rocshmem_team_t team,
-                                            src_tensor_t src, dst_tensor_t dst,
+                                            dst_tensor_t dst, const src_tensor_t src,
                                             tuple_t start_coord,
-                                            tuple_t boundary, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_min_reduce(src, dst, start_coord,
-                                                 boundary, team, flags);
+                                            tuple_t boundary, int root, uint64_t flags) {
+  return get_internal_ctx(ctx)->tile_min_reduce(team, dst, src, start_coord,
+                                                 boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_min_reduce_wave(rocshmem_ctx_t ctx,
                                                  rocshmem_team_t team,
-                                                 src_tensor_t src,
                                                  dst_tensor_t dst,
+                                                 const src_tensor_t src,
                                                  tuple_t start_coord,
                                                  tuple_t boundary,
-                                                 uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_min_reduce_wave(src, dst, start_coord,
-                                                      boundary, team, flags);
+                                                 int root, uint64_t flags) {
+  return get_internal_ctx(ctx)->tile_min_reduce_wave(team, dst, src, start_coord,
+                                                      boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_min_reduce_wg(rocshmem_ctx_t ctx,
                                                rocshmem_team_t team,
-                                               src_tensor_t src,
                                                dst_tensor_t dst,
+                                               const src_tensor_t src,
                                                tuple_t start_coord,
                                                tuple_t boundary,
-                                               uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_min_reduce_wg(src, dst, start_coord,
-                                                    boundary, team, flags);
+                                               int root, uint64_t flags) {
+  return get_internal_ctx(ctx)->tile_min_reduce_wg(team, dst, src, start_coord,
+                                                    boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_min_rooted_reduce(rocshmem_ctx_t ctx,
                                                    rocshmem_team_t team,
-                                                   src_tensor_t src,
                                                    dst_tensor_t dst,
+                                                   const src_tensor_t src,
                                                    tuple_t start_coord,
                                                    tuple_t boundary, int root,
                                                    uint64_t flags) {
   return get_internal_ctx(ctx)->tile_min_rooted_reduce(
-      src, dst, start_coord, boundary, root, team, flags);
+      team, dst, src, start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_min_rooted_reduce_wave(
-    rocshmem_ctx_t ctx, rocshmem_team_t team, src_tensor_t src,
-    dst_tensor_t dst, tuple_t start_coord, tuple_t boundary, int root,
+    rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst,
+    const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root,
     uint64_t flags) {
   return get_internal_ctx(ctx)->tile_min_rooted_reduce_wave(
-      src, dst, start_coord, boundary, root, team, flags);
+      team, dst, src, start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_min_rooted_reduce_wg(rocshmem_ctx_t ctx,
                                                       rocshmem_team_t team,
-                                                      src_tensor_t src,
                                                       dst_tensor_t dst,
+                                                      const src_tensor_t src,
                                                       tuple_t start_coord,
                                                       tuple_t boundary, int root,
                                                       uint64_t flags) {
   return get_internal_ctx(ctx)->tile_min_rooted_reduce_wg(
-      src, dst, start_coord, boundary, root, team, flags);
+      team, dst, src, start_coord, boundary, root, flags);
 }
 
 /******************************************************************************
  ************** MIN REDUCTIONS - DEFAULT CONTEXT WRAPPERS (6) *****************
  *****************************************************************************/
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_min_reduce(src_tensor_t src, dst_tensor_t dst,
-                                        tuple_t start_coord, tuple_t boundary,
-                                        rocshmem_team_t team, uint64_t flags) {
-  return rocshmem_ctx_tile_min_reduce(ROCSHMEM_CTX_DEFAULT, team, src, dst,
-                                      start_coord, boundary, flags);
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_min_reduce(rocshmem_team_t team, dst_tensor_t dst,
+                                        const src_tensor_t src, tuple_t start_coord,
+                                        tuple_t boundary, int root, uint64_t flags) {
+  return rocshmem_ctx_tile_min_reduce(ROCSHMEM_CTX_DEFAULT, team, dst, src,
+                                      start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_min_reduce_wave(src_tensor_t src,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_min_reduce_wave(rocshmem_team_t team,
                                              dst_tensor_t dst,
+                                             const src_tensor_t src,
                                              tuple_t start_coord,
                                              tuple_t boundary,
-                                             rocshmem_team_t team,
-                                             uint64_t flags) {
-  return rocshmem_ctx_tile_min_reduce_wave(ROCSHMEM_CTX_DEFAULT, team, src,
-                                           dst, start_coord, boundary, flags);
+                                             int root, uint64_t flags) {
+  return rocshmem_ctx_tile_min_reduce_wave(ROCSHMEM_CTX_DEFAULT, team, dst,
+                                           src, start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_min_reduce_wg(src_tensor_t src, dst_tensor_t dst,
-                                           tuple_t start_coord,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_min_reduce_wg(rocshmem_team_t team, dst_tensor_t dst,
+                                           const src_tensor_t src, tuple_t start_coord,
                                            tuple_t boundary,
-                                           rocshmem_team_t team,
-                                           uint64_t flags) {
-  return rocshmem_ctx_tile_min_reduce_wg(ROCSHMEM_CTX_DEFAULT, team, src, dst,
-                                         start_coord, boundary, flags);
+                                           int root, uint64_t flags) {
+  return rocshmem_ctx_tile_min_reduce_wg(ROCSHMEM_CTX_DEFAULT, team, dst, src,
+                                         start_coord, boundary, root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_min_rooted_reduce(src_tensor_t src,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_min_rooted_reduce(rocshmem_team_t team,
                                                dst_tensor_t dst,
+                                               const src_tensor_t src,
                                                tuple_t start_coord,
                                                tuple_t boundary, int pe_root,
-                                               rocshmem_team_t team,
                                                uint64_t flags) {
-  return rocshmem_ctx_tile_min_rooted_reduce(ROCSHMEM_CTX_DEFAULT, team, src,
-                                             dst, start_coord, boundary,
+  return rocshmem_ctx_tile_min_rooted_reduce(ROCSHMEM_CTX_DEFAULT, team, dst,
+                                             src, start_coord, boundary,
                                              pe_root, flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_min_rooted_reduce_wave(src_tensor_t src,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_min_rooted_reduce_wave(rocshmem_team_t team,
                                                     dst_tensor_t dst,
+                                                    const src_tensor_t src,
                                                     tuple_t start_coord,
                                                     tuple_t boundary,
                                                     int pe_root,
-                                                    rocshmem_team_t team,
                                                     uint64_t flags) {
   return rocshmem_ctx_tile_min_rooted_reduce_wave(
-      ROCSHMEM_CTX_DEFAULT, team, src, dst, start_coord, boundary, pe_root,
+      ROCSHMEM_CTX_DEFAULT, team, dst, src, start_coord, boundary, pe_root,
       flags);
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int rocshmem_tile_min_rooted_reduce_wg(src_tensor_t src,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int rocshmem_tile_min_rooted_reduce_wg(rocshmem_team_t team,
                                                   dst_tensor_t dst,
+                                                  const src_tensor_t src,
                                                   tuple_t start_coord,
                                                   tuple_t boundary, int pe_root,
-                                                  rocshmem_team_t team,
                                                   uint64_t flags) {
   return rocshmem_ctx_tile_min_rooted_reduce_wg(
-      ROCSHMEM_CTX_DEFAULT, team, src, dst, start_coord, boundary, pe_root,
+      ROCSHMEM_CTX_DEFAULT, team, dst, src, start_coord, boundary, pe_root,
       flags);
 }
 

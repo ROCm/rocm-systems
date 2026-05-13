@@ -109,7 +109,7 @@ __global__ void halo_exchange_kernel(Tensor2D<float> local_tensor,
 
     Coord2D start(0, 0);
     Coord2D boundary(1, inner_size);
-    rocshmem_ctx_tile_put_wg(ctx, src_sub, dst_sub, start, boundary, north_pe, 0);
+    rocshmem_ctx_tile_put_wg(ctx, dst_sub, src_sub, start, boundary, north_pe, 0);
   }
   else if (wg_id == 1 && south_pe >= 0) {
     // Send south boundary (row 8, cols 1-8) to south neighbor's north halo (row 0, cols 1-8)
@@ -120,7 +120,7 @@ __global__ void halo_exchange_kernel(Tensor2D<float> local_tensor,
 
     Coord2D start(0, 0);
     Coord2D boundary(1, inner_size);
-    rocshmem_ctx_tile_put_wg(ctx, src_sub, dst_sub, start, boundary, south_pe, 0);
+    rocshmem_ctx_tile_put_wg(ctx, dst_sub, src_sub, start, boundary, south_pe, 0);
   }
   else if (wg_id == 2 && east_pe >= 0) {
     // Send east boundary (rows 1-8, col 8) to east neighbor's west halo (rows 1-8, col 0)
@@ -131,7 +131,7 @@ __global__ void halo_exchange_kernel(Tensor2D<float> local_tensor,
 
     Coord2D start(0, 0);
     Coord2D boundary(inner_size, 1);
-    rocshmem_ctx_tile_put_wg(ctx, src_sub, dst_sub, start, boundary, east_pe, 0);
+    rocshmem_ctx_tile_put_wg(ctx, dst_sub, src_sub, start, boundary, east_pe, 0);
   }
   else if (wg_id == 3 && west_pe >= 0) {
     // Send west boundary (rows 1-8, col 1) to west neighbor's east halo (rows 1-8, col 9/last)
@@ -142,7 +142,7 @@ __global__ void halo_exchange_kernel(Tensor2D<float> local_tensor,
 
     Coord2D start(0, 0);
     Coord2D boundary(inner_size, 1);
-    rocshmem_ctx_tile_put_wg(ctx, src_sub, dst_sub, start, boundary, west_pe, 0);
+    rocshmem_ctx_tile_put_wg(ctx, dst_sub, src_sub, start, boundary, west_pe, 0);
   }
 
   if (threadIdx.x == 0) {

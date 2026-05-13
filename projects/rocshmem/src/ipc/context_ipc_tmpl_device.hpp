@@ -654,8 +654,8 @@ IPC_CONTEXT_PUT_SIGNAL_DEF(_wave)
  *****************************************************************************/
 
 // RMA Operations
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_put(src_tensor_t src, dst_tensor_t dst,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int IPCContext::tile_put(dst_tensor_t dst, const src_tensor_t src,
                                            tuple_t start_coord, tuple_t boundary,
                                            int pe, [[maybe_unused]] uint64_t flags) {
   // Extract tensor properties at compile time
@@ -747,8 +747,8 @@ __device__ inline int IPCContext::tile_put(src_tensor_t src, dst_tensor_t dst,
   return ROCSHMEM_SUCCESS;
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_put_wave(src_tensor_t src, dst_tensor_t dst,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int IPCContext::tile_put_wave(dst_tensor_t dst, const src_tensor_t src,
                                          tuple_t start_coord, tuple_t boundary,
                                          int pe, [[maybe_unused]] uint64_t flags) {
   using element_t = typename src_tensor_t::element_type;
@@ -834,8 +834,8 @@ __device__ inline int IPCContext::tile_put_wave(src_tensor_t src, dst_tensor_t d
   return ROCSHMEM_SUCCESS;
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_put_wg(src_tensor_t src, dst_tensor_t dst,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int IPCContext::tile_put_wg(dst_tensor_t dst, const src_tensor_t src,
                                        tuple_t start_coord, tuple_t boundary,
                                        int pe, [[maybe_unused]] uint64_t flags) {
   using element_t = typename src_tensor_t::element_type;
