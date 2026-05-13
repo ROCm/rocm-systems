@@ -6,6 +6,7 @@
  *************************************************************************/
 
 #include "common_cast.h"
+#include "connect_cast.h"
 
 #include "gin/gin_host.h"
 #include "gin_cast.h"
@@ -443,6 +444,9 @@ ncclResult_t IbCastGinIbProxyCreateContext(void* collComm, ncclGinConfig_v13_t* 
   char* handle = NULL, *handles = NULL;
   NCCLCHECKGOTO(ncclIbMalloc((void**)&handles, NCCL_NET_HANDLE_MAXSIZE*cComm->nranks), ret, end);
   handle = handles + NCCL_NET_HANDLE_MAXSIZE*cComm->rank;
+
+  //Mark communicator as RMA communicator: 1QP, Flush enabled, no CTS offload.
+  ((struct ncclIbHandle*)handle)->isRMA = true;
 
   NCCLCHECKGOTO(netIbCast.listen(cComm->ctx, cComm->dev, handle, &lComm), ret, end);
   NCCLCHECKGOTO(cComm->allGather(cComm, handle, handles, NCCL_NET_HANDLE_MAXSIZE), ret, end);
