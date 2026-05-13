@@ -495,8 +495,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_PinnedRegMemWithKernelLaunch,
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   {
     // 1 refers to pinned Memory

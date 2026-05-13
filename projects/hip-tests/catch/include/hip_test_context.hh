@@ -100,6 +100,7 @@ class TestContext {
   bool isLinux() const;
   bool isNvidia() const;
   bool isAmd() const;
+  bool skipTest() const;
 
   std::string currentPath() const;
 

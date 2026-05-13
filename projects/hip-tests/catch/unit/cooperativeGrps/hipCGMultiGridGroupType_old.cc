@@ -374,8 +374,7 @@ HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Basic) {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties, i));
     if (!device_properties.cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     }
     max_threads_per_blk = min(max_threads_per_blk, device_properties.maxThreadsPerBlock);
   }
@@ -418,16 +417,14 @@ HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Barrier) {
 
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   if (num_devices < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   std::vector<hipDeviceProp_t> device_properties(num_devices);
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     }
   }
 

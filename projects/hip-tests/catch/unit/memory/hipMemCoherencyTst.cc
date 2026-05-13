@@ -141,7 +141,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_CoherentTst) {
     HIP_CHECK(hipFree(Ptr));
     REQUIRE(YES_COHERENT);
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 #endif
@@ -180,7 +180,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_CoherentTstWthAdvise) {
     HIP_CHECK(hipStreamDestroy(strm));
     REQUIRE(YES_COHERENT);
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -221,12 +221,10 @@ HIP_TEST_CASE(Unit_hipExtMallocWithFlags_CoherentTst) {
   HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
   INFO("hipDeviceAttributeManagedMemory: " << managed);
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
   if (Pageable != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
   }
 
   // Allocating hipExtMallocWithFlags() memory with flags
