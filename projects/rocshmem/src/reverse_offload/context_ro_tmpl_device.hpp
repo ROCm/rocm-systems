@@ -457,22 +457,22 @@ RO_CONTEXT_PUT_SIGNAL_DEF(_wave)
  *****************************************************************************/
 
 // RMA PUT operations
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int ROContext::tile_put([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int ROContext::tile_put([[maybe_unused]] dst_tensor_t dst, [[maybe_unused]] const src_tensor_t src,
                                    [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
                                    [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int ROContext::tile_put_wave([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int ROContext::tile_put_wave([[maybe_unused]] dst_tensor_t dst, [[maybe_unused]] const src_tensor_t src,
                                         [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
                                         [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int ROContext::tile_put_wg([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int ROContext::tile_put_wg([[maybe_unused]] dst_tensor_t dst, [[maybe_unused]] const src_tensor_t src,
                                       [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
                                       [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
