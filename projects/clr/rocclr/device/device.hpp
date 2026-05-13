@@ -43,7 +43,6 @@
 #include <shared_mutex>
 
 namespace amd {
-namespace roc { struct GraphSignalPool; }
 class Command;
 class CommandQueue;
 class ReadMemoryCommand;
@@ -679,7 +678,7 @@ struct Info : public amd::EmbeddedObject {
 };
 
 //! Device settings
-class Settings : public amd::HeapObject {
+class Settings {
  public:
   enum KernelArgImpl {
     HostKernelArgs = 0,        //!< Kernel Arguments are put into host memory
@@ -753,7 +752,7 @@ class Settings : public amd::HeapObject {
 
 //! Device-independent cache memory, base class for the device-specific
 //! memories. One Memory instance refers to one or more of these.
-class Memory : public amd::HeapObject {
+class Memory {
  public:
   //! Resource map flags
   enum CpuMapFlags {
@@ -779,7 +778,7 @@ class Memory : public amd::HeapObject {
     SyncFlags() : value_(0) {}
   };
 
-  struct WriteMapInfo : public amd::HeapObject {
+  struct WriteMapInfo {
     amd::Coord3D origin_;  //!< Origin of the map location
     amd::Coord3D region_;  //!< Mapped region
     amd::Image* baseMip_;  //!< The base mip level for images
@@ -1019,7 +1018,7 @@ class Memory : public amd::HeapObject {
   Memory(const Memory&) = delete;
 };
 
-class Sampler : public amd::HeapObject {
+class Sampler {
  public:
   //! Constructor
   Sampler() : hwSrd_(0), hwState_(nullptr) {}
@@ -1045,7 +1044,7 @@ class Sampler : public amd::HeapObject {
   Sampler(const Sampler&);
 };
 
-class ClBinary : public amd::HeapObject {
+class ClBinary {
  public:
   enum BinaryImageFormat {
     BIF_VERSION2 = 0,  //!< Binary Image Format version 2.0 (ELF)
@@ -1229,7 +1228,7 @@ inline Program::binary_t Program::binary() {
  *
  *  \brief The device interface class for the performance counters
  */
-class PerfCounter : public amd::HeapObject {
+class PerfCounter {
  public:
   //! Constructor for the device performance
   PerfCounter() {}
@@ -1251,7 +1250,7 @@ class PerfCounter : public amd::HeapObject {
  *
  *  \brief The device interface class for the performance counters
  */
-class ThreadTrace : public amd::HeapObject {
+class ThreadTrace {
  public:
   //! Constructor for the device performance
   ThreadTrace() {}
@@ -1355,8 +1354,6 @@ class VirtualDevice : public amd::ReferenceCountedObject {
 
   //! Returns fence state of the VirtualGPU
   virtual bool isFenceDirty() const = 0;
-  //! Insert a system scope on the next dispatch
-  virtual void addSystemScope() {}
   //! Init hidden heap for device memory allocations
   virtual void HiddenHeapInit() = 0;
 
@@ -1746,7 +1743,7 @@ class Device : public RuntimeObject {
 
   typedef std::list<CommandQueue*> CommandQueues;
 
-  struct BlitProgram : public amd::HeapObject {
+  struct BlitProgram {
     Program* program_;  //!< GPU program object
     Context* context_;  //!< A dummy context
 
@@ -2131,19 +2128,6 @@ class Device : public RuntimeObject {
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const {}
-
-  // Creates a fully-initialised per-launch graph signal pool.
-  // Allocates gpu_count GPU-only signals and irq_count interrupt signals,
-  // then acquires segment_count hw-event slots into hw_events and resets
-  // the last-acquired pointer so GetLastAcquired() only tracks dispatches.
-  // Returns nullptr (and leaves hw_events empty) on allocation failure.
-  virtual roc::GraphSignalPool* CreateGraphSignalPool(
-      size_t gpu_count, size_t irq_count,
-      size_t segment_count, std::vector<void*>& hw_events) const { return nullptr; }
-
-  // Returns the number of GPU-only signals consumed from the pool so far.
-  // Used by the graph executor to cache the count for the next launch.
-  virtual size_t GetGraphSignalPoolUsedCount(roc::GraphSignalPool* pool) const { return 0; }
 
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;

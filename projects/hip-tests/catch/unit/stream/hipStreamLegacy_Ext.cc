@@ -9,8 +9,11 @@
 #include <utils.hh>
 #include <hip_test_process.hh>
 
-static constexpr int N = 2 * 1024 * 1024;
-static constexpr size_t NBYTES = N * sizeof(int);
+static int getN() {
+  static const int val = isQuickLevel() ? (64 * 1024 / sizeof(int)) : 2 * 1024 * 1024;
+  return val;
+}
+static size_t getNBytes() { return getN() * sizeof(int); }
 
 /**
  * Local Function to fill the array with given value
@@ -64,27 +67,27 @@ static __global__ void addOneKernel(int* a, int size) {
  *  - HIP_VERSION >= 6.3
  */
 HIP_TEST_CASE(Unit_hipStreamLegacy_WithBlockingStream) {
-  int* hostArrSrc = new int[N];
+  int* hostArrSrc = new int[getN()];
   REQUIRE(hostArrSrc != nullptr);
-  fillHostArray(hostArrSrc, N, 1);
+  fillHostArray(hostArrSrc, getN(), 1);
 
   int* devArr = nullptr;
-  HIP_CHECK(hipMalloc(&devArr, NBYTES));
+  HIP_CHECK(hipMalloc(&devArr, getNBytes()));
   REQUIRE(devArr != nullptr);
-  fillDeviceArray(devArr, N, 2);
+  fillDeviceArray(devArr, getN(), 2);
 
-  int* hostArrDst = new int[N];
+  int* hostArrDst = new int[getN()];
   REQUIRE(hostArrDst != nullptr);
-  fillHostArray(hostArrDst, N, 3);
+  fillHostArray(hostArrDst, getN(), 3);
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamDefault));
 
-  HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, stream));
-  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, getNBytes(), hipMemcpyHostToDevice, stream));
+  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
-  for (int i = 0; i < N; i++) {
+  for (int i = 0; i < getN(); i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 1 \n");
     REQUIRE(hostArrDst[i] == 1);
   }
@@ -102,24 +105,24 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_WithBlockingStream) {
  * Task 2 should wait till the execution of task 1.
  */
 void launchFunction(hipStream_t stream) {
-  int* hostArrSrc = new int[N];
+  int* hostArrSrc = new int[getN()];
   REQUIRE_THREAD(hostArrSrc != nullptr);
-  fillHostArray(hostArrSrc, N, 5);
+  fillHostArray(hostArrSrc, getN(), 5);
 
   int* devArr = nullptr;
-  HIP_CHECK_THREAD(hipMalloc(&devArr, NBYTES));
+  HIP_CHECK_THREAD(hipMalloc(&devArr, getNBytes()));
   REQUIRE_THREAD(devArr != nullptr);
-  fillDeviceArray(devArr, N, 6);
+  fillDeviceArray(devArr, getN(), 6);
 
-  int* hostArrDst = new int[N];
+  int* hostArrDst = new int[getN()];
   REQUIRE_THREAD(hostArrDst != nullptr);
-  fillHostArray(hostArrDst, N, 7);
+  fillHostArray(hostArrDst, getN(), 7);
 
-  HIP_CHECK_THREAD(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, stream));
-  HIP_CHECK_THREAD(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK_THREAD(hipMemcpyAsync(devArr, hostArrSrc, getNBytes(), hipMemcpyHostToDevice, stream));
+  HIP_CHECK_THREAD(hipMemcpyAsync(hostArrDst, devArr, getNBytes(), hipMemcpyDeviceToHost, stream));
   HIP_CHECK_THREAD(hipStreamSynchronize(hipStreamLegacy));
 
-  for (int i = 0; i < N; i++) {
+  for (int i = 0; i < getN(); i++) {
     if (hostArrDst[i] != 5) {
       std::cout << "At index : " << i << " Got value : " << hostArrDst[i]
                 << " Expected value : 5 \n"
@@ -194,27 +197,27 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_NegetiveCase) {
  *  - HIP_VERSION >= 6.3
  */
 HIP_TEST_CASE(Unit_hipStreamLegacy_WithNonBlockingStream) {
-  int* hostArrSrc = new int[N];
+  int* hostArrSrc = new int[getN()];
   REQUIRE(hostArrSrc != nullptr);
-  fillHostArray(hostArrSrc, N, 10);
+  fillHostArray(hostArrSrc, getN(), 10);
 
   int* devArr = nullptr;
-  HIP_CHECK(hipMalloc(&devArr, NBYTES));
+  HIP_CHECK(hipMalloc(&devArr, getNBytes()));
   REQUIRE(devArr != nullptr);
-  fillDeviceArray(devArr, N, 11);
+  fillDeviceArray(devArr, getN(), 11);
 
-  int* hostArrDst = new int[N];
+  int* hostArrDst = new int[getN()];
   REQUIRE(hostArrDst != nullptr);
-  fillHostArray(hostArrDst, N, 12);
+  fillHostArray(hostArrDst, getN(), 12);
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
 
-  HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, stream));
-  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, getNBytes(), hipMemcpyHostToDevice, stream));
+  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
-  for (int i = 0; i < N; i++) {
+  for (int i = 0; i < getN(); i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 10 or 11 \n");
     REQUIRE(((hostArrDst[i] == 10) || (hostArrDst[i] == 11)));
   }
@@ -241,23 +244,23 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_WithNonBlockingStream) {
  *  - HIP_VERSION >= 6.3
  */
 HIP_TEST_CASE(Unit_hipStreamLegacy_WithStreamPerThread) {
-  int* hostArrSrc = new int[N];
+  int* hostArrSrc = new int[getN()];
   REQUIRE(hostArrSrc != nullptr);
-  fillHostArray(hostArrSrc, N, 15);
+  fillHostArray(hostArrSrc, getN(), 15);
 
   int* devArr = nullptr;
-  HIP_CHECK(hipMalloc(&devArr, NBYTES));
+  HIP_CHECK(hipMalloc(&devArr, getNBytes()));
   REQUIRE(devArr != nullptr);
-  fillDeviceArray(devArr, N, 16);
+  fillDeviceArray(devArr, getN(), 16);
 
-  int* hostArrDst = new int[N];
+  int* hostArrDst = new int[getN()];
   REQUIRE(hostArrDst != nullptr);
 
-  HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, hipStreamPerThread));
-  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, getNBytes(), hipMemcpyHostToDevice, hipStreamPerThread));
+  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
-  for (int i = 0; i < N; i++) {
+  for (int i = 0; i < getN(); i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 15 \n");
     REQUIRE(hostArrDst[i] == 15);
   }
@@ -293,24 +296,24 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_MultiDevice) {
   for (int deviceId = 0; deviceId < deviceCount; deviceId++) {
     HIP_CHECK(hipSetDevice(deviceId));
 
-    int* hostArrSrc = new int[N];
+    int* hostArrSrc = new int[getN()];
     REQUIRE(hostArrSrc != nullptr);
-    fillHostArray(hostArrSrc, N, 20);
+    fillHostArray(hostArrSrc, getN(), 20);
 
     int* devArr = nullptr;
-    HIP_CHECK(hipMalloc(&devArr, NBYTES));
+    HIP_CHECK(hipMalloc(&devArr, getNBytes()));
     REQUIRE(devArr != nullptr);
-    fillDeviceArray(devArr, N, 21);
+    fillDeviceArray(devArr, getN(), 21);
 
-    int* hostArrDst = new int[N];
+    int* hostArrDst = new int[getN()];
     REQUIRE(hostArrDst != nullptr);
-    fillHostArray(hostArrDst, N, 22);
+    fillHostArray(hostArrDst, getN(), 22);
 
-    HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
-    HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+    HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, getNBytes(), hipMemcpyHostToDevice, hipStreamLegacy));
+    HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
     HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
-    for (int i = 0; i < N; i++) {
+    for (int i = 0; i < getN(); i++) {
       INFO("At index : " << i << " Got value : " << hostArrDst[i]
                          << " Expected value : 20 "
                             " For deviceId : "
@@ -338,40 +341,40 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_MultiDevice) {
  *  - HIP_VERSION >= 6.3
  */
 HIP_TEST_CASE(Unit_hipStreamLegacy_H2H_H2D_D2D_D2H_Default) {
-  int* hostArr1 = new int[N];
+  int* hostArr1 = new int[getN()];
   REQUIRE(hostArr1 != nullptr);
-  fillHostArray(hostArr1, N, 30);
+  fillHostArray(hostArr1, getN(), 30);
 
-  int* hostArr2 = new int[N];
+  int* hostArr2 = new int[getN()];
   REQUIRE(hostArr2 != nullptr);
-  fillHostArray(hostArr2, N, 31);
+  fillHostArray(hostArr2, getN(), 31);
 
   int* devArr1 = nullptr;
-  HIP_CHECK(hipMalloc(&devArr1, NBYTES));
+  HIP_CHECK(hipMalloc(&devArr1, getNBytes()));
   REQUIRE(devArr1 != nullptr);
-  fillDeviceArray(devArr1, N, 32);
+  fillDeviceArray(devArr1, getN(), 32);
 
   int* devArr2 = nullptr;
-  HIP_CHECK(hipMalloc(&devArr2, NBYTES));
+  HIP_CHECK(hipMalloc(&devArr2, getNBytes()));
   REQUIRE(devArr2 != nullptr);
-  fillDeviceArray(devArr2, N, 33);
+  fillDeviceArray(devArr2, getN(), 33);
 
-  int* hostArr3 = new int[N];
+  int* hostArr3 = new int[getN()];
   REQUIRE(hostArr3 != nullptr);
-  fillHostArray(hostArr3, N, 34);
+  fillHostArray(hostArr3, getN(), 34);
 
-  int* hostArr4 = new int[N];
+  int* hostArr4 = new int[getN()];
   REQUIRE(hostArr4 != nullptr);
-  fillHostArray(hostArr4, N, 35);
+  fillHostArray(hostArr4, getN(), 35);
 
-  HIP_CHECK(hipMemcpyAsync(hostArr2, hostArr1, NBYTES, hipMemcpyHostToHost, hipStreamLegacy));
-  HIP_CHECK(hipMemcpyAsync(devArr1, hostArr2, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
-  HIP_CHECK(hipMemcpyAsync(devArr2, devArr1, NBYTES, hipMemcpyDeviceToDevice, hipStreamLegacy));
-  HIP_CHECK(hipMemcpyAsync(hostArr3, devArr2, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
-  HIP_CHECK(hipMemcpyAsync(hostArr4, hostArr3, NBYTES, hipMemcpyDefault, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(hostArr2, hostArr1, getNBytes(), hipMemcpyHostToHost, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(devArr1, hostArr2, getNBytes(), hipMemcpyHostToDevice, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(devArr2, devArr1, getNBytes(), hipMemcpyDeviceToDevice, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(hostArr3, devArr2, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(hostArr4, hostArr3, getNBytes(), hipMemcpyDefault, hipStreamLegacy));
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
-  for (int i = 0; i < N; i++) {
+  for (int i = 0; i < getN(); i++) {
     INFO("At index : " << i << " Got value : " << hostArr4[i] << " Expected value : 30 \n");
     REQUIRE(hostArr4[i] == 30);
   }
@@ -419,64 +422,64 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_MultiDeviceMultiOperation) {
   // Set arrays in device 0
   HIP_CHECK(hipSetDevice(currentDevice));
 
-  int* h1Dev0 = new int[N];
+  int* h1Dev0 = new int[getN()];
   REQUIRE(h1Dev0 != nullptr);
-  fillHostArray(h1Dev0, N, 40);
+  fillHostArray(h1Dev0, getN(), 40);
 
   int* d1Dev0 = nullptr;
-  HIP_CHECK(hipMalloc(&d1Dev0, NBYTES));
+  HIP_CHECK(hipMalloc(&d1Dev0, getNBytes()));
   REQUIRE(d1Dev0 != nullptr);
-  fillDeviceArray(d1Dev0, N, 41);
+  fillDeviceArray(d1Dev0, getN(), 41);
 
   // Set arrays in device 1
   HIP_CHECK(hipSetDevice(peerDevice));
 
   int* d1Dev1 = nullptr;
-  HIP_CHECK(hipMalloc(&d1Dev1, NBYTES));
+  HIP_CHECK(hipMalloc(&d1Dev1, getNBytes()));
   REQUIRE(d1Dev1 != nullptr);
-  fillDeviceArray(d1Dev1, N, 42);
+  fillDeviceArray(d1Dev1, getN(), 42);
 
   int* d2Dev1 = nullptr;
-  HIP_CHECK(hipMalloc(&d2Dev1, NBYTES));
+  HIP_CHECK(hipMalloc(&d2Dev1, getNBytes()));
   REQUIRE(d2Dev1 != nullptr);
-  fillDeviceArray(d2Dev1, N, 43);
+  fillDeviceArray(d2Dev1, getN(), 43);
 
   // Set destination arrays in device 0
   HIP_CHECK(hipSetDevice(currentDevice));
 
   int* d2Dev0 = nullptr;
-  HIP_CHECK(hipMalloc(&d2Dev0, NBYTES));
+  HIP_CHECK(hipMalloc(&d2Dev0, getNBytes()));
   REQUIRE(d2Dev0 != nullptr);
-  fillDeviceArray(d2Dev0, N, 44);
+  fillDeviceArray(d2Dev0, getN(), 44);
 
-  int* h2Dev0 = new int[N];
+  int* h2Dev0 = new int[getN()];
   REQUIRE(h2Dev0 != nullptr);
-  fillHostArray(h2Dev0, N, 45);
+  fillHostArray(h2Dev0, getN(), 45);
 
   // Do operations in current device
   HIP_CHECK(hipSetDevice(currentDevice));
-  HIP_CHECK(hipMemcpyAsync(d1Dev0, h1Dev0, NBYTES, hipMemcpyHostToHost, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(d1Dev0, h1Dev0, getNBytes(), hipMemcpyHostToHost, hipStreamLegacy));
 
   // Copy from current device to peer device
   HIP_CHECK(hipMemcpyPeerAsync(d1Dev1, peerDevice,     // des
                                d1Dev0, currentDevice,  // src
-                               NBYTES, hipStreamLegacy));
+                               getNBytes(), hipStreamLegacy));
 
   // Do operations in peer device
   HIP_CHECK(hipSetDevice(peerDevice));
-  HIP_CHECK(hipMemcpyAsync(d2Dev1, d1Dev1, NBYTES, hipMemcpyDeviceToDevice, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(d2Dev1, d1Dev1, getNBytes(), hipMemcpyDeviceToDevice, hipStreamLegacy));
 
   // Copy from peer device to current device
   HIP_CHECK(hipMemcpyPeerAsync(d2Dev0, currentDevice,  // des
                                d2Dev1, peerDevice,     // src
-                               NBYTES, hipStreamLegacy));
+                               getNBytes(), hipStreamLegacy));
 
   // Finally copy daat to hostArr4
   HIP_CHECK(hipSetDevice(currentDevice));
-  HIP_CHECK(hipMemcpyAsync(h2Dev0, d2Dev0, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(h2Dev0, d2Dev0, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
-  for (int i = 0; i < N; i++) {
+  for (int i = 0; i < getN(); i++) {
     INFO("At index : " << i << " Got value : " << h2Dev0[i]
                        << " Expected value : 40/41/42/43/44 \n");
     REQUIRE(h2Dev0[i] != 45);
@@ -499,14 +502,14 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_MultiDeviceMultiOperation) {
  * Local helper function to copy data from host to device
  */
 static void copyFromHostToDevice(int* hostArr, int* devArr) {
-  HIP_CHECK(hipMemcpyAsync(devArr, hostArr, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(devArr, hostArr, getNBytes(), hipMemcpyHostToDevice, hipStreamLegacy));
 }
 
 /*
  * Local helper function to copy data from device to host
  */
 static void copyFromDeviceToHost(int* devArr, int* hostArr) {
-  HIP_CHECK(hipMemcpyAsync(hostArr, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(hostArr, devArr, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
 }
 
 /**
@@ -535,18 +538,18 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsEachOneDiffOperation) {
     return;
   }
 
-  int* hostArrSrc = new int[N];
+  int* hostArrSrc = new int[getN()];
   REQUIRE(hostArrSrc != nullptr);
-  fillHostArray(hostArrSrc, N, 50);
+  fillHostArray(hostArrSrc, getN(), 50);
 
   int* devArr = nullptr;
-  HIP_CHECK(hipMalloc(&devArr, NBYTES));
+  HIP_CHECK(hipMalloc(&devArr, getNBytes()));
   REQUIRE(devArr != nullptr);
-  fillDeviceArray(devArr, N, 51);
+  fillDeviceArray(devArr, getN(), 51);
 
-  int* hostArrDst = new int[N];
+  int* hostArrDst = new int[getN()];
   REQUIRE(hostArrDst != nullptr);
-  fillHostArray(hostArrDst, N, 52);
+  fillHostArray(hostArrDst, getN(), 52);
 
   std::thread H2D_Thread(copyFromHostToDevice, hostArrSrc, devArr);
   H2D_Thread.join();
@@ -555,7 +558,7 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsEachOneDiffOperation) {
   D2H_Thread.join();
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
-  for (int i = 0; i < N; i++) {
+  for (int i = 0; i < getN(); i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 50 \n");
     REQUIRE(hostArrDst[i] == 50);
   }
@@ -591,34 +594,34 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation) {
   HIP_CHECK(hipSetDevice(0));
 
   int* devArrDev0 = nullptr;
-  HIP_CHECK(hipMalloc(&devArrDev0, NBYTES));
+  HIP_CHECK(hipMalloc(&devArrDev0, getNBytes()));
   REQUIRE(devArrDev0 != nullptr);
-  fillDeviceArray(devArrDev0, N, 500);
+  fillDeviceArray(devArrDev0, getN(), 500);
 
   // Set arrays in device 1
   HIP_CHECK(hipSetDevice(1));
 
   int* devArrDev1 = nullptr;
-  HIP_CHECK(hipMalloc(&devArrDev1, NBYTES));
+  HIP_CHECK(hipMalloc(&devArrDev1, getNBytes()));
   REQUIRE(devArrDev1 != nullptr);
-  fillDeviceArray(devArrDev1, N, 501);
+  fillDeviceArray(devArrDev1, getN(), 501);
 
-  int* hostArrDst = new int[N];
+  int* hostArrDst = new int[getN()];
   REQUIRE(hostArrDst != nullptr);
-  fillHostArray(hostArrDst, N, 502);
+  fillHostArray(hostArrDst, getN(), 502);
 
   HIP_CHECK(hipSetDevice(0));
 
   HIP_CHECK(hipMemcpyPeerAsync(devArrDev1, 1,  // des
                                devArrDev0, 0,  // src
-                               NBYTES, hipStreamLegacy));
+                               getNBytes(), hipStreamLegacy));
 
   HIP_CHECK(hipSetDevice(1));
 
-  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArrDev1, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArrDev1, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
-  for (int i = 0; i < N; i++) {
+  for (int i = 0; i < getN(); i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i]
                        << " Expected value : 500 or 501 \n");
     REQUIRE(((hostArrDst[i] == 500) || (hostArrDst[i] == 501)));
@@ -638,7 +641,7 @@ static void operationsInDev0(int* devArrDev0, int* devArrDev1) {
   HIP_CHECK(hipSetDevice(0));
   HIP_CHECK(hipMemcpyPeerAsync(devArrDev1, 1,  // des
                                devArrDev0, 0,  // src
-                               NBYTES, hipStreamLegacy));
+                               getNBytes(), hipStreamLegacy));
 }
 
 /*
@@ -646,7 +649,7 @@ static void operationsInDev0(int* devArrDev0, int* devArrDev1) {
  */
 static void operationsInDev1(int* devArrDev1, int* hostArrDst) {
   HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArrDev1, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArrDev1, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
 }
 
 /**
@@ -676,21 +679,21 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsInTwoDevicesEachOneDiffOperation) {
   HIP_CHECK(hipSetDevice(0));
 
   int* devArrDev0 = nullptr;
-  HIP_CHECK(hipMalloc(&devArrDev0, NBYTES));
+  HIP_CHECK(hipMalloc(&devArrDev0, getNBytes()));
   REQUIRE(devArrDev0 != nullptr);
-  fillDeviceArray(devArrDev0, N, 999);
+  fillDeviceArray(devArrDev0, getN(), 999);
 
   // Set arrays in device 1
   HIP_CHECK(hipSetDevice(1));
 
   int* devArrDev1 = nullptr;
-  HIP_CHECK(hipMalloc(&devArrDev1, NBYTES));
+  HIP_CHECK(hipMalloc(&devArrDev1, getNBytes()));
   REQUIRE(devArrDev1 != nullptr);
-  fillDeviceArray(devArrDev1, N, 888);
+  fillDeviceArray(devArrDev1, getN(), 888);
 
-  int* hostArrDst = new int[N];
+  int* hostArrDst = new int[getN()];
   REQUIRE(hostArrDst != nullptr);
-  fillHostArray(hostArrDst, N, 777);
+  fillHostArray(hostArrDst, getN(), 777);
 
   HIP_CHECK(hipSetDevice(0));
 
@@ -700,7 +703,7 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsInTwoDevicesEachOneDiffOperation) {
   dev1Thread.join();
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
-  for (int i = 0; i < N; i++) {
+  for (int i = 0; i < getN(); i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i]
                        << " Expected value : 999 or 888 \n");
     REQUIRE(((hostArrDst[i] == 999) || (hostArrDst[i] == 888)));
@@ -744,25 +747,25 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_InChildProcess) {
  *  - HIP_VERSION >= 6.3
  */
 HIP_TEST_CASE(Unit_hipStreamLegacy_WithKernel) {
-  int* hostArrSrc = new int[N];
+  int* hostArrSrc = new int[getN()];
   REQUIRE(hostArrSrc != nullptr);
-  fillHostArray(hostArrSrc, N, 1);
+  fillHostArray(hostArrSrc, getN(), 1);
 
   int* devArr = nullptr;
-  HIP_CHECK(hipMalloc(&devArr, NBYTES));
+  HIP_CHECK(hipMalloc(&devArr, getNBytes()));
   REQUIRE(devArr != nullptr);
 
-  int* hostArrDst = new int[N];
+  int* hostArrDst = new int[getN()];
   REQUIRE(hostArrDst != nullptr);
-  fillHostArray(hostArrDst, N, 6);
+  fillHostArray(hostArrDst, getN(), 6);
 
-  HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
-  addOneKernel<<<1, 1, 0, hipStreamLegacy>>>(devArr, N);
-  addOneKernel<<<1, 1, 0, hipStreamLegacy>>>(devArr, N);
-  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, getNBytes(), hipMemcpyHostToDevice, hipStreamLegacy));
+  addOneKernel<<<1, 1, 0, hipStreamLegacy>>>(devArr, getN());
+  addOneKernel<<<1, 1, 0, hipStreamLegacy>>>(devArr, getN());
+  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
-  for (int i = 0; i < N; i++) {
+  for (int i = 0; i < getN(); i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 3 \n");
     REQUIRE(hostArrDst[i] == 3);
   }
@@ -786,25 +789,25 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_WithKernel) {
  */
 
 HIP_TEST_CASE(Unit_hipStreamLegacy_hipStreamSynchronize) {
-  int* hostArrSrc = new int[N];
+  int* hostArrSrc = new int[getN()];
   REQUIRE(hostArrSrc != nullptr);
-  fillHostArray(hostArrSrc, N, 1);
+  fillHostArray(hostArrSrc, getN(), 1);
 
   int* devArr = nullptr;
-  HIP_CHECK(hipMalloc(&devArr, NBYTES));
+  HIP_CHECK(hipMalloc(&devArr, getNBytes()));
   REQUIRE(devArr != nullptr);
 
-  int* hostArrDst = new int[N];
+  int* hostArrDst = new int[getN()];
   REQUIRE(hostArrDst != nullptr);
-  fillHostArray(hostArrDst, N, 3);
+  fillHostArray(hostArrDst, getN(), 3);
 
-  HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, getNBytes(), hipMemcpyHostToDevice, hipStreamLegacy));
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
-  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, getNBytes(), hipMemcpyDeviceToHost, hipStreamLegacy));
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
 
-  for (int i = 0; i < N; i++) {
+  for (int i = 0; i < getN(); i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 1 \n");
     REQUIRE(hostArrDst[i] == 1);
   }

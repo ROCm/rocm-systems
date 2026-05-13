@@ -594,6 +594,60 @@ protected:
             }
         }
     }
+
+    // Poll req until done or maxPolls exhausted. Safe to call with req==nullptr.
+    // Does not assert completion — the recv may legitimately time out when
+    // the sender faulted.
+    void DrainRecvRequest(void* req, int maxPolls = 500) {
+        if (req == nullptr) return;
+        for (int poll = 0; poll < maxPolls; ++poll) {
+            int done = 0, sz = 0;
+            if (TestRequest(req, &done, &sz) != ncclSuccess) break;
+            if (done) break;
+            usleep(kPollIntervalUs);
+        }
+    }
+
+    // Deregister mhandle, close comms rank-conditionally, barrier.
+    // rank 0 closes recvComm + listenComm; rank 1 closes sendComm.
+    // Call after any pre-teardown MPI_Barrier the test needs.
+    void TeardownConnection(void* recvComm, void* listenComm,
+                            void* sendComm, void* mhandle) {
+        const int rank = MPIEnvironment::world_rank;
+        void* comm = (rank == 0) ? recvComm : sendComm;
+        ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+        if (rank == 0) {
+            ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+            ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+        } else {
+            ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    // Assert WRR scheduler has been initialised with equal-weight tokens.
+    // Checks: schedInit==true, nqps==expectedNqps, initTotTokens==100,
+    //         each QP >= floor(100/nqps), sum(initQpTokens)==initTotTokens.
+    // Call from rank 1 (sender) — state comes from sendComm.
+    void ExpectEqualWeightInitTokens(const ncclIbCastSchedState& state, int expectedNqps) {
+        ASSERT_TRUE(state.schedInit);
+        EXPECT_EQ(state.nqps, expectedNqps);
+        EXPECT_EQ(state.initTotTokens, 100);
+        const int base = 100 / expectedNqps;
+        for (int i = 0; i < state.nqps; i++)
+            EXPECT_GE(state.initQpTokens[i], base)
+                << "QP " << i << " initToken below equal-weight floor";
+        int sum = 0;
+        for (int i = 0; i < state.nqps; i++) sum += state.initQpTokens[i];
+        EXPECT_EQ(sum, state.initTotTokens);
+    }
+
+    // Assert sum(activeQpTokens) == activeTotTokens.
+    void ExpectActiveTokenSumInvariant(const ncclIbCastSchedState& state) {
+        int activeSum = 0;
+        for (int i = 0; i < state.nqps; i++) activeSum += state.activeQpTokens[i];
+        EXPECT_EQ(activeSum, state.activeTotTokens);
+    }
 };
 
 #endif /* MPI_TESTS_ENABLED */
