@@ -75,10 +75,6 @@ class cli_analysis(OmniAnalyze_Base):
                 workload.raw_pmc = workload.raw_pmc.rename(
                     columns={"Dispatch_Id": "Dispatch_ID"}
                 )
-                # Create multi index dataframe with key pmc_perf
-                workload.raw_pmc = pd.concat(
-                    [workload.raw_pmc], keys=["pmc_perf"], axis=1
-                )
 
                 kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                     df_in=workload.raw_pmc,
@@ -155,7 +151,6 @@ class cli_analysis(OmniAnalyze_Base):
                 dir_path=path_info[0],
                 is_gui=False,
                 args=args,
-                config=self._profiling_config,
             )
 
     @demarcate
@@ -230,7 +225,6 @@ class cli_analysis(OmniAnalyze_Base):
                         ai_data = calc_ai_analyze(
                             workload=workload,
                             pmc_df=pmc_df,
-                            config=self._profiling_config,
                             arch_config=arch_config,
                         )
 

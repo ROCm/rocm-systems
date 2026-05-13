@@ -2000,7 +2000,6 @@ def test_list_available_metrics_with_block(
 def test_comprehensive_error_paths():
     """Simplified test for error path coverage"""
 
-    from utils.metrics.expression import build_eval_string
     from utils.parser import build_comparable_columns
     from utils.utils_common import calc_builtin_var
 
@@ -2022,16 +2021,20 @@ def test_comprehensive_error_paths():
     result = calc_builtin_var("$total_l2_chan", sys_info)
     assert result == 16
 
-    try:
-        build_eval_string("test", None, config={})
-        assert False, "Should raise exception for None coll_level"
-    except Exception as e:
-        assert "coll_level can not be None" in str(e)
-
 
 @pytest.mark.live_attach_detach
-def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
-    options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
+@pytest.mark.parametrize("profile_format", ["rocpd", "csv"])
+def test_live_attach_detach_block(
+    binary_handler_profile_rocprof_compute, profile_format
+):
+    options = [
+        "--block",
+        "3.1.1",
+        "4.1.1",
+        "5.1.1",
+        "--format-rocprof-output",
+        profile_format,
+    ]
     workload_dir = common.get_output_dir()
 
     # TODO: temp fix for sdk defautly disable attach/detach,
@@ -2223,6 +2226,8 @@ def test_live_attach_detach_singlepass_launch_stats(
 def test_live_attach_detach_pc_sampling(
     binary_handler_profile_rocprof_compute,
 ):
+    common.skip_unsupported_pc_sampling_soc(is_stochastic=True)
+
     options = ["-b", "21"]
     workload_dir = common.get_output_dir()
 

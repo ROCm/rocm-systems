@@ -291,6 +291,12 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   int GetID() const { return id_; }
   /// Returns command for graph node
   virtual std::vector<amd::Command*>& GetCommands() { return commands_; }
+  /// Propagate graph signal pool to all commands owned by this node
+  void SetGraphSignalPoolOnCommands(amd::roc::GraphSignalPool* pool) {
+    for (auto& cmd : commands_) {
+      if (cmd != nullptr) cmd->SetGraphSignalPool(pool);
+    }
+  }
   /// Returns graph node type
   hipGraphNodeType GetType() const { return type_; }
   /// Clone graph node
@@ -1132,6 +1138,10 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   SyncPlan sync_plan_;
 
   void BuildSyncPlan();
+
+  //! Cached signal counts for graph signal pool pre-allocation
+  size_t graph_signal_count_ = 0;      //!< GPU-only signals, cached after first launch
+  size_t graph_irq_signal_count_ = 0;  //!< Interrupt signals, determined at instantiation
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {
@@ -2563,10 +2573,12 @@ class GraphMemsetNode : public GraphNode {
         }
       } else {
         // 2D - hipGraphMemsetNodeSetParams returns invalid value if new width or new height is
-        // greter than actual allocation.
+        // greater than actual allocation. userData extents are only populated for hipMallocPitch /
+        // hipMalloc3D; for plain hipMalloc (and similar flat allocators) they are 0, in which case
+        // the size-based check in ihipMemset3D_validate below is authoritative.
         size_t discardOffset = 0;
         amd::Memory* memObj = getMemoryObject(params->dst, discardOffset);
-        if (memObj != nullptr) {
+        if (memObj != nullptr && memObj->getUserData().width_ != 0) {
           if (params->width * params->elementSize > memObj->getUserData().width_ ||
               params->height > memObj->getUserData().height_ ||
               depth > memObj->getUserData().depth_) {
@@ -2599,7 +2611,7 @@ class GraphMemsetNode : public GraphNode {
 
   hipError_t SetParams(GraphNode* node) override {
     const GraphMemsetNode* memsetNode = static_cast<GraphMemsetNode const*>(node);
-    return SetParams(&memsetNode->memsetParams_, false, memsetNode->depth_);
+    return SetParams(&memsetNode->memsetParams_, true, memsetNode->depth_);
   }
 };
 

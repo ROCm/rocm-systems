@@ -23,10 +23,10 @@ def test_evaluate_parse_false_basic_expressions():
     })
     sys_info = {"numCUs": 64, "clock_speed": 1500}
 
-    # Test raw_pmc_df['pmc_perf'] substitution
+    # Test raw_pmc_df -> pmc_df substitution on flat single-index columns
     result = db_analysis.evaluate(
         "test_metric",
-        "raw_pmc_df['pmc_perf']['Counter1']",
+        "raw_pmc_df['Counter1']",
         pmc_df,
         sys_info,
         parse=False,
@@ -47,7 +47,7 @@ def test_evaluate_parse_false_basic_expressions():
     # Test expression with helper function
     result = db_analysis.evaluate(
         "test_metric",
-        "to_sum(raw_pmc_df['pmc_perf']['Counter1'])",
+        "to_sum(raw_pmc_df['Counter1'])",
         pmc_df,
         sys_info,
         parse=False,
@@ -114,7 +114,7 @@ def test_evaluate_none_and_na_handling():
     pmc_df_nan = pd.DataFrame({"Counter1": [np.nan, np.nan, np.nan]})
     result = db_analysis.evaluate(
         "test_metric",
-        "to_sum(raw_pmc_df['pmc_perf']['Counter1'])",
+        "to_sum(raw_pmc_df['Counter1'])",
         pmc_df_nan,
         sys_info,
         parse=False,
@@ -125,7 +125,7 @@ def test_evaluate_none_and_na_handling():
     pmc_df_mixed = pd.DataFrame({"Counter1": [10, np.nan, 30]})
     result = db_analysis.evaluate(
         "test_metric",
-        "raw_pmc_df['pmc_perf']['Counter1']",
+        "raw_pmc_df['Counter1']",
         pmc_df_mixed,
         sys_info,
         parse=False,
@@ -138,7 +138,7 @@ def test_evaluate_none_and_na_handling():
     # Exceptions return None gracefully
     result = db_analysis.evaluate(
         "test_metric",
-        "raw_pmc_df['pmc_perf']['NonExistent']",
+        "raw_pmc_df['NonExistent']",
         pmc_df,
         sys_info,
         parse=False,
@@ -165,9 +165,9 @@ def test_evaluate_with_none_in_formula_does_not_nullify_valid_result():
     # when condition is met for at least some values
     result = db_analysis.evaluate(
         "test_metric",
-        "(raw_pmc_df['pmc_perf']['Counter1'] / "
-        "raw_pmc_df['pmc_perf']['Counter2'].where("
-        "raw_pmc_df['pmc_perf']['Counter2'] != 0, None))",
+        "(raw_pmc_df['Counter1'] / "
+        "raw_pmc_df['Counter2'].where("
+        "raw_pmc_df['Counter2'] != 0, None))",
         pmc_df,
         sys_info,
         parse=False,
@@ -260,7 +260,7 @@ def test_calc_dataframe_expressions_applies_evaluate_to_rows():
         "metric_id": ["1.1", "1.2"],
         "value_name": ["sum", "scaled"],
         "value": [
-            "to_sum(raw_pmc_df['pmc_perf']['Counter1'])",
+            "to_sum(raw_pmc_df['Counter1'])",
             "ammolite__scale * 2",
         ],
     })

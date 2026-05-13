@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 src_candidate = os.path.join(ROOT, "src")
@@ -255,3 +256,15 @@ def gpu_soc():
         return "", ""
     model = list(SUPPORTED_ARCHS[arch].keys())[0].upper()
     return arch, model
+
+
+def skip_unsupported_pc_sampling_soc(is_stochastic=False):
+    """Skip PC-sampling tests on SoCs that do not support the selected mode."""
+    _, soc = gpu_soc()
+
+    unsupported_socs = {"MI100", "RDNA35_HALO"}
+    if is_stochastic:
+        unsupported_socs.add("MI200")
+
+    if soc in unsupported_socs:
+        pytest.skip(f"PC sampling is not supported on {soc}")
