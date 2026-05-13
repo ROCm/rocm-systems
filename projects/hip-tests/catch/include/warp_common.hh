@@ -489,29 +489,24 @@ T calculateExpected(T* output,
   } else {
     bool initialized = false;
 
-    std::memset(&result, 0, sizeof(T));
+    if (std::is_same<Op, MinOp<T>>::value) {
+      result = std::numeric_limits<T>::max();
+    } else if (std::is_same<Op, MaxOp<T>>::value) {
+      result = std::numeric_limits<T>::lowest();
+    } else {
+      std::memset(&result, 0, sizeof(T));
+    }
 
     for (int i = 0; i < lastLane + 1; i++) {
       if (mask & (1ul << i)) {
-        T arg;
-
-        if (std::is_same<Op, MinOp<T>>::value) {
-          arg = std::numeric_limits<T>::max();
-        } else if (std::is_same<Op, MaxOp<T>>::value) {
-          arg = std::numeric_limits<T>::lowest();
-        } else {
-          std::memset(&arg, 0, sizeof(T));
-        }
-
-        if (inclusive) {
-          arg = input[i];
-        } else if (i > 0) {
-          arg = input[i - 1];
-        }
-
         if (initialized) {
-          result = op(arg, result);
-          output[i] = result;
+          if (inclusive) {
+            result = op(input[i], result);
+            output[i] = result;
+          } else {
+            output[i] = result;
+            result = op(input[i], result);
+          }
         } else {
           result = input[i];
 
