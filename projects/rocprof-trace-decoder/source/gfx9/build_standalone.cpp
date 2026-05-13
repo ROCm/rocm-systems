@@ -47,7 +47,8 @@ inline StatusToken encode_reg(uint8_t me, uint8_t pipe, uint16_t regaddr, uint32
 {
     const uint64_t enc_me = (1u - (me & 1u)) & 1u;
     uint64_t v = static_cast<uint64_t>(gfx9::TOKEN_REG) | (static_cast<uint64_t>(pipe & 0x3) << 5) | (enc_me << 7) |
-                 (uint64_t{1} << 15) | (static_cast<uint64_t>(regaddr) << 16) | (static_cast<uint64_t>(regdata) << 32);
+                 (uint64_t{1} << 15) | (uint64_t{gfx9::Reg::REG_TYPE_USERDATA} << 10) |
+                 (static_cast<uint64_t>(regaddr) << 16) | (static_cast<uint64_t>(regdata) << 32);
     return {v, 8};
 }
 
