@@ -17,6 +17,28 @@ COPY --chmod=+x <<-'EOT' /app/help
 #!/bin/bash
 cat /app/README.md
 EOT
+COPY --chmod=+x <<-'EOT' /app/perf-compare
+#!/bin/bash
+# Run rocSHMEM performance comparison inside the container.
+# Usage: docker run ... IMAGE perf-compare [run_perf_compare.sh options]
+# All extra args are forwarded to run_perf_compare.sh (--suite, --iterations, etc.)
+# Results land in /results (bind-mount a host directory there with -v host:/results)
+RESULTS_DIR="${RESULTS_DIR:-/results}"
+mkdir -p "$RESULTS_DIR"
+BASELINE_DIR=/app/build
+BRANCH_DIR=$(ls -d /app/build[0-9]* 2>/dev/null | head -1)
+if [[ -z "$BRANCH_DIR" ]]; then
+  echo "ERROR: No PR branch build found in this image." >&2
+  echo "       Rebuild with: docker build --build-arg PR_NUM=<N> ..." >&2
+  exit 1
+fi
+exec bash /app/rocm-systems/projects/rocshmem/scripts/run_perf_compare.sh \
+  --skip-build \
+  --baseline-dir "$BASELINE_DIR" \
+  --branch-dir   "$BRANCH_DIR" \
+  --outdir       "$RESULTS_DIR" \
+  "$@"
+EOT
 ENV PATH="${PATH}:/app/"
 COPY <<-'EOT' README.md
 Container for rocSHMEM development with MPI support
@@ -105,6 +127,27 @@ srun -N2 --ntasks-per-node=1 --gpus=8 \
 5. Run the full rocSHMEM testsuite in the persistent containers
 
 `srun -n1 docker exec -it $USER-rocshmem bash tests/rocshmem_functional_driver.sh /app/build/tests/functional_tests/rocshmem_functional_tests gda logs`
+
+Performance comparison
+----------------------
+
+Build image with a PR branch and develop, then run comparison with one command:
+
+```bash
+docker build --build-arg PR_NUM=4574 --tag $USER/rocshmem-pr4574 \
+  projects/rocshmem/docker/
+
+mkdir -p pr4574-results
+docker run --rm \
+  --shm-size 64G --network host --device /dev/dri --device /dev/kfd \
+  --ipc host --group-add video --cap-add SYS_PTRACE \
+  --security-opt seccomp=unconfined --privileged \
+  -v "$(pwd)/pr4574-results:/results" \
+  $USER/rocshmem-pr4574 perf-compare --suite heatmap --iterations 5
+# Plots: ./pr4574-results/heatmap_summary.png
+```
+
+See scripts/functional_tests/README-perf_compare.md for all options.
 
 Important directories
 ---------------------

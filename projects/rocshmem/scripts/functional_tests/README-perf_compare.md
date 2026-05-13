@@ -83,6 +83,11 @@ The script auto-detects multiple iteration directories (glob with `*`) and aggre
 
 ## Docker-based PR comparison
 
+> **Note:** the Docker baseline is the HEAD of `develop` at the time the image was
+> built, not the PR's merge-base. For a fresh image against a recent PR the
+> difference is usually negligible. For a precise merge-base comparison, use the
+> local workflow instead.
+
 ### Option A: one-shot (build image, run, get results on host)
 
 ```bash
