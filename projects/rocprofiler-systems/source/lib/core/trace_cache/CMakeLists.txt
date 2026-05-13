@@ -10,7 +10,7 @@ set(trace_cache_sources
     ${CMAKE_CURRENT_LIST_DIR}/post_processor.cpp
     ${CMAKE_CURRENT_LIST_DIR}/rocpd_processor.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto_processor.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/wall_clock_scope_event_processor.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/profiled_event_processor.cpp
 )
 
 set(trace_cache_headers

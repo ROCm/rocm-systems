@@ -711,7 +711,7 @@ rocpd_processor_t::handle(const kfd_sample& _kfd)
 }
 
 void
-rocpd_processor_t::handle(const wall_clock_scope_event_sample&)
+rocpd_processor_t::handle(const wall_clock_event_sample&)
 {}
 
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,

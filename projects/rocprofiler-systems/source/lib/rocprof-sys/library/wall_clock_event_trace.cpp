@@ -58,10 +58,9 @@ struct state_t
               std::uint64_t parent_exec_id, std::uint32_t depth,
               std::uint64_t correlation_id, std::string name)
     {
-        trace_cache::get_buffer_storage().store(
-            trace_cache::wall_clock_scope_event_sample{
-                steady_ns, wall_ns, thread_id_u, static_cast<std::uint8_t>(kind), exec_id,
-                parent_exec_id, depth, correlation_id, std::move(name) });
+        trace_cache::get_buffer_storage().store(trace_cache::wall_clock_event_sample{
+            steady_ns, wall_ns, thread_id_u, static_cast<std::uint8_t>(kind), exec_id,
+            parent_exec_id, depth, correlation_id, std::move(name) });
     }
 };
 
@@ -123,6 +122,55 @@ pop_region(std::int64_t thread_id, std::string_view name)
 
     const std::uint64_t exec_id = it->second.back().exec_id;
     st.emit(tw.first, tw.second, static_cast<std::uint64_t>(thread_id),
+            trace_cache::wall_clock_scope_event_kind::exit, exec_id, 0, 0, 0,
+            std::string{});
+    it->second.pop_back();
+}
+
+void
+push_region_ts(std::int64_t thread_id, const std::string& name, std::uint64_t steady_ns,
+               std::uint64_t wall_ns)
+{
+    if(!config::get_use_timemory()) return;
+
+    auto&                        st = get_state();
+    std::scoped_lock<std::mutex> lk{ st.mtx };
+
+    const std::uint64_t parent_exec = [&]() -> std::uint64_t {
+        auto it = st.stacks.find(thread_id);
+        if(it == st.stacks.end() || it->second.empty()) return 0;
+        return it->second.back().exec_id;
+    }();
+
+    const std::uint32_t depth = [&]() -> std::uint32_t {
+        auto it = st.stacks.find(thread_id);
+        if(it == st.stacks.end()) return 0;
+        return static_cast<std::uint32_t>(it->second.size());
+    }();
+
+    const std::uint64_t exec_id = st.next_exec_id.fetch_add(1, std::memory_order_relaxed);
+    st.emit(steady_ns, wall_ns, static_cast<std::uint64_t>(thread_id),
+            trace_cache::wall_clock_scope_event_kind::enter, exec_id, parent_exec, depth,
+            0, name);
+    st.stacks[thread_id].push_back(frame_t{ exec_id, name });
+}
+
+void
+pop_region_ts(std::int64_t thread_id, std::string_view name, std::uint64_t steady_ns,
+              std::uint64_t wall_ns)
+{
+    if(!config::get_use_timemory()) return;
+
+    auto&                        st = get_state();
+    std::scoped_lock<std::mutex> lk{ st.mtx };
+
+    auto it = st.stacks.find(thread_id);
+    if(it == st.stacks.end() || it->second.empty()) return;
+
+    if(it->second.back().name != name) return;
+
+    const std::uint64_t exec_id = it->second.back().exec_id;
+    st.emit(steady_ns, wall_ns, static_cast<std::uint64_t>(thread_id),
             trace_cache::wall_clock_scope_event_kind::exit, exec_id, 0, 0, 0,
             std::string{});
     it->second.pop_back();

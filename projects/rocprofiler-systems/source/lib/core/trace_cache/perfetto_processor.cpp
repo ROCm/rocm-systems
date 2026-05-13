@@ -1450,6 +1450,6 @@ perfetto_processor_t::handle(const kfd_sample& _kfd)
 }
 
 void
-perfetto_processor_t::handle(const wall_clock_scope_event_sample&)
+perfetto_processor_t::handle(const wall_clock_event_sample&)
 {}
 }  // namespace rocprofsys::trace_cache

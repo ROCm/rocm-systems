@@ -19,6 +19,16 @@ push_region(std::int64_t thread_id, const std::string& name);
 void
 pop_region(std::int64_t thread_id, std::string_view name);
 
+/// ENTER/EXIT timestamps supplied by caller (e.g. \c rocprofiler_timestamp_t values from
+/// ROCprofiler callbacks or buffer records). Both steady and wall fields use the same
+/// nanosecond value so replay ordering and inclusive duration match the profiler domain.
+void
+push_region_ts(std::int64_t thread_id, const std::string& name, std::uint64_t steady_ns,
+               std::uint64_t wall_ns);
+void
+pop_region_ts(std::int64_t thread_id, std::string_view name, std::uint64_t steady_ns,
+              std::uint64_t wall_ns);
+
 void
 push_pthread_create(std::int64_t parent_thread_id, const std::string& name);
 void

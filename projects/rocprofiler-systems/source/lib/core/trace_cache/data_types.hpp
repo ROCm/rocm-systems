@@ -19,7 +19,7 @@ namespace rocprofsys::trace_cache
 class metadata_registry;
 class rocpd_processor_t;
 class perfetto_processor_t;
-class wall_clock_scope_event_processor_t;
+class profiled_event_processor_t;
 }  // namespace rocprofsys::trace_cache
 
 namespace rocprofsys::trace_cache::data
@@ -82,9 +82,9 @@ struct processor_config_t
 
 struct processor_storage_t
 {
-    std::shared_ptr<rocpd_processor_t>                  rocpd_processor;
-    std::shared_ptr<perfetto_processor_t>               perfetto_processor;
-    std::shared_ptr<wall_clock_scope_event_processor_t> wall_clock_scope_processor;
+    std::shared_ptr<rocpd_processor_t>          rocpd_processor;
+    std::shared_ptr<perfetto_processor_t>       perfetto_processor;
+    std::shared_ptr<profiled_event_processor_t> profiled_event_processor;
 };
 
 using directory_files_t    = std::vector<std::string>;

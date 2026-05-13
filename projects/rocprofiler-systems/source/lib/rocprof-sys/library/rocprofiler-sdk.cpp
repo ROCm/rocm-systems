@@ -28,6 +28,7 @@
 #include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include "library/wall_clock_event_trace.hpp"
 #include "rocprofiler-sdk.hpp"
 #include "rocprofiler-sdk/roctx_client.hpp"
 
@@ -175,6 +176,23 @@ ompt_get_unified_name(const rocprofiler_callback_tracing_record_t& record)
 }
 
 #endif
+
+std::int64_t
+rocprofiler_trace_thread_id(rocprofiler_thread_id_t rtid)
+{
+    const auto& tinfo = thread_info::get(rtid, SystemTID);
+    if(!tinfo || !tinfo->index_data) return 0;
+    return tinfo->index_data->sequent_value;
+}
+
+void
+wall_clock_trace_buffered_interval(std::int64_t tid, const std::string& name,
+                                   std::uint64_t beg_ns, std::uint64_t end_ns)
+{
+    if(!config::get_use_timemory()) return;
+    wall_clock_event_trace::push_region_ts(tid, name, beg_ns, beg_ns);
+    wall_clock_event_trace::pop_region_ts(tid, name, end_ns, end_ns);
+}
 
 auto&
 get_stream_stack()
@@ -697,13 +715,16 @@ template <typename CategoryT>
 void
 tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t record,
                             rocprofiler_user_data_t* /*user_data*/,
-                            rocprofiler_timestamp_t /*ts*/)
+                            rocprofiler_timestamp_t ts)
 {
     auto _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
 
     if(get_use_timemory())
     {
         tracing::push_timemory(CategoryT{}, _name);
+        const auto          tid = rocprofiler_trace_thread_id(record.thread_id);
+        const std::uint64_t tns = static_cast<std::uint64_t>(ts);
+        wall_clock_event_trace::push_region_ts(tid, std::string{ _name }, tns, tns);
     }
 }
 
@@ -721,6 +742,9 @@ tool_tracing_callback_stop(
     if(get_use_timemory())
     {
         tracing::pop_timemory(CategoryT{}, _name);
+        const auto          tid = rocprofiler_trace_thread_id(record.thread_id);
+        const std::uint64_t ens = static_cast<std::uint64_t>(ts);
+        wall_clock_event_trace::pop_region_ts(tid, _name, ens, ens);
     }
 
     if(get_use_perfetto())
@@ -1194,6 +1218,9 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
     if(get_use_timemory())
     {
         tracing::push_timemory(category::rocm_ompt_api{}, _name);
+        const auto          tid = rocprofiler_trace_thread_id(record.thread_id);
+        const std::uint64_t tns = static_cast<std::uint64_t>(ts);
+        wall_clock_event_trace::push_region_ts(tid, std::string{ _name }, tns, tns);
     }
 
     if(get_use_perfetto())
@@ -1239,6 +1266,9 @@ ompt_tracing_callback_stop(
     if(get_use_timemory())
     {
         tracing::pop_timemory(category::rocm_ompt_api{}, _name);
+        const auto          tid = rocprofiler_trace_thread_id(record.thread_id);
+        const std::uint64_t ens = static_cast<std::uint64_t>(ts);
+        wall_clock_event_trace::pop_region_ts(tid, _name, ens, ens);
     }
 
     if(get_use_perfetto())
@@ -1744,16 +1774,21 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 if(get_use_timemory())
                 {
                     const auto& _tinfo = thread_info::get(record->thread_id, SystemTID);
-                    auto        _tid   = _tinfo->index_data->sequent_value;
+                    if(_tinfo && _tinfo->index_data)
+                    {
+                        auto _tid = _tinfo->index_data->sequent_value;
 
-                    auto _bundle = kernel_dispatch_bundle_t{ _name };
+                        auto _bundle = kernel_dispatch_bundle_t{ _name };
 
-                    _bundle.push(_tid).start().stop();
-                    _bundle.get([_beg_ns, _end_ns](tim::component::wall_clock* _wc) {
-                        _wc->set_value(_end_ns - _beg_ns);
-                        _wc->set_accum(_end_ns - _beg_ns);
-                    });
-                    _bundle.pop();
+                        _bundle.push(_tid).start().stop();
+                        _bundle.get([_beg_ns, _end_ns](tim::component::wall_clock* _wc) {
+                            _wc->set_value(_end_ns - _beg_ns);
+                            _wc->set_accum(_end_ns - _beg_ns);
+                        });
+                        _bundle.pop();
+
+                        wall_clock_trace_buffered_interval(_tid, _name, _beg_ns, _end_ns);
+                    }
                 }
 
                 if(get_use_perfetto())
@@ -1876,6 +1911,9 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                         _wc->set_accum(_end_ns - _beg_ns);
                     });
                     _bundle.pop();
+
+                    wall_clock_trace_buffered_interval(
+                        thread_id_sequent, std::string{ _name }, _beg_ns, _end_ns);
                 }
 
                 if(get_use_perfetto())
@@ -1986,16 +2024,22 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 if(get_use_timemory())
                 {
                     const auto& _tinfo = thread_info::get(record->thread_id, SystemTID);
-                    auto        _tid   = _tinfo->index_data->sequent_value;
+                    if(_tinfo && _tinfo->index_data)
+                    {
+                        auto _tid = _tinfo->index_data->sequent_value;
 
-                    auto _bundle = kernel_dispatch_bundle_t{ _name };
+                        auto _bundle = kernel_dispatch_bundle_t{ _name };
 
-                    _bundle.push(_tid).start().stop();
-                    _bundle.get([_beg_ns, _end_ns](tim::component::wall_clock* _wc) {
-                        _wc->set_value(_end_ns - _beg_ns);
-                        _wc->set_accum(_end_ns - _beg_ns);
-                    });
-                    _bundle.pop();
+                        _bundle.push(_tid).start().stop();
+                        _bundle.get([_beg_ns, _end_ns](tim::component::wall_clock* _wc) {
+                            _wc->set_value(_end_ns - _beg_ns);
+                            _wc->set_accum(_end_ns - _beg_ns);
+                        });
+                        _bundle.pop();
+
+                        wall_clock_trace_buffered_interval(_tid, std::string{ _name },
+                                                           _beg_ns, _end_ns);
+                    }
                 }
 
                 if(get_use_perfetto())
@@ -2064,6 +2108,20 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     cache_category<category::rocm_memory_allocate>();
                     cache_add_thread_info(record->thread_id);
                     cache_memory_allocation(record, _stream_id);
+                }
+
+                if(get_use_timemory())
+                {
+                    const auto& _tinfo = thread_info::get(record->thread_id, SystemTID);
+                    if(_tinfo && _tinfo->index_data)
+                    {
+                        auto _label = std::string{ tool_data->buffered_tracing_info.at(
+                            ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
+                            record->operation) };
+                        wall_clock_trace_buffered_interval(
+                            _tinfo->index_data->sequent_value, _label,
+                            record->start_timestamp, record->end_timestamp);
+                    }
                 }
             }
 #endif

@@ -38,7 +38,7 @@ public:
     void handle(const cpu_pmc_sample& sample);
     void handle(const backtrace_region_sample& sample);
     void handle(const kfd_sample& sample);
-    void handle(const wall_clock_scope_event_sample& sample);
+    void handle(const wall_clock_event_sample& sample);
 
 private:
     using primary_key = size_t;

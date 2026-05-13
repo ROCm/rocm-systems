@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/trace_cache/wall_clock_scope_event_processor.hpp"
+#include "core/trace_cache/profiled_event_processor.hpp"
 
 #include "core/config.hpp"
 #include "core/output_file_registry.hpp"
@@ -292,15 +292,14 @@ write_text(const std::vector<out_node_t>& nodes, std::ofstream& os)
 }
 
 bool
-replay_to_nodes(const std::vector<wall_clock_scope_event_sample>& ev,
-                std::vector<out_node_t>&                          out_nodes)
+replay_to_nodes(const std::vector<wall_clock_event_sample>& ev,
+                std::vector<out_node_t>&                    out_nodes)
 {
     if(ev.empty()) return false;
 
-    std::vector<wall_clock_scope_event_sample> sorted = ev;
+    std::vector<wall_clock_event_sample> sorted = ev;
     std::sort(sorted.begin(), sorted.end(),
-              [](const wall_clock_scope_event_sample& a,
-                 const wall_clock_scope_event_sample& b) {
+              [](const wall_clock_event_sample& a, const wall_clock_event_sample& b) {
                   if(a.steady_ns != b.steady_ns) return a.steady_ns < b.steady_ns;
                   if(a.thread_id != b.thread_id) return a.thread_id < b.thread_id;
                   if(a.exec_id != b.exec_id) return a.exec_id < b.exec_id;
@@ -421,8 +420,8 @@ replay_to_nodes(const std::vector<wall_clock_scope_event_sample>& ev,
 
 }  // namespace
 
-wall_clock_scope_event_processor_t::wall_clock_scope_event_processor_t(
-    int pid, int ppid, output_file_registry& registry)
+profiled_event_processor_t::profiled_event_processor_t(int pid, int ppid,
+                                                       output_file_registry& registry)
 : m_pid(pid)
 , m_ppid(ppid)
 , m_registry(registry)
@@ -432,13 +431,13 @@ wall_clock_scope_event_processor_t::wall_clock_scope_event_processor_t(
 }
 
 void
-wall_clock_scope_event_processor_t::prepare_for_processing()
+profiled_event_processor_t::prepare_for_processing()
 {
     m_events.clear();
 }
 
 void
-wall_clock_scope_event_processor_t::finalize_processing()
+profiled_event_processor_t::finalize_processing()
 {
     if(!config::get_use_timemory()) return;
     if(m_events.empty()) return;
@@ -468,7 +467,7 @@ wall_clock_scope_event_processor_t::finalize_processing()
     root["timemory"][output_metric]["type"]       = output_metric;
     root["timemory"][output_metric]["description"] =
         "Wall-clock tree reconstructed offline from trace-cache scope events "
-        "(wall_clock_scope_event)";
+        "(wall_clock_event)";
     root["timemory"][output_metric]["unit_value"]        = 1.e9;
     root["timemory"][output_metric]["unit_repr"]         = "sec";
     root["timemory"][output_metric]["thread_scope_only"] = false;
@@ -498,57 +497,57 @@ wall_clock_scope_event_processor_t::finalize_processing()
 }
 
 void
-wall_clock_scope_event_processor_t::handle(const wall_clock_scope_event_sample& s)
+profiled_event_processor_t::handle(const wall_clock_event_sample& s)
 {
     m_events.push_back(s);
 }
 
 void
-wall_clock_scope_event_processor_t::handle(const kernel_dispatch_sample&)
+profiled_event_processor_t::handle(const kernel_dispatch_sample&)
 {}
 
 void
-wall_clock_scope_event_processor_t::handle(const scratch_memory_sample&)
+profiled_event_processor_t::handle(const scratch_memory_sample&)
 {}
 
 void
-wall_clock_scope_event_processor_t::handle(const memory_copy_sample&)
+profiled_event_processor_t::handle(const memory_copy_sample&)
 {}
 
 void
-wall_clock_scope_event_processor_t::handle(const memory_allocate_sample&)
+profiled_event_processor_t::handle(const memory_allocate_sample&)
 {}
 
 void
-wall_clock_scope_event_processor_t::handle(const region_sample&)
+profiled_event_processor_t::handle(const region_sample&)
 {}
 
 void
-wall_clock_scope_event_processor_t::handle(const in_time_sample&)
+profiled_event_processor_t::handle(const in_time_sample&)
 {}
 
 void
-wall_clock_scope_event_processor_t::handle(const pmc_event_with_sample&)
+profiled_event_processor_t::handle(const pmc_event_with_sample&)
 {}
 
 void
-wall_clock_scope_event_processor_t::handle(const gpu_pmc_sample&)
+profiled_event_processor_t::handle(const gpu_pmc_sample&)
 {}
 
 void
-wall_clock_scope_event_processor_t::handle(const ainic_pmc_sample&)
+profiled_event_processor_t::handle(const ainic_pmc_sample&)
 {}
 
 void
-wall_clock_scope_event_processor_t::handle(const cpu_pmc_sample&)
+profiled_event_processor_t::handle(const cpu_pmc_sample&)
 {}
 
 void
-wall_clock_scope_event_processor_t::handle(const backtrace_region_sample&)
+profiled_event_processor_t::handle(const backtrace_region_sample&)
 {}
 
 void
-wall_clock_scope_event_processor_t::handle(const kfd_sample&)
+profiled_event_processor_t::handle(const kfd_sample&)
 {}
 
 }  // namespace rocprofsys::trace_cache

@@ -655,22 +655,22 @@ TEST_F(sample_type_test, kfd_sample_get_size)
     EXPECT_EQ(deserialized.category, original.category);
 }
 
-TEST_F(sample_type_test, wall_clock_scope_event_sample_default_constructor)
+TEST_F(sample_type_test, wall_clock_event_sample_default_constructor)
 {
-    wall_clock_scope_event_sample sample;
+    wall_clock_event_sample sample;
     EXPECT_EQ(sample.type_identifier, type_identifier_t::wall_clock_scope_event);
 }
 
-TEST_F(sample_type_test, wall_clock_scope_event_sample_serialize_roundtrip)
+TEST_F(sample_type_test, wall_clock_event_sample_serialize_roundtrip)
 {
-    wall_clock_scope_event_sample original(
+    wall_clock_event_sample original(
         1001, 2002, 42, static_cast<std::uint8_t>(wall_clock_scope_event_kind::enter), 7,
         3, 5, 99, "my_region");
 
     serialize(buffer.data(), original);
 
     std::uint8_t* buffer_ptr   = buffer.data();
-    auto          deserialized = deserialize<wall_clock_scope_event_sample>(buffer_ptr);
+    auto          deserialized = deserialize<wall_clock_event_sample>(buffer_ptr);
 
     EXPECT_EQ(deserialized.steady_ns, 1001u);
     EXPECT_EQ(deserialized.wall_ns, 2002u);

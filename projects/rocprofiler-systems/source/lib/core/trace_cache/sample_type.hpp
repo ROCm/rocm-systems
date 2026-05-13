@@ -34,7 +34,7 @@ enum class type_identifier_t : std::uint32_t
     fragmented_space       = 0xFFFF
 };
 
-/// Values for \ref wall_clock_scope_event_sample::event_kind.
+/// Values for \ref wall_clock_event_sample::event_kind.
 enum class wall_clock_scope_event_kind : std::uint8_t
 {
     enter = 0,
@@ -693,17 +693,17 @@ get_size(const backtrace_region_sample& item)
 /// ENTER/EXIT pair for one scope invocation. \c parent_exec_id / \c depth / \c name
 /// are meaningful on ENTER; on EXIT \c exec_id matches ENTER and other snapshot fields
 /// may be zero / empty.
-struct wall_clock_scope_event_sample : cacheable_t
+struct wall_clock_event_sample : cacheable_t
 {
     static constexpr type_identifier_t type_identifier =
         type_identifier_t::wall_clock_scope_event;
 
-    wall_clock_scope_event_sample() = default;
-    wall_clock_scope_event_sample(std::uint64_t _steady_ns, std::uint64_t _wall_ns,
-                                  std::uint64_t _thread_id, std::uint8_t _event_kind,
-                                  std::uint64_t _exec_id, std::uint64_t _parent_exec_id,
-                                  std::uint32_t _depth, std::uint64_t _correlation_id,
-                                  std::string _name)
+    wall_clock_event_sample() = default;
+    wall_clock_event_sample(std::uint64_t _steady_ns, std::uint64_t _wall_ns,
+                            std::uint64_t _thread_id, std::uint8_t _event_kind,
+                            std::uint64_t _exec_id, std::uint64_t _parent_exec_id,
+                            std::uint32_t _depth, std::uint64_t _correlation_id,
+                            std::string _name)
     : steady_ns(_steady_ns)
     , wall_ns(_wall_ns)
     , thread_id(_thread_id)
@@ -731,7 +731,7 @@ struct wall_clock_scope_event_sample : cacheable_t
 
 template <>
 inline void
-serialize(std::uint8_t* buffer, const wall_clock_scope_event_sample& item)
+serialize(std::uint8_t* buffer, const wall_clock_event_sample& item)
 {
     utility::store_value(buffer, item.steady_ns, item.wall_ns, item.thread_id,
                          item.event_kind, item.exec_id, item.parent_exec_id, item.depth,
@@ -739,11 +739,11 @@ serialize(std::uint8_t* buffer, const wall_clock_scope_event_sample& item)
 }
 
 template <>
-inline wall_clock_scope_event_sample
+inline wall_clock_event_sample
 deserialize(std::uint8_t*& buffer)
 {
-    wall_clock_scope_event_sample item;
-    std::string_view              name_view;
+    wall_clock_event_sample item;
+    std::string_view        name_view;
     utility::parse_value(buffer, item.steady_ns, item.wall_ns, item.thread_id,
                          item.event_kind, item.exec_id, item.parent_exec_id, item.depth,
                          item.correlation_id, name_view);
@@ -753,7 +753,7 @@ deserialize(std::uint8_t*& buffer)
 
 template <>
 inline size_t
-get_size(const wall_clock_scope_event_sample& item)
+get_size(const wall_clock_event_sample& item)
 {
     return utility::get_size(item.steady_ns, item.wall_ns, item.thread_id,
                              item.event_kind, item.exec_id, item.parent_exec_id,

@@ -16,14 +16,13 @@ namespace rocprofsys
 namespace trace_cache
 {
 
-/// Collects \ref wall_clock_scope_event_sample during trace-cache replay and writes
+/// Collects \ref wall_clock_event_sample during trace-cache replay and writes
 /// \c wall_clock_evt.{json,txt} (offline reconstruction of the instrumented wall-clock
 /// tree).
-class wall_clock_scope_event_processor_t
-: public processor_t<wall_clock_scope_event_processor_t>
+class profiled_event_processor_t : public processor_t<profiled_event_processor_t>
 {
 public:
-    wall_clock_scope_event_processor_t(int pid, int ppid, output_file_registry& registry);
+    profiled_event_processor_t(int pid, int ppid, output_file_registry& registry);
 
     void prepare_for_processing();
     void finalize_processing();
@@ -40,13 +39,13 @@ public:
     void handle(const cpu_pmc_sample& sample);
     void handle(const backtrace_region_sample& sample);
     void handle(const kfd_sample& sample);
-    void handle(const wall_clock_scope_event_sample& sample);
+    void handle(const wall_clock_event_sample& sample);
 
 private:
-    int                                        m_pid;
-    int                                        m_ppid;
-    output_file_registry&                      m_registry;
-    std::vector<wall_clock_scope_event_sample> m_events;
+    int                                  m_pid;
+    int                                  m_ppid;
+    output_file_registry&                m_registry;
+    std::vector<wall_clock_event_sample> m_events;
 };
 
 }  // namespace trace_cache

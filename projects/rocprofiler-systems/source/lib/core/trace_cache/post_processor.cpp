@@ -8,10 +8,10 @@
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
+#include "core/trace_cache/profiled_event_processor.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/storage_parser_alias.hpp"
-#include "core/trace_cache/wall_clock_scope_event_processor.hpp"
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
 
@@ -56,10 +56,9 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinat
                      output_file_registry&                            _registry)
 {
     data::processor_storage_t storage;
-    storage.wall_clock_scope_processor =
-        std::make_shared<wall_clock_scope_event_processor_t>(_config->_pid,
-                                                             _config->_ppid, _registry);
-    _coordinator->add_handler(*storage.wall_clock_scope_processor);
+    storage.profiled_event_processor = std::make_shared<profiled_event_processor_t>(
+        _config->_pid, _config->_ppid, _registry);
+    _coordinator->add_handler(*storage.profiled_event_processor);
 
     if(_formats.is_rocpd_enabled())
     {
