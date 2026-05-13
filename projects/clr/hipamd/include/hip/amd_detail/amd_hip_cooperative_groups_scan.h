@@ -141,182 +141,205 @@ namespace impl {
     __hip_internal::is_same<T, double>::value;
   }
   // TODO g-h-c half
-}
 
-template <typename TyGroup, typename TyVal, typename TyFn>
-__CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& op) -> decltype(op(val, val)) {
-  using Op = typename __hip_internal::remove_cvref<TyFn>::type;
-  using Val = typename __hip_internal::remove_cvref<TyVal>::type;
+  template <bool Inclusive, typename TyGroup, typename TyVal, typename TyFn>
+  __CG_QUALIFIER__ auto scan(const TyGroup& group, TyVal&& val, TyFn&& op) -> decltype(op(val, val))
+  {
+    using Op = typename __hip_internal::remove_cvref<TyFn>::type;
+    using Val = typename __hip_internal::remove_cvref<TyVal>::type;
 
-  constexpr bool isPrimitiveType = impl::isPrimitiveType<Val>();
-  using permuteType = typename __hip_internal::conditional<isPrimitiveType && (sizeof(Val) == 4 || sizeof(Val) == 2), Val, unsigned int>::type;
+    constexpr bool isPrimitiveType = impl::isPrimitiveType<Val>();
+    using permuteType = typename __hip_internal::conditional<isPrimitiveType && (sizeof(Val) == 4 || sizeof(Val) == 2), Val, unsigned int>::type;
 
-  // the number of backward permutes will be: size(Val) / 4 rounded up
-  static constexpr int kNumOfPermutes = (sizeof(Val) < 4)?
-                                        1 :
-                                        (sizeof(Val) + sizeof(unsigned int) - 1) / sizeof(unsigned int);
-  static_assert(cooperative_groups::impl::is_param_type_same<Val, decltype(op(val, val))>::value, "Operator input and output types differ");
-  static_assert(__hip_internal::is_trivially_copyable<Val>::value, "val must be trivially copyable");
-  static_assert(sizeof(Val) <= 32, "scan only operate on values of size up to 32 bytes");
+    // the number of backward permutes will be: size(Val) / 4 rounded up
+    static constexpr int kNumOfPermutes = (sizeof(Val) < 4)?
+                                          1 :
+                                          (sizeof(Val) + sizeof(unsigned int) - 1) / sizeof(unsigned int);
+    static_assert(cooperative_groups::impl::is_param_type_same<Val, decltype(op(val, val))>::value, "Operator input and output types differ");
+    static_assert(__hip_internal::is_trivially_copyable<Val>::value, "val must be trivially copyable");
+    static_assert(sizeof(Val) <= 32, "scan only operate on values of size up to 32 bytes");
 
-  if constexpr (!cooperative_groups::impl::isTiledGroup<TyGroup>::value && !cooperative_groups::impl::isCoalescedGroup<TyGroup>::value) {
-    static_assert(__hip_internal::is_void<TyGroup>::value, "This group does not exclusively represent a tile");
-  }
+    if constexpr (!cooperative_groups::impl::isTiledGroup<TyGroup>::value && !cooperative_groups::impl::isCoalescedGroup<TyGroup>::value) {
+      static_assert(__hip_internal::is_void<TyGroup>::value, "This group does not exclusively represent a tile");
+    }
 
-  // TODO g-h-c we should be able to calculate the mask AT COMPILE TIME, and thusly
-  // do a loop unroll at compile time but only IF THE GROUP IS A BLOCK TILE of a compile-time size
-  unsigned int maskNumBits;
-  int numIterations;
-  // next bit to aggregate with
-  unsigned int maskIdx;
-  unsigned int laneId = __lane_id();
-  int nextBit = laneId;
-  unsigned long long mask = ~0ull;
+    // TODO g-h-c we should be able to calculate the mask AT COMPILE TIME, and thusly
+    // do a loop unroll at compile time but only IF THE GROUP IS A BLOCK TILE of a compile-time size
+    unsigned int maskNumBits;
+    int numIterations;
+    // next bit to aggregate with
+    unsigned int maskIdx;
+    unsigned int laneId = __lane_id();
+    int nextBit = laneId;
+    unsigned long long mask = ~0ull;
 
-  if constexpr (impl::isCoalescedGroup<TyGroup>::value) {
-    // for coalesced_groups, the mask is simply the activemask
-    mask &= __activemask();
-  } else {
-    // we cannot simply just use the __activemask() here, because more than one tile could have active
-    // threads at a time; we need to mask away the threads that not part of this tile first
-    mask >>= (64 - group.num_threads());
-    mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
-  }
+    if constexpr (impl::isCoalescedGroup<TyGroup>::value) {
+      // for coalesced_groups, the mask is simply the activemask
+      mask &= __activemask();
+    } else {
+      // we cannot simply just use the __activemask() here, because more than one tile could have active
+      // threads at a time; we need to mask away the threads that not part of this tile first
+      mask >>= (64 - group.num_threads());
+      mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
+    }
 
-  maskNumBits = __popcll(mask);
-  maskIdx = __popcll(((1ul << laneId) - 1) & mask);
+    maskNumBits = __popcll(mask);
+    maskIdx = __popcll(((1ul << laneId) - 1) & mask);
 
-  if (laneId) {
-    mask <<= 64 - laneId;
-  }
+    if (laneId) {
+      mask <<= 64 - laneId;
+    }
 
 #ifdef __OPTIMIZE__  // at the time of this writing the ockl wfscan functions do not compile when
-                     // using -O0
-  if (impl::isTiledGroup<TyGroup>::value) {
-    // for tiled_groups we know at compile time that whether we can call the ockl intrinsics or
-    // not; if the block tile is actually the whole warp
-    if (impl::tiledGroupSize<TyGroup>::value == warpSize) {
-      if constexpr (impl::isArithmeticFunc<Val, TyFn >::value && impl::has_arithmetic_scan<Val, Op>::value ||
-                    impl::isBooleanFunc<Val, TyFn >::value && impl::has_boolean_scan<Val, Op>::value) {
-        return impl::call_scan<Val, Op, true>(val);
+                      // using -O0
+    if (impl::isTiledGroup<TyGroup>::value) {
+      // for tiled_groups we know at compile time that whether we can call the ockl intrinsics or
+      // not; if the block tile is actually the whole warp
+      if (impl::tiledGroupSize<TyGroup>::value == warpSize) {
+        if constexpr (impl::isArithmeticFunc<Val, TyFn >::value && impl::has_arithmetic_scan<Val, Op>::value ||
+                      impl::isBooleanFunc<Val, TyFn >::value && impl::has_boolean_scan<Val, Op>::value) {
+          return impl::call_scan<Val, Op, Inclusive>(val);
+        }
+      }
+    } else if constexpr (impl::isCoalescedGroup<TyGroup>::value) {
+      // for the coalesced_group case we do need to check at runtime, adding a slight overhead on
+      // this branch
+      if (maskNumBits == warpSize) {
+        if constexpr (impl::isArithmeticFunc<Val, TyFn >::value && impl::has_arithmetic_scan<Val, Op>::value ||
+                      impl::isBooleanFunc<Val, TyFn >::value && impl::has_boolean_scan<Val, Op>::value) {
+          return impl::call_scan<Val, Op, Inclusive>(val);
+        }
       }
     }
-  } else if constexpr (impl::isCoalescedGroup<TyGroup>::value) {
-    // for the coalesced_group case we do need to check at runtime, adding a slight overhead on
-    // this branch
-    if (maskNumBits == warpSize) {
-       if constexpr (impl::isArithmeticFunc<Val, TyFn >::value && impl::has_arithmetic_scan<Val, Op>::value ||
-                     impl::isBooleanFunc<Val, TyFn >::value && impl::has_boolean_scan<Val, Op>::value) {
-        return impl::call_scan<Val, Op, true>(val);
-      }
-    }
-  }
 #endif
 
-  
-  // unsigned int[N] is used in some cases, e.g. when T is wider than 32-bit
-  typename __hip_internal::conditional<isPrimitiveType && (sizeof(Val) == 4 || sizeof(Val) == 2), permuteType,
-                                       permuteType[kNumOfPermutes]>::type result, permuteResult;
-  auto backwardPermute = [](int index, permuteType arg) {
-    if constexpr (__hip_internal::is_floating_point<Val>::value &&
-                sizeof(Val) <= 4) {
-      return __hip_ds_bpermutef(index, arg);
+    // unsigned int[N] is used in some cases, e.g. when T is wider than 32-bit
+    typename __hip_internal::conditional<isPrimitiveType && (sizeof(Val) == 4 || sizeof(Val) == 2), permuteType,
+                                        permuteType[kNumOfPermutes]>::type result, permuteResult, exclusiveResult;
+    auto backwardPermute = [](int index, permuteType arg) {
+      if constexpr (__hip_internal::is_floating_point<Val>::value &&
+                  sizeof(Val) <= 4) {
+        return __hip_ds_bpermutef(index, arg);
+      } else {
+        return __hip_ds_bpermute(index, arg);
+      }
+    };
+
+    if constexpr (isPrimitiveType && (sizeof(Val) == 2 || sizeof(Val) == 4)) {
+      result = val;
     } else {
-      return __hip_ds_bpermute(index, arg);
+      __builtin_memcpy(result, &val, sizeof(result));
     }
-  };
 
-  if constexpr (isPrimitiveType && (sizeof(Val) == 2 || sizeof(Val) == 4)) {
-    result = val;
-  } else {
-    __builtin_memcpy(result, &val, sizeof(result));
-  }
+    if constexpr(!Inclusive) {
+      __builtin_memset(&exclusiveResult, 0, sizeof(exclusiveResult));
+    }
 
-  // the number of iterations needs to be at least log2(number of bits on)
-  numIterations = sizeof(int) * 8 - __clz(maskNumBits);
+    // the number of iterations needs to be at least log2(number of bits on)
+    numIterations = sizeof(int) * 8 - __clz(maskNumBits);
 
-  if constexpr (impl::isTiledGroup<TyGroup>::value) {
-    // the number of bits in the mask is always a power of 2 when
-    // tiled blocks are used and in that case we need an iteration less
-    numIterations -= 1;
-  } else {
-    // in the coalesced_threads case it depends, we are not sure whether
-    // it is a power of 2, or not so we check
-    if (!(maskNumBits & (maskNumBits - 1))) {
+    if constexpr (impl::isTiledGroup<TyGroup>::value) {
+      // the number of bits in the mask is always a power of 2 when
+      // tiled blocks are used and in that case we need an iteration less
       numIterations -= 1;
-    }
-  }
-
-  int modulo = 1;
-
-  while (numIterations) {
-    int offset = modulo >> 1;
-    int increment = modulo - offset;
-    int nextPos = maskIdx - offset - increment;
-    bool insideLanes = nextPos >= 0;
-
-    if (insideLanes) {
-      int next;
-
-      // find the position to aggregate with; although we could just call fns64() that will probably
-      // be very slow when called multiple times in this for loop; this is equivalent
-      for (int i = 0; i < increment; i++) {
-        next = __builtin_clzll(mask) + 1;
-        mask <<= next;
-        nextBit -= next;
-      }
-    }
-
-    // clamp index; if out of bounds, the thread read its own value
-    nextBit = (nextBit < (laneId & ~(warpSize - 1))) ? laneId : nextBit;
-
-    if constexpr (!isPrimitiveType) {
-      // ds_bpermute only deals with 32-bit sizes, so for other sizes
-      // we need to call the permute multiple times
-      for (int i = 0; i < kNumOfPermutes; i++) {
-        permuteResult[i] = backwardPermute(nextBit << 2, result[i]);
-      }
-    } else if constexpr (sizeof(Val) == 2) {
-      union {
-        int i;
-        Val f;
-      } tmp;
-
-      tmp.f = result;
-      tmp.i = __hip_ds_bpermute(nextBit << 2, tmp.i);
-      permuteResult = tmp.f;
-    } else if constexpr (sizeof(Val) == 4) {
-      auto bPermuteResult = backwardPermute(nextBit << 2, result);
-      __builtin_memcpy(&permuteResult, &bPermuteResult, sizeof(result));
     } else {
-      // ds_bpermute only deals with 32-bit sizes, so for 8 bytes, we
-      // need to call it twice
-      permuteResult[0] = backwardPermute(nextBit << 2, result[0]);
-      permuteResult[1] = backwardPermute(nextBit << 2, result[1]);
-    }
-
-    if (insideLanes) {
-      if constexpr (!isPrimitiveType) {
-        Val toReturn;
-        toReturn = op(*reinterpret_cast<Val*>(result), *reinterpret_cast<Val*>(permuteResult));
-      __builtin_memcpy(result, &toReturn, sizeof(Val));
-      } else if constexpr (sizeof(Val) == 4 || sizeof(Val) == 2) {
-        result = op(result, permuteResult);
-      }  if constexpr (sizeof(Val) == 8) {
-        Val tmp;
-        unsigned long long rhs =
-            (static_cast<unsigned long long>(permuteResult[1]) << 32) | permuteResult[0];
-       __builtin_memcpy(&tmp, result, sizeof(result));
-        tmp = op(tmp, *reinterpret_cast<Val*>(&rhs));
-        __builtin_memcpy(result, &tmp, sizeof(result));
+      // in the coalesced_threads case it depends, we are not sure whether
+      // it is a power of 2, or not so we check
+      if (!(maskNumBits & (maskNumBits - 1))) {
+        numIterations -= 1;
       }
     }
 
-    modulo <<= 1;
-    numIterations--;
+    int modulo = 1;
+
+    while (numIterations) {
+      int offset = modulo >> 1;
+      int increment = modulo - offset;
+      int nextPos = maskIdx - offset - increment;
+      bool insideLanes = nextPos >= 0;
+
+      if (insideLanes) {
+        int next;
+
+        // find the position to aggregate with
+        for (int i = 0; i < increment; i++) {
+          next = __builtin_clzll(mask) + 1;
+          mask <<= next;
+          nextBit -= next;
+        }
+      }
+
+      // clamp index; if out of bounds, the thread read its own value
+      nextBit = (nextBit < (laneId & ~(warpSize - 1))) ? laneId : nextBit;
+
+      if constexpr (!isPrimitiveType) {
+        // ds_bpermute only deals with 32-bit sizes, so for other sizes
+        // we need to call the permute multiple times
+        for (int i = 0; i < kNumOfPermutes; i++) {
+          permuteResult[i] = backwardPermute(nextBit << 2, result[i]);
+        }
+      } else if constexpr (sizeof(Val) == 2) {
+        union {
+          int i;
+          Val f;
+        } tmp;
+
+        tmp.f = result;
+        tmp.i = __hip_ds_bpermute(nextBit << 2, tmp.i);
+        permuteResult = tmp.f;
+      } else if constexpr (sizeof(Val) == 4) {
+        auto bPermuteResult = backwardPermute(nextBit << 2, result);
+        __builtin_memcpy(&permuteResult, &bPermuteResult, sizeof(result));
+      } else {
+        // ds_bpermute only deals with 32-bit sizes, so for 8 bytes, we
+        // need to call it twice
+        permuteResult[0] = backwardPermute(nextBit << 2, result[0]);
+        permuteResult[1] = backwardPermute(nextBit << 2, result[1]);
+      }
+
+      if (insideLanes) {
+        if constexpr (!isPrimitiveType) {
+          Val toReturn;
+          toReturn = op(*reinterpret_cast<Val*>(result), *reinterpret_cast<Val*>(permuteResult));
+        __builtin_memcpy(result, &toReturn, sizeof(Val));
+        } else if constexpr (sizeof(Val) == 4 || sizeof(Val) == 2) {
+          exclusiveResult = op(exclusiveResult, permuteResult);
+          result = op(result, permuteResult);
+        } else if constexpr (sizeof(Val) == 8) {
+          Val tmp;
+          unsigned long long rhs =
+              (static_cast<unsigned long long>(permuteResult[1]) << 32) | permuteResult[0];
+          __builtin_memcpy(&tmp, result, sizeof(result));
+          tmp = op(tmp, *reinterpret_cast<Val*>(&rhs));
+          __builtin_memcpy(result, &tmp, sizeof(result));
+        }
+      }
+
+      modulo <<= 1;
+      numIterations--;
+    }
+    if constexpr (Inclusive) {
+      return *reinterpret_cast<Val*>(&result);
+    } else {
+      return *reinterpret_cast<Val*>(&exclusiveResult);
+    }
   }
-  return *reinterpret_cast<Val*>(&result);
 }
+
+  template <typename TyGroup, typename TyVal, typename TyFn>
+  __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& op)
+    -> decltype(op(val, val))
+  {
+    return impl::scan<true>(group, val, op);
+  }
+
+  template <typename TyGroup, typename TyVal, typename TyFn>
+  __CG_QUALIFIER__ auto exclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& op)
+    -> decltype(op(val, val))
+  {
+    return impl::scan<false>(group, val, op);
+  }
+
 }
 #endif  // __cplusplus
 #endif  // HIP_INCLUDE_HIP_AMD_DETAIL_HIP_COOPERATIVE_GROUPS_SCAN_H

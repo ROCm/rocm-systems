@@ -394,6 +394,21 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
 
 enum class AggregationType { Reduce, InclusiveScan, ExclusiveScan};
 
+inline const char* aggregationTypeToStr(AggregationType aggType)
+{
+  switch (aggType) {
+  case AggregationType::Reduce:
+    return "reduce";
+  case AggregationType::InclusiveScan:
+    return "inclusive scan";
+  case AggregationType::ExclusiveScan:
+    return "exclusive scan";
+  default:
+    assert(false && "Unknown aggregation type");
+    return "unknown";
+  }
+}
+
 constexpr uint64_t nextPowerOf2(uint64_t v) {
   v += (v == 0);
   v--;
@@ -419,26 +434,39 @@ T calculateExpected(T* output,
   T result;
   bool inclusive = aggType != AggregationType::ExclusiveScan;
   int lastLane = 64 - __builtin_clzll(mask) - 1;
-  T lastOutput[64];
+  T aggregation[64];
+  // the results for the previous step of the aggregation
+  T lastAggregation[64];
 
   std::memset(output, 0, 64 * sizeof(T));
+  std::memset(aggregation, 0, 64 * sizeof(T));
+  std::memset(lastAggregation, 0, 64 * sizeof(T));
 
-  if constexpr (std::is_same<Op, std::plus<T>>::value || std::is_same<Op, cooperative_groups::plus<T>>::value) {
+  if constexpr (std::is_same<Op, std::plus<T>>::value ||
+                std::is_same<Op, cooperative_groups::plus<T>>::value ) {
     for (int i = 0; i < lastLane + 1; i++) {
-       if (inclusive && mask & (1ul << i)) {
-         output[i] = input[i];
+       if (mask & (1ul << i)) {
+         aggregation[i] = input[i];
+         lastAggregation[i] = input[i];
        }
     }
 
     for (int modulo = 2; modulo <= nextPowerOf2(lastLane + 1); modulo *= 2) {
-      std::memcpy(lastOutput, output, sizeof(lastOutput));
-
       for (int i = 0; i < lastLane + 1; i += 1) {
         int j = i - modulo / 2;
 
         if (j >= 0) {
-          output[i] += lastOutput[j];
+          aggregation[i] += lastAggregation[j];
         }
+      }
+      std::memcpy(lastAggregation, aggregation, sizeof(lastAggregation));
+    }
+
+    for (int i = 0; i < lastLane + 1; i += 1) {
+      if (inclusive) {
+        output[i] = aggregation[i];
+      } else if (i > 0) {
+        output[i] = aggregation[i - 1];
       }
     }
 
@@ -467,7 +495,13 @@ T calculateExpected(T* output,
       if (mask & (1ul << i)) {
         T arg;
 
-        std::memset(&arg, 0, sizeof(T));
+        if (std::is_same<Op, MinOp<T>>::value) {
+          arg = std::numeric_limits<T>::max();
+        } else if (std::is_same<Op, MaxOp<T>>::value) {
+          arg = std::numeric_limits<T>::lowest();
+        } else {
+          std::memset(&arg, 0, sizeof(T));
+        }
 
         if (inclusive) {
           arg = input[i];
@@ -477,8 +511,13 @@ T calculateExpected(T* output,
           result = op(arg, result);
           output[i] = result;
         } else {
-          result = arg;
-          output[i] = result;
+          result = input[i];
+
+          if (inclusive) {
+            output[i] = result;
+          } else {
+            output[i] = 0;
+          }
           initialized = true;
         }
       }
@@ -599,8 +638,13 @@ void runTestReduce(int iteration, Reduce reduce)
   HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost));
 
   while (numReduce < kNumReduces) {
+    T expectedByLane[64];
     T* waveInput = &input.ptr()[numReduce * wavefrontSize];
-    T expected = calculateExpected<T>(waveInput, op, masks.ptr()[numReduce], AggregationType::Reduce);
+    T expected = calculateExpected<T>(expectedByLane,
+                                      waveInput,
+                                      op,
+                                      masks.ptr()[numReduce],
+                                      AggregationType::Reduce);
     int lane = 0;
 
     while (lane < wavefrontSize) {

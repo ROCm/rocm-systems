@@ -614,7 +614,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Basic, int)
 // @extraMasks  when testing coalesced_threads, this can be use to simulate
 //              divergence
 template <size_t TileSize, class Functor, class T>
-void __global__ reduceKernel(T* output, const T* input, unsigned long long* extraMasks, AggregationType* aggType)
+void __global__ reduceKernel(T* output,
+                             const T* input,
+                             unsigned long long* extraMasks,
+                             AggregationType* aggType)
 {
   int tid = threadIdx.x;
   int laneId = tid % warpSize;
@@ -633,6 +636,9 @@ void __global__ reduceKernel(T* output, const T* input, unsigned long long* extr
       case AggregationType::InclusiveScan:
         result = cg::inclusive_scan(mytile, input[idx], Functor());
         break;
+      case AggregationType::ExclusiveScan:
+        result = cg::exclusive_scan(mytile, input[idx], Functor());
+        break;
       default:
         assert(false && "Unsupported enumeration");
       }
@@ -645,7 +651,10 @@ void __global__ reduceKernel(T* output, const T* input, unsigned long long* extr
 
 // @extraMasks  used to simulate divergence when using coalesced_threads
 template <class Functor, class T>
-void __global__ reduceKernelCoalesced(T* output, const T* input, unsigned long long* extraMasks)
+void __global__ reduceKernelCoalesced(T* output,
+                                      const T* input,
+                                      unsigned long long* extraMasks,
+                                      AggregationType* aggType)
 {
   int tid = threadIdx.x;
   int laneId = tid % warpSize;
@@ -658,7 +667,16 @@ void __global__ reduceKernelCoalesced(T* output, const T* input, unsigned long l
     if ((1ull << laneId) & mask) {
       auto coalesced = cg::coalesced_threads();
 
-      result = cg::reduce(coalesced, input[idx], Functor());
+      switch (*aggType) {
+      case AggregationType::Reduce:
+        result = cg::reduce(coalesced, input[idx], Functor());
+        break;
+      case AggregationType::InclusiveScan:
+        result = cg::inclusive_scan(coalesced, input[idx], Functor());
+        break;
+      default:
+        assert(false && "Unsupported enumeration");
+      }
     } else {
       result = 0;
     }
@@ -757,7 +775,12 @@ void aggregateForTypeAndOp(AggregationType aggType)
       }
 
       calculateExpected(expected, input, op, mask, aggType);
-      resultLane = (aggType == AggregationType::Reduce)? lastLane : laneId;
+
+      if (aggType == AggregationType::Reduce) {
+        resultLane = lastLane;
+      } else {
+        resultLane = laneId;
+      }
 
       if ((1ull << laneId) & mask) {
         if constexpr (std::is_integral<T>::value) {
@@ -765,13 +788,18 @@ void aggregateForTypeAndOp(AggregationType aggType)
           // for reduce, the result would be in the last lane whose first bit is on in the mask
           // for scans, the associated result is different in each lane
           if (result != expected[resultLane]) {
+            INFO("Aggregation type: " << aggregationTypeToStr(aggType));
             printMismatch(result, expected[resultLane], input, mask, laneId);
             INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
             REQUIRE(result == expected[resultLane]);
           }
         } else {
           INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
-          compareFloatingPoint(result, expected[resultLane], mask, h_input.host_ptr(), laneId);
+          compareFloatingPoint(result,
+                               expected[resultLane],
+                               mask,
+                               h_input.host_ptr(),
+                               laneId);
         }
       }
     }
@@ -1104,26 +1132,39 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_boolean, int, unsigned
 }
 
 template <size_t TileSize>
-void __global__ simpleScan(int* result)
+void __global__ simpleScan(int* result, AggregationType* aggType)
 {
   int value = threadIdx.x;
   cg::thread_block mygroup = cg::this_thread_block();
   auto mytile = cg::tiled_partition<TileSize>(mygroup);
-  result[threadIdx.x] = cg::inclusive_scan(mytile, value, cg::plus<int>());
+
+  if (*aggType == AggregationType::InclusiveScan) {
+    result[threadIdx.x] = cg::inclusive_scan(mytile, value, cg::plus<int>());
+  } else if (*aggType == AggregationType::ExclusiveScan) {
+    result[threadIdx.x] = cg::exclusive_scan(mytile, value, cg::plus<int>());
+  } else {
+    assert(false && "Unexpected aggType");
+  }
 }
 
 template <size_t TileSize>
-void testScanForTileSize()
+void testScanForTileSize(AggregationType aggType)
 {
   LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int) * getWarpSize());
   LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, h_result.size_bytes());
   dim3 gridDim = { 1 };
   dim3 blockDim = { static_cast<unsigned short>(getWarpSize()) };
-  void* devicePtr = d_result.ptr();
-  void* args[] = { &devicePtr };
   int accum = 0;
   int pos = 0;
+  LinearAllocGuard<AggregationType> d_aggType(LinearAllocs::hipMalloc, sizeof(AggregationType));
+  std::array<void*, 2> devicePtrs = { d_result.ptr(), d_aggType.ptr() };
+  void* args[devicePtrs.size()];
 
+  for (int i = 0; i < devicePtrs.size(); i++) {
+    args[i] = &devicePtrs[i];
+  }
+
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
   HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleScan<TileSize>),
                                        gridDim,
                                        blockDim,
@@ -1137,9 +1178,17 @@ void testScanForTileSize()
 
   while (pos < getWarpSize()) {
     for (int i = 0; i < TileSize; i++) {
-      accum += pos + i;
-      INFO("Index: " << pos + i);
-      REQUIRE(h_result.host_ptr()[pos + i] == accum);
+      UNSCOPED_INFO("Index: " << pos + i << " tile size: " << TileSize);
+
+      if (aggType == AggregationType::InclusiveScan) {
+        accum += pos + i;
+        INFO("Inclusive scan");
+        REQUIRE(h_result.host_ptr()[pos + i] == accum);
+      } else {
+        INFO("Exclusive scan");
+        REQUIRE(h_result.host_ptr()[pos + i] == accum);
+        accum += pos + i;
+      }
     }
 
     accum = 0;
@@ -1149,15 +1198,33 @@ void testScanForTileSize()
 
 TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
 {
-  testScanForTileSize<1>();
-  testScanForTileSize<2>();
-  testScanForTileSize<4>();
-  testScanForTileSize<8>();
-  testScanForTileSize<16>();
-  testScanForTileSize<32>();
+  AggregationType aggType = AggregationType::InclusiveScan;
+
+  testScanForTileSize<1>(aggType);
+  testScanForTileSize<2>(aggType);
+  testScanForTileSize<4>(aggType);
+  testScanForTileSize<8>(aggType);
+  testScanForTileSize<16>(aggType);
+  testScanForTileSize<32>(aggType);
 
   if (getWarpSize() == 64) {
-    testScanForTileSize<64>();
+    testScanForTileSize<64>(aggType);
+  }
+}
+
+TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic)
+{
+  AggregationType aggType = AggregationType::ExclusiveScan;
+
+  testScanForTileSize<1>(aggType);
+  testScanForTileSize<2>(aggType);
+  testScanForTileSize<4>(aggType);
+  testScanForTileSize<8>(aggType);
+  testScanForTileSize<16>(aggType);
+  testScanForTileSize<32>(aggType);
+
+  if (getWarpSize() == 64) {
+    testScanForTileSize<64>(aggType);
   }
 }
 
@@ -1171,10 +1238,20 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_arithmetic,  int, unsigned
              cooperative_groups::less<TestType>,
              cooperative_groups::greater<TestType>> types;
 
-  if (getWarpSize() == 32) {
-    runAggregationRandomForOps<false, TestType, 32>(AggregationType::InclusiveScan, types);
-  } else {
-    runAggregationRandomForOps<false, TestType, 64>(AggregationType::InclusiveScan, types);
+  SECTION("inclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<false, TestType, 32>(AggregationType::InclusiveScan, types);
+    } else {
+      runAggregationRandomForOps<false, TestType, 64>(AggregationType::InclusiveScan, types);
+    }
+  }
+
+  SECTION("exclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<false, TestType, 32>(AggregationType::ExclusiveScan, types);
+    } else {
+      runAggregationRandomForOps<false, TestType, 64>(AggregationType::ExclusiveScan, types);
+    }
   }
 }
 
@@ -1189,6 +1266,34 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_boolean, int, unsigned int
     runAggregationRandomForOps<false, TestType, 32>(AggregationType::InclusiveScan, types);
   } else {
     runAggregationRandomForOps<false, TestType, 64>(AggregationType::InclusiveScan, types);
+  }
+}
+
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_arithmetic, int, unsigned int, long long,
+                   unsigned long long, float, half, double)
+{
+  std::tuple<cooperative_groups::plus<TestType>,
+             cooperative_groups::less<TestType>,
+             cooperative_groups::greater<TestType>> ops;
+
+  if (getWarpSize() == 32) {
+    runAggregationRandomForOps<true, TestType, 32>(AggregationType::InclusiveScan, ops);
+  } else {
+    runAggregationRandomForOps<true, TestType, 64>(AggregationType::InclusiveScan, ops);
+  }
+}
+
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_boolean, int, unsigned int, long long,
+                   unsigned long long)
+{
+  std::tuple<cooperative_groups::plus<TestType>,
+             cooperative_groups::less<TestType>,
+             cooperative_groups::greater<TestType>> ops;
+
+  if (getWarpSize() == 32) {
+    runAggregationRandomForOps<true, TestType, 32>(AggregationType::InclusiveScan, ops);
+  } else {
+    runAggregationRandomForOps<true, TestType, 64>(AggregationType::InclusiveScan, ops);
   }
 }
 
