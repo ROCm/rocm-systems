@@ -11,8 +11,9 @@
 #      AqlQueue regardless of GPU agent type).
 #   2. _get_state() after _enable() returns:
 #        - non-null buffer_base
-#        - num_records == DISPATCH_LOG_RECORD_COUNT (65536) — matches
-#          AqlQueue::SetProfiling's hard-coded ring count
+#        - num_records is a sane power-of-2 ring size chosen by
+#          AqlQueue::SetProfiling at allocation time (no build-time
+#          constant; the test asserts shape, not a hard-coded value)
 #        - non-null wptr_ptr and signal_ptr
 #   3. _enable() / _get_state() reject nullptr / non-AQL-queue arguments
 #      with HSA_STATUS_ERROR_INVALID_*.
@@ -141,8 +142,14 @@ int main() {
     EXPECT_OK(hsa_amd_dispatch_log_test_get_state(queue, &buf, &nrec, &w, &sig));
 
     if (buf == nullptr) { std::fprintf(stderr, "FAIL: buffer_base null\n"); return 2; }
-    /* DISPATCH_LOG_RECORD_COUNT in dispatch_log.h. */
-    EXPECT_EQ(nrec, 65536u, "num_records mismatch");
+    /* The ring record count is chosen at runtime by AqlQueue::SetProfiling
+       (no build-time constant, see core/inc/dispatch_log.h). Validate that
+       it's a non-zero power of 2 and within a reasonable range, not a
+       hard-coded value that goes stale when SetProfiling is bumped. */
+    if (nrec == 0u || (nrec & (nrec - 1u)) != 0u || nrec < 1024u || nrec > (1u << 24)) {
+      std::fprintf(stderr, "FAIL: num_records=%u not a sane power-of-2 ring size\n", nrec);
+      return 2;
+    }
     if (w == nullptr) { std::fprintf(stderr, "FAIL: wptr_ptr null\n"); return 2; }
     if (sig == nullptr) { std::fprintf(stderr, "FAIL: signal_ptr null\n"); return 2; }
 

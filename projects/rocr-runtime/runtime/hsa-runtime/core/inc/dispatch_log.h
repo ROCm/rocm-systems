@@ -76,17 +76,22 @@ namespace dispatch_log {
 // only as historical constants for now and may be removed.
 // -----------------------------------------------------------------------------
 
-// Number of FW dispatch records per queue ring buffer. Must match
-// AqlQueue::SetProfiling's hard-coded num_records (currently 65536).
-// Power of 2 so masking is cheap; the drainer uses (kRecordCount - 1)
-// for byte-offset wraparound.
-constexpr uint32_t DISPATCH_LOG_RECORD_COUNT = 65536;
+// NOTE: the per-queue ring record count is NOT a build-time constant.
+// AqlQueue::SetProfiling chooses the num_records value at allocation
+// time and the drainer derives ring_records at runtime from
+// AqlQueue::GetProfilingDispatchRecords (buf_bytes / sizeof(record)).
+// A previous DISPATCH_LOG_RECORD_COUNT constant was removed because it
+// silently went stale when SetProfiling's ring size was bumped (and was
+// not actually used by the drainer code path). The single source of
+// truth is AqlQueue::SetProfiling in core/runtime/amd_aql_queue.cpp;
+// consumers MUST query GetProfilingDispatchRecords for the live size.
 
 // FW-written 16-byte record. Layout is fixed by the firmware contract.
 // Mirrors rocr::AMD::mec_dispatch_record from
 // core/inc/mec_dispatch_record.h, with the trailing 4-byte field treated
 // as the dispatch index (FW writes the per-queue monotonic dispatch idx
-// into the `reserved` slot per the cpc_tracing drainer's interpretation).
+// into the slot named `reserved` in mec_dispatch_record; see that header
+// for the historical-name vs current-FW-semantics rationale).
 //
 // `record_type` is FW-defined and intentionally left opaque to HSA: the
 // drainer does not interpret which value means dispatch start vs end and

@@ -1235,9 +1235,10 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   // workaround for an older pre-fix kernel that over-counted the stride
   // in its BO-size validation; both that older kernel and the current
   // kfd_process_queue_manager.c validation accept *16. FW writes — and
-  // the drainer reads — at the 16-byte FW record stride (kSlotStride).
-  // See dispatch_log.cpp:390 and the slot addressing at
-  // dispatch_log.cpp:400-402.
+  // the drainer reads — at the 16-byte FW record stride (see kSlotStride
+  // above and the per-slot addressing expressions in drain_one_queue:
+  // `static_cast<char*>(qs.ring_base) + slot * kSlotStride` on both the
+  // signal-bound Path A and the sentinel-scan Path B).
   const uint32_t record_count = buf_bytes / static_cast<uint32_t>(sizeof(mec_dispatch_record_16));
   if (record_count == 0 || (record_count & (record_count - 1)) != 0) {
     std::fprintf(stderr,

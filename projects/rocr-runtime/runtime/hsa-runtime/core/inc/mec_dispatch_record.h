@@ -29,11 +29,25 @@ namespace AMD {
 ///     added later by extending this struct and the firmware write path,
 ///     but is not required for the primary use-case of late-attach
 ///     timestamp profiling.
+///
+/// Field-name history note: the trailing slot is named `reserved` for
+/// historical reasons (the original 2026-03-30 contract reserved it as
+/// padding "must be 0"). Subsequent firmware revisions repurposed this
+/// slot to carry the per-queue monotonic dispatch index that the FW
+/// writes alongside every record. Host-side consumers therefore treat
+/// this slot as the FW-written dispatch_idx; see the
+/// `mec_dispatch_record_16` mirror in core/inc/dispatch_log.h, which
+/// names the slot `dispatch_idx` to reflect its current FW semantics,
+/// and the rocm_hsa:kernel_dispatch_record tracepoint contract in
+/// lttng/rocm_hsa_tp.h. The `reserved` name is retained on this struct
+/// for source-compatibility with existing consumers; it is NOT zero in
+/// FW-written records.
 struct mec_dispatch_record {
   uint32_t ts_lo;        // GPU clock counter [31:0]
   uint32_t ts_hi;        // GPU clock counter [63:32]
   uint32_t record_type;  // 1 = dispatch-start, 2 = EOP (dispatch-end)
-  uint32_t reserved;     // Must be 0
+  uint32_t reserved;     // Historical name; FW writes per-queue monotonic
+                         // dispatch_idx here (see struct doc above).
 };
 
 }  // namespace AMD
