@@ -60,14 +60,16 @@ class TestROCTx(RocprofsysTest):
             "roctxRangePush_HIP_Kernel",
             "roctxRangePush_HIP_Kernel",
             "roctxGetThreadId",
+            "roctxMark_Thread_Start",
+            "roctxMark_End",
             "roctxMark_Finished_GPU",
         ]
 
     def roctx_legacy_count(self) -> list[int]:
-        return [1, 1, 1, 1, 1, 1, 1, 1]
+        return [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 
     def roctx_legacy_depth(self) -> list[int]:
-        return [1, 1, 2, 0, 3, 1, 2, 1]
+        return [1, 1, 2, 0, 3, 1, 2, 0, 0, 1]
 
     def roctx_cached_labels(self) -> list[str]:
         return [

@@ -60,9 +60,9 @@
                 },
                 {
                     "comparison": "equals",
-                    "description": "Verify that roctxMark markers appear 5 times in table 'regions'",
-                    "error_message": "Expected 5 roctxMark marker entries in `regions` table",
-                    "expected_result": 5,
+                    "description": "Verify that roctxMark markers appear 4 times in table 'regions'",
+                    "error_message": "Expected 4 roctxMark marker entries in `regions` table",
+                    "expected_result": 4,
                     "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name LIKE 'roctxMark_%';"
                 },
                 {

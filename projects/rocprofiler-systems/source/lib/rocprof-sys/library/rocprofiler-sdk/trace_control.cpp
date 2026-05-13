@@ -10,6 +10,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -65,7 +66,7 @@ trace_control::handle_range_start(std::uint64_t range_id, const char* message)
                                     std::memory_order_relaxed);
     }
 
-    if(was_empty && !m_user_paused.load(std::memory_order_relaxed))
+    if(was_empty && m_paused_thread_count.load(std::memory_order_relaxed) == 0)
     {
         trigger_callbacks(m_resume_callbacks);
     }
@@ -74,7 +75,8 @@ trace_control::handle_range_start(std::uint64_t range_id, const char* message)
 void
 trace_control::handle_range_stop(std::uint64_t range_id)
 {
-    bool now_empty = false;
+    bool now_empty  = false;
+    bool had_paused = false;
     {
         std::scoped_lock const lk{ m_region_mutex };
         auto                   it = m_active_range_ids.find(range_id);
@@ -86,15 +88,21 @@ trace_control::handle_range_stop(std::uint64_t range_id)
                 static_cast<std::uint32_t>(m_active_range_ids.size()),
                 std::memory_order_relaxed);
         }
+
+        if(now_empty && !m_paused_thread_ids.empty())
+        {
+            had_paused = true;
+            m_paused_thread_ids.clear();
+            m_paused_thread_count.store(0, std::memory_order_relaxed);
+        }
     }
 
     if(now_empty)
     {
-        if(m_user_paused.load(std::memory_order_relaxed))
+        if(had_paused)
         {
             LOG_WARNING(
                 "Target region ended while paused. Subsequent resume will be ignored.");
-            m_user_paused.store(false, std::memory_order_relaxed);
         }
         else
         {
@@ -104,7 +112,7 @@ trace_control::handle_range_stop(std::uint64_t range_id)
 }
 
 void
-trace_control::handle_pause()
+trace_control::handle_pause(std::uint64_t tid)
 {
     if(region_filter_active())
     {
@@ -116,26 +124,32 @@ trace_control::handle_pause()
         }
     }
 
-    if(m_user_paused.load(std::memory_order_relaxed))
+    bool first_pause = false;
     {
-        LOG_WARNING("Pause requested but tracing is already paused - ignoring");
-        return;
+        std::scoped_lock const lk{ m_region_mutex };
+        auto [it, inserted] = m_paused_thread_ids.insert(tid);
+        if(!inserted)
+        {
+            LOG_WARNING("Pause requested but thread {} is already paused - ignoring",
+                        tid);
+            return;
+        }
+        first_pause = (m_paused_thread_ids.size() == 1);
+        m_paused_thread_count.store(
+            static_cast<std::uint32_t>(m_paused_thread_ids.size()),
+            std::memory_order_relaxed);
     }
 
-    m_user_paused.store(true, std::memory_order_relaxed);
-    LOG_INFO("Pausing tracing session...");
-    trigger_callbacks(m_pause_callbacks);
+    if(first_pause)
+    {
+        LOG_INFO("Pausing tracing session (thread {})...", tid);
+        trigger_callbacks(m_pause_callbacks);
+    }
 }
 
 void
-trace_control::handle_resume()
+trace_control::handle_resume(std::uint64_t tid)
 {
-    if(!m_user_paused.load(std::memory_order_relaxed))
-    {
-        LOG_WARNING("Resume requested but tracing was not paused by user - ignoring");
-        return;
-    }
-
     if(region_filter_active())
     {
         std::scoped_lock const lk{ m_region_mutex };
@@ -146,9 +160,28 @@ trace_control::handle_resume()
         }
     }
 
-    m_user_paused.store(false, std::memory_order_relaxed);
-    LOG_INFO("Resuming tracing session...");
-    trigger_callbacks(m_resume_callbacks);
+    bool last_resume = false;
+    {
+        std::scoped_lock const lk{ m_region_mutex };
+        auto                   it = m_paused_thread_ids.find(tid);
+        if(it == m_paused_thread_ids.end())
+        {
+            LOG_WARNING(
+                "Resume requested but thread {} was not paused by user - ignoring", tid);
+            return;
+        }
+        m_paused_thread_ids.erase(it);
+        last_resume = m_paused_thread_ids.empty();
+        m_paused_thread_count.store(
+            static_cast<std::uint32_t>(m_paused_thread_ids.size()),
+            std::memory_order_relaxed);
+    }
+
+    if(last_resume)
+    {
+        LOG_INFO("Resuming tracing session (thread {})...", tid);
+        trigger_callbacks(m_resume_callbacks);
+    }
 }
 
 void
@@ -164,6 +197,8 @@ trace_control::shutdown()
         std::scoped_lock const lk{ m_region_mutex };
         m_active_range_ids.clear();
         m_active_region_count.store(0, std::memory_order_relaxed);
+        m_paused_thread_ids.clear();
+        m_paused_thread_count.store(0, std::memory_order_relaxed);
         m_trace_regions.clear();
         m_region_filter_active.store(false, std::memory_order_relaxed);
     }
@@ -181,9 +216,16 @@ trace_control::register_region_pauser_resume_callbacks(callback_t start_callback
 bool
 trace_control::should_write_markers() const
 {
-    if(m_user_paused.load(std::memory_order_relaxed))
+    // Fast path: if any threads are paused, check whether the calling thread is one of
+    // them. Skip the lock entirely when no threads are paused (the common case).
+    if(m_paused_thread_count.load(std::memory_order_relaxed) > 0)
     {
-        return false;
+        const auto             tid = static_cast<std::uint64_t>(::gettid());
+        std::scoped_lock const lk{ m_region_mutex };
+        if(m_paused_thread_ids.count(tid) > 0)
+        {
+            return false;
+        }
     }
 
     if(!region_filter_active())

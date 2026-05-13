@@ -43,21 +43,26 @@ public:
 
     void handle_range_start(std::uint64_t range_id, const char* message);
     void handle_range_stop(std::uint64_t range_id);
-    void handle_pause();
-    void handle_resume();
+    void handle_pause(std::uint64_t tid);
+    void handle_resume(std::uint64_t tid);
 
 private:
     std::set<std::string, std::less<>> m_trace_regions;
     std::unordered_set<std::uint64_t>  m_active_range_ids;
-    std::atomic<bool>                  m_region_filter_active{ false };
-    std::atomic<std::uint32_t>         m_active_region_count{ 0 };
-    std::atomic<bool>                  m_user_paused{ false };
+    // Thread IDs that have called roctxProfilerPause but not yet roctxProfilerResume.
+    // Guarded by m_region_mutex. m_paused_thread_count mirrors the set size as an
+    // atomic fast path so should_write_markers() can skip the lock when no threads
+    // are paused (the common case).
+    std::unordered_set<std::uint64_t> m_paused_thread_ids;
+    std::atomic<bool>                 m_region_filter_active{ false };
+    std::atomic<std::uint32_t>        m_active_region_count{ 0 };
+    std::atomic<std::uint32_t>        m_paused_thread_count{ 0 };
 
     std::vector<callback_t> m_resume_callbacks;
     std::vector<callback_t> m_pause_callbacks;
 
-    std::mutex m_region_mutex;
-    std::mutex m_callback_mutex;
+    mutable std::mutex m_region_mutex;
+    std::mutex         m_callback_mutex;
 
     void trigger_callbacks(const std::vector<callback_t>& callbacks);
 };

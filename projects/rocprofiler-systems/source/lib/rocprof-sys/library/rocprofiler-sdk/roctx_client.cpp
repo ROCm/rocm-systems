@@ -267,12 +267,12 @@ roctx_client<MarkerWriterPolicy>::handle_marker_control(
     if(record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        m_controller->handle_pause();
+        m_controller->handle_pause(record.thread_id);
     }
     else if(record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume &&
             record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
     {
-        m_controller->handle_resume();
+        m_controller->handle_resume(record.thread_id);
     }
 }
 
