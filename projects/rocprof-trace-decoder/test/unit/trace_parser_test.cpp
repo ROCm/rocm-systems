@@ -295,7 +295,7 @@ TEST(CSRegisterHandlerTest, ROCHeaderAndCodeObjLoadUnload)
     tail.legacy_id = 42;
     tok.regdata = tail.raw;
     h.UpdateRegNoCS(tok);
-    EXPECT_FALSE(h.active_codeobj_id.empty());
+    EXPECT_FALSE(h.active_codeobjs.read().empty());
 
     // TAIL (unload)
     tok.regdata = pkt.u32All;
@@ -303,7 +303,7 @@ TEST(CSRegisterHandlerTest, ROCHeaderAndCodeObjLoadUnload)
     tail.isUnload = 1;
     tok.regdata = tail.raw;
     h.UpdateRegNoCS(tok);
-    EXPECT_TRUE(h.active_codeobj_id.empty());
+    EXPECT_TRUE(h.active_codeobjs.read().empty());
 }
 
 TEST(CSRegisterHandlerTest, AgentInfoCounterAndRtFrequency)
