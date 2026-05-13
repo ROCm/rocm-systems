@@ -32,6 +32,7 @@ THE SOFTWARE.
     #include <experimental/filesystem>
     namespace fs = std::experimental::filesystem;
 #endif
+
 #include <hip/hip_runtime.h>
 #include <rocdecode/rocdecode.h>
 #include <rocdecode/rocparser.h>
@@ -68,12 +69,11 @@ __attribute__((visibility("hidden"))) inline void report_error(
     std::exit(EXIT_FAILURE);
 }
 
-//hardcoding for this sample: Degault width will get adjusted after reconfigure
+//hardcoding for initial creation of decoder. Will get adjusted based on the input stream after reconfigure
 #define DEFAULT_WIDTH 2912
 #define DEFAULT_HEIGHT 1888
 
-// helper functions for saving output to file
-
+// helper function for GetChromaHeightFactor based on YUV format
 static inline float GetChromaHeightFactor(rocDecVideoSurfaceFormat surface_format) {
     float factor = 0.5;
     switch (surface_format) {
@@ -96,6 +96,7 @@ static inline float GetChromaHeightFactor(rocDecVideoSurfaceFormat surface_forma
     return factor;
 };
 
+// helper function for CodecTypeToRocDecVideoCodec based on codec_type
 static inline rocDecVideoCodec CodecTypeToRocDecVideoCodec(int codec_type) {
     switch (codec_type) {
         case 0:     return rocDecVideoCodec_HEVC;
@@ -107,6 +108,8 @@ static inline rocDecVideoCodec CodecTypeToRocDecVideoCodec(int codec_type) {
         default:    return rocDecVideoCodec_NumCodecs;
     }
 }
+
+// helper function for ChromaWidthFactor based on surface_format
 static inline float GetChromaWidthFactor(rocDecVideoSurfaceFormat surface_format) {
     float factor = 0.5;
     switch (surface_format) {
