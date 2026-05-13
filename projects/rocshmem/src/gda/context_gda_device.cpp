@@ -34,7 +34,7 @@
 
 namespace rocshmem {
 
-__host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id)
+__host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, [[maybe_unused]] int gda_provider)
     : Context(b) {
   GDABackend *backend{static_cast<GDABackend *>(b)};
   base_heap = backend->heap.get_heap_bases().data();
@@ -624,8 +624,8 @@ __device__ void GDAContext::internal_getmem_nbi_wave(void *dest, const void *sou
  **************** TILE API STUB IMPLEMENTATION (NOT IMPLEMENTED) **************
  *****************************************************************************/
 
-__device__ int GDAContext::tile_collective_wait(rocshmem_team_t team,
-                                                 uint64_t flags) {
+__device__ int GDAContext::tile_collective_wait([[maybe_unused]] rocshmem_team_t team,
+                                                 [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
