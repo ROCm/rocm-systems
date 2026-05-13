@@ -21,7 +21,7 @@
 
 namespace {
 
-constexpr size_t kBatchCount = 64;
+constexpr size_t kBatchCount = 8;
 constexpr unsigned char kPattern = 0x5a;
 
 std::string GetSizeSectionName(size_t size) {
