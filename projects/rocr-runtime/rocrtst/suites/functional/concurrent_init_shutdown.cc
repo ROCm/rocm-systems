@@ -161,7 +161,11 @@ void ConcurrentInitShutdownTest::TestConcurrentInitShutdown(void) {
   }
 
   // Check that HSA refcount is exact.
+#ifndef ROCRTST_ASAN
+  // Under ASan, the sanitizer's hsa_init interceptor holds an extra reference
+  // count, so the runtime is still alive here.  Skip this verification.
   hsa_status_t err = hsa_shut_down();
   ASSERT_EQ(HSA_STATUS_ERROR_NOT_INITIALIZED, err) << "hsa_init reference count was too high.";
+#endif
 }
 #undef RET_IF_HSA_ERR
