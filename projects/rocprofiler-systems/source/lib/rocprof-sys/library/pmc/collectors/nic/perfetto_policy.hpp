@@ -54,6 +54,26 @@ const auto RESP_TX_PKT_SEQ_ERR_VALUE     = make_nic_metric_value({ 7 });
 const auto REQ_RX_PKT_SEQ_ERR_VALUE      = make_nic_metric_value({ 8 });
 const auto REQ_RX_IMPL_NAK_SEQ_ERR_VALUE = make_nic_metric_value({ 9 });
 
+// Single source of truth for NIC track labels and units. Adding a new metric
+// requires exactly one new row here (plus the bit position above and the
+// corresponding member in the metrics/enabled_metrics structs).
+inline std::map<std::uint32_t, nic_track_description>
+make_default_nic_tracks()
+{
+    return {
+        { RX_RDMA_UCAST_BYTES_VALUE, { "RX RDMA Bytes", "bytes", 0 } },
+        { TX_RDMA_UCAST_BYTES_VALUE, { "TX RDMA Bytes", "bytes", 0 } },
+        { RX_RDMA_UCAST_PKTS_VALUE, { "RX RDMA Pkts", "packets", 0 } },
+        { TX_RDMA_UCAST_PKTS_VALUE, { "TX RDMA Pkts", "packets", 0 } },
+        { RX_RDMA_CNP_PKTS_VALUE, { "RX CNP Pkts", "packets", 0 } },
+        { TX_RDMA_CNP_PKTS_VALUE, { "TX CNP Pkts", "packets", 0 } },
+        { TX_RDMA_ACK_TIMEOUT_VALUE, { "TX ACK TIMEOUT", "timeouts", 0 } },
+        { RESP_TX_PKT_SEQ_ERR_VALUE, { "RESP TX PKT SEQ ERROR", "errors", 0 } },
+        { REQ_RX_PKT_SEQ_ERR_VALUE, { "REQ RX PKT SEQ ERROR", "errors", 0 } },
+        { REQ_RX_IMPL_NAK_SEQ_ERR_VALUE, { "REQ RX IMPL NAK SEQ ERROR", "errors", 0 } },
+    };
+}
+
 struct nic_perfetto_sample
 {
     size_t  timestamp;
@@ -118,88 +138,13 @@ struct perfetto_policy
 
         auto& device_tracks = perfetto_policy::tracks[device_index];
 
-        if(enabled_metric_config.bits.rx_rdma_ucast_bytes)
+        for(auto& [bit_value, description] : make_default_nic_tracks())
         {
-            device_tracks[RX_RDMA_UCAST_BYTES_VALUE] = {
-                "RX RDMA Bytes", "bytes",
-                counter_track::emplace(device_index, addendum("RX RDMA Bytes"), "bytes")
-            };
-        }
+            if((enabled_metric_config.value & bit_value) == 0) continue;
 
-        if(enabled_metric_config.bits.tx_rdma_ucast_bytes)
-        {
-            device_tracks[TX_RDMA_UCAST_BYTES_VALUE] = {
-                "TX RDMA Bytes", "bytes",
-                counter_track::emplace(device_index, addendum("TX RDMA Bytes"), "bytes")
-            };
-        }
-
-        if(enabled_metric_config.bits.rx_rdma_ucast_pkts)
-        {
-            device_tracks[RX_RDMA_UCAST_PKTS_VALUE] = {
-                "RX RDMA Pkts", "packets",
-                counter_track::emplace(device_index, addendum("RX RDMA Pkts"), "packets")
-            };
-        }
-
-        if(enabled_metric_config.bits.tx_rdma_ucast_pkts)
-        {
-            device_tracks[TX_RDMA_UCAST_PKTS_VALUE] = {
-                "TX RDMA Pkts", "packets",
-                counter_track::emplace(device_index, addendum("TX RDMA Pkts"), "packets")
-            };
-        }
-
-        if(enabled_metric_config.bits.rx_rdma_cnp_pkts)
-        {
-            device_tracks[RX_RDMA_CNP_PKTS_VALUE] = {
-                "RX CNP Pkts", "packets",
-                counter_track::emplace(device_index, addendum("RX CNP Pkts"), "packets")
-            };
-        }
-
-        if(enabled_metric_config.bits.tx_rdma_cnp_pkts)
-        {
-            device_tracks[TX_RDMA_CNP_PKTS_VALUE] = {
-                "TX CNP Pkts", "packets",
-                counter_track::emplace(device_index, addendum("TX CNP Pkts"), "packets")
-            };
-        }
-
-        if(enabled_metric_config.bits.tx_rdma_ack_timeout)
-        {
-            device_tracks[TX_RDMA_ACK_TIMEOUT_VALUE] = {
-                "TX ACK TIMEOUT", "timeouts",
-                counter_track::emplace(device_index, addendum("TX ACK TIMEOUT"),
-                                       "packets")
-            };
-        }
-
-        if(enabled_metric_config.bits.resp_tx_pkt_seq_err)
-        {
-            device_tracks[RESP_TX_PKT_SEQ_ERR_VALUE] = {
-                "RESP TX PKT SEQ ERR VALUE", "errors",
-                counter_track::emplace(device_index, addendum("RESP TX PKT SEQ ERR"),
-                                       "packets")
-            };
-        }
-
-        if(enabled_metric_config.bits.req_rx_pkt_seq_err)
-        {
-            device_tracks[REQ_RX_PKT_SEQ_ERR_VALUE] = {
-                "REQ RX PKT SEQ ERR VALUE", "errors",
-                counter_track::emplace(device_index, addendum("REQ RX PKT SEQ ERR"),
-                                       "packets")
-            };
-        }
-
-        if(enabled_metric_config.bits.req_rx_impl_nak_seq_err)
-        {
-            device_tracks[REQ_RX_IMPL_NAK_SEQ_ERR_VALUE] = {
-                "REQ RX IMPL NAK SEQ ERR VALUE", "errors",
-                counter_track::emplace(device_index, addendum("REQ RX IMPL NAK SEQ ERR"),
-                                       "packets")
-            };
+            description.track_index = counter_track::emplace(
+                device_index, addendum(description.track_name), description.units);
+            device_tracks[bit_value] = description;
         }
     }
 
