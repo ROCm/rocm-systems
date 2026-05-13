@@ -643,6 +643,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
         case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
         case ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH:
+        case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }
