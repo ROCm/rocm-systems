@@ -131,6 +131,7 @@
 .set TTMP1_BUF_ID_BIT_POSITION                    , 25           // TTMP1 bit position for buffer ID
 
 .set TTMP8_DISPATCH_ID_MASK                        , 0X1FFFFFF
+.set TTMP8_GRID_YZ_VALID_SHIFT                     , 30           // TTMP8 bit 30: SPI sets this for 2D/3D dispatches when ttmp7 contains valid Y/Z
 // Per-sample data layout within the device buffer. Each sample is 64 bytes.
 // These are offsets from the start of a specific sample slot in the device buffer.
 
@@ -676,18 +677,32 @@
 .endif
   global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_EXEC_LOHI, scope:SCOPE_SYS  // store out original EXEC
 
-  // Store Workgroup ID X and Y at offset SAMPLE_OFF_WGID_XY (0x10).
-  // ttmp9 = WGID_X (from first-level handler).
-  // ttmp7 contains WGID_Y in low 16 bits.
+  // Store Workgroup ID X at offset SAMPLE_OFF_WGID_XY (0x10).
+  // ttmp9 = WGID_X (always valid, from SPI).
   v_writelane_b32   v2, ttmp9, 0                             // wg_id_x
-  s_bfe_u32         ttmp13, ttmp7, (0 | 16<<16)              // extract bits tttmp7[15:0] representing wg_id_y
+
+  // ttmp7 = {WGID_Z[15:0], WGID_Y[15:0]} but only valid if ttmp8 bit 30 (grid_yz_valid) is set.
+  // For 1D dispatches, ttmp8.b30 = 0 and ttmp7 contains garbage.
+  // Check if grid Y/Z is valid (TTMP8 bit 30 set by SPI for 2D/3D dispatches)
+  s_bitcmp1_b32     ttmp8, TTMP8_GRID_YZ_VALID_SHIFT
+  s_cbranch_scc0    .wgid_yz_invalid
+
+  // Valid (2D/3D dispatch): extract wg_id_y from ttmp7[15:0] and wg_id_z from ttmp7[31:16]
+  s_bfe_u32         ttmp13, ttmp7, (0 | (16 << 16))          // Extract WGID_Y[15:0] from ttmp7[15:0]
   v_writelane_b32   v3, ttmp13, 0                            // wg_id_y
   global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_WGID_XY, scope:SCOPE_SYS  // store wg_id_x and wg_id_y
-
-  // Store Workgroup ID Z at offset 0x18 (32-bit).
-  // ttmp7 contains WGID_Z in high 16 bits [31:16].
   s_bfe_u32         ttmp13, ttmp7, (16 | (16 << 16))         // Extract WGID_Z[15:0] from ttmp7[31:16]
-  v_writelane_b32   v2, ttmp13, 0                            // Store WGID_Z in v2
+  v_writelane_b32   v2, ttmp13, 0                            // wg_id_z
+  s_branch          .store_wgid_z
+
+.wgid_yz_invalid:
+  // Invalid (1D dispatch): write 0 for both wg_id_y and wg_id_z
+  v_mov_b32         v3, 0                                    // wg_id_y = 0
+  global_store_b64  v[0:1], v[2:3], off, offset:SAMPLE_OFF_WGID_XY, scope:SCOPE_SYS  // store wg_id_x and wg_id_y
+  v_mov_b32         v2, 0                                    // wg_id_z = 0
+
+.store_wgid_z:
+  // Store Workgroup ID Z at offset 0x18 (32-bit)
   global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_WGID_Z, scope:SCOPE_SYS  // store wg_id_z
 
   // v[0:1] = &buffer[local_entry]
