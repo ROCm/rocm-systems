@@ -64,7 +64,9 @@
 #include "amd_smi/impl/nic/amd_smi_nic_device.h"
 #include "amd_smi/impl/nic/amd_smi_switch_device.h"
 #endif  // BRCM_NIC
+#include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_processor.h"
+#include "amd_smi/impl/amd_smi_test_internal.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_uuid.h"
 #include "amd_smi/impl/xf86drm.h"
@@ -1444,6 +1446,7 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
+  SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
 
   status = smi_amdgpu_get_board_info(gpu_device, board_info);
   if (board_info->product_serial[0] == '\0') {
@@ -8578,4 +8581,12 @@ amdsmi_status_t amdsmi_reset_ttm_pages_limit(void) {
   }
 
   return AMDSMI_STATUS_SUCCESS;
+}
+
+// Test-only wrapper: acquires the device mutex for |seconds| seconds.
+// Not declared in amdsmi.h — internal use via amd_smi_test_internal.h only.
+// rsmi_test_sleep is undocumented and not in rocm_smi.h, so forward-declare it.
+extern rsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds);
+amdsmi_status_t amdsmi_test_sleep(amdsmi_processor_handle processor_handle, uint32_t seconds) {
+  return rsmi_wrapper(rsmi_test_sleep, processor_handle, 0, seconds);
 }

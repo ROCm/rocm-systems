@@ -439,7 +439,14 @@ def _derive_sopk(name: str) -> InstructionSemantics | None:
                                        operation=op,
                                        data_type=_DTYPE_MAP[dt_raw])
 
-    # Everything else (GETREG, SETREG, CBRANCH_I_FORK, …) → nop
+    if name == 'S_GETREG_B32':
+        return InstructionSemantics(name, 'scalar_getreg')
+    if name == 'S_SETREG_B32':
+        return InstructionSemantics(name, 'scalar_setreg')
+    if name == 'S_SETREG_IMM32_B32':
+        return InstructionSemantics(name, 'scalar_setreg_imm')
+
+    # Everything else (CBRANCH_I_FORK, …) → nop
     return InstructionSemantics(name, 'nop')
 
 # Map mnemonic stem → operation.

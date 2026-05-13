@@ -436,7 +436,7 @@ for `foo` via the direct call within `spam`. There will be no entries for `bar` 
 Perfetto tracing with the system backend supports multiple processes writing to the same
 output file. Thus, it is a useful technique if rocprofiler-systems is built with partial MPI support
 because all the perfetto output will be coalesced into a single file. The
-installation docs for perfetto can be found [here](https://perfetto.dev/docs/contributing/build-instructions).
+installation docs for perfetto can be found in the [Perfetto build instructions](https://perfetto.dev/docs/contributing/build-instructions).
 If you are building rocprofiler-systems from source, you can configure CMake with `ROCPROFSYS_INSTALL_PERFETTO_TOOLS=ON`
 and the `perfetto` and `traced` applications will be installed as part of the build process. However,
 it should be noted that to prevent this option from accidentally overwriting an existing perfetto install,

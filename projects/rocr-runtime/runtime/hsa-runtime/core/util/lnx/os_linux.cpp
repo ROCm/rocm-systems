@@ -958,6 +958,8 @@ int Ffs(int i) { return ffs(i); }
 
 int Ctz(uint64_t i) { return __builtin_ctz(i); }
 
+int Popcount(uint32_t i) { return __builtin_popcount(i); }
+
 char* DlError() { return dlerror(); }
 
 static inline int IPCSockToFd(IPCSocket sock) {
