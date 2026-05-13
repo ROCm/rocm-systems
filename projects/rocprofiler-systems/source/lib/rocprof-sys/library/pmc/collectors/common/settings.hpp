@@ -132,7 +132,7 @@ struct settings_policy
     /**
      * @brief Get NIC enabled metrics.
      *
-     * For NIC, all 10 RDMA metrics are enabled when NIC sampling is active.
+     * For NIC, all RDMA metrics are enabled when NIC sampling is active.
      */
     static nic::enabled_metrics get_nic_enabled_metrics() noexcept
     {
