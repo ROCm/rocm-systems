@@ -3003,6 +3003,7 @@ generate_output(cleanup_mode _cleanup_mode)
                          memory_allocation_output.get_generator(),
                          rocdecode_output.get_generator(),
                          rocjpeg_output.get_generator(),
+                         rocshmem_output.get_generator(),
                          pc_sampling_host_trap_output.get_generator(),
                          pc_sampling_stochastic_output.get_generator());
         json_ar.finish_process();
@@ -3026,7 +3027,8 @@ generate_output(cleanup_mode _cleanup_mode)
                              rccl_output.get_generator(),
                              memory_allocation_output.get_generator(),
                              rocdecode_output.get_generator(),
-                             rocjpeg_output.get_generator());
+                             rocjpeg_output.get_generator(),
+                             rocshmem_output.get_generator());
     }
 
     if(tool::get_config().rocpd_output && outdata.num_output > 0 &&
@@ -3045,6 +3047,7 @@ generate_output(cleanup_mode _cleanup_mode)
                           kfd_output.get_generator(),
                           rccl_output.get_generator(),
                           rocdecode_output.get_generator(),
+                          rocshmem_output.get_generator(),
                           counters_output.get_generator());
     }
 
@@ -3061,6 +3064,7 @@ generate_output(cleanup_mode _cleanup_mode)
         auto memory_allocation_elem_data = memory_allocation_output.load_all();
         auto rocdecode_elem_data         = rocdecode_output.load_all();
         auto rocjpeg_elem_data           = rocjpeg_output.load_all();
+        auto rocshmem_elem_data          = rocshmem_output.load_all();
 
         tool::write_otf2(tool::get_config(),
                          *tool_metadata,
@@ -3075,7 +3079,8 @@ generate_output(cleanup_mode _cleanup_mode)
                          &rccl_elem_data,
                          &memory_allocation_elem_data,
                          &rocdecode_elem_data,
-                         &rocjpeg_elem_data);
+                         &rocjpeg_elem_data,
+                         &rocshmem_elem_data);
     }
 
     if(tool::get_config().summary_output && outdata.num_output > 0 &&

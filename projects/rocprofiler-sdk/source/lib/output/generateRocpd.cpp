@@ -1022,6 +1022,7 @@ write_rocpd(
     const generator<tool_buffer_tracing_kfd_record_t>&                      kfd_gen,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
+    const generator<rocprofiler_buffer_tracing_rocshmem_api_record_t>&      rocshmem_api_gen,
     const generator<tool_counter_record_t>&                                 counter_collection_gen)
 {
     static auto get_simple_timer = [](std::string_view label) {
@@ -2016,6 +2017,7 @@ write_rocpd(
         insert_api_data(marker_api_gen);
         insert_api_data(rccl_api_gen);
         insert_api_data(rocdecode_api_gen);
+        insert_api_data(rocshmem_api_gen);
     }
 
     insert_kernel_dispatch_data(dispatch_to_evt_id);
