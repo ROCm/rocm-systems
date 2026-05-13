@@ -369,7 +369,8 @@ write_otf2(const output_config&                                          cfg,
            std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>*       rccl_api_data,
            std::deque<tool_buffer_tracing_memory_allocation_ext_record_t>* memory_allocation_data,
            std::deque<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>* rocdecode_api_data,
-           std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>*       rocjpeg_api_data)
+           std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>*       rocjpeg_api_data,
+           std::deque<rocprofiler_buffer_tracing_rocshmem_api_record_t>*      rocshmem_api_data)
 {
     namespace sdk = ::rocprofiler::sdk;
 
@@ -423,6 +424,8 @@ write_otf2(const output_config&                                          cfg,
         for(auto itr : *rocdecode_api_data)
             tids.emplace(itr.thread_id);
         for(auto itr : *rocjpeg_api_data)
+            tids.emplace(itr.thread_id);
+        for(auto itr : *rocshmem_api_data)
             tids.emplace(itr.thread_id);
 
         for(auto itr : *memory_copy_data)
@@ -618,6 +621,7 @@ write_otf2(const output_config&                                          cfg,
         add_event_data(marker_api_data, sdk::category::marker_api{});
         add_event_data(rccl_api_data, sdk::category::rccl_api{});
         add_event_data(rocjpeg_api_data, sdk::category::rocjpeg_api{});
+        add_event_data(rocshmem_api_data, sdk::category::rocshmem_api{});
     }
 
     for(auto itr : *rocdecode_api_data)

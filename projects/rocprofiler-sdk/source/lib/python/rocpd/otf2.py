@@ -58,6 +58,7 @@ def get_perfetto_category_name(category):
         "RUNTIME_INITIALIZATION": "none",
         "ROCDECODE_API": "rocdecode_api",
         "ROCJPEG_API": "rocjpeg_api",
+        "ROCSHMEM_API": "rocshmem_api",
         "HIP_STREAM": "hip_api",
         "HIP_GRAPH": "hip_api",
         "HIP_RUNTIME_API_EXT": "hip_api",
