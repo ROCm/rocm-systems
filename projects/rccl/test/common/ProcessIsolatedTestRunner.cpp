@@ -19,6 +19,20 @@
 
 #include "ErrCode.hpp"
 
+// LLVM source-based code coverage profile writer.
+// When the binary is built with -fprofile-instr-generate, libclang_rt.profile
+// provides this symbol and a default atexit() handler that writes the
+// per-process .profraw file. Because we terminate child test processes with
+// _exit() (to skip atexit handlers that would otherwise tear down GPU runtime
+// state), that handler never fires and coverage data is lost. When coverage
+// is enabled at build time (RCCL_TEST_CODE_COVERAGE), declare the writer so
+// we can flush coverage explicitly before _exit().
+#if defined(RCCL_TEST_CODE_COVERAGE)
+#include <dlfcn.h>
+extern "C" int  __llvm_profile_write_file(void);
+extern "C" void __llvm_profile_set_filename(const char* name);
+#endif
+
 namespace RcclUnitTesting
 {
 
@@ -410,7 +424,66 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         if(pid == 0)
         {
             redirectOutputToPipes(stdout_fd, stderr_fd);
+#if defined(RCCL_TEST_CODE_COVERAGE)
+            // The LLVM profile runtime resolves LLVM_PROFILE_FILE (and any %p
+            // patterns it contains) once, in the parent, before fork(). All
+            // children would otherwise inherit the same already-resolved path
+            // and overwrite each other's coverage data. Override the filename
+            // here so each child writes a unique .profraw based on its own PID.
+            {
+                char            childProfile[512];
+                const char*     pattern = std::getenv("LLVM_PROFILE_FILE");
+                if(!pattern || !*pattern)
+                    pattern = "default_%m.profraw";
+                std::snprintf(
+                    childProfile, sizeof(childProfile), "rccl_isolated_%d_%s",
+                    static_cast<int>(getpid()), pattern
+                );
+                __llvm_profile_set_filename(childProfile);
+            }
+#endif
             int result = runTestInProcess(testConfig);
+            // Flush LLVM source-based coverage data before _exit().
+            // _exit() skips atexit handlers (intentionally, to avoid GPU
+            // runtime teardown issues), but that also skips the profile
+            // writer registered by libclang_rt.profile, so without an
+            // explicit flush no .profraw file is produced for this child.
+#if defined(RCCL_TEST_CODE_COVERAGE)
+            // Flush this binary's coverage data.
+            __llvm_profile_write_file();
+            // librccl.so is statically linked against its own copy of the
+            // LLVM profile runtime, so the symbol above only flushes the
+            // test binary. librccl exports rcclCoverageSetFilename /
+            // rcclCoverageWriteFile (built only when ENABLE_CODE_COVERAGE
+            // is on) which forward to its private runtime instance.
+            // Resolve them dynamically so the test binary doesn't need to
+            // declare them at link time.
+            using WriteFn = int (*)(void);
+            using SetFn   = void (*)(const char*);
+            auto libWrite = reinterpret_cast<WriteFn>(
+                dlsym(RTLD_DEFAULT, "rcclCoverageWriteFile")
+            );
+            auto libSet = reinterpret_cast<SetFn>(
+                dlsym(RTLD_DEFAULT, "rcclCoverageSetFilename")
+            );
+            if(libSet)
+            {
+                char            libProfile[512];
+                const char*     pattern = std::getenv("LLVM_PROFILE_FILE");
+                if(!pattern || !*pattern)
+                    pattern = "default_%m.profraw";
+                std::snprintf(
+                    libProfile, sizeof(libProfile),
+                    "rccl_isolated_lib_%d_%s",
+                    static_cast<int>(getpid()), pattern
+                );
+                libSet(libProfile);
+            }
+            if(libWrite)
+            {
+                libWrite();
+            }
+#endif
             // Use _exit() instead of exit() to avoid atexit handlers
             // This prevents GPU runtime cleanup issues after fork
             _exit(result);
