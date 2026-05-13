@@ -8,6 +8,7 @@
 #include "p2p_cast.h"
 #include "common_cast.h"
 #include "p2p_resiliency_cast.h"
+#include "net_ib_fault_inject.h"
 
 NCCL_PARAM(IbCastArThreshold, "IB_AR_THRESHOLD", -2);
 int64_t IbCastArThreshold = 8192;
@@ -292,6 +293,16 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       currWr = currWr->next;
     }
 #endif // ENABLE_TRACE
+#ifdef ENABLE_FAULT_INJECTION
+    {
+      const uint32_t faultDelay = comm->base.faultQpDelayUs[qpIndex];
+      if (faultDelay) usleep(faultDelay);
+      if (comm->base.faultQpError[qpIndex]) {
+        IbCastStatsFatalError(&comm->base.stats);
+        return ncclSystemError;
+      }
+    }
+#endif
     NCCLCHECK(wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr));
 
     // Update the send offset and addresses for the next QP according to the
@@ -1087,3 +1098,40 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
   // If no (more) CQEs found on any device, return and come back later
   return ncclSuccess;
 }
+
+/* ── Fault injection API (CAST path) ──────────────────────────────────── */
+#ifdef ENABLE_FAULT_INJECTION
+
+ncclResult_t ncclIbCastFaultSetQpDelay(void* sendComm, int qpIdx, uint32_t delayUs) {
+  if (!sendComm) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  if (qpIdx < 0 || qpIdx >= comm->base.nqps) return ncclInvalidArgument;
+  comm->base.faultQpDelayUs[qpIdx] = delayUs;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIbCastFaultSetQpError(void* sendComm, int qpIdx, bool inject) {
+  if (!sendComm) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  if (qpIdx < 0 || qpIdx >= comm->base.nqps) return ncclInvalidArgument;
+  comm->base.faultQpError[qpIdx] = inject;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIbCastFaultClear(void* sendComm) {
+  if (!sendComm) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  memset(comm->base.faultQpDelayUs, 0, sizeof(comm->base.faultQpDelayUs));
+  memset(comm->base.faultQpError, 0, sizeof(comm->base.faultQpError));
+  __atomic_store_n(&comm->base.stats.fatalErrorCount, 0, __ATOMIC_RELEASE);
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIbCastFaultGetFatalCount(void* sendComm, int* out) {
+  if (!sendComm || !out) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  *out = __atomic_load_n(&comm->base.stats.fatalErrorCount, __ATOMIC_ACQUIRE);
+  return ncclSuccess;
+}
+
+#endif /* ENABLE_FAULT_INJECTION */
