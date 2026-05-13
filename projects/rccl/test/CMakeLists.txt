@@ -291,9 +291,14 @@ if(BUILD_TESTS)
       transport/NetIbMPI/NicFusionTests.cpp
       transport/NetIbMPI/CastTests.cpp
       transport/NetIbMPI/FaultInjectTests.cpp
+      transport/NetIbMPI/IbPortFailoverTests.cpp
       transport/GinMPI/GinMPITests.cpp
+      transport/GinMPI/GinMultiContextTests.cpp
+      transport/GinMPI/GinQueueControlTests.cpp
+      transport/GinMPI/GinBackwardsCompatTests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
+      MultiSegmentRegistrationMPITests.cpp
       RegistrationMPITests.cpp
       mem_manager/SuspendResumeMPITests.cpp
     )
