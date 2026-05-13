@@ -382,6 +382,7 @@ postfork_child_reset_sampler_lock()
     ::new(static_cast<void*>(&_m)) mutex_type{};
 }
 
+void
 register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agent_list)
 {
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
