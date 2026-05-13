@@ -775,10 +775,16 @@ rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) 
             }
         }, &va_driver_path);
         int major_version = 0, minor_version = 0;
-        CHECK_VAAPI(vaInitialize(new_va_display, &major_version, &minor_version));
-        vaSetInfoCallback(new_va_display, NULL, NULL);
-        InfoLog(g_rocdec_logger, "VA-API version " + std::to_string(major_version) + "." + std::to_string(minor_version) + ".0");
-        InfoLog(g_rocdec_logger, "VA-API vendor: " + std::string(vaQueryVendorString(new_va_display)));
+        VAStatus va_status = vaInitialize(new_va_display, &major_version, &minor_version);
+        vaSetInfoCallback(new_va_display, nullptr, nullptr);
+        if (va_status != VA_STATUS_SUCCESS) {
+            CriticalLog(g_rocdec_logger, std::string("vaInitialize failed: ") + vaErrorStr(va_status));
+            FunctionExitLog(g_rocdec_logger);
+            return ROCDEC_RUNTIME_ERROR;
+        }
+        InfoLog(g_rocdec_logger, "VA-API version " + std::to_string(major_version) + "." + std::to_string(minor_version));
+        const char* vendor_str = vaQueryVendorString(new_va_display);
+        InfoLog(g_rocdec_logger, "VA-API vendor: " + std::string(vendor_str ? vendor_str : "<unknown>"));
         if (!va_driver_path.empty()) {
             InfoLog(g_rocdec_logger, va_driver_path);
         }
@@ -1033,10 +1039,16 @@ rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, std::string drm_node) {
         }
     }, &va_driver_path);
     int major_version = 0, minor_version = 0;
-    CHECK_VAAPI(vaInitialize(va_contexts_[va_ctx_idx].va_display, &major_version, &minor_version));
-    vaSetInfoCallback(va_contexts_[va_ctx_idx].va_display, NULL, NULL);
-    InfoLog(g_rocdec_logger, "VA-API version " + std::to_string(major_version) + "." + std::to_string(minor_version) + ".0");
-    InfoLog(g_rocdec_logger, "VA-API vendor: " + std::string(vaQueryVendorString(va_contexts_[va_ctx_idx].va_display)));
+    VAStatus va_status = vaInitialize(va_contexts_[va_ctx_idx].va_display, &major_version, &minor_version);
+    vaSetInfoCallback(va_contexts_[va_ctx_idx].va_display, nullptr, nullptr);
+    if (va_status != VA_STATUS_SUCCESS) {
+        CriticalLog(g_rocdec_logger, std::string("vaInitialize failed: ") + vaErrorStr(va_status));
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_RUNTIME_ERROR;
+    }
+    InfoLog(g_rocdec_logger, "VA-API version " + std::to_string(major_version) + "." + std::to_string(minor_version));
+    const char* vendor_str = vaQueryVendorString(va_contexts_[va_ctx_idx].va_display);
+    InfoLog(g_rocdec_logger, "VA-API vendor: " + std::string(vendor_str ? vendor_str : "<unknown>"));
     if (!va_driver_path.empty()) {
         InfoLog(g_rocdec_logger, va_driver_path);
     }
