@@ -304,7 +304,7 @@ public:
             amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME_LENGTH, &name_size));
 
         std::string name;
-        name.resize(name_size);
+        name.resize(name_size + 1);
 
         RETURN_COMGR(amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME, name.data()));
 
