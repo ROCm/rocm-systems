@@ -4236,8 +4236,7 @@ hsa_status_t Runtime::VMemoryGetAccess(const void* va, hsa_access_permission_t* 
   if (!mappedHandleFound) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
   Agent* agent = Agent::Convert(agent_handle);
-  if (agent == NULL || !agent->IsValid() || agent->device_type() != core::Agent::kAmdGpuDevice)
-    return HSA_STATUS_ERROR_INVALID_AGENT;
+  if (agent == NULL || !agent->IsValid()) return HSA_STATUS_ERROR_INVALID_AGENT;
 
   auto agentPermsIt = mappedHandleIt->second.allowed_agents.find(agent);
   if (agentPermsIt != mappedHandleIt->second.allowed_agents.end()) {
