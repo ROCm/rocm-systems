@@ -400,9 +400,9 @@ constexpr bool is_blocking(MemcpyKind k) {
   return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
 }
 
-template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
+template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll = 8>
 __device__ __forceinline__ void copy_bulk(uint8_t* dst_bytes, uint8_t* src_bytes, size_t N16,
-                                             int tid, int stride) {
+                                          int tid, int stride) {
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
   using T = typename Acc::type;
 
@@ -412,7 +412,7 @@ __device__ __forceinline__ void copy_bulk(uint8_t* dst_bytes, uint8_t* src_bytes
   for (; i + stride * Unroll <= N16; i += stride * Unroll) {
     T regs[Unroll];
 
-    #pragma Unroll
+    #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
       regs[u] = Acc::load(src_bytes + (i + u * stride) * ChunkSize);
     }
@@ -444,38 +444,41 @@ __device__ __forceinline__ void copy_dispatcher(uint8_t* dst, uint8_t* src, size
                                                 int stride) {
   if (N16 == 0) return;
 
+  size_t u_stride = static_cast<size_t>(stride);
+
   // Adapt the Unroll strategy based on thread-count (stride) to cap VGPR usage,
   // while ensuring we only instantiate heavy Unrolls if the message size warrants it.
-  if (stride >= 512) {
-    // Extreme register pressure
-    if (N16 >= stride * 2) {
-      copy_bulk<16, LP, SP, 2>(dst, src, N16, tid, stride);
-    } else {
+  if (stride <= 32) {
+    // Safe register pressure
+    if (N16 < u_stride * 2) [[likely]] {
       copy_bulk<16, LP, SP, 1>(dst, src, N16, tid, stride);
-    }
-  } else if (stride >= 64) {
-    // High register pressure
-    if (N16 >= stride * 8) {
-      copy_bulk<16, LP, SP, 8>(dst, src, N16, tid, stride);
-    } else if (N16 >= stride * 4) {
+    } else if (N16 < u_stride * 4) {
+      copy_bulk<16, LP, SP, 2>(dst, src, N16, tid, stride);
+    } else if (N16 < u_stride * 8) {
       copy_bulk<16, LP, SP, 4>(dst, src, N16, tid, stride);
-    } else if (N16 >= stride * 2) {
-      copy_bulk<16, LP, SP, 2>(dst, src, N16, tid, stride);
     } else {
+      copy_bulk<16, LP, SP, 8>(dst, src, N16, tid, stride);
+    }
+  } else if (stride <= 128) {
+    // High register pressure
+    if (N16 < u_stride * 2) {
       copy_bulk<16, LP, SP, 1>(dst, src, N16, tid, stride);
+    } else if (N16 < u_stride * 4) {
+      copy_bulk<16, LP, SP, 2>(dst, src, N16, tid, stride);
+    } else if (N16 < u_stride * 8) {
+      copy_bulk<16, LP, SP, 4>(dst, src, N16, tid, stride);
+    } else {
+      copy_bulk<16, LP, SP, 8>(dst, src, N16, tid, stride);
     }
   } else {
-    // Safe register pressure
-    if (N16 >= stride * 16) {
-      copy_bulk<16, LP, SP, 16>(dst, src, N16, tid, stride);
-    } else if (N16 >= stride * 8) {
-      copy_bulk<16, LP, SP, 8>(dst, src, N16, tid, stride);
-    } else if (N16 >= stride * 4) {
-      copy_bulk<16, LP, SP, 4>(dst, src, N16, tid, stride);
-    } else if (N16 >= stride * 2) {
+    // Extreme register pressure
+    // copy_bulk<16, LP, SP, 1>(dst, src, N16, tid, stride);
+    if (N16 < u_stride * 2) {
+      copy_bulk<16, LP, SP, 1>(dst, src, N16, tid, stride);
+    } else if (N16 < u_stride * 4) {
       copy_bulk<16, LP, SP, 2>(dst, src, N16, tid, stride);
     } else {
-      copy_bulk<16, LP, SP, 1>(dst, src, N16, tid, stride);
+      copy_bulk<16, LP, SP, 4>(dst, src, N16, tid, stride);
     }
   }
 }
