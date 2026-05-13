@@ -268,6 +268,7 @@ class TestTransposeROCProfiler(RocprofsysTest):
     REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
 
     @pytest.mark.timeout(120)
+    @pytest.mark.rocpd("rocprofiler_env")
     def test(self, mode, rocprofiler_env, gpu_info, num_processes):
         result = self.run_test(
             mode,
