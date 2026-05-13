@@ -61,29 +61,11 @@ TEST_F(NetIbMPITest, CastEqualWeightsTwoQPsTokenCounts) {
     if (rank == 1) {
         struct ncclIbCastSchedState state = {};
         ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), ncclSuccess);
-
-        ASSERT_TRUE(state.schedInit);
-        EXPECT_EQ(state.nqps, actualNqps);
-        EXPECT_EQ(state.initTotTokens, 100);
-        // Each QP must have 100/nqps tokens (±1 for remainder distribution).
-        const int base = 100 / actualNqps;
-        for (int i = 0; i < state.nqps; i++)
-            EXPECT_GE(state.initQpTokens[i], base)
-                << "QP " << i << " initToken below equal-weight floor";
-        int sum = 0;
-        for (int i = 0; i < state.nqps; i++) sum += state.initQpTokens[i];
-        EXPECT_EQ(sum, state.initTotTokens);
+        ExpectEqualWeightInitTokens(state, actualNqps);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -171,14 +153,7 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -228,28 +203,12 @@ TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
     if (rank == 1) {
         struct ncclIbCastSchedState state = {};
         ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), ncclSuccess);
-
-        ASSERT_TRUE(state.schedInit);
-        EXPECT_EQ(state.initTotTokens, 100);
-        // Equal tokens: each QP gets 100/nqps (±1 for remainder).
-        const int base = 100 / actualNqps;
-        for (int i = 0; i < state.nqps; i++)
-            EXPECT_GE(state.initQpTokens[i], base)
-                << "QP " << i << " initToken below equal-weight floor";
-        int activeSum = 0;
-        for (int i = 0; i < state.nqps; i++) activeSum += state.activeQpTokens[i];
-        EXPECT_EQ(activeSum, state.activeTotTokens);
+        ExpectEqualWeightInitTokens(state, actualNqps);
+        ExpectActiveTokenSumInvariant(state);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -298,14 +257,7 @@ TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -355,14 +307,7 @@ TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -422,14 +367,7 @@ TEST_F(NetIbMPITest, CastCursorWrapsAtNqpsBoundary) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -498,14 +436,7 @@ TEST_F(NetIbMPITest, CastMaxQPCount128) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -605,14 +536,7 @@ TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -712,14 +636,7 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -823,14 +740,7 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -938,14 +848,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -1044,14 +947,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -1163,14 +1059,7 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -1241,14 +1130,7 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================
@@ -1314,14 +1196,7 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
-    if (rank == 0) {
-        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
-    } else {
-        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 // =============================================================================

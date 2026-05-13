@@ -1085,8 +1085,7 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_MultGPU) {
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return
   if (devcount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   hipGraph_t** graph = new hipGraph_t*[devcount]();
   REQUIRE(graph != nullptr);

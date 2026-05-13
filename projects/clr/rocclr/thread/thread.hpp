@@ -30,7 +30,7 @@ namespace amd {
 
 class Monitor;
 
-class Thread : public HeapObject {
+class Thread {
   friend const void* Os::createOsThread(Thread*);
 
  public:
