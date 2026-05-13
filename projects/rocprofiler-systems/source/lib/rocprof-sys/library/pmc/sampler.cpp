@@ -346,7 +346,6 @@ postfork_parent_reinit()
     g_reinit_pending.store(true);
 }
 
-#if ROCPROFSYS_ROCM_VERSION >= 60400
 // Intentionally a second-phase setup called after rocprofiler initializes (outside of
 // setup()), because the rocprofiler context and agent list are not available at
 // setup() time. shutdown() symmetrically stops and resets the provider/collector
@@ -382,6 +381,7 @@ postfork_child_reset_sampler_lock()
     ::new(static_cast<void*>(&_m)) mutex_type{};
 }
 
+#if ROCPROFSYS_ROCM_VERSION >= 60400
 void
 register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agent_list)
 {
