@@ -545,7 +545,7 @@ The call-site stub uses `s_branch` rather than `s_call_b64` because the trampoli
 
 The trampoline itself does **not** decode or rewrite the displaced bytes — they must be position-independent. The `Instrumentor` is responsible for skipping any patch site whose original is PC-relative (`InstFlags::BRANCH | COND_BRANCH | INDIRECT_BRANCH`) or larger than the call-site stub (literal-bearing instructions). PC-rel rewrite for displaced instructions is a future enhancement; never NOP-pad an embedded literal to fit the stub.
 
-EXEC is saved across the probe call using a `SpillManager`-allocated scratch slot, keyed on `RegisterRef{RegClass::EXEC, 0, w}` (w=2 for wave64, w=1 for wave32). The `Instrumentor` allocates the slot before invoking `build_trampoline`; the trampoline reads the offset via `spill_mgr.offset_for(...)` and emits matched scratch_store/load instructions around the probe call. `link_pair` doubles as the transient register that stages EXEC into and out of scratch (it is reloaded with `probe_va` immediately after the spill, and then re-clobbered by `s_swappc_b64`, so this reuse is safe).
+EXEC is saved across the probe call using a `SpillManager`-allocated scratch slot, keyed on `RegisterRef{RegClass::EXEC, 0, w}` (w=2 for wave64, w=1 for wave32). The `Instrumentor` allocates the slot before invoking `build_trampoline`; the trampoline reads the offset via `spill_mgr.offset_for(...)` and emits the SGPR-data scratch save and matching reload around the probe call. The trampoline forces `EXEC=-1` early in the body and stages all SGPR-domain values (EXEC, every live SGPR) through a transient dead VGPR (`vTMP`) — `v_mov_b32 vTMP, sgpr` broadcasts the SGPR to all lanes (under EXEC=-1), then a normal `scratch_store_dword vTMP, off` writes per-lane. On reload, `scratch_load_dword vTMP, off` followed by `v_readfirstlane_b32 sgpr, vTMP` reads the value back from lane 0 (active under EXEC=-1). This avoids needing a separate SMEM scratch path for SGPR data and avoids growing the API with a caller-provided temp VGPR — the trampoline picks `vTMP` itself from the first VGPR not in `live_regs`. Side effect: the entire trampoline body runs under EXEC=-1, so `force_full_exec` is effectively always-true under this design (kept on the API for stability).
 
 The generic structure of a trampoline (showing both displaced-position slots — only one is populated for any given site, per `DisplacedPosition`):
 
@@ -553,28 +553,26 @@ The generic structure of a trampoline (showing both displaced-position slots —
 Trampoline for site S:
   ┌─────────────────────────────────────────────────────┐
   │ [Displaced original bytes]                          │  ← BeforeProbe slot (under original EXEC)
-  │ s_mov_b64 link_pair, exec                           │  ← stage EXEC into link_pair (SGPR pair)
-  │ [Spill link_pair to spill.offset_for(EXEC)]         │  ← per-ISA: SMEM scalar store, or VGPR-staged scratch_store
-  │ [Spill live SGPRs to scratch]                       │  ← same SGPR-data constraint as the EXEC spill above
-  │ [Spill live VGPRs to scratch]                       │
-  │ [Optionally s_mov_b64 exec, -1]                     │  ← force_full_exec
+  │ s_mov_b64 link_pair, exec                           │  ← capture original EXEC into SGPR pair
+  │ s_mov_b64 exec, -1                                  │  ← force EXEC=-1 for the body
+  │ [Spill EXEC value via vTMP broadcast]               │  ← v_mov_b32 vTMP, link_pair_*; scratch_store_dwordx2 vTMP, off
+  │ [Spill live SGPRs via vTMP broadcast]               │  ← same pattern, one dword per SGPR
+  │ [Spill live VGPRs to scratch]                       │  ← scratch_store_dword vN, off (VGPR data — direct)
   │ [Load probe_va literal → link_pair]                 │
-  │ s_swappc_b64 link_pair, link_pair                   │  ← probe runs
-  │ [Wait for SMEM/scratch loads issued by the probe]   │
-  │ [Restore VGPRs from scratch]                        │  ← while EXEC still all-lanes active
-  │ [Wait for VGPR-load completion]                     │
-  │ [Reload link_pair from spill.offset_for(EXEC)]      │  ← per-ISA: matches the spill instruction family
-  │ [Wait for the EXEC-slot reload]
-  │ s_mov_b64 exec, link_pair                           │  ← restore EXEC
-  │ [Restore SGPRs from scratch]                        │
+  │ s_swappc_b64 link_pair, link_pair                   │  ← probe runs (under EXEC=-1)
+  │ [Wait for probe-issued loads]                       │
+  │ [Restore VGPRs from scratch]                        │  ← under EXEC=-1
+  │ [Restore live SGPRs via vTMP + v_readfirstlane]     │  ← scratch_load_dword vTMP, off; wait; v_readfirstlane sN, vTMP
+  │ [Reload EXEC via vTMP + v_readfirstlane → link_pair]│  ← same pattern, into link_pair
+  │ s_mov_b64 exec, link_pair                           │  ← restore original EXEC
   │ [Displaced original bytes]                          │  ← AfterProbe slot (under restored EXEC)
   │ s_branch <pc-rel-back-to-call_site_va+4>            │  ← return to kernel
   └─────────────────────────────────────────────────────┘
 ```
 
-**Concrete vs. bracketed lines in the diagram.** Lines without brackets (`s_mov_b64`, `s_swappc_b64`, `s_branch`) are conceptually portable mnemonics — per-ISA `TrampolineBuilder` subclasses still emit the correct binary encoding for their family from `{isa}/machine_insts.h` (opcodes and field layouts differ per family — see §3.2 ISA Capability Matrix). Bracketed lines name an *operation*, not an instruction; the per-ISA subclass picks the right instruction(s) for its family. Two operations that hide non-trivial choices:
+**Concrete vs. bracketed lines in the diagram.** Lines without brackets (`s_mov_b64`, `s_swappc_b64`, `s_branch`) are conceptually portable mnemonics — per-ISA `TrampolineBuilder` subclasses still emit the correct binary encoding for their family from `{isa}/machine_insts.h` (opcodes and field layouts differ per family — see §3.2 ISA Capability Matrix). Bracketed lines name an *operation*, not an instruction; the per-ISA subclass picks the right instruction(s) for its family. Two operations to call out:
 
-- **Spill/reload of an SGPR-domain value to scratch** (the EXEC slot, plus every SGPR in the user spill set). SCRATCH-family stores (`scratch_store_*`) take a VGPR data operand on every AMDGPU family, so SGPR-source data must either go through a VGPR staging register or use SMEM (`s_buffer_store_dwordx2` against a flat-scratch SRD), depending on what the per-ISA subclass chooses. The waitcnt counter that drains the operation likewise depends on the chosen family (`vmcnt`/`loadcnt` for VMEM, `lgkmcnt`/`kmcnt` for SMEM).
+- **vTMP broadcast spill/reload of SGPR-domain values** (the EXEC slot, plus every SGPR in the user spill set). The per-ISA subclass picks the actual `v_mov_b32` / `scratch_store_dword` / `v_readfirstlane_b32` opcodes; the structure of the sequence is universal. SGPR restores must happen *while EXEC=-1 still holds* — `v_readfirstlane_b32` reads from the lowest active lane, and lane 0 is only guaranteed active under EXEC=-1.
 - **Wait operations** (`[Wait for ...]`). On GFX9–GFX11 these are `s_waitcnt` with the appropriate counter mask; on GFX12 they are split-counter mnemonics (`s_wait_loadcnt 0`, `s_wait_kmcnt 0`, `s_wait_storecnt 0`, etc.); the GFX12 split also means a single conceptual "wait for everything between point A and point B" may need more than one emitted instruction. Per-ISA subclass selects.
 
 Per-ISA subclasses are also responsible for inserting any **inter-instruction hazard mitigation** their family's MR-ISA spec requires. The most important case for the trampoline is the EXEC→VALU dependency window after `s_mov_b64 exec, link_pair` (the EXEC restore): on some families a subsequent VALU instruction must be separated from the EXEC write by an `s_nop` (or equivalent) to avoid stale-EXEC reads. If the displaced bytes contain a VALU instruction, this hazard applies; the `TrampolineBuilder` subclass must emit the right mitigation rather than relying on the diagram's bare sequence.
@@ -641,7 +639,11 @@ public:
   ///                         after s_swappc_b64 (the probe consumes it via s_setpc_b64).
   ///                         Does NOT carry the kernel-to-trampoline return PC; that
   ///                         transfer uses s_branch (no link recorded).
-  /// @param force_full_exec  If true, set all execution lanes active before calling probe.
+  /// @param force_full_exec  Vestigial under the current vTMP-broadcast design: the
+  ///                         entire trampoline body runs under EXEC=-1 regardless of
+  ///                         this flag (see §2.4). Kept on the API for forward
+  ///                         compatibility with a future register-based EXEC-save
+  ///                         design that would honor it.
   /// @param displaced_bytes  Bytes of the original instruction the call-site stub
   ///                         overwrote. Spliced into the trampoline body verbatim.
   ///                         MUST be position-independent (no PC-relative addressing) —
@@ -663,7 +665,7 @@ public:
 } // namespace rocjitsu
 ```
 
-ISA-specific subclasses (e.g., `Cdna3TrampolineBuilder` in `isa/arch/amdgpu/cdna3/trampoline_builder.cpp`) implement `build_call_site` and `build_trampoline` using their ISA's machine instruction structs and opcode constants from `{isa}/machine_insts.h`. The choice of call instruction, spill/restore instruction family (SMEM vs flat-scratch), and EXEC register encoding are all ISA-specific and contained entirely within those subclasses.
+ISA-specific subclasses (e.g., `Cdna3TrampolineBuilder` in `isa/arch/amdgpu/cdna3/trampoline_builder.cpp`) implement `build_call_site` and `build_trampoline` using their ISA's machine instruction structs and opcode constants from `{isa}/machine_insts.h`. The opcode constants for `s_branch`, `s_swappc_b64`, `s_mov_b32/b64`, `v_mov_b32`, `v_readfirstlane_b32`, `scratch_store_dword[x2]`, `scratch_load_dword[x2]`, EXEC-write encoding (wave32 vs wave64), and per-family wait-counter mnemonics are all ISA-specific and contained entirely within those subclasses; the structural sequence (vTMP-broadcast pattern, ordering, displaced-bytes splice slots) is universal and lives in the shared base class.
 
 **Probe calling convention.** The probe is a non-kernel `__device__` function called via `s_swappc_b64`. On the AMDGPU CC, non-kernel functions receive only their explicit arguments (no kernel-implicit SGPRs such as dispatch pointer or queue pointer), provided the function does not use scratch. The probe is compiled at `-O2` with a small, spill-free body by design — `TrampolineBuilder::build_trampoline` reads the probe code object's `COMPUTE_PGM_RSRC1.GRANULATED_WAVEFRONT_SGPR_COUNT` and `VGPR_COUNT` (and possibly other fields) to verify this before emitting the call sequence. With no scratch, argument registers are:
 
@@ -676,30 +678,28 @@ ISA-specific subclasses (e.g., `Cdna3TrampolineBuilder` in `isa/arch/amdgpu/cdna
 
 The `s[buf_lo:buf_hi]` source for `hdr` is supplied by `BufferInjector` (§2.7). `BufferInjector` has two modes: when a free user SGPR pair is available, it allocates one and the kernel-entry prologue loads the buffer VA into it once, so it remains live for the kernel body. When all 16 user SGPRs are already allocated (the `USER_SGPR_COUNT == 16` fallback in §2.7), no persistent pair is available — in that mode each trampoline must re-issue the `s_load_dwordx2` from the reserved kernarg slot itself, and `s[buf_lo:buf_hi]` is just a transient pair the trampoline picks at emission time. The Instrumentor reads `BufferInjector::Result` to know which mode applies and emits the right marshalling sequence. In the persistent mode, the chosen pair must also be excluded from `select_link_pair()` and from `live_regs` so the trampoline does not clobber it.
 
-The logging variant is the canonical trampoline above with one additional **probe-arg marshalling block** inserted between the EXEC=all-lanes flip and the probe-VA load. Marshalling happens after spills (so s[0:5] and v[0:1] are safe to overwrite) and before `link_pair` is loaded with `probe_va` (so writes to `s[0:1]` for `hdr` don't conflict with the swappc target — `select_link_pair` already starts at s[6:7] to avoid this; see §2.5):
+The logging variant is the canonical trampoline above with one additional **probe-arg marshalling block** inserted between the spills and the probe-VA load. Marshalling happens after spills (so s[0:5] and v[0:1] are safe to overwrite) and before `link_pair` is loaded with `probe_va` (so writes to `s[0:1]` for `hdr` don't conflict with the swappc target — `select_link_pair` already starts at s[6:7] to avoid this; see §2.5):
 
 ```
 Trampoline for site S (logging variant):
   ┌─────────────────────────────────────────────────────┐
   │ [Displaced original bytes]                          │  ← BeforeProbe slot (under original EXEC)
-  │ s_mov_b64 link_pair, exec                           │  ← stage EXEC into link_pair (SGPR pair)
-  │ [Spill link_pair to spill.offset_for(EXEC)]         │  ← per-ISA: SMEM scalar store, or VGPR-staged scratch_store
-  │ [Spill live SGPRs to scratch]                       │  ← same SGPR-data constraint as the EXEC spill above
+  │ s_mov_b64 link_pair, exec                           │  ← capture original EXEC into SGPR pair
+  │ s_mov_b64 exec, -1                                  │  ← force EXEC=-1 for the body
+  │ [Spill EXEC value via vTMP broadcast]               │
+  │ [Spill live SGPRs via vTMP broadcast]               │
   │ [Spill live VGPRs to scratch]                       │
-  │ [Optionally s_mov_b64 exec, -1]                     │  ← force_full_exec
   │ [Copy s[buf_lo:buf_hi] → s[0:1]]                    │  ← buf VA for probe (or s_load_dwordx2 in fallback mode)
   │ [Load record_type constant → s[2]]                  │  ← per-site constant
   │ [Load inst_byte_offset constant → s[3]]             │  ← per-site constant
   │ [Collect payload → s[4:5] or v[0:1]]                │  ← per InstrumentationPoint::payload_kind
   │ [Load probe_va literal → link_pair]                 │
-  │ s_swappc_b64 link_pair, link_pair                   │  ← probe runs
-  │ [Wait for SMEM/scratch loads issued by the probe]   │
-  │ [Restore VGPRs from scratch]                        │  ← while EXEC still all-lanes active
-  │ [Wait for VGPR-load completion]                     │
-  │ [Reload link_pair from spill.offset_for(EXEC)]      │  ← per-ISA: matches the spill instruction family
-  │ [Wait for the EXEC-slot reload]
-  │ s_mov_b64 exec, link_pair                           │  ← restore EXEC
-  │ [Restore SGPRs from scratch]                        │
+  │ s_swappc_b64 link_pair, link_pair                   │  ← probe runs (under EXEC=-1)
+  │ [Wait for probe-issued loads]                       │
+  │ [Restore VGPRs from scratch]                        │  ← under EXEC=-1
+  │ [Restore live SGPRs via vTMP + v_readfirstlane]     │
+  │ [Reload EXEC via vTMP + v_readfirstlane → link_pair]│
+  │ s_mov_b64 exec, link_pair                           │  ← restore original EXEC
   │ [Displaced original bytes]                          │  ← AfterProbe slot (under restored EXEC)
   │ s_branch <pc-rel-back-to-call_site_va+4>            │  ← return to kernel
   └─────────────────────────────────────────────────────┘
@@ -769,7 +769,9 @@ struct InstrumentationPoint {
   /// Ignored when payload_kind == None.
   PayloadSource payload_source = {};
 
-  /// @brief If true, restore exec to -1 before calling the probe (all lanes active).
+  /// @brief Vestigial under the current vTMP-broadcast trampoline design (§2.4),
+  /// which always runs the body under EXEC=-1. Kept for API stability and forward
+  /// compatibility with a future register-based EXEC-save design.
   bool force_full_exec = false;
 };
 
@@ -1735,7 +1737,9 @@ RJ_API_EXPORT void rj_code_instrumentor_destroy(rj_code_instrumentor_t *instrume
 /// @param probe_symbol   Symbol name of the probe function in @p probe_obj.
 /// @param kind           When to fire relative to matching instructions.
 /// @param filter_flags   Bitmask of rj_code_inst_flags_t; 0 = all instructions.
-/// @param force_full_exec If true, restore exec to -1 before calling the probe.
+/// @param force_full_exec Vestigial under the current trampoline design (§2.4) —
+///                        the body always runs under EXEC=-1. Kept for forward
+///                        compatibility; pass false in new code.
 [[nodiscard]] RJ_API_EXPORT rj_status_t
 rj_code_instrumentor_add_probe(rj_code_instrumentor_t *instrumentor,
                                 const rj_code_object_t *probe_obj,
