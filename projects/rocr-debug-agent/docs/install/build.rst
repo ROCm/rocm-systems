@@ -1,8 +1,6 @@
 .. meta::
-   :description: A library that can be loaded by ROCr to print the AMDGPU wavefront states
-   :keywords: ROCdebug-agent installation, ROCR Debug Agent installation, install ROCdebug-agent, install ROCR Debug Agent,
-    build ROCdebug-agent, build ROCR Debug Agent
-
+   :description: Build AMD ROCr Debug Agent from source
+   :keywords: rocr, debug, agent, build, install, tool
 
 .. _debug-agent-installation:
 
@@ -10,7 +8,13 @@
 Build ROCr Debug Agent from source
 ==================================
 
-This topic provides information required to build and install ROCr Debug Agent library.
+To build ROCr Debug Agent as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build ROCr Debug Agent standalone using the following
+instructions.
 
 System requirements
 -------------------
