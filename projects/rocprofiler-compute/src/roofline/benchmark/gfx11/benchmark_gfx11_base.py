@@ -15,8 +15,8 @@ from .. import benchmark_base
 # Bench_gfx11 Class (ABSTRACT)
 # =============================================================================
 class Bench_gfx11(benchmark_base.Bench_base):
-    def __init__(self, device_id: int) -> None:
-        super().__init__(device_id)
+    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+        super().__init__(device_id, cache_sizes)
 
         # TODO: there is potential wavefront size could be set to 64,
         # but default for gfx11 is 32
