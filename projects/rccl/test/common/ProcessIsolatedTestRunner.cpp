@@ -425,22 +425,45 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         {
             redirectOutputToPipes(stdout_fd, stderr_fd);
 #if defined(RCCL_TEST_CODE_COVERAGE)
-            // The LLVM profile runtime resolves LLVM_PROFILE_FILE (and any %p
-            // patterns it contains) once, in the parent, before fork(). All
-            // children would otherwise inherit the same already-resolved path
-            // and overwrite each other's coverage data. Override the filename
-            // here so each child writes a unique .profraw based on its own PID.
+            // The LLVM profile runtime resolves LLVM_PROFILE_FILE (including
+            // any %p / %m patterns) once in the parent, before fork(), and
+            // caches the resolved path. Without intervention every child
+            // would inherit the parent's PID-substituted path and overwrite
+            // the same .profraw. Re-call __llvm_profile_set_filename() in
+            // the child with the original pattern so %p is re-resolved
+            // against the child PID. Force a %p into the pattern if the
+            // user didn't supply one, so children don't collide.
+            //
+            // librccl.so is statically linked against its own copy of the
+            // LLVM profile runtime (separate counters, separate writer,
+            // separate filename buffer). librccl exports
+            // rcclCoverageSetFilename / rcclCoverageWriteFile (built only
+            // when ENABLE_CODE_COVERAGE is on) which forward to its private
+            // runtime instance. Resolve them dynamically so the test binary
+            // doesn't need to declare them at link time. %m in the pattern
+            // (binary signature) keeps the two runtimes' files distinct.
+            using WriteFn = int (*)(void);
+            using SetFn   = void (*)(const char*);
+            auto libWrite = reinterpret_cast<WriteFn>(
+                dlsym(RTLD_DEFAULT, "rcclCoverageWriteFile"));
+            auto libSet = reinterpret_cast<SetFn>(
+                dlsym(RTLD_DEFAULT, "rcclCoverageSetFilename"));
+
+            const char* envPattern = std::getenv("LLVM_PROFILE_FILE");
+            std::string pattern    = (envPattern && *envPattern)
+                                         ? envPattern
+                                         : "default_%m.profraw";
+            if(pattern.find("%p") == std::string::npos)
             {
-                char            childProfile[512];
-                const char*     pattern = std::getenv("LLVM_PROFILE_FILE");
-                if(!pattern || !*pattern)
-                    pattern = "default_%m.profraw";
-                std::snprintf(
-                    childProfile, sizeof(childProfile), "rccl_isolated_%d_%s",
-                    static_cast<int>(getpid()), pattern
-                );
-                __llvm_profile_set_filename(childProfile);
+                // Inject %p before the extension to keep child files unique.
+                auto dot = pattern.rfind('.');
+                if(dot == std::string::npos)
+                    pattern += "_%p";
+                else
+                    pattern.insert(dot, "_%p");
             }
+            __llvm_profile_set_filename(pattern.c_str());
+            if(libSet) libSet(pattern.c_str());
 #endif
             int result = runTestInProcess(testConfig);
             // Flush LLVM source-based coverage data before _exit().
@@ -449,40 +472,8 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
             // writer registered by libclang_rt.profile, so without an
             // explicit flush no .profraw file is produced for this child.
 #if defined(RCCL_TEST_CODE_COVERAGE)
-            // Flush this binary's coverage data.
             __llvm_profile_write_file();
-            // librccl.so is statically linked against its own copy of the
-            // LLVM profile runtime, so the symbol above only flushes the
-            // test binary. librccl exports rcclCoverageSetFilename /
-            // rcclCoverageWriteFile (built only when ENABLE_CODE_COVERAGE
-            // is on) which forward to its private runtime instance.
-            // Resolve them dynamically so the test binary doesn't need to
-            // declare them at link time.
-            using WriteFn = int (*)(void);
-            using SetFn   = void (*)(const char*);
-            auto libWrite = reinterpret_cast<WriteFn>(
-                dlsym(RTLD_DEFAULT, "rcclCoverageWriteFile")
-            );
-            auto libSet = reinterpret_cast<SetFn>(
-                dlsym(RTLD_DEFAULT, "rcclCoverageSetFilename")
-            );
-            if(libSet)
-            {
-                char            libProfile[512];
-                const char*     pattern = std::getenv("LLVM_PROFILE_FILE");
-                if(!pattern || !*pattern)
-                    pattern = "default_%m.profraw";
-                std::snprintf(
-                    libProfile, sizeof(libProfile),
-                    "rccl_isolated_lib_%d_%s",
-                    static_cast<int>(getpid()), pattern
-                );
-                libSet(libProfile);
-            }
-            if(libWrite)
-            {
-                libWrite();
-            }
+            if(libWrite) libWrite();
 #endif
             // Use _exit() instead of exit() to avoid atexit handlers
             // This prevents GPU runtime cleanup issues after fork
