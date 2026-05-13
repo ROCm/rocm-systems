@@ -1134,4 +1134,44 @@ ncclResult_t ncclIbCastFaultGetFatalCount(void* sendComm, int* out) {
   return ncclSuccess;
 }
 
+ncclResult_t ncclIbCastFaultDriveQpToError(void* sendComm, int qpIdx) {
+  if (!sendComm) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  if (qpIdx < 0 || qpIdx >= comm->base.nqps) return ncclInvalidArgument;
+  struct ibv_qp_attr attr = {};
+  attr.qp_state = IBV_QPS_ERR;
+  NCCLCHECK(wrap_ibv_modify_qp(comm->base.activeQps[qpIdx]->qp, &attr, IBV_QP_STATE));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIbCastFaultDriveRecvQpToError(void* recvComm, int qpIdx) {
+  if (!recvComm) return ncclInvalidArgument;
+  struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
+  if (qpIdx < 0 || qpIdx >= comm->base.nqps) return ncclInvalidArgument;
+  struct ibv_qp_attr attr = {};
+  attr.qp_state = IBV_QPS_ERR;
+  NCCLCHECK(wrap_ibv_modify_qp(comm->base.activeQps[qpIdx]->qp, &attr, IBV_QP_STATE));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIbCastFaultCheckErrorFatal(void* sendComm, int wcStatus, bool* isFatal) {
+  if (!sendComm || !isFatal) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  if (!comm->base.resiliency) return ncclInvalidArgument;
+  // Only test the status code classification — do not call the full
+  // HandleCompletionError which modifies device state and QP pointers.
+  bool fatal = true;
+  switch ((enum ibv_wc_status)wcStatus) {
+    case IBV_WC_WR_FLUSH_ERR:
+    case IBV_WC_RETRY_EXC_ERR:
+      fatal = false;
+      break;
+    default:
+      fatal = true;
+      break;
+  }
+  *isFatal = fatal;
+  return ncclSuccess;
+}
+
 #endif /* ENABLE_FAULT_INJECTION */

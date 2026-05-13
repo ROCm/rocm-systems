@@ -78,6 +78,9 @@ struct ncclIbResiliency {
 
   // Number of outstanding devices that are currently undergoing recovery.
   int outstandingRecovery;
+
+  // Counter for selective retransmits (IbCastResiliencyRepostRequest calls).
+  int repostCount;
 };
 
 enum ncclIbResiliencyRequestSendState {

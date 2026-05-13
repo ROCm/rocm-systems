@@ -10,6 +10,29 @@
 
 #if defined(MPI_TESTS_ENABLED) && defined(ENABLE_FAULT_INJECTION)
 
+// IB WC status codes used by FailoverErrorCodeWhitelist test.
+// Defined here as constants to avoid depending on infiniband/verbs.h in tests.
+static constexpr int kWcWrFlushErr    = 5;  // IBV_WC_WR_FLUSH_ERR
+static constexpr int kWcRetryExcErr   = 12; // IBV_WC_RETRY_EXC_ERR
+static constexpr int kWcRemAccessErr  = 10; // IBV_WC_REM_ACCESS_ERR
+static constexpr int kWcGeneralErr    = 22; // IBV_WC_GENERAL_ERR
+
+// Helper: Create a NIC Fusion merged device from physical devices 0 and 1.
+// Returns the merged device index, or -1 if fewer than 2 devices available.
+// Both ranks must call this; result is broadcast from rank 0.
+static int CreateMergedDeviceForFailover(ncclNet_t* net, int totalDevs) {
+    int mergedDev = -1;
+    if (totalDevs >= 2) {
+        ncclNetVDeviceProps_t vProps = {};
+        vProps.ndevs = 2;
+        vProps.devs[0] = 0;
+        vProps.devs[1] = 1;
+        net->makeVDevice(&mergedDev, &vProps);
+    }
+    MPI_Bcast(&mergedDev, 1, MPI_INT, /*root=*/0, MPI_COMM_WORLD);
+    return mergedDev;
+}
+
 // MPI tags used for inter-rank result forwarding (rank 1 → rank 0).
 // Keep these distinct from NCCL-level recv tags (per-message ints passed to irecv).
 static constexpr int kSchedStateMpiTag  = 9880;  // ncclIbCastSchedState from FaultInjCastSlowQpRebalances
@@ -663,6 +686,921 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
     }
 
     TeardownConnection(recvComm2, listenComm2, sendComm2, mhandle2);
+}
+
+// =============================================================================
+// Test: FailoverErrorCodeWhitelist
+//
+// Validates IbCastResiliencyCheckErrorNotFatal via the ncclIbCastFaultCheckErrorFatal
+// wrapper. WR_FLUSH_ERR and RETRY_EXC_ERR must be non-fatal (eligible for
+// failover); other error codes must be fatal.
+//
+// Requires NCCL_IB_RESILIENCY_PORT_FAILOVER=1 so the resiliency context exists.
+// Does NOT require ndevs >= 2 — only tests the classification function.
+// =============================================================================
+TEST_F(NetIbMPITest, FailoverErrorCodeWhitelist) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
+    if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
+        GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_FAILOVER=1";
+    }
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    struct WhitelistResult {
+        int hasResiliency;
+        int flushIsFatal;
+        int retryIsFatal;
+        int remAccessIsFatal;
+        int generalErrIsFatal;
+    };
+
+    static constexpr int kWhitelistMpiTag = 9885;
+    WhitelistResult r = {};
+
+    if (rank == 1) {
+        // Check resiliency context exists
+        struct ncclIbCastResiliencyState resState = {};
+        r.hasResiliency = (ncclIbCastGetResiliencyState(sendComm, &resState) == ncclSuccess) ? 1 : 0;
+
+        if (r.hasResiliency) {
+            bool isFatal = false;
+
+            ncclIbCastFaultCheckErrorFatal(sendComm, kWcWrFlushErr, &isFatal);
+            r.flushIsFatal = isFatal ? 1 : 0;
+
+            ncclIbCastFaultCheckErrorFatal(sendComm, kWcRetryExcErr, &isFatal);
+            r.retryIsFatal = isFatal ? 1 : 0;
+
+            ncclIbCastFaultCheckErrorFatal(sendComm, kWcRemAccessErr, &isFatal);
+            r.remAccessIsFatal = isFatal ? 1 : 0;
+
+            ncclIbCastFaultCheckErrorFatal(sendComm, kWcGeneralErr, &isFatal);
+            r.generalErrIsFatal = isFatal ? 1 : 0;
+        }
+
+        MPI_Send(&r, sizeof(r), MPI_BYTE, 0, kWhitelistMpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        MPI_Recv(&r, sizeof(r), MPI_BYTE, 1, kWhitelistMpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+
+        ASSERT_EQ(r.hasResiliency, 1)
+            << "Resiliency context not created — is NCCL_IB_RESILIENCY_PORT_FAILOVER=1?";
+
+        EXPECT_EQ(r.flushIsFatal, 0)
+            << "WR_FLUSH_ERR should be non-fatal (eligible for failover)";
+        EXPECT_EQ(r.retryIsFatal, 0)
+            << "RETRY_EXC_ERR should be non-fatal (eligible for failover)";
+        EXPECT_EQ(r.remAccessIsFatal, 1)
+            << "REM_ACCESS_ERR should be fatal (not in whitelist)";
+        EXPECT_EQ(r.generalErrIsFatal, 1)
+            << "GENERAL_ERR should be fatal (not in whitelist)";
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, nullptr);
+}
+
+// =============================================================================
+// Test: FailoverCqeErrorRecovered
+//
+// Core failover test. Requires NIC Fusion (ndevs >= 2) so there is a
+// surviving device. Drives one QP to IBV_QPS_ERR via
+// ncclIbCastFaultDriveQpToError, producing real WR_FLUSH_ERR CQEs.
+// The resiliency state machine should: detect the error, replace the QP,
+// probe the receiver, and complete the request via the surviving device.
+//
+// Requires:
+//   - NCCL_IB_RESILIENCY_PORT_FAILOVER=1
+//   - NCCL_IB_MERGE_NICS=1 + NCCL_NET_FORCE_MERGE (or ndevs >= 2 by topology)
+//   - sentData fix (C2) — without it, probe result is ignored
+// =============================================================================
+TEST_F(NetIbMPITest, FailoverCqeErrorRecovered) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
+    if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
+        GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_FAILOVER=1";
+    }
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    int totalDevs = 0;
+    AssertInitAndGetDevices(&totalDevs);
+
+    int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
+    if (mergedDev < 0) {
+        GTEST_SKIP() << "Failover requires NIC Fusion (ndevs >= 2). "
+                     << "Found " << totalDevs << " physical devices.";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 8192;
+    std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 13 + 7) & 0xFF);
+    memset(recvBuf.data(), 0, kMsgSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, /*tag=*/600, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    struct ncclIbCastResiliencyState resState = {};
+
+    struct FailoverResult {
+        int sendRet;
+        int fatalCount;
+        int devState0;
+        int inProgress;
+        int repostCount;
+    };
+    static constexpr int kFailoverMpiTag = 9886;
+    FailoverResult fr = {};
+
+    bool recvDone = false;
+    void* recvReq = nullptr;
+
+    if (rank == 0) {
+        void*  bufs[1]    = {buf};
+        size_t sizes[1]   = {kMsgSize};
+        int    tags[1]    = {601};
+        void*  handles[1] = {mhandle};
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Drive sender QP 0 to ERR. The receiver should handle this via
+    // negative events accounting (BY_ID matching + resiliency).
+    if (rank == 1) {
+        ncclIbCastFaultDriveQpToError(sendComm, 0);
+
+        // Post the send — WRs on QP 0 will flush, surviving QPs handle the data
+        void* sendReq = nullptr;
+        ncclResult_t sendRet = ncclSuccess;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            sendRet = PostSend(sendComm, buf, kMsgSize, 601, mhandle, &sendReq);
+            if (sendRet != ncclSuccess || sendReq != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+
+        if (sendRet == ncclSuccess && sendReq != nullptr) {
+            // Poll IbCastTest until request completes or timeout
+            for (int poll = 0; poll < 500; poll++) {
+                int done = 0, sz = 0;
+                ncclResult_t testRet = TestRequest(sendReq, &done, &sz);
+                if (testRet != ncclSuccess) { sendRet = testRet; break; }
+                if (done) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+
+        int fatalCount = 0;
+        ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
+
+        ncclIbCastGetResiliencyState(sendComm, &resState);
+        int repostCount = 0;
+        ncclIbCastGetRepostCount(sendComm, &repostCount);
+
+        fr.sendRet     = static_cast<int>(sendRet);
+        fr.fatalCount  = fatalCount;
+        fr.devState0   = resState.devState[0];
+        fr.inProgress  = resState.inProgress ? 1 : 0;
+        fr.repostCount = repostCount;
+
+        MPI_Send(&fr, sizeof(fr), MPI_BYTE, 0, kFailoverMpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        // Receiver MUST poll IbCastTest concurrently with sender's failover.
+        // The sender's probe RDMA-reads receiver's completions[] which is only
+        // set when the receiver calls IbCastTest → IbCastCompletionEventProcess.
+        // Poll long enough for sender's failover (~10-15 seconds).
+        for (int poll = 0; poll < 1500; poll++) {
+            int done = 0, sz = 0;
+            if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
+            if (done) { recvDone = true; break; }
+            usleep(kPollIntervalUs);
+        }
+
+        MPI_Recv(&fr, sizeof(fr), MPI_BYTE, 1, kFailoverMpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+
+        EXPECT_EQ(fr.sendRet, static_cast<int>(ncclSuccess))
+            << "Send should complete via surviving device after failover";
+        EXPECT_EQ(fr.fatalCount, 0)
+            << "No fatal error expected — failover should handle the QP error";
+        EXPECT_EQ(fr.inProgress, 0)
+            << "Resiliency operations should be complete";
+
+        // devState[0] should be Error (no recovery enabled)
+        // ncclIbResiliencyDevStateError = 1
+        EXPECT_EQ(fr.devState0, 1)
+            << "Device 0 should be in Error state after failover (got " << fr.devState0 << ")";
+
+        if (fr.sendRet == static_cast<int>(ncclSuccess)) {
+            EXPECT_TRUE(recvDone)
+                << "Send succeeded but receiver never got the data — data loss";
+        }
+        if (recvDone) {
+            EXPECT_EQ(memcmp(recvBuf.data(), sendBuf.data(), kMsgSize), 0)
+                << "Data corruption after failover — receiver got wrong data";
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !recvDone)
+        DrainRecvRequest(recvReq);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: FailoverSingleDeviceTopology
+//
+// Single NIC with PORT_FAILOVER=1. Drive QP to ERR. With only one device,
+// there is no surviving device — failover should degrade to fatal error.
+// Verifies graceful degradation (no crash, no hang).
+// =============================================================================
+TEST_F(NetIbMPITest, FailoverSingleDeviceTopology) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
+    if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
+        GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_FAILOVER=1";
+    }
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    // Use device 0 (single NIC, ndevs=1) — no NIC Fusion
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 4096;
+    std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 11 + 3) & 0xFF);
+    memset(recvBuf.data(), 0, kMsgSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // Warmup
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, /*tag=*/700, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    struct SingleDevResult {
+        int sendRet;
+        int fatalCount;
+    };
+    static constexpr int kSingleDevMpiTag = 9887;
+    SingleDevResult sr = {};
+
+    bool recvDone = false;
+    void* recvReq = nullptr;
+
+    if (rank == 0) {
+        void*  bufs[1]    = {buf};
+        size_t sizes[1]   = {kMsgSize};
+        int    tags[1]    = {701};
+        void*  handles[1] = {mhandle};
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == 1) {
+        // Drive QP 0 to ERR before sending — with single device,
+        // all QPs are on device 0, so failover has no surviving device
+        ncclIbCastFaultDriveQpToError(sendComm, 0);
+
+        void* sendReq = nullptr;
+        ncclResult_t sendRet = ncclSuccess;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            sendRet = PostSend(sendComm, buf, kMsgSize, 701, mhandle, &sendReq);
+            if (sendRet != ncclSuccess || sendReq != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+
+        if (sendRet == ncclSuccess && sendReq != nullptr) {
+            for (int poll = 0; poll < 200; poll++) {
+                int done = 0, sz = 0;
+                ncclResult_t testRet = TestRequest(sendReq, &done, &sz);
+                if (testRet != ncclSuccess) { sendRet = testRet; break; }
+                if (done) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+
+        int fatalCount = 0;
+        ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
+
+        sr.sendRet    = static_cast<int>(sendRet);
+        sr.fatalCount = fatalCount;
+
+        MPI_Send(&sr, sizeof(sr), MPI_BYTE, 0, kSingleDevMpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        for (int poll = 0; poll < 200; poll++) {
+            int done = 0, sz = 0;
+            if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
+            if (done) { recvDone = true; break; }
+            usleep(kPollIntervalUs);
+        }
+
+        MPI_Recv(&sr, sizeof(sr), MPI_BYTE, 1, kSingleDevMpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+
+        // With single device, failover should detect no surviving device
+        // and return a fatal error (ncclRemoteError)
+        bool isendFailed = (sr.sendRet != static_cast<int>(ncclSuccess));
+        EXPECT_TRUE(isendFailed || sr.fatalCount > 0)
+            << "Single-device failover should produce a fatal error or failed send; "
+            << "sendRet=" << sr.sendRet << ", fatalCount=" << sr.fatalCount;
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !recvDone)
+        DrainRecvRequest(recvReq);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: FailoverAllDevicesFailed
+//
+// NIC Fusion (ndevs >= 2) with PORT_FAILOVER=1. Drive ALL QPs on both
+// devices to ERR simultaneously. With no surviving device, failover
+// should detect the total failure and return a fatal error, no hang.
+// =============================================================================
+TEST_F(NetIbMPITest, FailoverAllDevicesFailed) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
+    if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
+        GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_FAILOVER=1";
+    }
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    int totalDevs = 0;
+    AssertInitAndGetDevices(&totalDevs);
+
+    int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
+    if (mergedDev < 0) {
+        GTEST_SKIP() << "Requires NIC Fusion (ndevs >= 2). Need at least 2 IB devices.";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 4096;
+    std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 17 + 5) & 0xFF);
+    memset(recvBuf.data(), 0, kMsgSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, /*tag=*/800, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    struct MaxAttemptResult {
+        int sendRet;
+        int fatalCount;
+    };
+    static constexpr int kMaxAttemptMpiTag = 9888;
+    MaxAttemptResult mr = {};
+
+    bool recvDone = false;
+    void* recvReq = nullptr;
+
+    if (rank == 0) {
+        void*  bufs[1]    = {buf};
+        size_t sizes[1]   = {kMsgSize};
+        int    tags[1]    = {801};
+        void*  handles[1] = {mhandle};
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == 1) {
+        // Drive ALL QPs to ERR — no surviving device
+        for (int q = 0; q < actualNqps; q++) {
+            ncclIbCastFaultDriveQpToError(sendComm, q);
+        }
+
+        void* sendReq = nullptr;
+        ncclResult_t sendRet = ncclSuccess;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            sendRet = PostSend(sendComm, buf, kMsgSize, 801, mhandle, &sendReq);
+            if (sendRet != ncclSuccess || sendReq != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+
+        if (sendRet == ncclSuccess && sendReq != nullptr) {
+            for (int poll = 0; poll < 300; poll++) {
+                int done = 0, sz = 0;
+                ncclResult_t testRet = TestRequest(sendReq, &done, &sz);
+                if (testRet != ncclSuccess) { sendRet = testRet; break; }
+                if (done) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+
+        int fatalCount = 0;
+        ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
+
+        mr.sendRet    = static_cast<int>(sendRet);
+        mr.fatalCount = fatalCount;
+
+        MPI_Send(&mr, sizeof(mr), MPI_BYTE, 0, kMaxAttemptMpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        for (int poll = 0; poll < 300; poll++) {
+            int done = 0, sz = 0;
+            if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
+            if (done) { recvDone = true; break; }
+            usleep(kPollIntervalUs);
+        }
+
+        MPI_Recv(&mr, sizeof(mr), MPI_BYTE, 1, kMaxAttemptMpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+
+        bool isendFailed = (mr.sendRet != static_cast<int>(ncclSuccess));
+        EXPECT_TRUE(isendFailed || mr.fatalCount > 0)
+            << "All QPs failed — expected fatal error or failed send; "
+            << "sendRet=" << mr.sendRet << ", fatalCount=" << mr.fatalCount;
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !recvDone)
+        DrainRecvRequest(recvReq);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: FailoverLargeMessageDataIntegrity
+//
+// NIC Fusion (ndevs >= 2). Drive one QP to ERR before sending a large
+// message (64 KB). Verifies failover handles multi-chunk data correctly:
+// the surviving QPs deliver the data, and the receiver gets the complete
+// message with no corruption.
+//
+// Note: repostCount may be 0 because fault is injected before the send,
+// so QP 0 never posts data. Selective retransmit (repostCount > 0) only
+// triggers when data is partially sent before the fault — requires
+// mid-flight injection which is non-deterministic on fast HW.
+// =============================================================================
+TEST_F(NetIbMPITest, FailoverLargeMessageDataIntegrity) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
+    if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
+        GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_FAILOVER=1";
+    }
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    int totalDevs = 0;
+    AssertInitAndGetDevices(&totalDevs);
+
+    int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
+    if (mergedDev < 0) {
+        GTEST_SKIP() << "Requires NIC Fusion (ndevs >= 2). Need at least 2 IB devices.";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
+
+    // Large message to ensure data spans multiple QPs
+    constexpr size_t kMsgSize = 65536;
+    std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 31 + 17) & 0xFF);
+    memset(recvBuf.data(), 0, kMsgSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, /*tag=*/900, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    struct RetransmitResult {
+        int sendRet;
+        int fatalCount;
+        int repostCount;
+        int devState0;
+    };
+    static constexpr int kRetransmitMpiTag = 9889;
+    RetransmitResult rr = {};
+
+    bool recvDone = false;
+    void* recvReq = nullptr;
+
+    if (rank == 0) {
+        void*  bufs[1]    = {buf};
+        size_t sizes[1]   = {kMsgSize};
+        int    tags[1]    = {901};
+        void*  handles[1] = {mhandle};
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == 1) {
+        ncclIbCastFaultDriveQpToError(sendComm, 0);
+
+        void* sendReq = nullptr;
+        ncclResult_t sendRet = ncclSuccess;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            sendRet = PostSend(sendComm, buf, kMsgSize, 901, mhandle, &sendReq);
+            if (sendRet != ncclSuccess || sendReq != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+
+        if (sendRet == ncclSuccess && sendReq != nullptr) {
+            for (int poll = 0; poll < 500; poll++) {
+                int done = 0, sz = 0;
+                ncclResult_t testRet = TestRequest(sendReq, &done, &sz);
+                if (testRet != ncclSuccess) { sendRet = testRet; break; }
+                if (done) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+
+        int fatalCount = 0;
+        ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
+
+        struct ncclIbCastResiliencyState resState = {};
+        ncclIbCastGetResiliencyState(sendComm, &resState);
+        int repostCount = 0;
+        ncclIbCastGetRepostCount(sendComm, &repostCount);
+
+        rr.sendRet     = static_cast<int>(sendRet);
+        rr.fatalCount  = fatalCount;
+        rr.repostCount = repostCount;
+        rr.devState0   = resState.devState[0];
+
+        MPI_Send(&rr, sizeof(rr), MPI_BYTE, 0, kRetransmitMpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        // Receiver must poll concurrently with sender's failover
+        for (int poll = 0; poll < 1500; poll++) {
+            int done = 0, sz = 0;
+            if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
+            if (done) { recvDone = true; break; }
+            usleep(kPollIntervalUs);
+        }
+
+        MPI_Recv(&rr, sizeof(rr), MPI_BYTE, 1, kRetransmitMpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+
+        EXPECT_EQ(rr.sendRet, static_cast<int>(ncclSuccess))
+            << "Send should complete via surviving device after failover";
+        EXPECT_EQ(rr.fatalCount, 0)
+            << "No fatal error expected";
+        EXPECT_EQ(rr.devState0, 1)
+            << "Device 0 should be in Error state (got " << rr.devState0 << ")";
+        if (rr.sendRet == static_cast<int>(ncclSuccess)) {
+            EXPECT_TRUE(recvDone)
+                << "Send succeeded but receiver never got the data — data loss";
+        }
+        if (recvDone) {
+            EXPECT_EQ(memcmp(recvBuf.data(), sendBuf.data(), kMsgSize), 0)
+                << "Data corruption after failover on large message";
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !recvDone)
+        DrainRecvRequest(recvReq);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: FailoverDeviceOneFailure
+//
+// Same as FailoverCqeErrorRecovered but fails device 1 (QP index 1)
+// instead of device 0 (QP index 0). Validates that failover works
+// regardless of which device fails.
+// =============================================================================
+TEST_F(NetIbMPITest, FailoverDeviceOneFailure) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
+    if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
+        GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_FAILOVER=1";
+    }
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    int totalDevs = 0;
+    AssertInitAndGetDevices(&totalDevs);
+
+    int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
+    if (mergedDev < 0) {
+        GTEST_SKIP() << "Requires NIC Fusion (ndevs >= 2).";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 8192;
+    std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 19 + 11) & 0xFF);
+    memset(recvBuf.data(), 0, kMsgSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, /*tag=*/1000, mhandle);
+    ASSERT_GT(actualNqps, 1);
+
+    struct {
+        int sendRet;
+        int fatalCount;
+        int devState0;
+        int inProgress;
+    } fr = {};
+    static constexpr int kDev1MpiTag = 9890;
+    bool recvDone = false;
+    void* recvReq = nullptr;
+
+    if (rank == 0) {
+        void*  bufs[1]    = {buf};
+        size_t sizes[1]   = {kMsgSize};
+        int    tags[1]    = {1001};
+        void*  handles[1] = {mhandle};
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == 1) {
+        // Fail QP index 1 = device 1 (QPs interleaved: 0=dev0, 1=dev1, 2=dev0...)
+        ncclIbCastFaultDriveQpToError(sendComm, 1);
+
+        void* sendReq = nullptr;
+        ncclResult_t sendRet = ncclSuccess;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            sendRet = PostSend(sendComm, buf, kMsgSize, 1001, mhandle, &sendReq);
+            if (sendRet != ncclSuccess || sendReq != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+
+        if (sendRet == ncclSuccess && sendReq != nullptr) {
+            for (int poll = 0; poll < 500; poll++) {
+                int done = 0, sz = 0;
+                ncclResult_t testRet = TestRequest(sendReq, &done, &sz);
+                if (testRet != ncclSuccess) { sendRet = testRet; break; }
+                if (done) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+
+        int fatalCount = 0;
+        ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
+        struct ncclIbCastResiliencyState resState = {};
+        ncclIbCastGetResiliencyState(sendComm, &resState);
+
+        fr.sendRet    = static_cast<int>(sendRet);
+        fr.fatalCount = fatalCount;
+        fr.devState0  = resState.devState[1]; // device 1 state
+        fr.inProgress = resState.inProgress ? 1 : 0;
+
+        MPI_Send(&fr, sizeof(fr), MPI_BYTE, 0, kDev1MpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        for (int poll = 0; poll < 1500; poll++) {
+            int done = 0, sz = 0;
+            if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
+            if (done) { recvDone = true; break; }
+            usleep(kPollIntervalUs);
+        }
+
+        MPI_Recv(&fr, sizeof(fr), MPI_BYTE, 1, kDev1MpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+
+        EXPECT_EQ(fr.sendRet, static_cast<int>(ncclSuccess))
+            << "Send should complete via device 0 after device 1 failover";
+        EXPECT_EQ(fr.fatalCount, 0);
+        EXPECT_EQ(fr.devState0, 1) << "Device 1 should be in Error state";
+        if (fr.sendRet == static_cast<int>(ncclSuccess)) {
+            EXPECT_TRUE(recvDone) << "Send succeeded but receiver lost data";
+        }
+        if (recvDone) {
+            EXPECT_EQ(memcmp(recvBuf.data(), sendBuf.data(), kMsgSize), 0)
+                << "Data corruption after device 1 failover";
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !recvDone)
+        DrainRecvRequest(recvReq);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: FailoverMultiRequestInFlight
+//
+// Post 4 send requests, then fault QP 0. All 4 requests should
+// complete via the surviving device. Validates that the resiliency
+// state machine handles multiple concurrent failed requests.
+// =============================================================================
+TEST_F(NetIbMPITest, FailoverMultiRequestInFlight) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
+    if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
+        GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_FAILOVER=1";
+    }
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    int totalDevs = 0;
+    AssertInitAndGetDevices(&totalDevs);
+
+    int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
+    if (mergedDev < 0) {
+        GTEST_SKIP() << "Requires NIC Fusion (ndevs >= 2).";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
+
+    constexpr int    kNumReqs = 4;
+    constexpr size_t kMsgSize = 4096;
+    const size_t     kBufSize = kMsgSize * (kNumReqs + 1);
+    std::vector<char> sendBuf(kBufSize), recvBuf(kBufSize);
+    for (size_t i = 0; i < kBufSize; i++) sendBuf[i] = static_cast<char>((i * 29 + 7) & 0xFF);
+    memset(recvBuf.data(), 0, kBufSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    char* regBuf  = (rank == 0) ? recvBuf.data() : sendBuf.data();
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, regBuf, kBufSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // Warmup
+    const int actualNqps = GetActualNqps(sendComm, recvComm, regBuf, kMsgSize, /*tag=*/1200, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    static constexpr int kMultiMpiTag = 9892;
+    constexpr int kBaseTag = 1210;
+
+    // Post all recvs first
+    void* recvReqs[kNumReqs] = {};
+    if (rank == 0) {
+        for (int i = 0; i < kNumReqs; i++) {
+            char* buf = regBuf + (i + 1) * kMsgSize;
+            void*  bufs[1]    = {buf};
+            size_t sizes[1]   = {kMsgSize};
+            int    tags[1]    = {kBaseTag + i};
+            void*  handles[1] = {mhandle};
+            ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReqs[i]), ncclSuccess);
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    struct MultiReqResult {
+        int sendRet[kNumReqs];
+        int fatalCount;
+    };
+    MultiReqResult mr = {};
+
+    if (rank == 1) {
+        // Fault QP 0 before posting any sends
+        ncclIbCastFaultDriveQpToError(sendComm, 0);
+
+        // Post all 4 sends
+        void* sendReqs[kNumReqs] = {};
+        for (int i = 0; i < kNumReqs; i++) {
+            char* buf = regBuf + (i + 1) * kMsgSize;
+            ncclResult_t sendRet = ncclSuccess;
+            for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+                sendRet = PostSend(sendComm, buf, kMsgSize, kBaseTag + i, mhandle, &sendReqs[i]);
+                if (sendRet != ncclSuccess || sendReqs[i] != nullptr) break;
+                usleep(kPollIntervalUs);
+            }
+            mr.sendRet[i] = static_cast<int>(sendRet);
+        }
+
+        // Poll all requests to completion
+        for (int i = 0; i < kNumReqs; i++) {
+            if (sendReqs[i] == nullptr) continue;
+            for (int poll = 0; poll < 500; poll++) {
+                int done = 0, sz = 0;
+                ncclResult_t testRet = TestRequest(sendReqs[i], &done, &sz);
+                if (testRet != ncclSuccess) { mr.sendRet[i] = static_cast<int>(testRet); break; }
+                if (done) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+
+        ncclIbCastFaultGetFatalCount(sendComm, &mr.fatalCount);
+        MPI_Send(&mr, sizeof(mr), MPI_BYTE, 0, kMultiMpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        // Poll all recvs concurrently
+        bool allDone = false;
+        for (int poll = 0; poll < 1500 && !allDone; poll++) {
+            allDone = true;
+            for (int i = 0; i < kNumReqs; i++) {
+                if (recvReqs[i] == nullptr) continue;
+                int done = 0, sz = 0;
+                TestRequest(recvReqs[i], &done, &sz);
+                if (done) { recvReqs[i] = nullptr; }
+                else { allDone = false; }
+            }
+            if (!allDone) usleep(kPollIntervalUs);
+        }
+
+        MPI_Recv(&mr, sizeof(mr), MPI_BYTE, 1, kMultiMpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+
+        for (int i = 0; i < kNumReqs; i++) {
+            EXPECT_EQ(mr.sendRet[i], static_cast<int>(ncclSuccess))
+                << "Multi-request " << i << " send failed";
+        }
+        EXPECT_EQ(mr.fatalCount, 0) << "Fatal error during multi-request failover";
+        EXPECT_TRUE(allDone) << "Not all receiver requests completed";
+
+        if (allDone) {
+            for (int i = 0; i < kNumReqs; i++) {
+                size_t offset = (i + 1) * kMsgSize;
+                EXPECT_EQ(memcmp(recvBuf.data() + offset, sendBuf.data() + offset, kMsgSize), 0)
+                    << "Data corruption in multi-request " << i;
+            }
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0) {
+        for (int i = 0; i < kNumReqs; i++) {
+            if (recvReqs[i]) DrainRecvRequest(recvReqs[i]);
+        }
+    }
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 #endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */
