@@ -12,7 +12,7 @@ if [[ -z "$BRANCH_DIR" ]]; then
   echo "       Rebuild with: docker build --build-arg PR_NUM=<N> ..." >&2
   exit 1
 fi
-exec bash /app/rocm-systems/projects/rocshmem/scripts/run_perf_compare.sh \
+exec bash /app/rocm-systems/projects/rocshmem/scripts/functional_tests/run_perf_compare.sh \
   --skip-build \
   --baseline-dir "$BASELINE_DIR" \
   --branch-dir   "$BRANCH_DIR" \
