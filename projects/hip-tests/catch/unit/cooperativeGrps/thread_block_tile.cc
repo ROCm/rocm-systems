@@ -674,6 +674,9 @@ void __global__ reduceKernelCoalesced(T* output,
       case AggregationType::InclusiveScan:
         result = cg::inclusive_scan(coalesced, input[idx], Functor());
         break;
+      case AggregationType::ExclusiveScan:
+        result = cg::exclusive_scan(coalesced, input[idx], Functor());
+        break;
       default:
         assert(false && "Unsupported enumeration");
       }
@@ -996,8 +999,7 @@ __global__ void applyFunctor(ArrayContainer<NumElems>* result,
       *result = cg::inclusive_scan(mytile, input, op);
       break;
     case AggregationType::ExclusiveScan:
-      // TODO g-h-c
-      //*result = cg::exclusive_scan(mytile, input, op);
+      *result = cg::exclusive_scan(mytile, input, op);
       break;
     default:
       assert(false && "AggregationType not supported");
@@ -1261,10 +1263,20 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Scan_Random_boolean, int, unsigned int
              cooperative_groups::bit_or<TestType>,
              cooperative_groups::bit_xor<TestType>> types;
 
-  if (getWarpSize() == 32) {
-    runAggregationRandomForOps<false, TestType, 32>(AggregationType::InclusiveScan, types);
-  } else {
-    runAggregationRandomForOps<false, TestType, 64>(AggregationType::InclusiveScan, types);
+  SECTION("inclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<false, TestType, 32>(AggregationType::InclusiveScan, types);
+    } else {
+      runAggregationRandomForOps<false, TestType, 64>(AggregationType::InclusiveScan, types);
+    }
+  }
+
+  SECTION("exclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<false, TestType, 32>(AggregationType::ExclusiveScan, types);
+    } else {
+      runAggregationRandomForOps<false, TestType, 64>(AggregationType::ExclusiveScan, types);
+    }
   }
 }
 
@@ -1275,10 +1287,20 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_arithmetic, int, unsigned in
              cooperative_groups::less<TestType>,
              cooperative_groups::greater<TestType>> ops;
 
-  if (getWarpSize() == 32) {
-    runAggregationRandomForOps<true, TestType, 32>(AggregationType::InclusiveScan, ops);
-  } else {
-    runAggregationRandomForOps<true, TestType, 64>(AggregationType::InclusiveScan, ops);
+  SECTION("inclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<true, TestType, 32>(AggregationType::InclusiveScan, ops);
+    } else {
+      runAggregationRandomForOps<true, TestType, 64>(AggregationType::InclusiveScan, ops);
+    }
+  }
+
+  SECTION("exclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<true, TestType, 32>(AggregationType::ExclusiveScan, ops);
+    } else {
+      runAggregationRandomForOps<true, TestType, 64>(AggregationType::ExclusiveScan, ops);
+    }
   }
 }
 
@@ -1289,10 +1311,20 @@ TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Scan_boolean, int, unsigned int, 
              cooperative_groups::less<TestType>,
              cooperative_groups::greater<TestType>> ops;
 
-  if (getWarpSize() == 32) {
-    runAggregationRandomForOps<true, TestType, 32>(AggregationType::InclusiveScan, ops);
-  } else {
-    runAggregationRandomForOps<true, TestType, 64>(AggregationType::InclusiveScan, ops);
+  SECTION("inclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<true, TestType, 32>(AggregationType::InclusiveScan, ops);
+    } else {
+      runAggregationRandomForOps<true, TestType, 64>(AggregationType::InclusiveScan, ops);
+    }
+  }
+
+  SECTION("exclusive") {
+    if (getWarpSize() == 32) {
+      runAggregationRandomForOps<true, TestType, 32>(AggregationType::ExclusiveScan, ops);
+    } else {
+      runAggregationRandomForOps<true, TestType, 64>(AggregationType::ExclusiveScan, ops);
+    }
   }
 }
 
