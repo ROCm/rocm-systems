@@ -13,6 +13,7 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include "library/wall_clock_event_trace.hpp"
 #include <cstdint>
 
 #include <timemory/backends/threading.hpp>
@@ -28,6 +29,7 @@
 
 #include <csignal>
 #include <dlfcn.h>
+#include <optional>
 #include <ostream>
 #include <pthread.h>
 #include <string_view>
@@ -63,7 +65,8 @@ auto  bundles_dtor  = scope::destructor{ []() {
 
 template <typename... Args>
 inline void
-start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
+start_bundle(bundle_t& _bundle, std::int64_t _tid,
+             std::optional<std::int64_t> _start_thread_parent_tid, Args&&... _args)
 {
     if(!get_use_timemory() && !get_use_perfetto()) return;
     LOG_TRACE("Starting bundle '{}' in thread {}...", _bundle.key(), _tid);
@@ -84,6 +87,16 @@ start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
     {
         _bundle.push(_tid);
         _bundle.start();
+        const std::string _key = _bundle.key();
+        if(_key == "pthread_create")
+        {
+            wall_clock_event_trace::push_pthread_create(_tid, _key);
+        }
+        else if(_key == "start_thread" && _start_thread_parent_tid)
+        {
+            wall_clock_event_trace::push_start_thread(*_start_thread_parent_tid, _tid,
+                                                      _key);
+        }
     }
 }
 
@@ -110,6 +123,16 @@ stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
         _bundle.stop();
         // exclude popping wall-clock
         _bundle.pop(_tid);
+
+        const std::string _key = _bundle.key();
+        if(_key == "pthread_create")
+        {
+            wall_clock_event_trace::pop_pthread_create(_tid, _key);
+        }
+        else if(_key == "start_thread")
+        {
+            wall_clock_event_trace::pop_start_thread(_tid, _key);
+        }
     }
     if constexpr(sizeof...(Args) > 0)
     {
@@ -241,7 +264,7 @@ pthread_create_gotcha::wrapper::operator()() const
             _bundle = bundles->emplace(_tid, std::make_shared<bundle_t>("start_thread"))
                           .first->second;
         }
-        if(_bundle) start_bundle(*_bundle, _tid);
+        if(_bundle) start_bundle(*_bundle, _tid, m_config.parent_tid);
         get_cpu_cid_stack(_tid, m_config.parent_tid);
         if(m_config.enable_causal)
         {
@@ -645,8 +668,8 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     if(_use_bundle)
     {
         _bundle = bundle_t{ "pthread_create" };
-        start_bundle(*_bundle, _info->index_data->sequent_value, audit::incoming{},
-                     thread, attr, func, arg);
+        start_bundle(*_bundle, _info->index_data->sequent_value, std::nullopt,
+                     audit::incoming{}, thread, attr, func, arg);
     }
 
     // threads must process their delays before creating a new thread

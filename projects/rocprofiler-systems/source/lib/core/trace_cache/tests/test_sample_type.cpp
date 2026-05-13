@@ -476,6 +476,8 @@ TEST_F(sample_type_test, type_identifier_enum_values)
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::cpu_pmc_sample), 0x0007);
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::backtrace_region_sample),
               0x0008);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::wall_clock_scope_event),
+              0x000C);
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::fragmented_space), 0xFFFF);
 }
 
@@ -651,4 +653,33 @@ TEST_F(sample_type_test, kfd_sample_get_size)
     auto          deserialized = deserialize<kfd_sample>(buffer_ptr);
     EXPECT_EQ(deserialized.name, original.name);
     EXPECT_EQ(deserialized.category, original.category);
+}
+
+TEST_F(sample_type_test, wall_clock_scope_event_sample_default_constructor)
+{
+    wall_clock_scope_event_sample sample;
+    EXPECT_EQ(sample.type_identifier, type_identifier_t::wall_clock_scope_event);
+}
+
+TEST_F(sample_type_test, wall_clock_scope_event_sample_serialize_roundtrip)
+{
+    wall_clock_scope_event_sample original(
+        1001, 2002, 42, static_cast<std::uint8_t>(wall_clock_scope_event_kind::enter), 7,
+        3, 5, 99, "my_region");
+
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<wall_clock_scope_event_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.steady_ns, 1001u);
+    EXPECT_EQ(deserialized.wall_ns, 2002u);
+    EXPECT_EQ(deserialized.thread_id, 42u);
+    EXPECT_EQ(deserialized.event_kind,
+              static_cast<std::uint8_t>(wall_clock_scope_event_kind::enter));
+    EXPECT_EQ(deserialized.exec_id, 7u);
+    EXPECT_EQ(deserialized.parent_exec_id, 3u);
+    EXPECT_EQ(deserialized.depth, 5u);
+    EXPECT_EQ(deserialized.correlation_id, 99u);
+    EXPECT_EQ(deserialized.name, "my_region");
 }

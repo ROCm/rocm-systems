@@ -53,6 +53,7 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include "library/wall_clock_event_trace.hpp"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
 
 #include <timemory/hash/types.hpp>
@@ -734,6 +735,7 @@ rocprofsys_init_tooling_hidden(void)
 
     if(get_use_timemory())
     {
+        rocprofsys::wall_clock_event_trace::session_reset();
         comp::user_global_bundle::global_init();
         std::set<int> _comps{};
         // convert string into set of enumerations
@@ -1171,24 +1173,10 @@ rocprofsys_finalize_hidden(void)
                                            _perfetto_output_error, _output_registry);
     }
 
-    {
-        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
-        _manager.shutdown();
-
-        rocprofsys::progress::bar_options _bar_opts;
-        _bar_opts.verbose = config::get_verbose();
-
-        rocprofsys::progress::tracker _tracker{ [_bar_opts](std::string   _label,
-                                                            std::uint64_t _total) {
-            auto                      _bar = std::make_shared<rocprofsys::progress::bar>(std::move(_label),
-                                                                                         _total, _bar_opts);
-            return rocprofsys::progress::progress_callback{ [_bar](std::uint64_t _delta) {
-                _bar->on_advance(_delta);
-            } };
-        } };
-
-        _manager.post_process_bulk(_output_registry, _tracker);
-    }
+    // Flush trace-cache ring buffer to /tmp before timemory finalization (same as prior
+    // shutdown placement; post_process_bulk is deferred until after finalize — see
+    // below).
+    rocprofsys::trace_cache::cache_manager::get_instance().shutdown();
 
     if(_timemory_manager && _timemory_manager != nullptr)
     {
@@ -1223,12 +1211,36 @@ rocprofsys_finalize_hidden(void)
             }
         }
 
-        LOG_DEBUG("Finalizing timemory...");
-        tim::timemory_finalize(_timemory_manager.get());
-
         auto _cfg       = settings::compose_filename_config{};
         _cfg.use_suffix = config::get_use_pid();
         _cfg.suffix     = settings::default_process_suffix();
+        // Ensure OUTPUT_PATH (e.g. time-stamped subdirectory) exists before any component
+        // writes files — matches timemory finalize behavior.
+        _cfg.make_dir = true;
+
+        LOG_DEBUG("Finalizing timemory...");
+        tim::timemory_finalize(_timemory_manager.get());
+
+        // Parse buffered_storage.bin after timemory finalize so OUTPUT_PATH / dated
+        // subdirectory / make_dir match timemory (wall_clock_evt used to compose empty
+        // paths when this ran earlier).
+        {
+            rocprofsys::progress::bar_options _bar_opts;
+            _bar_opts.verbose = config::get_verbose();
+
+            rocprofsys::progress::tracker _tracker{ [_bar_opts](std::string   _label,
+                                                                std::uint64_t _total) {
+                auto                      _bar = std::make_shared<rocprofsys::progress::bar>(
+                    std::move(_label), _total, _bar_opts);
+                return rocprofsys::progress::progress_callback{
+                    [_bar](std::uint64_t _delta) { _bar->on_advance(_delta); }
+                };
+            } };
+
+            rocprofsys::trace_cache::cache_manager::get_instance().post_process_bulk(
+                _output_registry, _tracker);
+        }
+
         _timemory_manager->write_metadata(settings::get_global_output_prefix(),
                                           "rocprofsys", _cfg);
 
@@ -1250,6 +1262,23 @@ rocprofsys_finalize_hidden(void)
                     output_format::json, _comp_name);
             }
         }
+    }
+    else
+    {
+        rocprofsys::progress::bar_options _bar_opts;
+        _bar_opts.verbose = config::get_verbose();
+
+        rocprofsys::progress::tracker _tracker{ [_bar_opts](std::string   _label,
+                                                            std::uint64_t _total) {
+            auto                      _bar = std::make_shared<rocprofsys::progress::bar>(std::move(_label),
+                                                                                         _total, _bar_opts);
+            return rocprofsys::progress::progress_callback{ [_bar](std::uint64_t _delta) {
+                _bar->on_advance(_delta);
+            } };
+        } };
+
+        rocprofsys::trace_cache::cache_manager::get_instance().post_process_bulk(
+            _output_registry, _tracker);
     }
 
     _output_registry.print_summary();

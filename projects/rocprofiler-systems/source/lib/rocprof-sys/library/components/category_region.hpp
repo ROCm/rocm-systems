@@ -15,6 +15,7 @@
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
+#include "library/wall_clock_event_trace.hpp"
 #include <cstdint>
 
 #include <map>
@@ -23,6 +24,7 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/types.hpp>
+#include <timemory/process/threading.hpp>
 #include <timemory/utility/types.hpp>
 #include <tuple>
 
@@ -282,6 +284,8 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
         if(get_use_timemory())
         {
             tracing::push_timemory(CategoryT{}, name, std::forward<Args>(args)...);
+            wall_clock_event_trace::push_region(tim::threading::get_id(),
+                                                std::string{ name });
         }
     }
 
@@ -346,6 +350,7 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
             if(get_use_timemory())
             {
                 tracing::pop_timemory(CategoryT{}, name, std::forward<Args>(args)...);
+                wall_clock_event_trace::pop_region(tim::threading::get_id(), name);
             }
         }
 

@@ -4,12 +4,14 @@
 #include "core/trace_cache/post_processor.hpp"
 
 #include "core/agent_manager.hpp"
+#include "core/config.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/storage_parser_alias.hpp"
+#include "core/trace_cache/wall_clock_scope_event_processor.hpp"
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
 
@@ -54,6 +56,11 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinat
                      output_file_registry&                            _registry)
 {
     data::processor_storage_t storage;
+    storage.wall_clock_scope_processor =
+        std::make_shared<wall_clock_scope_event_processor_t>(_config->_pid,
+                                                             _config->_ppid, _registry);
+    _coordinator->add_handler(*storage.wall_clock_scope_processor);
+
     if(_formats.is_rocpd_enabled())
     {
         storage.rocpd_processor = std::make_shared<rocpd_processor_t>(
@@ -120,6 +127,24 @@ post_processor::process(
         run_sequential(configs, formats.get_sequential_formats());
     if(formats.has_parallel_formats())
         run_multithreaded(configs, formats.get_parallel_formats());
+
+    if(!formats.has_sequential_formats() && !formats.has_parallel_formats())
+    {
+        // Instrumented wall-clock scope events are only emitted when profile mode
+        // (ROCPROFSYS_PROFILE / get_use_timemory) is on; skip an expensive buffer scan
+        // when profiling is disabled.
+        if(!config::get_use_timemory()) return;
+
+        // ROCpd and Perfetto are both off: we still must read buffered_storage.bin so
+        // processors that do not emit those formats (e.g. wall_clock_evt replay) run.
+        static const data::enabled_formats_t buffer_scan_formats{
+            std::vector<data::format_t>{
+                { data::format_kind::rocpd, true, false, "rocpd" },
+                { data::format_kind::perfetto, false, false, "perfetto" },
+            }
+        };
+        run_sequential(configs, buffer_scan_formats);
+    }
 }
 
 void

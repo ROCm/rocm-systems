@@ -29,7 +29,16 @@ enum class type_identifier_t : std::uint32_t
     scratch_memory          = 0x0009,
     ainic_pmc_sample        = 0x000A,
     kfd_sample              = 0x000B,
-    fragmented_space        = 0xFFFF
+    /// Instrumented wall-clock scope ENTER/EXIT for offline tree reconstruction.
+    wall_clock_scope_event = 0x000C,
+    fragmented_space       = 0xFFFF
+};
+
+/// Values for \ref wall_clock_scope_event_sample::event_kind.
+enum class wall_clock_scope_event_kind : std::uint8_t
+{
+    enter = 0,
+    exit  = 1
 };
 
 struct kernel_dispatch_sample : cacheable_t
@@ -679,6 +688,77 @@ get_size(const backtrace_region_sample& item)
         std::string_view(item.name), item.start_timestamp, item.end_timestamp,
         std::string_view(item.category), std::string_view(item.call_stack),
         std::string_view(item.line_info), std::string_view(item.extdata));
+}
+
+/// ENTER/EXIT pair for one scope invocation. \c parent_exec_id / \c depth / \c name
+/// are meaningful on ENTER; on EXIT \c exec_id matches ENTER and other snapshot fields
+/// may be zero / empty.
+struct wall_clock_scope_event_sample : cacheable_t
+{
+    static constexpr type_identifier_t type_identifier =
+        type_identifier_t::wall_clock_scope_event;
+
+    wall_clock_scope_event_sample() = default;
+    wall_clock_scope_event_sample(std::uint64_t _steady_ns, std::uint64_t _wall_ns,
+                                  std::uint64_t _thread_id, std::uint8_t _event_kind,
+                                  std::uint64_t _exec_id, std::uint64_t _parent_exec_id,
+                                  std::uint32_t _depth, std::uint64_t _correlation_id,
+                                  std::string _name)
+    : steady_ns(_steady_ns)
+    , wall_ns(_wall_ns)
+    , thread_id(_thread_id)
+    , event_kind(_event_kind)
+    , exec_id(_exec_id)
+    , parent_exec_id(_parent_exec_id)
+    , depth(_depth)
+    , correlation_id(_correlation_id)
+    , name(std::move(_name))
+    {}
+
+    /// Monotonic timestamp for deterministic global ordering (steady_clock).
+    std::uint64_t steady_ns = 0;
+    /// system_clock wall time in nanoseconds (duration = EXIT.wall - ENTER.wall).
+    std::uint64_t wall_ns   = 0;
+    std::uint64_t thread_id = 0;
+    /// 0 = ENTER, 1 = EXIT (see \c wall_clock_scope_event_kind).
+    std::uint8_t  event_kind     = 0;
+    std::uint64_t exec_id        = 0;
+    std::uint64_t parent_exec_id = 0;
+    std::uint32_t depth          = 0;
+    std::uint64_t correlation_id = 0;
+    std::string   name;
+};
+
+template <>
+inline void
+serialize(std::uint8_t* buffer, const wall_clock_scope_event_sample& item)
+{
+    utility::store_value(buffer, item.steady_ns, item.wall_ns, item.thread_id,
+                         item.event_kind, item.exec_id, item.parent_exec_id, item.depth,
+                         item.correlation_id, std::string_view(item.name));
+}
+
+template <>
+inline wall_clock_scope_event_sample
+deserialize(std::uint8_t*& buffer)
+{
+    wall_clock_scope_event_sample item;
+    std::string_view              name_view;
+    utility::parse_value(buffer, item.steady_ns, item.wall_ns, item.thread_id,
+                         item.event_kind, item.exec_id, item.parent_exec_id, item.depth,
+                         item.correlation_id, name_view);
+    item.name = std::string(name_view);
+    return item;
+}
+
+template <>
+inline size_t
+get_size(const wall_clock_scope_event_sample& item)
+{
+    return utility::get_size(item.steady_ns, item.wall_ns, item.thread_id,
+                             item.event_kind, item.exec_id, item.parent_exec_id,
+                             item.depth, item.correlation_id,
+                             std::string_view(item.name));
 }
 
 struct kfd_sample : cacheable_t
