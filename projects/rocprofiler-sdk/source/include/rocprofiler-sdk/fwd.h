@@ -433,7 +433,8 @@ typedef enum rocprofiler_runtime_library_t
     ROCPROFILER_ROCDECODE_LIBRARY = (1 << 5),
     ROCPROFILER_ROCJPEG_LIBRARY   = (1 << 6),
     ROCPROFILER_OMPT_LIBRARY      = (1 << 7),
-    ROCPROFILER_LIBRARY_LAST      = ROCPROFILER_OMPT_LIBRARY,
+    ROCPROFILER_ROCSHMEM_LIBRARY  = (1 << 8),
+    ROCPROFILER_LIBRARY_LAST      = ROCPROFILER_ROCSHMEM_LIBRARY,
 } rocprofiler_runtime_library_t;
 
 /**
@@ -451,7 +452,8 @@ typedef enum rocprofiler_intercept_table_t
     ROCPROFILER_RCCL_TABLE           = (1 << 6),
     ROCPROFILER_ROCDECODE_TABLE      = (1 << 7),
     ROCPROFILER_ROCJPEG_TABLE        = (1 << 8),
-    ROCPROFILER_TABLE_LAST           = ROCPROFILER_ROCJPEG_TABLE,
+    ROCPROFILER_ROCSHMEM_TABLE       = (1 << 9),
+    ROCPROFILER_TABLE_LAST           = ROCPROFILER_ROCSHMEM_TABLE,
 } rocprofiler_intercept_table_t;
 
 /**
