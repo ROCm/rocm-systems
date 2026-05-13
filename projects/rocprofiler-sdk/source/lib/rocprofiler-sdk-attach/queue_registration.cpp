@@ -39,13 +39,20 @@ struct queue_entry_t
     void*               user_write_interceptor_data = nullptr;
 };
 
+struct queue_cb_entry_t
+{
+    rocprofiler_attach_queue_cb_t cb   = nullptr;
+    void*                         data = nullptr;
+};
+
 using queue_collection_t = std::unordered_map<hsa_queue_t*, queue_entry_t>;
 
 struct queue_registration_t
 {
-    // guards access to both queues collection
-    std::mutex         queues_mutex;
-    queue_collection_t queues;
+    // guards access to both queues and cb_list
+    std::mutex                    mutex;
+    queue_collection_t            queues;
+    std::vector<queue_cb_entry_t> cb_list;
 
     decltype(AmdExtTable::hsa_amd_queue_intercept_create_fn) hsa_amd_queue_intercept_create_fn =
         nullptr;
@@ -152,11 +159,13 @@ create_queue(hsa_agent_t        agent,
     queue_entry_t entry{};
     entry.agent = agent;
 
+    auto snapshot = std::vector<queue_cb_entry_t>{};
     {
-        std::lock_guard lg(registration->queues_mutex);
+        std::lock_guard lg(registration->mutex);
         ROCP_FATAL_IF(registration->queues.count(new_queue) > 0)
             << "Queue registration already contains an entry for new queue handle " << new_queue;
         registration->queues.insert({new_queue, entry});
+        snapshot = registration->cb_list;
     }
     auto* write_interceptor_data = &(registration->queues.at(new_queue));
 
@@ -170,10 +179,12 @@ create_queue(hsa_agent_t        agent,
 
     ROCP_INFO << "created attach queue for HSA agent handle " << agent.handle;
 
-    auto* attach_table = rocprofiler::attach::get_dispatch_table();
-    if(attach_table->rocprofiler_attach_notify_new_queue)
+    for(auto& cb_entry : snapshot)
     {
-        attach_table->rocprofiler_attach_notify_new_queue(new_queue, agent, nullptr);
+        if(cb_entry.cb)
+        {
+            cb_entry.cb(new_queue, agent, ROCPROFILER_ATTACH_QUEUE_CREATED, cb_entry.data);
+        }
     }
 
     return HSA_STATUS_SUCCESS;
@@ -185,10 +196,36 @@ destroy_queue(hsa_queue_t* hsa_queue)
     auto* registration = get_queue_registration();
     if(registration)
     {
-        std::lock_guard lg(registration->queues_mutex);
-        size_t          erase_count = registration->queues.erase(hsa_queue);
-        ROCP_WARNING_IF(erase_count == 0)
-            << "Destroy queue was called for a handle that was not in queues: " << hsa_queue;
+        hsa_agent_t agent{};
+        bool        found    = false;
+        auto        snapshot = std::vector<queue_cb_entry_t>{};
+        {
+            std::lock_guard lg(registration->mutex);
+            auto            it = registration->queues.find(hsa_queue);
+            if(it != registration->queues.end())
+            {
+                agent    = it->second.agent;
+                found    = true;
+                snapshot = registration->cb_list;
+                registration->queues.erase(it);
+            }
+            else
+            {
+                ROCP_WARNING << "Destroy queue was called for a handle that was not in queues: "
+                             << hsa_queue;
+            }
+        }
+        if(found)
+        {
+            for(auto& cb_entry : snapshot)
+            {
+                if(cb_entry.cb)
+                {
+                    cb_entry.cb(
+                        hsa_queue, agent, ROCPROFILER_ATTACH_QUEUE_DESTROYED, cb_entry.data);
+                }
+            }
+        }
     }
     return HSA_STATUS_SUCCESS;
 }
@@ -198,7 +235,7 @@ iterate_all_queues(rocprof_attach_queue_iterator_t func, void* user_data)
 {
     auto* registration = CHECK_NOTNULL(get_queue_registration());
 
-    std::lock_guard lg(registration->queues_mutex);
+    std::lock_guard lg(registration->mutex);
     for(const auto& qr_pair : registration->queues)
     {
         func(qr_pair.first, qr_pair.second.agent, user_data);
@@ -220,6 +257,39 @@ set_write_interceptor(hsa_queue_t* queue, write_interceptor_t func, void* data)
     qr_pair->second.user_write_interceptor_func = func;
     qr_pair->second.user_write_interceptor_data = data;
     return 0;
+}
+
+int
+add_queue_cb(rocprofiler_attach_queue_cb_t cb, void* data)
+{
+    if(!cb)
+    {
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    auto* registration = CHECK_NOTNULL(get_queue_registration());
+    auto  lg           = std::lock_guard{registration->mutex};
+    registration->cb_list.push_back({cb, data});
+    for(const auto& qr_pair : registration->queues)
+    {
+        cb(qr_pair.first, qr_pair.second.agent, ROCPROFILER_ATTACH_QUEUE_CREATED, data);
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+int
+remove_queue_cb(rocprofiler_attach_queue_cb_t cb)
+{
+    if(!cb)
+    {
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    auto* registration = CHECK_NOTNULL(get_queue_registration());
+    auto  lg           = std::lock_guard{registration->mutex};
+    auto  pred         = [cb](const queue_cb_entry_t& e) { return e.cb == cb; };
+    registration->cb_list.erase(
+        std::remove_if(registration->cb_list.begin(), registration->cb_list.end(), pred),
+        registration->cb_list.end());
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 }  // namespace
@@ -263,6 +333,18 @@ int
 rocprofiler_attach_set_write_interceptor(hsa_queue_t* queue, write_interceptor_t func, void* data)
 {
     return set_write_interceptor(queue, func, data);
+}
+
+int
+rocprofiler_attach_add_queue_cb(rocprofiler_attach_queue_cb_t cb, void* data)
+{
+    return add_queue_cb(cb, data);
+}
+
+int
+rocprofiler_attach_remove_queue_cb(rocprofiler_attach_queue_cb_t cb)
+{
+    return remove_queue_cb(cb);
 }
 
 ROCPROFILER_EXTERN_C_FINI
