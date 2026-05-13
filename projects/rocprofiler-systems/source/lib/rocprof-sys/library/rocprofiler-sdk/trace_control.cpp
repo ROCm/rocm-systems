@@ -10,7 +10,6 @@
 #include <mutex>
 #include <string>
 #include <string_view>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -23,6 +22,14 @@ namespace rocprofiler_sdk
 {
 namespace control
 {
+
+namespace
+{
+// True on exactly the threads that have called handle_pause() without a matching
+// handle_resume(). Checked in should_write_markers() with zero overhead (no lock,
+// no syscall) on every roctx marker event.
+thread_local bool tl_thread_paused = false;
+}  // namespace
 
 trace_control::trace_control(std::string_view trace_regions)
 {
@@ -88,17 +95,17 @@ trace_control::handle_range_stop(std::uint64_t range_id)
                 static_cast<std::uint32_t>(m_active_range_ids.size()),
                 std::memory_order_relaxed);
         }
-
-        if(now_empty && !m_paused_thread_ids.empty())
-        {
-            had_paused = true;
-            m_paused_thread_ids.clear();
-            m_paused_thread_count.store(0, std::memory_order_relaxed);
-        }
     }
 
     if(now_empty)
     {
+        // Reset the count atomically. Paused threads still carry tl_thread_paused=true
+        // and will clear it when they call handle_resume(); the early-return in that
+        // path (region filter active + no active ranges) prevents a spurious callback.
+        const std::uint32_t prev =
+            m_paused_thread_count.exchange(0, std::memory_order_relaxed);
+        had_paused = (prev > 0);
+
         if(had_paused)
         {
             LOG_WARNING(
@@ -124,21 +131,15 @@ trace_control::handle_pause(std::uint64_t tid)
         }
     }
 
-    bool first_pause = false;
+    if(tl_thread_paused)
     {
-        std::scoped_lock const lk{ m_region_mutex };
-        auto [it, inserted] = m_paused_thread_ids.insert(tid);
-        if(!inserted)
-        {
-            LOG_WARNING("Pause requested but thread {} is already paused - ignoring",
-                        tid);
-            return;
-        }
-        first_pause = (m_paused_thread_ids.size() == 1);
-        m_paused_thread_count.store(
-            static_cast<std::uint32_t>(m_paused_thread_ids.size()),
-            std::memory_order_relaxed);
+        LOG_WARNING("Pause requested but thread {} is already paused - ignoring", tid);
+        return;
     }
+
+    tl_thread_paused = true;
+    const bool first_pause =
+        (m_paused_thread_count.fetch_add(1, std::memory_order_relaxed) == 0);
 
     if(first_pause)
     {
@@ -150,32 +151,29 @@ trace_control::handle_pause(std::uint64_t tid)
 void
 trace_control::handle_resume(std::uint64_t tid)
 {
+    if(!tl_thread_paused)
+    {
+        LOG_WARNING("Resume requested but thread {} was not paused - ignoring", tid);
+        return;
+    }
+
+    // Clear the per-thread flag unconditionally so the thread can write markers
+    // even if we skip the callbacks below (e.g. region ended while paused).
+    tl_thread_paused = false;
+
     if(region_filter_active())
     {
         std::scoped_lock const lk{ m_region_mutex };
         if(m_active_range_ids.empty())
         {
+            // Region ended while paused; count was already reset by handle_range_stop.
             LOG_WARNING("Resume requested outside of target region - ignoring");
             return;
         }
     }
 
-    bool last_resume = false;
-    {
-        std::scoped_lock const lk{ m_region_mutex };
-        auto                   it = m_paused_thread_ids.find(tid);
-        if(it == m_paused_thread_ids.end())
-        {
-            LOG_WARNING(
-                "Resume requested but thread {} was not paused by user - ignoring", tid);
-            return;
-        }
-        m_paused_thread_ids.erase(it);
-        last_resume = m_paused_thread_ids.empty();
-        m_paused_thread_count.store(
-            static_cast<std::uint32_t>(m_paused_thread_ids.size()),
-            std::memory_order_relaxed);
-    }
+    const bool last_resume =
+        (m_paused_thread_count.fetch_sub(1, std::memory_order_relaxed) == 1);
 
     if(last_resume)
     {
@@ -197,7 +195,6 @@ trace_control::shutdown()
         std::scoped_lock const lk{ m_region_mutex };
         m_active_range_ids.clear();
         m_active_region_count.store(0, std::memory_order_relaxed);
-        m_paused_thread_ids.clear();
         m_paused_thread_count.store(0, std::memory_order_relaxed);
         m_trace_regions.clear();
         m_region_filter_active.store(false, std::memory_order_relaxed);
@@ -216,16 +213,9 @@ trace_control::register_region_pauser_resume_callbacks(callback_t start_callback
 bool
 trace_control::should_write_markers() const
 {
-    // Fast path: if any threads are paused, check whether the calling thread is one of
-    // them. Skip the lock entirely when no threads are paused (the common case).
-    if(m_paused_thread_count.load(std::memory_order_relaxed) > 0)
+    if(tl_thread_paused)
     {
-        const auto             tid = static_cast<std::uint64_t>(::gettid());
-        std::scoped_lock const lk{ m_region_mutex };
-        if(m_paused_thread_ids.count(tid) > 0)
-        {
-            return false;
-        }
+        return false;
     }
 
     if(!region_filter_active())

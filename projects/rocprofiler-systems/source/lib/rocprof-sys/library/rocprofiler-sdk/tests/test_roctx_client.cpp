@@ -198,12 +198,12 @@ TEST_F(roctx_client_control_test, pause_resume_no_filter)
     EXPECT_TRUE(ctrl->should_write_markers());
 
     // Pause: stop callback fires, should_write becomes false
-    ctrl->handle_pause(static_cast<std::uint64_t>(::gettid()));
+    ctrl->handle_pause(std::uint64_t{ 1 });
     EXPECT_EQ(stop_count, 1);
     EXPECT_FALSE(ctrl->should_write_markers());
 
     // Resume: start callback fires, should_write becomes true
-    ctrl->handle_resume(static_cast<std::uint64_t>(::gettid()));
+    ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 1);
     EXPECT_TRUE(ctrl->should_write_markers());
 }
@@ -308,12 +308,12 @@ TEST_F(roctx_client_control_test, selective_region_pause_resume_inside)
     EXPECT_TRUE(ctrl->should_write_markers());  // CodeA
 
     // roctx_pause
-    ctrl->handle_pause(static_cast<std::uint64_t>(::gettid()));
+    ctrl->handle_pause(std::uint64_t{ 1 });
     EXPECT_EQ(stop_count, 1);
     EXPECT_FALSE(ctrl->should_write_markers());  // CodeB: not profiled
 
     // roctx_resume (paused is true, inside region => succeeds)
-    ctrl->handle_resume(static_cast<std::uint64_t>(::gettid()));
+    ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 2);
     EXPECT_TRUE(ctrl->should_write_markers());  // CodeC
 
@@ -345,7 +345,7 @@ TEST_F(roctx_client_control_test, selective_region_pause_outside_resume_inside)
     auto ctrl   = client->get_controller();
 
     // roctx_pause outside region: ignored (region filter active, no active ranges)
-    ctrl->handle_pause(static_cast<std::uint64_t>(::gettid()));
+    ctrl->handle_pause(std::uint64_t{ 1 });
     EXPECT_EQ(stop_count, 0);  // no callback fired
 
     // CodeZ: outside region
@@ -360,7 +360,7 @@ TEST_F(roctx_client_control_test, selective_region_pause_outside_resume_inside)
     EXPECT_TRUE(ctrl->should_write_markers());
 
     // roctx_resume: not paused => ignored
-    ctrl->handle_resume(static_cast<std::uint64_t>(::gettid()));
+    ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 1);  // no new callback
 
     // CodeC: still profiled
@@ -399,7 +399,7 @@ TEST_F(roctx_client_control_test, selective_region_pause_then_region_ends)
     EXPECT_TRUE(ctrl->should_write_markers());  // CodeA
 
     // roctx_pause
-    ctrl->handle_pause(static_cast<std::uint64_t>(::gettid()));
+    ctrl->handle_pause(std::uint64_t{ 1 });
     EXPECT_EQ(stop_count, 1);
     EXPECT_FALSE(ctrl->should_write_markers());  // CodeC: not profiled
 
@@ -411,7 +411,7 @@ TEST_F(roctx_client_control_test, selective_region_pause_then_region_ends)
     EXPECT_FALSE(ctrl->should_write_markers());  // CodeD: outside region
 
     // roctx_resume: paused set was cleared by range_stop => ignored
-    ctrl->handle_resume(static_cast<std::uint64_t>(::gettid()));
+    ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 1);  // no new callback
     EXPECT_FALSE(ctrl->should_write_markers());
 }
@@ -425,7 +425,7 @@ TEST_F(roctx_client_control_test, double_pause_is_ignored)
     auto client = make_client("");
     auto ctrl   = client->get_controller();
 
-    const auto tid = static_cast<std::uint64_t>(::gettid());
+    const auto tid = std::uint64_t{ 1 };
     ctrl->handle_pause(tid);
     EXPECT_EQ(stop_count, 1);
 
@@ -443,7 +443,7 @@ TEST_F(roctx_client_control_test, resume_without_pause_is_ignored)
     auto ctrl   = client->get_controller();
 
     // Resume without prior pause
-    ctrl->handle_resume(static_cast<std::uint64_t>(::gettid()));
+    ctrl->handle_resume(std::uint64_t{ 1 });
     EXPECT_EQ(start_count, 0);
     EXPECT_TRUE(ctrl->should_write_markers());
 }

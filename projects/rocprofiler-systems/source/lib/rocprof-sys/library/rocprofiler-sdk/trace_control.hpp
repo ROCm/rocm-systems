@@ -49,20 +49,19 @@ public:
 private:
     std::set<std::string, std::less<>> m_trace_regions;
     std::unordered_set<std::uint64_t>  m_active_range_ids;
-    // Thread IDs that have called roctxProfilerPause but not yet roctxProfilerResume.
-    // Guarded by m_region_mutex. m_paused_thread_count mirrors the set size as an
-    // atomic fast path so should_write_markers() can skip the lock when no threads
-    // are paused (the common case).
-    std::unordered_set<std::uint64_t> m_paused_thread_ids;
-    std::atomic<bool>                 m_region_filter_active{ false };
-    std::atomic<std::uint32_t>        m_active_region_count{ 0 };
-    std::atomic<std::uint32_t>        m_paused_thread_count{ 0 };
+    std::atomic<bool>                  m_region_filter_active{ false };
+    std::atomic<std::uint32_t>         m_active_region_count{ 0 };
+    // Count of threads currently paused via handle_pause(). Per-thread paused state is
+    // tracked via a thread_local in trace_control.cpp; this count drives the
+    // first-pause/last-resume callback semantics and "region ended while paused"
+    // detection in handle_range_stop().
+    std::atomic<std::uint32_t> m_paused_thread_count{ 0 };
 
     std::vector<callback_t> m_resume_callbacks;
     std::vector<callback_t> m_pause_callbacks;
 
-    mutable std::mutex m_region_mutex;
-    std::mutex         m_callback_mutex;
+    std::mutex m_region_mutex;
+    std::mutex m_callback_mutex;
 
     void trigger_callbacks(const std::vector<callback_t>& callbacks);
 };
