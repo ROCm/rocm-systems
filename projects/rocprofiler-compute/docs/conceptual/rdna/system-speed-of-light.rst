@@ -15,7 +15,8 @@ metrics for how your workload is performing on the target GPU, so you can spot
 bottlenecks before diving into block-specific panels.
 
 VALU FLOPs rows use aggregate VALU instruction counters (they do not split FP16,
-FP32, and FP64). WMMA follows a separate ISA path and is not broken out in this panel.
+FP32, and FP64). WMMA uses a separate ISA path and is not shown as its own row in
+this panel.
 
 Wavefronts and FLOPs accounting
 --------------------------------
@@ -23,7 +24,7 @@ Wavefronts and FLOPs accounting
 RDNA 3.5 supports both Wave32 (typical primary mode) and Wave64 wavefronts;
 wavefront size is fixed per kernel at compile time. The profiler’s ``$wave_size``
 comes from hardware discovery (for example ``rocminfo``), while the executing kernel
-may use a different size—treat peaks as approximate when those differ. VALU FLOPs
+may use a different size—treat peaks as an approximation when those differ. VALU FLOPs
 in this panel scale roughly as ``wave_size × SQ_INSTS_VALU_sum / time``.
 
 Peak theoretical VALU rates (per CU, before multiplying by CU count and clock)
@@ -45,9 +46,12 @@ Scaling and clocks
 ------------------
 
 ``$cu_per_gpu`` is the total CU count from system info, not WGP count. On RDNA 3.5,
-each WGP pairs two CUs, so CU count is approximately twice the WGP count; peak
-FLOPs scale with CUs. ``$max_sclk`` is the shader/engine clock in MHz from profiler
-system specs.
+each WGP pairs two CUs, so CU count is approximately twice the WGP count. We say
+*approximately* because ``$cu_per_gpu`` comes from hardware discovery of **active**
+CUs, not from doubling a separately published WGP figure; harvested dies and
+differences in how tools expose WGP versus CU totals mean the ratio is not always
+exactly two even though the floorplan pairs two CUs per WGP. Peak FLOPs scale with
+CUs. ``$max_sclk`` is the shader/engine clock in MHz from profiler system specs.
 
 Bandwidth and cache POP rows
 ----------------------------
