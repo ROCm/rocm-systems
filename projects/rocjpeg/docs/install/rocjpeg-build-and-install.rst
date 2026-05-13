@@ -43,7 +43,7 @@ Build and install
    .. code-block:: bash
 
       git checkout develop
-      cd rocm-systems/projects/rocjpeg
+      cd projects/rocjpeg
 
 3. Build and install rocJPEG using the following commands:
 
