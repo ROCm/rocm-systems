@@ -116,7 +116,23 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 
 //! Graph-owned signal pool for per-launch signal allocation.
 //! Avoids runtime signal pool stalls (WaitCurrent/WaitNext) during graph execution.
-//! Two sub-pools: GPU-only signals (fast) and interrupt-capable signals (for host callbacks).
+//!
+//! Two sub-pools:
+//!   - GPU-only signals: pre-allocated up to graph_signal_count_; recycled
+//!     between launches via TryCpuReset/GPU-side reset (entire sub-pool is
+//!     re-armed at once when the previous launch is fully drained).
+//!   - IRQ signals: pulled on-demand via AcquireIrq with re-arm-on-acquire
+//!     semantics. Each AcquireIrq() scans the IRQ vector for a signal whose
+//!     handler has already fully retired (flags_.done_ == true — set inside
+//!     HsaAmdSignalHandler's drain path, not implied by value==0), silent-
+//!     stores init_val and returns it. Only allocates a fresh IRQ signal
+//!     when nothing is reusable (launches overlap in flight). Sub-pool
+//!     size therefore stays bounded by max-concurrent-in-flight launches
+//!     × IRQs-per-launch.
+//!
+//! The pool is owned by GraphExec (persistent across launches) and is
+//! destroyed in ~GraphExec after every parallel stream has finished — at
+//! which point all async handlers attached to any IRQ signal have fired.
 struct GraphSignalPool {
   ProfilingSignal* Acquire() {
     size_t idx = next_idx_.fetch_add(1, std::memory_order_relaxed);
@@ -130,17 +146,12 @@ struct GraphSignalPool {
     return ps;
   }
 
-  ProfilingSignal* AcquireIrq(bool system_scope) {
-    size_t idx = irq_next_idx_.fetch_add(1, std::memory_order_relaxed);
-    ProfilingSignal* ps;
-    if (idx < irq_capacity_.load(std::memory_order_acquire)) {
-      ps = irq_signals_[idx];
-    } else {
-      ps = GrowAndAcquireIrq(idx, system_scope);
-    }
-    if (ps) last_acquired_ = ps;
-    return ps;
-  }
+  //! Acquire an IRQ-capable signal and atomically re-arm it to init_val.
+  //! Scans irq_signals_ under lock_ for a signal with flags_.done_ == true
+  //! (handler has fully retired — see rocdevice.cpp::AcquireIrq for why a
+  //! value==0 check is insufficient); if found, silent-stores init_val and
+  //! returns it. Otherwise allocates a fresh signal and appends it.
+  ProfilingSignal* AcquireIrq(bool system_scope, hsa_signal_value_t init_val);
 
   //! Returns the most recently acquired signal from a GPU dispatch (not pre-allocation)
   ProfilingSignal* GetLastAcquired() const { return last_acquired_; }
@@ -149,10 +160,42 @@ struct GraphSignalPool {
   void ResetLastAcquired() { last_acquired_ = nullptr; }
 
   bool Allocate(size_t count);
-  bool AllocateIrq(size_t count, bool system_scope);
 
   size_t UsedCount() const { return next_idx_.load(std::memory_order_relaxed); }
-  size_t UsedIrqCount() const { return irq_next_idx_.load(std::memory_order_relaxed); }
+
+  //! Current size of the IRQ sub-pool. Used by diagnostics — there is no
+  //! "used IRQ count" because IRQ signals are scanned/re-armed on Acquire,
+  //! not bumped via a counter.
+  size_t IrqCapacity() const {
+    amd::ScopedLock sl(lock_);
+    return irq_signals_.size();
+  }
+
+  //! Total number of signals currently owned by the pool (both sub-pools).
+  size_t TotalSignalCount() const {
+    amd::ScopedLock sl(lock_);
+    return signals_.size() + irq_signals_.size();
+  }
+
+  //! Try to reset the GPU-only sub-pool entirely on the CPU. Returns true if
+  //! every GPU-only signal is already at 0 (previous launch's GPU work fully
+  //! drained): all GPU-only signal values are silently stored back to 1 and
+  //! the acquire counter is wound back to 0. Returns false if any GPU-only
+  //! signal is still busy, in which case the caller must dispatch a GPU-side
+  //! reset before the next launch. IRQ signals are NOT touched here — they
+  //! are re-armed individually on each AcquireIrq.
+  bool TryCpuReset();
+
+  //! Wind GPU-only acquire counter back to 0 and clear last_acquired_. Used
+  //! by the caller after dispatching a GPU-side reset (the GPU kernel only
+  //! resets the signal value bytes; the host-side bookkeeping is reset here).
+  void ResetCountersForReuse();
+
+  //! Append device-visible pointers to amd_signal_t.value for every GPU-only
+  //! signal into out. Used by the GPU reset kernel; pointers are stable for
+  //! the pool's lifetime. IRQ signals are excluded — they're handled by
+  //! re-arm-on-acquire and would race with the async-handler thread otherwise.
+  void CollectValuePtrs(std::vector<uint64_t*>& out) const;
 
   ~GraphSignalPool();
 
@@ -160,15 +203,12 @@ struct GraphSignalPool {
   std::vector<ProfilingSignal*> signals_;       //!< GPU-only signals
   std::atomic<size_t> capacity_{0};             //!< Current GPU-only signal count (atomic to avoid race with growth)
   std::atomic<size_t> next_idx_{0};             //!< Next GPU-only signal index
-  std::vector<ProfilingSignal*> irq_signals_;   //!< Interrupt-capable signals
-  std::atomic<size_t> irq_capacity_{0};         //!< Current interrupt signal count
-  std::atomic<size_t> irq_next_idx_{0};         //!< Next interrupt signal index
+  std::vector<ProfilingSignal*> irq_signals_;   //!< IRQ-capable signals (re-armed on acquire)
   ProfilingSignal* last_acquired_ = nullptr;    //!< Most recently acquired signal
-  amd::Monitor lock_;                           //!< Protects growth of both vectors
+  mutable amd::Monitor lock_;                   //!< Protects growth of signals_ and IRQ scan/grow
 
   static ProfilingSignal* AllocateOneSignal(bool interrupt, bool system_scope);
   ProfilingSignal* GrowAndAcquire(size_t idx);
-  ProfilingSignal* GrowAndAcquireIrq(size_t idx, bool system_scope);
 };
 
 class Sampler : public device::Sampler {
@@ -546,9 +586,14 @@ class Device : public NullDevice {
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const override;
   virtual GraphSignalPool* CreateGraphSignalPool(
-      size_t gpu_count, size_t irq_count,
+      size_t gpu_count,
       size_t segment_count, std::vector<void*>& hw_events) const override;
   virtual size_t GetGraphSignalPoolUsedCount(GraphSignalPool* pool) const override;
+  virtual void DestroyGraphSignalPool(GraphSignalPool* pool) const override;
+  virtual bool ResetGraphSignalPool(device::VirtualDevice* vdev,
+                                    GraphSignalPool* pool,
+                                    bool prev_done,
+                                    bool* out_did_gpu_reset = nullptr) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 

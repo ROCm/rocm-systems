@@ -3084,6 +3084,102 @@ bool KernelBlitManager::batchMemOps(const void* paramArray, size_t paramSize,
 }
 
 // ================================================================================================
+// Dispatches __amd_rocclr_resetGraphSignals to atomically write resetValue
+// into amd_signal_t.value of every signal whose pointer is in valuePtrs.
+//
+// Pass attach_signal=true so submitKernelInternal acquires a completion
+// signal from the runtime pool and attaches it to the kernel's AQL packet.
+// The caller can then read it back via gpu->Barriers().GetLastSignal() and
+// use it to serialize parallel-stream dispatches behind the reset
+// (cross-queue ordering).
+//
+// Threading caveat: this is called from the user thread inside hipGraphLaunch
+// and bypasses the worker-thread queue management, which can race with
+// HsaAmdSignalHandler::ReleaseHwQueue. The handler thread calls
+// VirtualGPU::ReleaseHwQueue() and opportunistically takes execution() via
+// try_lock(). If we let it succeed while we are mid-setup here (setArgument,
+// captureArguments, etc.), it nulls gpu_queue_ before submitKernelInternal's
+// packet writes, causing a crash. To prevent that we hold execution()
+// continuously across the queue-check, the setup phase, and the packet
+// dispatch inside submitKernelInternal. submitKernelInternal does NOT take
+// execution() itself — its callers are expected to hold it (see callsites in
+// rocvirtual.cpp), so no recursive-lock deadlock occurs here. We use
+// AcquireQueueWithPreferenceLocked() rather than AcquireQueueWithPreference()
+// for the same reason: the latter would re-enter execution() (std::mutex is
+// non-recursive).
+bool KernelBlitManager::resetGraphSignals(const std::vector<uint64_t*>& valuePtrs,
+                                          uint64_t resetValue) const {
+  if (valuePtrs.empty()) return true;
+
+  // Lock order is execution() -> lockXferOps_ everywhere else in the
+  // codebase (e.g. submitCopyMemory takes execution() then calls into
+  // KernelBlitManager which takes lockXferOps_). Match that order here to
+  // avoid an inverse-order deadlock with concurrent blits on the same VGPU.
+  std::scoped_lock execLock(gpu().execution());
+  std::scoped_lock k(lockXferOps_);
+
+  if (gpu().gpu_queue() == nullptr) {
+    gpu().AcquireQueueWithPreferenceLocked();
+    if (gpu().gpu_queue() == nullptr) {
+      return false;
+    }
+  }
+
+  uint blitType = ResetGraphSignals;
+  const uint32_t count = static_cast<uint32_t>(valuePtrs.size());
+
+  constexpr bool kDirectVa = true;
+  const size_t arr_size = static_cast<size_t>(count) * sizeof(uint64_t*);
+  void* constBuf = gpu().allocKernArg(arr_size, kCBAlignment);
+  if (constBuf == nullptr) return false;
+  memcpy(constBuf, valuePtrs.data(), arr_size);
+
+  setArgument(kernels_[blitType], 0, sizeof(cl_mem), constBuf, 0, nullptr, kDirectVa);
+  setArgument(kernels_[blitType], 1, sizeof(uint32_t), &count);
+  setArgument(kernels_[blitType], 2, sizeof(uint64_t), &resetValue);
+
+  size_t globalWorkOffset[1] = {0};
+  size_t localWorkSize[1] = {std::min<size_t>(64, count)};
+  const size_t global = ((count + localWorkSize[0] - 1) / localWorkSize[0]) * localWorkSize[0];
+  size_t globalWorkSize[1] = {global};
+
+  amd::NDRangeContainer ndrange(1, globalWorkOffset, globalWorkSize, localWorkSize);
+
+  address parameters = captureArguments(kernels_[blitType]);
+  // submitKernelInternal does NOT clear gpu().command() when vcmd==nullptr,
+  // so any leftover command pointer from a previous dispatch (e.g. the prior
+  // launch's AccumulateCommand whose graphSignalPool() is non-null) would
+  // make HwQueueTracker::ActiveSignal route this kernel's completion signal
+  // through the graph pool. That is wrong here: the reset kernel writes 1
+  // to every value field in the graph pool, including the one we just
+  // allocated for ourselves — race against subsequent graph segment
+  // dispatches that re-acquire the same slot. Force the runtime-pool path
+  // by temporarily clearing command_.
+  amd::Command* saved_cmd = gpu().command();
+  gpu().SetCommand(nullptr);
+
+  constexpr bool kAttachSignal = true;
+
+  // Promote the next AQL dispatch (this reset kernel) to SYSTEM-scope
+  // acquire/release fences. The kernel writes resetValue into graph signal
+  // pool slots consumed by subsequent graph dispatches and host wait paths;
+  // AGENT-scope release can leave those writes invisible outside this
+  // agent's coherence domain.
+  // gpu().addSystemScope();
+
+  bool result = gpu().submitKernelInternal(ndrange, *kernels_[blitType], parameters,
+                                           /*event_handle=*/nullptr,
+                                           /*sharedMemBytes=*/0,
+                                           /*vcmd=*/nullptr,
+                                           /*aql_packet=*/nullptr,
+                                           kAttachSignal);
+
+  gpu().SetCommand(saved_cmd);
+  releaseArguments(parameters);
+  return result;
+}
+
+// ================================================================================================
 bool KernelBlitManager::initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
                                  uint heap_size, uint number_of_initial_blocks) const {
   bool result;

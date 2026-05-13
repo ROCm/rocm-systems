@@ -2133,17 +2133,44 @@ class Device : public RuntimeObject {
                                    const std::vector<void*>& hw_events) const {}
 
   // Creates a fully-initialised per-launch graph signal pool.
-  // Allocates gpu_count GPU-only signals and irq_count interrupt signals,
-  // then acquires segment_count hw-event slots into hw_events and resets
-  // the last-acquired pointer so GetLastAcquired() only tracks dispatches.
+  // Allocates gpu_count GPU-only signals, then acquires segment_count
+  // hw-event slots into hw_events and resets the last-acquired pointer so
+  // GetLastAcquired() only tracks dispatches. IRQ/handler-bearing signals
+  // are NOT owned by the graph pool — they come from the runtime pool.
   // Returns nullptr (and leaves hw_events empty) on allocation failure.
   virtual roc::GraphSignalPool* CreateGraphSignalPool(
-      size_t gpu_count, size_t irq_count,
+      size_t gpu_count,
       size_t segment_count, std::vector<void*>& hw_events) const { return nullptr; }
 
   // Returns the number of GPU-only signals consumed from the pool so far.
   // Used by the graph executor to cache the count for the next launch.
   virtual size_t GetGraphSignalPoolUsedCount(roc::GraphSignalPool* pool) const { return 0; }
+
+  // Destroys a graph signal pool created by CreateGraphSignalPool.
+  // Required because GraphSignalPool is only forward-declared in platform/
+  // headers; calling `delete pool;` from generic code would not invoke
+  // ~GraphSignalPool (delete-on-incomplete-type is undefined behaviour and
+  // in practice silently skips the destructor). Routing through this virtual
+  // ensures the destructor in rocdevice.cpp is actually called.
+  virtual void DestroyGraphSignalPool(roc::GraphSignalPool* pool) const {}
+
+  // Reset a previously-used graph signal pool so it can be reused for the
+  // next launch on `vdev`. When `prev_done` is true the caller has already
+  // verified (via the previous launch's leaf signals) that every GPU-only
+  // signal has settled, so we take the CPU fast path. Otherwise dispatches
+  // the __amd_rocclr_resetGraphSignals kernel on `vdev`'s queue with a
+  // completion signal attached; caller pulls it back via
+  // `vdev->Barriers().GetLastSignal()` and serializes parallel-stream
+  // dispatches behind it. `out_did_gpu_reset` (optional) is set to true iff
+  // the GPU kernel was actually dispatched (i.e. caller should read the
+  // last signal). Returns true on success.
+  virtual bool ResetGraphSignalPool(device::VirtualDevice* vdev,
+                                    roc::GraphSignalPool* pool,
+                                    bool prev_done,
+                                    bool* out_did_gpu_reset = nullptr) const {
+    if (out_did_gpu_reset != nullptr) *out_did_gpu_reset = false;
+    return false;
+  }
 
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
