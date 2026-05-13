@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include <limits.h>     // For INT_MAX
 
 RCCL_PARAM(IntraGraphGen, "INTRA_GRAPH_GEN", 0);
+RCCL_PARAM(InterGraphGen, "INTER_GRAPH_GEN", 0);
 
 static void generateWalecki(int nNodes, int channel, int* order) {
   if (nNodes <= 0 || !order) return;
@@ -57,37 +58,129 @@ static void generateWalecki(int nNodes, int channel, int* order) {
 }
 
 /**
- * This function takes number of nodes in a fully connected graph and number target channels, and generates upto nChannel Hamiltonian cycles 
- * In this function we initially generate Walecki Construction depending on (nNodes mod 2), upto nNodes / 2 channels. Then, based on edge usage
- * heuristic, we construct rest of the cycles.
- * 
- * Assumptions : nodeOrder is pointer to flattened 2D array of size nNodes*nChannels*sizeof(int), and is pre-allocated before invoking this function.
- * 
+ * isPrime
+ * Uses the 6k+/-1 optimization. 
+ * Time Complexity: O(sqrt(n))
  */
-ncclResult_t generateRings(int nNodes, uint8_t nChannels, int* nodeOrder) {
-    // --- SAFETY CHECK: Guard against invalid cluster sizes ---
-    if (nNodes <= 0 || nChannels <= 0 || nodeOrder == NULL) return ncclInvalidArgument;
-    if ( nChannels >= 255 ) {
-        WARN(" generateRings is implemented with an assumption nChannels [=%d] < 255 as an optimization. Update the implementaion to accept uint16/32 for nChannels ",nChannels );
-        return ncclInvalidArgument;
-    }
-    // Handle degenerate cases (N=1, N=2) where Hamiltonian diversity is impossible
-    if (nNodes < 3) {
-        for (int c = 0; c < nChannels; c++) {
-            for (int n = 0; n < nNodes; n++) {
-                nodeOrder[c * nNodes + n] = n;
-            }
+static bool isPrime(int n) {
+    // 1. Handle the simplest cases
+    if (n <= 1) return false;
+    if (n <= 3) return true;
+
+    // 2. Eliminate multiples of 2 and 3 immediately
+    if (n % 2 == 0 || n % 3 == 0) return false;
+
+    // 3. Check for divisors up to sqrt(n)
+    // We skip even numbers and multiples of 3 by stepping by 6
+    for (int i = 5; i * i <= n; i += 6) {
+        if (n % i == 0 || n % (i + 2) == 0) {
+            return false;
         }
-        return ncclSuccess;
     }
 
-    if (nChannels <= (nNodes / 2)) {
-        for (int c = 0; c < nChannels; c++) {
-            generateWalecki(nNodes, c, &nodeOrder[c * nNodes]);
-        }
-        return ncclSuccess;
-    }
+    return true;
+}
 
+/**
+ * genRingsN_prime
+ * For prime p, generates (p-1) perfectly balanced rings.
+ * 
+ * @param p: The number of nodes (MUST be prime)
+ * @param nChannels: Number of rings requested
+ * @param nodeOrder: Buffer of size nChannels * p
+ */
+static int genRingsN_prime(int p, int nChannels, int* nodeOrder) {
+    if (p <= 0 || nChannels <= 0 || nodeOrder == NULL) return 0;
+
+    // There are (p-1) unique strides that produce Hamiltonian cycles
+    int totalAvailable = p - 1;
+    int numRingsCopied = 0;
+    for (int c = 0; c < nChannels; c++) {
+        // stride 's' must be in [1, p-1]
+        // We use (c % totalAvailable) to loop through strides
+        int s = (c % totalAvailable) + 1;
+        int* currentRing = &nodeOrder[c * p];
+        for (int i = 0; i < p; i++) {
+            // The i-th rank in the ring is (i * s) mod p
+            currentRing[i] = (i * s) % p;
+        }
+        numRingsCopied++;
+    }
+    return numRingsCopied;
+}
+
+/**
+ * genRingsN_4
+ * @param nodeOrder: Pre-allocated buffer of size nChannelsRequested * 6
+ * @param nChannelsRequested: Number of rings the user wants
+ * @return The number of rings successfully written
+ */
+static int genRingsN_4(int* nodeOrder, int nChannelsRequested) {
+
+    const int totalAvailable = 6;
+    const int nNodes = 4;
+    const int optimizedRings[totalAvailable][nNodes] = {{0,1,2,3},{0,2,1,3},{0,1,3,2},{0,3,2,1},{0,3,1,2},{0,2,3,1}};
+    if (nodeOrder == NULL || nChannelsRequested <= 0) return 0;
+    int numRingsCopied = 0;
+    for (int c = 0; c < nChannelsRequested; c++) {
+        int sourceIdx = c % totalAvailable;
+        memcpy(&nodeOrder[c * nNodes], optimizedRings[sourceIdx], nNodes * sizeof(int));
+        numRingsCopied++;
+    }
+    return numRingsCopied;
+}
+
+/**
+ * genRingsN_6
+ * @param nodeOrder: Pre-allocated buffer of size nChannelsRequested * 6
+ * @param nChannelsRequested: Number of rings the user wants
+ * @return The number of rings successfully written
+ */
+static int genRingsN_6(int* nodeOrder, int nChannelsRequested) {
+
+    const int totalAvailable = 15;
+    const int nNodes = 6;
+    const int optimizedRings[totalAvailable][nNodes] = 
+    {{5,3,4,1,2,0},{4,0,3,1,5,2},{5,1,0,4,3,2},{2,0,1,3,5,4},{3,0,2,1,4,5},
+    {1,5,0,2,3,4},{0,4,1,3,5,2},{1,0,2,4,5,3},{2,5,0,1,4,3},{1,2,3,4,0,5},
+    {3,2,1,4,5,0},{2,1,3,0,5,4},{3,0,1,5,2,4},{4,0,3,1,2,5},{0,4,2,3,5,1}};
+
+    if (nodeOrder == NULL || nChannelsRequested <= 0) return 0;
+    int numRingsCopied = 0;
+    for (int c = 0; c < nChannelsRequested; c++) {
+        int sourceIdx = c % totalAvailable;
+        memcpy(&nodeOrder[c * nNodes], optimizedRings[sourceIdx], nNodes * sizeof(int));
+        numRingsCopied++;
+    }
+    return numRingsCopied;
+}
+
+/**
+ * genRingsN_8
+ * @param nodeOrder: Pre-allocated buffer of size nChannelsRequested * 8
+ * @param nChannelsRequested: Number of rings the user wants
+ * @return The number of rings successfully written
+ */
+static int genRingsN_8(int* nodeOrder, int nChannelsRequested) {
+    const int totalAvailable = 14;
+    const int nNodes = 8;
+    const int optimizedRings[totalAvailable][nNodes] =
+    {{0,1,2,3,4,5,6,7},{0,2,4,6,1,7,3,5},{0,5,3,7,1,6,4,2},{0,7,6,5,4,3,2,1},{0,6,4,7,2,5,1,3},{0,2,4,1,3,6,5,7},{0,3,5,1,6,2,7,4},
+    {0,7,5,6,3,1,4,2},{0,3,1,5,2,7,4,6},{0,4,7,2,6,1,5,3},{0,5,2,6,3,7,1,4},{0,1,2,3,4,5,7,6},{0,6,7,5,4,3,2,1},{0,4,1,7,3,6,2,5}};
+
+    if (nodeOrder == NULL || nChannelsRequested <= 0) return 0;
+    int numRingsCopied = 0;
+    for (int c = 0; c < nChannelsRequested; c++) {
+        // Use modulo to cycle through the optimized patterns if nChannels > 13
+        int sourceIdx = c % totalAvailable;
+        // Copy 8 integers (32 bytes) into the correct offset
+        memcpy(&nodeOrder[c * nNodes], optimizedRings[sourceIdx], nNodes * sizeof(int));
+        numRingsCopied++;
+    }
+    return numRingsCopied;
+}
+
+static ncclResult_t greedyRingGen(int nNodes, uint8_t nChannels, int* nodeOrder) {
     // Choose to augment with Greedy approach only if nNodes/2 channels are not sufficient. Most systems 
     // do not execute below code as we have MAXCHANNELS = 128.
     // Optimization: uint8_t is sufficient for nChannels <= 255, In RCCL we limit it to 128 channels now. 
@@ -150,4 +243,55 @@ ncclResult_t generateRings(int nNodes, uint8_t nChannels, int* nodeOrder) {
     free(visited);
     free(edgeUsage);
     return ncclSuccess;
+}
+
+/**
+ * This function takes number of nodes in a fully connected graph and number target channels, and generates upto nChannel Hamiltonian cycles 
+ * In this function we use known constructions for 2,4,6,8 nodes in graph. For prime number of nodes, simple modulo construction creates 
+ * perfect set of Hamiltonian rings load balancing accross all channels, We use Walecki + greedy in rest of the cases.
+ * 
+ * Assumptions : nodeOrder is pointer to flattened 2D array of size nNodes*nChannels*sizeof(int), and is pre-allocated before invoking this function.
+ * 
+ */
+ncclResult_t generateRings(int nNodes, uint8_t nChannels, int* nodeOrder) {
+    // --- SAFETY CHECK: Guard against invalid cluster sizes ---
+    if (nNodes <= 0 || nChannels <= 0 || nodeOrder == NULL) return ncclInvalidArgument;
+    if ( nChannels >= 255 ) {
+        WARN(" generateRings is implemented with an assumption nChannels [=%d] < 255 as an optimization. Update the implementaion to accept uint16/32 for nChannels ",nChannels );
+        return ncclInvalidArgument;
+    }
+    // Handle degenerate cases (N=1, N=2) where Hamiltonian diversity is impossible
+    if (nNodes < 3) {
+        for (int c = 0; c < nChannels; c++) {
+            for (int n = 0; n < nNodes; n++) {
+                nodeOrder[c * nNodes + n] = n;
+            }
+        }
+        return ncclSuccess;
+    }
+    if (nNodes == 4) {
+        genRingsN_4(nodeOrder, nChannels);
+        return ncclSuccess;
+    }
+    if (nNodes == 6) {
+        genRingsN_6(nodeOrder, nChannels);
+        return ncclSuccess;
+    }
+    if (nNodes == 8) {
+        genRingsN_8(nodeOrder, nChannels);
+        return ncclSuccess;
+    }
+    if (isPrime(nNodes)) {
+        genRingsN_prime(nNodes, nChannels, nodeOrder);
+        return ncclSuccess;
+    }
+
+    if (nChannels <= (nNodes / 2)) {
+        for (int c = 0; c < nChannels; c++) {
+            generateWalecki(nNodes, c, &nodeOrder[c * nNodes]);
+        }
+        return ncclSuccess;
+    } 
+    ncclResult_t res = greedyRingGen(nNodes, nChannels, nodeOrder);
+    return res;
 }

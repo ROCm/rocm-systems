@@ -17,25 +17,40 @@
 
 static void permute_array_inplace(int* input, int length, int* permutation) {
     for (int i = 0; i < length; i++) {
-        int next = i;
+        // Skip if this index is already processed (marked negative)
+        if (permutation[i] < 0) continue;
+
+        // If the element is already in the right place, just mark and move on
+        if (permutation[i] == i) {
+            permutation[i] = -permutation[i] - 1;
+            continue;
+        }
+
+        // Standard cycle-following for a "Gather" operation
+        int current_hole = i;
+        int save_val = input[i]; // Take the value out to create a 'hole'
         
-        // While the element at 'next' hasn't been moved into its final spot
-        while (permutation[next] >= 0) {
-            int target_idx = permutation[next];
+        while (true) {
+            int source_idx = permutation[current_hole];
             
-            // Swap input[i] with the element belonging at target_idx
-            int temp_val = input[i];
-            input[i] = input[target_idx];
-            input[target_idx] = temp_val;
+            // Mark the current index as done
+            permutation[current_hole] = -permutation[current_hole] - 1;
+
+            if (source_idx == i) {
+                // The cycle is complete; plug the hole with the saved value
+                input[current_hole] = save_val;
+                break;
+            }
+
+            // Pull the value from the source into the current hole
+            input[current_hole] = input[source_idx];
             
-            // Mark this part of the permutation as "done" by flipping the sign
-            int temp_next = permutation[next];
-            permutation[next] = -permutation[next] - 1; 
-            next = temp_next;
+            // The source_idx is now the new hole we need to fill
+            current_hole = source_idx;
         }
     }
 
-    // Restore the permutation array if you need to reuse it later
+    // Restore the permutation array
     for (int i = 0; i < length; i++) {
         permutation[i] = -permutation[i] - 1;
     }

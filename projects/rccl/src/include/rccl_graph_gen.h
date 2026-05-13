@@ -24,10 +24,13 @@ THE SOFTWARE.
 
 #include "nccl.h"
 #include "param.h"
+
 /**
- * User for enabling using walecki construction of rings in intranode ranks.
+ * Used for enabling using walecki construction of rings in intranode ranks.
  */
-RCCL_PARAM_DECLARE( IntraGraphGen ) ;
+RCCL_PARAM_DECLARE(IntraGraphGen);
+RCCL_PARAM_DECLARE(InterGraphGen);
+
 ncclResult_t generateRings(int nNodes, uint8_t nChannels, int* nodeOrder);
 
 #endif
