@@ -41,6 +41,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cinttypes>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -3494,7 +3495,8 @@ device::Signal* Device::createIpcSignal() const { return new roc::IpcSignal(); }
 // ================================================================================================
 static std::string GetLocalHostName() {
 #if defined(__linux__)
-  char buf[HOST_NAME_MAX];
+  char buf[HOST_NAME_MAX + 1];
+  buf[HOST_NAME_MAX] = '\0';
   if (gethostname(buf, sizeof(buf)) == 0) return buf;
 #endif
   return "";
@@ -3506,6 +3508,7 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
   switch (event->event_type) {
     case HSA_AMD_GPU_MEMORY_FAULT_EVENT: {
       gpu_error = CL_INVALID_MEM_OBJECT;
+      LogError("Memory Fault Error");
       std::string hostnameStr = GetLocalHostName();
       std::string host_tag = hostnameStr.empty() ? "" : "host: " + hostnameStr + ", ";
       for (auto* amd_dev : amd::Device::devices()) {

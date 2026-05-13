@@ -1164,7 +1164,7 @@ std::string VirtualGPU::AnalyzeAqlQueue() const {
     auto printKernelName = [&](uint64_t kernel_object) {
       auto it = dev().KernelMap().find(kernel_object);
       if (it != dev().KernelMap().end()) {
-        kernelName = it->second.name();
+        kernelName = it->second.getDemangledName();
       } else {
         fprintf(stderr, "VGPU(%p) Queue(%p). Couldn't find kernel\n", this, gpu_queue_);
       }
