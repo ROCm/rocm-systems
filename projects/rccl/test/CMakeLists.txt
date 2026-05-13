@@ -157,6 +157,9 @@ if(BUILD_TESTS)
     AllToAllTests.cpp
     AllToAllVTests.cpp
     BroadcastTests.cpp
+    CommGrowTests.cpp
+    CommQueryPropertiesTests.cpp
+    CommSuspendResumeTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
