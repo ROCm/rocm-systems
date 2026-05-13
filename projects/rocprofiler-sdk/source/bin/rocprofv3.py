@@ -611,6 +611,11 @@ For attachment profiling of running processes:
         "--rocjpeg-trace",
         help="For collecting rocJPEG Traces",
     )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--rocshmem-trace",
+        help="For collecting rocSHMEM (ROCm SHared MEMory) host-stream API Traces",
+    )
 
     extended_tracing_options = parser.add_argument_group("Granular tracing options")
 
@@ -1735,6 +1740,7 @@ def run(app_args, args, **kwargs):
             ["ompt_trace", "OMPT_TRACE"],
             ["rocdecode_trace", "ROCDECODE_API_TRACE"],
             ["rocjpeg_trace", "ROCJPEG_API_TRACE"],
+            ["rocshmem_trace", "ROCSHMEM_API_TRACE"],
             ["kernel_trace", "KERNEL_TRACE"],
             ["hip_graph_trace", "HIP_GRAPH_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
