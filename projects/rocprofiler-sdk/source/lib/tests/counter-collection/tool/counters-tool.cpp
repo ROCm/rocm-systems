@@ -40,7 +40,6 @@
 #include <cstdlib>
 #include <future>
 #include <list>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -170,8 +169,18 @@ struct collection_state_t
 
     agent_config_map_t                 agent_configs{};
     std::atomic<int>                   pending_dispatches{0};
+    std::atomic<bool>                  sealed{false};
+    std::atomic<bool>                  fulfilled{false};
     synced<collection_results_t>       results{};
     std::promise<collection_results_t> promise{};
+
+    void try_fulfill()
+    {
+        if(!sealed.load(std::memory_order_acquire)) return;
+        if(pending_dispatches.load(std::memory_order_acquire) != 0) return;
+        if(fulfilled.exchange(true, std::memory_order_acq_rel)) return;
+        results.rlock([&](const auto& r) { promise.set_value(r); });
+    }
 };
 
 using agent_info_map_t    = std::unordered_map<rocprofiler_agent_id_t, rocprofiler_agent_t>;
@@ -390,9 +399,10 @@ stop_counter_collection()
                      "failed to stop kernel callback context");
 
     auto* coll = tool::ctx().active_collection;
-    if(coll && coll->pending_dispatches.load(std::memory_order_acquire) == 0)
+    if(coll)
     {
-        coll->results.rlock([&](const auto& results) { coll->promise.set_value(results); });
+        coll->sealed.store(true, std::memory_order_release);
+        coll->try_fulfill();
     }
 }
 
@@ -439,10 +449,17 @@ kernel_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_d
                          rocprofiler_user_data_t*                     user_data,
                          void* /*callback_data_args*/)
 {
-    const auto& ctx = tool::ctx();
+    const auto& ctx      = tool::ctx();
+    auto*       coll     = ctx.active_collection;
+    auto        agent_id = dispatch_data.dispatch_info.agent_id;
 
-    auto* coll     = ctx.active_collection;
-    auto  agent_id = dispatch_data.dispatch_info.agent_id;
+    bool is_internal = false;
+    ctx.kernel_map.rlock([&](const auto& map) {
+        auto it = map.find(dispatch_data.dispatch_info.kernel_id);
+        if(it != map.end()) is_internal = (it->second.mangled.rfind("__", 0) == 0);
+    });
+
+    if(is_internal) return;
 
     *config = coll->agent_configs.at(agent_id);
     coll->pending_dispatches.fetch_add(1, std::memory_order_relaxed);
@@ -505,10 +522,8 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
         }
     });
 
-    if(coll->pending_dispatches.fetch_sub(1, std::memory_order_acq_rel) == 1)
-    {
-        coll->results.rlock([&](const auto& results) { coll->promise.set_value(results); });
-    }
+    coll->pending_dispatches.fetch_sub(1, std::memory_order_acq_rel);
+    coll->try_fulfill();
 }
 }  // namespace
 
