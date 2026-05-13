@@ -32,13 +32,13 @@ typedef __int32 ssize_t;
 #endif  // !_WIN64
 #endif  /*_WIN32*/
 
-static double GetGigabytesPerSecond(size_t bytes, float time_ms) {
+inline double GetGigabytesPerSecond(size_t bytes, float time_ms) {
   constexpr double kBytesPerGigabyte = 1'000'000'000.0;
   return (static_cast<double>(bytes) / kBytesPerGigabyte) /
          (static_cast<double>(time_ms) / 1000.0);
 }
 
-static std::string FormatGigabytesPerSecond(size_t bytes, float time_ms) {
+inline std::string FormatGigabytesPerSecond(size_t bytes, float time_ms) {
   std::ostringstream out;
   out << std::fixed << std::setprecision(2)
       << GetGigabytesPerSecond(bytes, time_ms);

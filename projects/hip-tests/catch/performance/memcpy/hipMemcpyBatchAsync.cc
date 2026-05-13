@@ -111,7 +111,7 @@ void RunBenchmark(size_t copy_size, size_t offset) {
 /**
  * Test Description
  * ------------------------
- *  - Executes `hipMemcpyBatchAsync` with 64 same-device D2D copies:
+ *  - Executes `hipMemcpyBatchAsync` with kBatchCount same-device D2D copies:
  *    -# Copy sizes: 4 KB, 64 KB, 128 KB, 256 KB, 1 MB, 4 MB,
  *       16 MB, 64 MB, 128 MB, 256 MB, 1024 MB
  *    -# Source and destination allocation type: hipMalloc on the current device
@@ -133,7 +133,7 @@ HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_D2D_OptimizedPath_Aligned) {
 /**
  * Test Description
  * ------------------------
- *  - Executes `hipMemcpyBatchAsync` with 64 same-device D2D copies:
+ *  - Executes `hipMemcpyBatchAsync` with kBatchCount same-device D2D copies:
  *    -# Copy sizes: 4 KB, 64 KB, 128 KB, 256 KB, 1 MB, 4 MB,
  *       16 MB, 64 MB, 128 MB, 256 MB, 1024 MB
  *    -# Source and destination allocation type: hipMalloc on the current device
