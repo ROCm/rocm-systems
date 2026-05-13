@@ -575,7 +575,9 @@ hsaKmtRegisterGraphicsHandleToNodesExt(
 
 /**
   Imports an external semaphore (e.g. from Vulkan) into ROCr's KMD
-  context, returning an opaque handle suitable for queue signal/wait.
+  context, returning an opaque handle. The HSA-layer queue signal/wait
+  API that consumes the resulting handle has not landed yet; for now
+  the handle round-trips through hsaKmtDestroyExternalSemaphore only.
 */
 
 HSAKMT_STATUS
