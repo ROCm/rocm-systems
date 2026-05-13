@@ -25,9 +25,6 @@ static void RunBenchmark(size_t size, bool enable_peer_access = false) {
 
   int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
   int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-  if (src_device == -1 && dst_device == -1) {
-    return;
-  }
 
   LinearAllocGuard<int> src_allocation(LinearAllocs::hipMalloc, size);
   HIP_CHECK(hipSetDevice(dst_device));
@@ -60,8 +57,7 @@ static void RunBenchmark(size_t size, bool enable_peer_access = false) {
  */
 HIP_TEST_CASE(Performance_hipMemcpyDtoD_PeerAccessEnabled) {
   if (HipTest::getDeviceCount() < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(allocation_size, true);

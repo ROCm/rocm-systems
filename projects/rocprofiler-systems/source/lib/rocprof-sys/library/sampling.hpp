@@ -54,6 +54,15 @@ void
 postfork_child_cleanup();
 
 void
+prefork_lock_pmc_sampler();
+
+void
+postfork_parent_unlock_pmc_sampler();
+
+void
+postfork_child_reset_pmc_sampler_lock();
+
+void
 pause();
 
 void

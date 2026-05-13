@@ -296,6 +296,11 @@ class CodeGenerator:
                     f' if ({size_condition})'
                     f' size_ += sizeof(MachineInst);'
                 )
+            if inst_enc.has_implied_literal_ops:
+                size_line += (
+                    ' if (hasImpliedLiteral())'
+                    ' literal_ = reinterpret_cast<const uint32_t *>(inst)[1];'
+                )
             if rule.use_flat_mnemonic:
                 # FLAT mnemonics are dynamically constructed ("scratch_*",
                 # "global_*"). Store the owned string in a member so the
@@ -419,6 +424,10 @@ class CodeGenerator:
                     'const OpEncoding inst_'
                 )
             )
+            if inst_enc.has_implied_literal_ops:
+                class_members.append(
+                    cgen.Statement('uint32_t literal_ = 0')
+                )
             # FLAT encoding bases need an owned string for the dynamic mnemonic.
             if rule.use_flat_mnemonic:
                 class_members.append(
@@ -769,6 +778,63 @@ class CodeGenerator:
             L.append(f'  {dst_ops[0]}.write_scalar64(wf, wf.pc + size_);')
             L.append(f'  int16_t offset = static_cast<int16_t>({src_ops[0]}.encoding_value_);')
             L.append('  wf.pc = wf.pc + static_cast<int64_t>(offset) * 4 - size_;')
+            return '\n'.join(L)
+
+        if cls == 'scalar_getreg':
+            L.append(f'  uint16_t hwreg = {src_ops[0]}.encoding_value_;')
+            L.append('  uint32_t reg_id = hwreg & 0x3Fu;')
+            L.append('  uint32_t offset = (hwreg >> 6) & 0x1Fu;')
+            L.append('  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;')
+            L.append('  uint32_t reg_val = 0;')
+            L.append('  switch (reg_id) {')
+            L.append('  case 1: reg_val = wf.status_raw(); break;')
+            L.append('  case 4: reg_val = static_cast<uint32_t>(wf.cu().id()); break;')
+            L.append('  case 5: reg_val = static_cast<uint32_t>(wf.cu().id() >> 16); break;')
+            L.append('  case 6: reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8); break;')
+            L.append('  case 7: reg_val = (wf.vgpr_alloc().count & 0xFFu) | ((wf.vgpr_alloc().base & 0xFFu) << 8); break;')
+            L.append('  default: util::Logger::warn("s_getreg_b32: unhandled hwreg id=", reg_id); break;')
+            L.append('  }')
+            L.append('  if (offset + size > 32) size = 32 - offset;')
+            L.append('  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);')
+            L.append(f'  {dst_ops[0]}.write_scalar(wf, (reg_val >> offset) & mask);')
+            return '\n'.join(L)
+
+        if cls == 'scalar_setreg':
+            L.append(f'  uint16_t hwreg = {dst_ops[0]}.encoding_value_;')
+            L.append('  uint32_t reg_id = hwreg & 0x3Fu;')
+            L.append('  uint32_t offset = (hwreg >> 6) & 0x1Fu;')
+            L.append('  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;')
+            L.append('  if (offset + size > 32) size = 32 - offset;')
+            L.append('  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);')
+            L.append(f'  uint32_t src = {src_ops[0]}.read_scalar(wf);')
+            L.append('  switch (reg_id) {')
+            L.append('  case 1: {')
+            L.append('    uint32_t s = wf.status_raw();')
+            L.append('    s = (s & ~(mask << offset)) | ((src & mask) << offset);')
+            L.append('    wf.set_status_raw(s);')
+            L.append('    break;')
+            L.append('  }')
+            L.append('  default: util::Logger::warn("s_setreg_b32: unhandled hwreg id=", reg_id); break;')
+            L.append('  }')
+            return '\n'.join(L)
+
+        if cls == 'scalar_setreg_imm':
+            L.append(f'  uint16_t hwreg = {dst_ops[0]}.encoding_value_;')
+            L.append('  uint32_t reg_id = hwreg & 0x3Fu;')
+            L.append('  uint32_t offset = (hwreg >> 6) & 0x1Fu;')
+            L.append('  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;')
+            L.append('  if (offset + size > 32) size = 32 - offset;')
+            L.append('  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);')
+            L.append('  uint32_t src = inst.literal_;')
+            L.append('  switch (reg_id) {')
+            L.append('  case 1: {')
+            L.append('    uint32_t s = wf.status_raw();')
+            L.append('    s = (s & ~(mask << offset)) | ((src & mask) << offset);')
+            L.append('    wf.set_status_raw(s);')
+            L.append('    break;')
+            L.append('  }')
+            L.append('  default: util::Logger::warn("s_setreg_imm32_b32: unhandled hwreg id=", reg_id); break;')
+            L.append('  }')
             return '\n'.join(L)
 
         if cls == 'scalar_bitcmp':
@@ -4004,6 +4070,17 @@ class CodeGenerator:
                         ('util/log.h', False),
                         ('format', True),
                     ])
+                has_getreg = any(
+                    self.semantics
+                    and (s := self.semantics.instructions.get(i.name))
+                    and s.semantic_class in ('scalar_getreg', 'scalar_setreg')
+                    for i in all_insts
+                )
+                if has_getreg and not is_mem_enc:
+                    cpp_includes.extend([
+                        ('rocjitsu/vm/amdgpu/compute_unit.h', False),
+                        ('util/log.h', False),
+                    ])
 
                 # Include the unified shared execute template header when
                 # any instruction in this encoding delegates to a template.
@@ -4220,6 +4297,7 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             '#include "util/data_types.h"',
             '#include "util/except.h"',
+            '#include "util/log.h"',
             '#include <algorithm>',
             '#include <bit>',
             '#include <cmath>',
