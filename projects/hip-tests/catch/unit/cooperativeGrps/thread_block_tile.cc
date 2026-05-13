@@ -794,12 +794,11 @@ void aggregateForTypeAndOp(AggregationType aggType)
             REQUIRE(result == expected[resultLane]);
           }
         } else {
-          INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
-          compareFloatingPoint(result,
-                               expected[resultLane],
-                               mask,
-                               h_input.host_ptr(),
-                               laneId);
+          compareFloatingPoint<Op>(result,
+                                   expected[resultLane],
+                                   mask,
+                                   h_input.host_ptr(),
+                                   laneId);
         }
       }
     }
