@@ -2334,6 +2334,13 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE:
       *((uint64_t*)value) = cluster_max_dim_.x;
       break;
+    case HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS:
+      if (isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() >= 5) {
+        *((uint32_t*)value) = AMD_LAUNCH_DESCRIPTOR_MAX_PREFETCH_REGIONS;
+      } else {
+        *((uint32_t*)value) = 0;
+      }
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;

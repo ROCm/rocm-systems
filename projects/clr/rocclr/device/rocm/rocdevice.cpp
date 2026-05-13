@@ -1075,9 +1075,23 @@ bool Device::populateOCLDeviceConstants() {
     return false;
   }
 
-  if ((isa().versionMajor() == 12 && isa().versionMinor() == 5 && isa().versionStepping() == 0)
-       && (info_.globalMemCacheLineSize_ < 256)) {
+  if (info_.globalMemCacheLineSize_ < 256 &&
+      (isa().versionMajor() >= 13 ||
+       (isa().versionMajor() == 12 && isa().versionMinor() >= 5))) {
     info_.globalMemCacheLineSize_ = 256;
+  }
+
+  {
+    uint32_t maxPrefetchRegions = 0;
+    if (HSA_STATUS_SUCCESS ==
+        Hsa::agent_get_info(
+            bkendDevice_,
+            (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS,
+            &maxPrefetchRegions)) {
+      info_.maxDynDataPrefetchRegions_ = maxPrefetchRegions;
+    } else {
+      info_.maxDynDataPrefetchRegions_ = 0;
+    }
   }
 
   assert(cachesize[0] > 0);

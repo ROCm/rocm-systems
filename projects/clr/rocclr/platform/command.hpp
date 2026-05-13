@@ -32,6 +32,29 @@
 
 namespace amd {
 
+// Compile-time upper bound for DynDataPrefetch region arrays.
+// The actual device limit is queried at runtime via hipDeviceAttributeMaxDynDataPrefetchRegions.
+constexpr uint32_t kDynDataPrefetchMaxRegions = 2;
+
+struct DynDataPrefetchRegion {
+  void*    baseAddress;
+  size_t   burstSize;
+  uint32_t numBursts;
+  uint32_t stride;
+};
+
+struct DynDataPrefetchConfig {
+  uint32_t             numRegions;
+  uint8_t              hints;
+  DynDataPrefetchRegion regions[kDynDataPrefetchMaxRegions];
+
+  DynDataPrefetchConfig() : numRegions(0), hints(0) {
+    memset(regions, 0, sizeof(regions));
+  }
+
+  bool isEnabled() const { return numRegions > 0; }
+};
+
 /*! \addtogroup Runtime
  *  @{
  *
@@ -1326,6 +1349,7 @@ class NDRangeKernelCommand : public Command {
   uint64_t allGridSum_;      //!< A sum of all grids in multi GPU launch
   uint32_t firstDevice_;     //!< Device index of the first device in the gridc
   uint32_t numWorkgroups_;   //!< Total number of workgroups in the current launch
+  DynDataPrefetchConfig dynDataPrefetchConfig_;  //!< Dynamic data prefetch configuration
 
  public:
   enum {
@@ -1394,6 +1418,9 @@ class NDRangeKernelCommand : public Command {
   uint64_t firstDevice() const { return firstDevice_; }
 
   uint32_t numWorkgroups() const { return numWorkgroups_; }
+
+  const DynDataPrefetchConfig& dynDataPrefetchConfig() const { return dynDataPrefetchConfig_; }
+  void setDynDataPrefetchConfig(const DynDataPrefetchConfig& cfg) { dynDataPrefetchConfig_ = cfg; }
 
   //! Set the local work size.
   void setLocalWorkSize(const NDRange& local) { sizes_.local() = local; }
