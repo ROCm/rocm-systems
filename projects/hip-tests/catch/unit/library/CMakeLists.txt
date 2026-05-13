@@ -8,7 +8,7 @@ set(TEST_SRC
     library_negative.cc
     library_get_global.cc
     library_get_global_co.cc
-    library_refactor_regression.cc
+    library_invariants.cc
     hipKernelGetAttribute.cc
     lib_attribute.cc
 )

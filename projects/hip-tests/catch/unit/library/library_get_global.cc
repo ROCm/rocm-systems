@@ -7,22 +7,12 @@
 #include <hip_test_common.hh>
 
 #include <hip/hiprtc.h>
-#include <cstdlib>
 #include <string>
 #include <vector>
 
 namespace {
 
 constexpr size_t kArrLen = 32;
-
-// HIPRTC has no default include search path, so <hip/hip_runtime.h> (which
-// defines __managed__ and pulls in hip_version.h) is unreachable unless we
-// pass -I explicitly. Discover the install via env; fall back to /opt/rocm.
-std::string HipIncludePath() {
-  if (auto* p = std::getenv("ROCM_PATH")) return std::string(p) + "/include";
-  if (auto* p = std::getenv("HIP_PATH")) return std::string(p) + "/include";
-  return "/opt/rocm/include";
-}
 
 std::vector<char> CompileSource(const std::string& code, const std::string& gpu_arch) {
   hiprtcProgram prog;
@@ -32,9 +22,8 @@ std::vector<char> CompileSource(const std::string& code, const std::string& gpu_
 #else
   std::string offload_arch = "--fmad=false";
 #endif
-  std::string include_arg = "-I" + HipIncludePath();
-  const char* opts[] = {offload_arch.c_str(), include_arg.c_str()};
-  HIPRTC_CHECK(hiprtcCompileProgram(prog, 2, opts));
+  const char* opts[] = {offload_arch.c_str()};
+  HIPRTC_CHECK(hiprtcCompileProgram(prog, 1, opts));
   size_t size;
   HIPRTC_CHECK(hiprtcGetCodeSize(prog, &size));
   std::vector<char> res(size, 0);
