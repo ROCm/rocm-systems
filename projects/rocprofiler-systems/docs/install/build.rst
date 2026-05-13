@@ -148,7 +148,9 @@ via ``ROCPROFSYS_BUILD_<DEP>=ON``, as follows:
 
 .. code-block:: shell
 
-   git clone https://github.com/ROCm/rocm-systems.git
+   git clone --filter=blob:none --sparse https://github.com/ROCm/rocm-systems.git
+   git -C rocm-systems sparse-checkout set projects/rocprofiler-systems
+
    cmake -B rocprof-sys-build -DROCPROFSYS_BUILD_DYNINST=ON \
          -DROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=ON \
          -S rocm-systems/projects/rocprofiler-systems
@@ -191,7 +193,9 @@ in `the Perfetto UI <https://ui.perfetto.dev>`_.
 
 .. code-block:: shell
 
-   git clone https://github.com/ROCm/rocm-systems.git
+   git clone --filter=blob:none --sparse https://github.com/ROCm/rocm-systems.git
+   git -C rocm-systems sparse-checkout set projects/rocprofiler-systems
+
    cmake                                                 \
        -B rocprof-sys-build                              \
        -D CMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems  \
