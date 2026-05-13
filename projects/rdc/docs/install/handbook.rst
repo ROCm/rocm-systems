@@ -8,7 +8,13 @@
 Build and test RDC
 ******************
 
-RDC is open source and available under the MIT License. This section is helpful for open source developers. Third-party integrators may also find this information useful.
+To build RDC as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build RDC standalone using the following
+instructions.
 
 Build and install RDC
 =====================
