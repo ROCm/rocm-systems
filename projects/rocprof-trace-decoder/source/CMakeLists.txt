@@ -205,6 +205,11 @@ if(SQTT_LOGGING)
     target_compile_definitions(rocprof-trace-decoder-objects PRIVATE SQTT_LOGGING)
 endif()
 
+option(ARCH_MODEL "Enable ARCH_MODEL stitcher path" ON)
+if(ARCH_MODEL)
+    target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ARCH_MODEL)
+endif()
+
 # --- Shared library (installed) ---
 #
 # LLVM is exposed PUBLICly because cxx/disassembly.hpp is header-only and
@@ -273,6 +278,9 @@ if(DEFINED BUILD_TESTS AND BUILD_TESTS)
     endif()
     target_compile_options(rocprof-trace-decoder-sanitized PRIVATE -fsanitize=address,undefined -g -O1)
     target_link_options(rocprof-trace-decoder-sanitized PRIVATE -fsanitize=address,undefined)
+    if(ARCH_MODEL)
+        target_compile_definitions(rocprof-trace-decoder-sanitized PRIVATE ARCH_MODEL)
+    endif()
     set_target_properties(rocprof-trace-decoder-sanitized PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 endif()
 
