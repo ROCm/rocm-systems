@@ -101,6 +101,14 @@ def build_eval_string(equation: str) -> str:
                 pmc_df["GRBM_GUI_ACTIVE"] *
                 ammolite__numCU
             )
+        input:
+            SUM(TCC_EA_RDREQ_LEVEL_31) / SUM(TCC_EA_RDREQ_31)
+        output:
+            to_sum(
+                pmc_df["TCC_EA_RDREQ_LEVEL_31"]
+            ) / to_sum(
+                pmc_df["TCC_EA_RDREQ_31"]
+            )
         We can not handle the below for now:
         input:
             AVG(
