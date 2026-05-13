@@ -169,7 +169,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       }
     }
     lastWr->opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
-    lastWr->imm_data = immData;
+    lastWr->imm_data = htobe32(immData);
   }
   lastWr->wr_id = wr_id;
   lastWr->next = NULL;
@@ -740,7 +740,7 @@ static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetC
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
     *req = recvComm->recvReqs[be32toh(wc->imm_data) % NET_IB_MAX_REQUESTS];
   } else if (!base->isSend && wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM && base->recvMatchingScheme == BY_INDEX) {
-    *req = &base->reqs[((wc->imm_data >> WR_IMM_RX_REQ_IDX_SHIFT) & WR_IMM_RX_REQ_IDX_MASK)];
+    *req = &base->reqs[((be32toh(wc->imm_data) >> WR_IMM_RX_REQ_IDX_SHIFT) & WR_IMM_RX_REQ_IDX_MASK)];
   } else if (!base->isSend && wc->opcode == IBV_WC_RDMA_READ) { // Flush request completion
     NCCLCHECK(IbCastRequestRetrieveAsIndex(base->reqs, (wc->wr_id - NCCL_IB_FLUSH_REQ_WR_ID_OFFSET), req));
   } else if (!base->isSend) {
@@ -991,7 +991,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
         IbCastPostRecvWorkRequest(qp->qp, &recvComm->ibRecvWorkRequest);
       }
       if (commBase->recvMatchingScheme == BY_INDEX) {
-        if (wc->imm_data & WR_IMM_SPLIT_DATA_FLAG) {
+        if (be32toh(wc->imm_data) & WR_IMM_SPLIT_DATA_FLAG) {
           req->events[devIndex]--;
         } else { // Single QP send path
                 // The receiver posted recvs on all QPs, but the sender used a single QP
