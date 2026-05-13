@@ -1140,7 +1140,8 @@ static inline void packet_store_release(uint32_t* packet, uint16_t header, uint1
 }
 
 // ================================================================================================
-void VirtualGPU::AnalyzeAqlQueue() const {
+std::string VirtualGPU::AnalyzeAqlQueue() const {
+  std::string kernelName = "<not identified>";
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
   uint64_t index = Hsa::queue_load_write_index_relaxed(gpu_queue_);
@@ -1161,7 +1162,7 @@ void VirtualGPU::AnalyzeAqlQueue() const {
     }
     if (valid_packet_idx == kAqlSearchWindow) {
       fprintf(stderr, "VGPU(%p) Queue(%p). Couldn't find the hang AQL packet!\n", this, gpu_queue_);
-      return;
+      return kernelName;
     }
     auto aql_loc = &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
         gpu_queue_->base_address))[(read + valid_packet_idx) & queueMask];
@@ -1172,7 +1173,7 @@ void VirtualGPU::AnalyzeAqlQueue() const {
     auto printKernelName = [&](uint64_t kernel_object) {
       auto it = dev().KernelMap().find(kernel_object);
       if (it != dev().KernelMap().end()) {
-        fprintf(stderr, "Kernel Name: %s\n", it->second.name().c_str());
+        kernelName = it->second.getDemangledName();
       } else {
         fprintf(stderr, "VGPU(%p) Queue(%p). Couldn't find kernel\n", this, gpu_queue_);
       }
@@ -1238,6 +1239,7 @@ void VirtualGPU::AnalyzeAqlQueue() const {
   } else {
     fprintf(stderr, "VGPU(%p) Queue(%p) is idle\n", this, gpu_queue_);
   }
+  return kernelName;
 }
 
 // ================================================================================================

@@ -19,6 +19,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <stack>
+#include <string>
 #include <thread>
 
 namespace amd::roc {
@@ -571,8 +572,9 @@ class VirtualGPU : public device::VirtualDevice {
   //! Start the scheduler queue thread on first use
   void startSchedulerQueueThread();
 
-  //! Analyzes a crashed AQL queue to find a broken AQL packet
-  void AnalyzeAqlQueue() const;
+  //! Analyzes a crashed AQL queue to find a broken AQL packet.
+  //! Returns the faulting kernel name ("<not identified>" if not found).
+  std::string AnalyzeAqlQueue() const;
   bool ForceIrq() const { return force_irq_; }
 
   //! SDMA engine affinity management
