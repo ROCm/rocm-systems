@@ -592,15 +592,15 @@ void ComputeQueue::RingDoorbell(uint64_t value) {
 
 hsa_status_t ComputeQueue::Init(void) {
   if (use_hws) {
-    pr_info("Scheduler: Microsoft Hardware Scheduler (HWS)\n");
+    pr_rocr_info("Scheduler: Microsoft Hardware Scheduler (HWS)\n");
   } else {
-    pr_info("Scheduler: AMD proprietary\n");
+    pr_rocr_info("Scheduler: AMD proprietary\n");
   }
 
   if (native_aql_)
-    pr_info("Submission type: AQL packet\n");
+    pr_rocr_info("Submission type: AQL packet\n");
   else
-    pr_info("Submission type: PM4 packet (AQL->PM4 translation)\n");
+    pr_rocr_info("Submission type: PM4 packet (AQL->PM4 translation)\n");
 
   hsa_status_t ret = use_hws ? HwsInit() : SwsInit();
   if (ret) {
