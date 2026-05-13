@@ -550,47 +550,35 @@ def test_merge_counters_spatial_multiplex_basic_functionality():
     import pandas as pd
 
     data = {
-        "Dispatch_ID": [1, 2, 3],
-        "GPU_ID": [0, 0, 1],
-        "Grid_Size": [64, 128, 256],
-        "Workgroup_Size": [16, 32, 64],
-        "LDS_Per_Workgroup": [1024, 2048, 4096],
-        "Scratch_Per_Workitem": [0, 0, 0],
-        "Arch_VGPR": [32, 64, 96],
-        "Accum_VGPR": [0, 0, 0],
-        "SGPR": [16, 32, 48],
-        ("file1", "Wave_Size"): [64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003],
-        "Kernel_ID": [501, 502, 503],
-        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_b"],
-        "Start_Timestamp": [1000, 1100, 2000],
-        "End_Timestamp": [1200, 1300, 2500],
-        "Counter1": [100, 200, 300],
-        ("file2", "Dispatch_ID"): [4, 5, 6],
-        ("file2", "GPU_ID"): [1, 2, 2],
-        ("file2", "Grid_Size"): [512, 1024, 2048],
-        ("file2", "Workgroup_Size"): [32, 64, 128],
-        ("file2", "LDS_Per_Workgroup"): [2048, 4096, 8192],
-        ("file2", "Scratch_Per_Workitem"): [0, 0, 0],
-        ("file2", "Arch_VGPR"): [64, 96, 128],
-        ("file2", "Accum_VGPR"): [0, 0, 0],
-        ("file2", "SGPR"): [32, 48, 64],
-        ("file2", "Wave_Size"): [64, 64, 64],
-        ("file2", "Correlation_ID"): [2001, 2002, 2003],
-        ("file2", "Kernel_ID"): [601, 602, 603],
-        ("file2", "Kernel_Name"): ["kernel_c", "kernel_c", "kernel_d"],
-        ("file2", "Start_Timestamp"): [3000, 3100, 4000],
-        ("file2", "End_Timestamp"): [3400, 3500, 4800],
-        ("file2", "Counter1"): [400, 500, 600],
+        "Dispatch_ID": [1, 2, 3, 4, 5, 6],
+        "GPU_ID": [0, 0, 1, 1, 2, 2],
+        "Grid_Size": [64, 128, 256, 512, 1024, 2048],
+        "Workgroup_Size": [16, 32, 64, 32, 64, 128],
+        "LDS_Per_Workgroup": [1024, 2048, 4096, 2048, 4096, 8192],
+        "Scratch_Per_Workitem": [0, 0, 0, 0, 0, 0],
+        "Arch_VGPR": [32, 64, 96, 64, 96, 128],
+        "Accum_VGPR": [0, 0, 0, 0, 0, 0],
+        "SGPR": [16, 32, 48, 32, 48, 64],
+        "Wave_Size": [64, 64, 64, 64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003, 2001, 2002, 2003],
+        "Kernel_ID": [501, 502, 503, 601, 602, 603],
+        "Kernel_Name": [
+            "kernel_a",
+            "kernel_a",
+            "kernel_b",
+            "kernel_c",
+            "kernel_c",
+            "kernel_d",
+        ],
+        "Start_Timestamp": [1000, 1100, 2000, 3000, 3100, 4000],
+        "End_Timestamp": [1200, 1300, 2500, 3400, 3500, 4800],
+        "Counter1": [100, 200, 300, 400, 500, 600],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
     assert isinstance(result, pd.DataFrame)
-    assert isinstance(result.columns, pd.MultiIndex)
-    assert len(result.columns.levels) == 2
 
 
 def test_merge_counters_spatial_multiplex_kernel_name_fallback():
@@ -612,16 +600,15 @@ def test_merge_counters_spatial_multiplex_kernel_name_fallback():
         "Arch_VGPR": [32, 64],
         "Accum_VGPR": [0, 0],
         "SGPR": [16, 32],
-        ("file1", "Wave_Size"): [64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002],
+        "Wave_Size": [64, 64],
+        "Correlation_ID": [1001, 1002],
         "Kernel_ID": [501, 502],
-        ("file1", "Name"): ["kernel_a", "kernel_a"],
+        "Name": ["kernel_a", "kernel_a"],
         "Start_Timestamp": [1000, 1100],
         "End_Timestamp": [1200, 1300],
         "Counter1": [100, 200],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # The function currently has a bug where it doesn't properly check for 'Kernel_Name'
     # existence before accessing it, even though it has fallback logic for 'Name'
@@ -661,8 +648,8 @@ def test_merge_counters_spatial_multiplex_single_kernel_occurrence():
         "Arch_VGPR": [32, 64, 96],
         "Accum_VGPR": [0, 0, 0],
         "SGPR": [16, 32, 48],
-        ("file1", "Wave_Size"): [64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003],
+        "Wave_Size": [64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003],
         "Kernel_ID": [501, 502, 503],
         "Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"],
         "Start_Timestamp": [1000, 2000, 3000],
@@ -670,7 +657,6 @@ def test_merge_counters_spatial_multiplex_single_kernel_occurrence():
         "Counter1": [100, 200, 300],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
@@ -697,8 +683,8 @@ def test_merge_counters_spatial_multiplex_multiple_duplicate_kernels():
         "Arch_VGPR": [32, 32, 64, 64, 96, 96],
         "Accum_VGPR": [0, 0, 0, 0, 0, 0],
         "SGPR": [16, 16, 32, 32, 48, 48],
-        ("file1", "Wave_Size"): [64, 64, 64, 64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003, 1004, 1005, 1006],
+        "Wave_Size": [64, 64, 64, 64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003, 1004, 1005, 1006],
         "Kernel_ID": [501, 502, 503, 504, 505, 506],
         "Kernel_Name": [
             "kernel_a",
@@ -713,7 +699,6 @@ def test_merge_counters_spatial_multiplex_multiple_duplicate_kernels():
         "Counter1": [100, 200, 300, 400, 500, 600],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
@@ -740,8 +725,8 @@ def test_merge_counters_spatial_multiplex_timestamp_median_calculation():
         "Arch_VGPR": [32, 32, 32],
         "Accum_VGPR": [0, 0, 0],
         "SGPR": [16, 16, 16],
-        ("file1", "Wave_Size"): [64, 64, 64],
-        ("file1", "Correlation_ID"): [1001, 1002, 1003],
+        "Wave_Size": [64, 64, 64],
+        "Correlation_ID": [1001, 1002, 1003],
         "Kernel_ID": [501, 502, 503],
         "Kernel_Name": ["kernel_a", "kernel_a", "kernel_a"],
         "Start_Timestamp": [1000, 1200, 1400],
@@ -749,7 +734,6 @@ def test_merge_counters_spatial_multiplex_timestamp_median_calculation():
         "Counter1": [100, 200, 300],
     }
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.merge_counters_spatial_multiplex(df)
 
@@ -785,7 +769,6 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
     result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
@@ -829,7 +812,6 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
@@ -864,7 +846,6 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
     result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
@@ -897,7 +878,6 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
@@ -930,40 +910,39 @@ def test_impute_counters_iteration_multiplex(tmp_path: Path) -> None:
         "End_Timestamp": [1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500],
         "Kernel_ID": [1, 1, 1, 1, 1, 1, 1, 1],
         # Counter bucket pattern: A, B, C (repeats)
-        ("file1", "Counter_A"): [100, None, None, 200, None, None, 300, None],
-        ("file1", "Counter_B"): [None, 110, None, None, 210, None, None, 310],
-        ("file1", "Counter_C"): [None, None, 120, None, None, 220, None, None],
+        "Counter_A": [100, None, None, 200, None, None, 300, None],
+        "Counter_B": [None, 110, None, None, 210, None, None, 310],
+        "Counter_C": [None, None, 120, None, None, 220, None, None],
     }
 
     df = pd.DataFrame(data)
-    df.columns = pd.MultiIndex.from_tuples(df.columns)
     result = utils_analysis.impute_counters_iteration_multiplex(
         df, "kernel_launch_params", tmp_path
     )
     result = result.sort_values(by="Dispatch_ID")
 
     # Verify complete subgroups: all rows should have all counters
-    assert result[("file1", "Counter_A")].iloc[0] == 100
-    assert result[("file1", "Counter_A")].iloc[1] == 100
-    assert result[("file1", "Counter_A")].iloc[2] == 100
-    assert result[("file1", "Counter_B")].iloc[0] == 110
-    assert result[("file1", "Counter_C")].iloc[0] == 120
+    assert result["Counter_A"].iloc[0] == 100
+    assert result["Counter_A"].iloc[1] == 100
+    assert result["Counter_A"].iloc[2] == 100
+    assert result["Counter_B"].iloc[0] == 110
+    assert result["Counter_C"].iloc[0] == 120
 
     # Verify no cross-subgroup contamination: subgroup 1 has its own values
-    assert result[("file1", "Counter_A")].iloc[3] == 200
-    assert result[("file1", "Counter_A")].iloc[4] == 200
-    assert result[("file1", "Counter_B")].iloc[3] == 210
-    assert result[("file1", "Counter_C")].iloc[3] == 220
+    assert result["Counter_A"].iloc[3] == 200
+    assert result["Counter_A"].iloc[4] == 200
+    assert result["Counter_B"].iloc[3] == 210
+    assert result["Counter_C"].iloc[3] == 220
 
     # Verify incomplete last subgroup gets filled from previous subgroup
     # Row 6-7 only have Counter_A and Counter_B, missing Counter_C
-    assert result[("file1", "Counter_A")].iloc[6] == 300
-    assert result[("file1", "Counter_A")].iloc[7] == 300
-    assert result[("file1", "Counter_B")].iloc[6] == 310
-    assert result[("file1", "Counter_B")].iloc[7] == 310
+    assert result["Counter_A"].iloc[6] == 300
+    assert result["Counter_A"].iloc[7] == 300
+    assert result["Counter_B"].iloc[6] == 310
+    assert result["Counter_B"].iloc[7] == 310
     # Counter_C should be filled from previous subgroup via global ffill
-    assert result[("file1", "Counter_C")].iloc[6] == 220
-    assert result[("file1", "Counter_C")].iloc[7] == 220
+    assert result["Counter_C"].iloc[6] == 220
+    assert result["Counter_C"].iloc[7] == 220
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 8  # Ensure same number of rows

@@ -2679,9 +2679,11 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(benchmark_base, "Path", mock_path)
 
     deviceID = 0
+    cache_sizes = {}
     # Create Bench_base object in order to call gpu benchmark lock method
     # Device ID list arg doesn't matter since we are just using the base class
-    testClass = benchmark_base.Bench_base([deviceID])
+    # cache_sizes can be empty for this test since we do not need it to test locking
+    testClass = benchmark_base.Bench_base(deviceID, cache_sizes)
 
     # --- Test lock acquisition and lock file creation ---
     with testClass.gpu_benchmark_lock(deviceID):
