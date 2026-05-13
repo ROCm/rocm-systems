@@ -10,6 +10,8 @@
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
+extern int64_t ncclParamIbCastResiliencyPortFailover();
+extern int64_t ncclParamIbCastResiliencyPortRecovery();
 extern int64_t ncclParamIbCastGdrFlushDisable();
 // AMD AINIC
 RCCL_PARAM(IbCastCtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
@@ -523,6 +525,12 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
 exit:
   if (ret == ncclSuccess)
     ret = IbCastQpSchedInitParms(&castGlobalQpSchedParms);
+  if (ret == ncclSuccess && castGlobalQpSchedParms.enable &&
+      (ncclParamIbCastResiliencyPortFailover() || ncclParamIbCastResiliencyPortRecovery())) {
+    INFO(NCCL_INIT|NCCL_NET, "NET/IB : PORT_FAILOVER/RECOVERY enabled - disabling QP scheduler "
+         "(load balancer integration with resiliency is pending)");
+    castGlobalQpSchedParms.enable = false;
+  }
   return ret;
 fail:
   if(devices && (ncclSuccess != wrap_ibv_free_device_list(devices))){WARN("NET/IB : Unable to free device list");}
