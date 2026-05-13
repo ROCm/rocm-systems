@@ -280,8 +280,7 @@ public:
         try
         {
             auto& decoder = decoders.at(id);
-            uint64_t vaddr = decoder->begin() + offset;
-            if (decoder->inrange(vaddr)) return decoder->getSymbolName(vaddr);
+            return decoder->getSymbolName(decoder->begin() + offset);
         }
         catch (std::out_of_range&)
         {}
@@ -368,7 +367,7 @@ public:
 
     std::unique_ptr<Instruction> get(code_object_id_t id, uint64_t offset)
     {
-        if (id == 0)
+        if (id == 0 && decoders.find(id) == decoders.end())
             return get(offset);
         else
             return this->Super::get(id, offset);
@@ -388,7 +387,7 @@ public:
     {
         std::map<uint64_t, SymbolInfo> symbols;
 
-        for (const auto& [_, dec] : decoders)
+        for (const auto& [id, dec] : decoders)
         {
             auto& smap = dec->getSymbolMap();
             for (auto& [vaddr, sym] : smap) symbols[vaddr + dec->load_addr] = sym;
