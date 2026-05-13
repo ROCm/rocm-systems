@@ -73,8 +73,8 @@ This includes the ROCm profilers, dependencies, and base packages.
 
             sudo zypper install amdrocm-profiler
 
-Configuration and modulefile usage
-==================================
+Install from source
+===================
 
 For runtime configuration options and modulefile-based environment setup, see
 :doc:`./source-install`:
