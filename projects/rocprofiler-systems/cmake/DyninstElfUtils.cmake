@@ -45,7 +45,7 @@ endif()
 
 # Minimum acceptable version of elfutils NB: We need >=0.178 because libdw isn't
 # thread-safe before then
-set(_min_version 0.178)
+set(_min_version 0.195)
 
 set(ElfUtils_MIN_VERSION
     ${_min_version}
@@ -135,7 +135,7 @@ else()
     # If we didn't find a suitable version on the system, then download one from the web
     rocprofiler_systems_add_cache_option(
         ELFUTILS_DOWNLOAD_VERSION "Version of elfutils to download and install" STRING
-        "0.188"
+        "0.195"
     )
     set(ELFUTILS_DOWNLOAD_VERSION ${ElfUtils_DOWNLOAD_VERSION})
 
