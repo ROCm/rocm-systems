@@ -285,8 +285,7 @@ static void AllocateHmmMemory(int flag, int device) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiThread) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
@@ -339,16 +338,14 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThread) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
   int Ngpus = 0;
   HIP_CHECK(hipGetDeviceCount(&Ngpus));
   if (Ngpus < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   int InitVal = 123, *Hmm1 = NULL, NumElms = isQuickLevel() ? 4096 : 4096 * 4;
@@ -382,8 +379,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
@@ -417,8 +413,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
@@ -448,8 +443,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
@@ -482,8 +476,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
 HIP_TEST_CASE(Unit_hipMallocManaged_TwoKrnlsComnHmmMem) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   IfTestPassed = true;
