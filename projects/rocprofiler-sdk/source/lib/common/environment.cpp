@@ -31,13 +31,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
 
-// Declare environ as extern at file scope
-extern "C" {
-extern char** environ;
-}
+// POSIX process environment table.
+// We intentionally read from environ directly instead of std::getenv()
+// because target applications (e.g. bash) may interpose getenv().
+extern "C" char** environ;
 
 namespace rocprofiler
 {
@@ -45,36 +46,37 @@ namespace common
 {
 namespace impl
 {
-namespace
-{
 // Safely read environment variable directly from environ array.
 // This avoids issues with bash's custom getenv() implementation which
 // breaks when setenv() is called before bash initializes its internal tables.
-// See: bash exports its own getenv() that uses hash tables, but when
-// libraries call setenv() in constructors, bash's tables are uninitialized.
-const char*
-safe_getenv(const char* name)
+//
+// THREAD SAFETY: This function is NOT thread-safe with respect to concurrent
+// setenv()/putenv()/unsetenv() calls.
+std::optional<std::string>
+get_env_direct(std::string_view name)
 {
-    if(!name || !environ) return nullptr;
+    if(name.empty() || !environ) return std::nullopt;
 
-    size_t name_len = std::strlen(name);
     for(char** env = environ; *env; ++env)
     {
-        if(std::strncmp(*env, name, name_len) == 0 && (*env)[name_len] == '=')
+        std::string_view entry{*env};
+        if(entry.size() > name.size() && entry.compare(0, name.size(), name) == 0 &&
+           entry[name.size()] == '=')
         {
-            return *env + name_len + 1;
+            // copy the value so callers do not retain pointers into environ.
+            return std::string{entry.substr(name.size() + 1)};
         }
     }
-    return nullptr;
+
+    return std::nullopt;
 }
-}  // namespace
 
 std::string
 get_env(std::string_view env_id, std::string_view _default)
 {
     if(env_id.empty()) return std::string{_default};
-    const char* env_var = safe_getenv(env_id.data());
-    if(env_var) return std::string{env_var};
+    auto env_var = get_env_direct(env_id);
+    if(env_var) return *env_var;
     return std::string{_default};
 }
 
@@ -88,26 +90,26 @@ bool
 get_env(std::string_view env_id, bool _default)
 {
     if(env_id.empty()) return _default;
-    const char* env_var = safe_getenv(env_id.data());
+    auto env_var = get_env_direct(env_id);
     if(env_var)
     {
-        if(std::string_view{env_var}.empty())
+        if(env_var->empty())
         {
             ROCP_FATAL << fmt::format("No boolean value provided for {}", env_id);
         }
 
-        if(std::string_view{env_var}.find_first_not_of("0123456789") == std::string_view::npos)
+        if(env_var->find_first_not_of("0123456789") == std::string_view::npos)
         {
-            return static_cast<bool>(std::stoi(env_var));
+            return static_cast<bool>(std::stoi(*env_var));
         }
 
-        // Create a mutable copy for tolower modification
-        std::string env_var_lower{env_var};
-        for(size_t i = 0; i < env_var_lower.length(); ++i)
-            env_var_lower[i] = tolower(env_var_lower[i]);
+        // Convert to lowercase in-place (cast to unsigned char to avoid UB)
+        for(size_t i = 0; i < env_var->length(); ++i)
+            (*env_var)[i] =
+                static_cast<char>(std::tolower(static_cast<unsigned char>((*env_var)[i])));
 
         for(const auto& itr : {"off", "false", "no", "n", "f", "0"})
-            if(env_var_lower == itr) return false;
+            if(*env_var == itr) return false;
 
         return true;
     }
@@ -126,7 +128,7 @@ get_env(std::string_view env_id,
         "change use of stol/stoul if instantiating for type larger than a 64-bit integer");
 
     if(env_id.empty()) return _default;
-    const char* env_var = safe_getenv(env_id.data());
+    auto env_var = get_env_direct(env_id);
     if(env_var)
     {
         try
@@ -135,18 +137,18 @@ get_env(std::string_view env_id,
             {
                 // use stol/stoul
                 if constexpr(std::is_signed<Tp>::value)
-                    return static_cast<Tp>(std::stol(env_var));
+                    return static_cast<Tp>(std::stol(*env_var));
                 else
-                    return static_cast<Tp>(std::stoul(env_var));
+                    return static_cast<Tp>(std::stoul(*env_var));
             }
             else if constexpr(std::is_floating_point<Tp>::value)
             {
-                return static_cast<Tp>(std::stod(env_var));
+                return static_cast<Tp>(std::stod(*env_var));
             }
         } catch(std::exception& _e)
         {
             ROCP_ERROR << "[rocprofiler][get_env] Exception thrown converting getenv(\"" << env_id
-                       << "\") = " << env_var << " to " << cxx_demangle(typeid(Tp).name())
+                       << "\") = " << *env_var << " to " << cxx_demangle(typeid(Tp).name())
                        << " :: " << _e.what() << ". Using default value of " << _default << "\n";
         }
         return _default;

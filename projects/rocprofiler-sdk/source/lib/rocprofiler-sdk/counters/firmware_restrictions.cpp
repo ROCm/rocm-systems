@@ -65,11 +65,11 @@ findViaInstallPath(const std::string& filename)
 std::string
 findViaEnvironment(const std::string& filename)
 {
-    auto metrics_path = common::get_env("ROCPROFILER_METRICS_PATH", "");
-    if(!metrics_path.empty())
+    auto metrics_path = common::get_env_optional("ROCPROFILER_METRICS_PATH");
+    if(metrics_path)
     {
         ROCP_INFO << filename << " is being looked up via env variable ROCPROFILER_METRICS_PATH";
-        return common::filesystem::path{metrics_path} / filename;
+        return common::filesystem::path{*metrics_path} / filename;
     }
     // No environment variable, lookup via install path
     return findViaInstallPath(filename);
