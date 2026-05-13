@@ -1266,7 +1266,7 @@ class TestExecutor:
 
         # Add test binaries
         test_dir = os.path.join(self.build_dir, "test")
-        for binary in ["rccl-UnitTestsFixtures", "rccl-UnitTests", "rccl-UnitTestsMPI"]:
+        for binary in ["rccl-UnitTestsFixtures", "rccl-UnitTestsFixturesDebug", "rccl-UnitTests", "rccl-UnitTestsMPI", "rccl-UnitTestsAltRsmi"]:
             binary_path = os.path.join(test_dir, binary)
             if os.path.isfile(binary_path):
                 object_files.extend(["--object", binary_path])
