@@ -180,6 +180,7 @@ typedef enum rocprofiler_callback_tracing_kind_t  // NOLINT(performance-enum-siz
     ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,  ///< @see ::rocprofiler_hip_stream_operation_t
     ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,  ///< @see
                                                          ///< ::rocprofiler_marker_core_range_api_id_t
+    ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,           ///< rocSHMEM API tracing
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -231,6 +232,7 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,         ///< @see rocprofiler_kfd_queue_operation_t
     ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API,  ///< @see
                                                        ///< ::rocprofiler_marker_core_range_api_id_t
+    ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API,           ///< rocSHMEM tracing
     ROCPROFILER_BUFFER_TRACING_LAST,
 
     /// @var ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT
@@ -438,6 +440,7 @@ typedef enum rocprofiler_runtime_initialization_operation_t  // NOLINT(performan
     ROCPROFILER_RUNTIME_INITIALIZATION_RCCL,       ///< Application loaded RCCL runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_ROCDECODE,  ///< Application loaded rocDecoder runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_ROCJPEG,    ///< Application loaded rocJPEG runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_ROCSHMEM,   ///< Application loaded rocSHMEM runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_LAST,
 } rocprofiler_runtime_initialization_operation_t;
 

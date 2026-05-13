@@ -96,6 +96,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCDECODE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCJPEG_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_STREAM)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_CORE_RANGE_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCSHMEM_API)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -301,6 +302,12 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
                 operation);
             break;
         }
+        case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+        {
+            // rocSHMEM service is wired in via lib/rocprofiler-sdk/rocshmem in
+            // a follow-up commit; until then operation names are unresolved.
+            break;
+        }
     };
 
     if(!val)
@@ -448,6 +455,12 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API:
         {
             ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxCoreRange>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+        {
+            // rocSHMEM service is wired in via lib/rocprofiler-sdk/rocshmem in
+            // a follow-up commit; until then no operations are enumerated.
             break;
         }
     };
@@ -606,6 +619,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
         case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
         case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
+        case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }
