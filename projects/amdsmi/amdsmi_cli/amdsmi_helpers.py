@@ -3107,15 +3107,14 @@ class AMDSMIHelpers:
                     }
                 return f"{power_type_key} power cap is already set to {requested_power_cap}W"
             elif current_power_cap == 0:
-                if logger.is_json_format() or logger.is_csv_format():
-                    return {
-                        "status": "error",
-                        "sensor": power_type_key,
-                        "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
-                        "current_power_cap": self.unit_format(logger, current_power_cap, "W"),
-                        "message": f"Unable to set {power_type_key} power cap to {requested_power_cap}W, current value is {current_power_cap}W",
-                    }
-                return f"Unable to set {power_type_key} power cap to {requested_power_cap}W, current value is {current_power_cap}W"
+                error_msg = f"Unable to set {power_type_key} power cap to {current_power_cap}W."
+                output_format = self.get_output_format()
+                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    None,
+                    output_format,
+                    hint=error_msg,
+                )
             elif not (
                 min_power_cap < requested_power_cap <= max_power_cap and requested_power_cap > 0
             ):
@@ -3135,26 +3134,22 @@ class AMDSMIHelpers:
             )
             amdsmi_interface.amdsmi_set_power_cap(device_handle, power_type, new_power_cap)
             if logger.is_json_format() or logger.is_csv_format():
+                msg = f"Successfully set {power_type_key} power cap to {requested_power_cap}W"
                 return {
                     "status": "success",
                     "sensor": power_type_key,
                     "power_cap": self.unit_format(logger, requested_power_cap, "W"),
-                    "message": f"Successfully set {power_type_key} power cap to {requested_power_cap}W",
+                    "message": msg,
                 }
-            return f"Successfully set {power_type_key} power cap to {requested_power_cap}W"
+            return msg
         except amdsmi_exception.AmdSmiLibraryException as e:
             if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                 raise PermissionError("Command requires elevation") from e
             error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set {power_type_key} power cap to {requested_power_cap}W"
-            if logger.is_json_format() or logger.is_csv_format():
-                return {
-                    "status": "error",
-                    "sensor": power_type_key,
-                    "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
-                    "error": e.get_error_info(detailed=False),
-                    "message": error_msg,
-                }
-            return error_msg
+            output_format = self.get_output_format()
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                sys.argv[1] if len(sys.argv) > 1 else "unknown", None, output_format, error_msg
+            )
 
     def prompt_reboot(self):
         """Prompt user to reboot and execute if confirmed

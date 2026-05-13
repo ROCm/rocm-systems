@@ -76,8 +76,9 @@ except ImportError:
 
 def _print_error(e, destination):
     if destination in ["stdout", "json", "csv"]:
-        print(e)
+        print(e, file=sys.stderr)
     else:
+        print(e, file=sys.stderr)
         f = open(destination, "w", encoding="utf-8")
         f.write(e)
         f.close()
@@ -256,19 +257,36 @@ if __name__ == "__main__":
             amd_smi_commands.logger.destination,
         )
         sys.exit(abs(e.value))
-    except amdsmi_exception.AmdSmiLibraryException as e:
-        exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
-            amd_smi_commands.logger.format, e.get_error_code()
-        )
+    # jcnii
+    # except amdsmi_exception.AmdSmiLibraryException as e:
+    #    exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+    #        amd_smi_commands.logger.format, None, e.get_error_code()
+    #    )
+    #    _print_error(
+    #        f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
+    #        amd_smi_commands.logger.destination,
+    #    )
+    #    sys.exit(abs(exc.value))
+    # except amdsmi_cli_exceptions.AmdSmiLibraryErrorException as e:
+    #    exc = e
+    #    _print_error(
+    #        f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
+    #        amd_smi_commands.logger.destination,
+    #    )
+    #    sys.exit(abs(exc.value))
+    except PermissionError as e:
+        command = sys.argv[1] if len(sys.argv) > 1 else ""
+        outputformat = amd_smi_commands.logger.format
+        exc = amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command, outputformat)
         _print_error(
             f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
             amd_smi_commands.logger.destination,
         )
         sys.exit(abs(exc.value))
-    except PermissionError as e:
+    except ValueError as e:
         command = sys.argv[1] if len(sys.argv) > 1 else ""
         outputformat = amd_smi_commands.logger.format
-        exc = amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command, outputformat)
+        exc = amdsmi_cli_exceptions.AmdSmiParameterNotSupportedException(command, outputformat)
         _print_error(
             f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
             amd_smi_commands.logger.destination,

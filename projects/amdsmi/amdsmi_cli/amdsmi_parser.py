@@ -353,7 +353,9 @@ class AMDSMIParser(argparse.ArgumentParser):
     def _is_command_supported(self, user_input, acceptable_values, command_name):
         if acceptable_values == "N/A":
             outputformat = self.helpers.get_output_format()
-            raise amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command_name, outputformat)
+            raise amdsmi_cli_exceptions.AmdSmiCommandNotSupportedException(
+                command_name, outputformat
+            )
         elif str(user_input).upper() not in acceptable_values:
             print(f"Valid inputs are {acceptable_values}")
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
@@ -786,7 +788,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 if args.watch is None:
                     raise argparse.ArgumentError(
                         self,
-                        f"invalid argument: '{self.dest}' needs to be paired with -w/--watch. Error code: -2",
+                        f"invalid argument: '{self.dest}' needs to be paired with -w/--watch. Error code: 202",
                     )
                 else:
                     setattr(args, self.dest, values)
@@ -2442,7 +2444,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 )
                 (accelerator_set_choices, _) = self.helpers.get_accelerator_choices_types_indices()
                 memory_partition_choices_str = ", ".join(self.helpers.get_memory_partition_types())
-                accelerator_set_choices_str = ", ".join(accelerator_set_choices)
+                if isinstance(accelerator_set_choices, str) and accelerator_set_choices == "N/A":
+                    accelerator_set_choices_str = "N/A"
+                else:
+                    accelerator_set_choices_str = ", ".join(accelerator_set_choices)
                 set_compute_partition_help = f"Set one of the following accelerator TYPE or profile INDEX:\n\t{accelerator_set_choices_str}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
                 set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
                 soc_pstate_help_info = ", ".join(self.helpers.get_soc_pstates())
