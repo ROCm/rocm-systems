@@ -341,6 +341,7 @@ if (NOT BUILD_TESTS_ONLY)
     ${PROJECT_NAME}
     PUBLIC
       -fgpu-rdc
+      $<$<BOOL:${ASAN}>:-fsanitize=address -g>
     PRIVATE
       -Wall
       -Wextra
@@ -377,16 +378,10 @@ if (NOT BUILD_TESTS_ONLY)
       $<$<BOOL:${ASAN}>:-fsanitize=address -g -shared-libsan>
   )
 
-  target_compile_options(
-    ${PROJECT_NAME}
-    PUBLIC
-      $<$<BOOL:${ASAN}>:-fsanitize=address -g>
-  )
-
-if (ASAN)
-   message(STATUS "Removing xnack- from GPU_TARGET as these are invalid with ASAN address sanitizer")
-   list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
-endif()
+  if (ASAN)
+    message(STATUS "Removing xnack- from GPU_TARGET as these are invalid with ASAN address sanitizer")
+    list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
+  endif()
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
     # ROCm 6.x requires us to explicitly enable warp sync builtins

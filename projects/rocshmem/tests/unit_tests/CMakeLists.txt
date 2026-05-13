@@ -30,6 +30,11 @@ cmake_minimum_required(VERSION 3.16.3 FATAL_ERROR)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 project(rocshmem_unit_tests VERSION 1.0.0 LANGUAGES CXX)
 
+# ASAN option (if not already defined by parent project)
+if (NOT DEFINED ASAN)
+  option(ASAN "Enable AddressSanitizer" OFF)
+endif()
+
 ###############################################################################
 # SOURCES
 ###############################################################################
@@ -204,3 +209,16 @@ endif()
 # For backward compatibility, the shell script is still available
 # Usage: rocshmem_unit_driver.sh <binary> all
 # Usage: rocshmem_unit_driver.sh <binary> custom <ranks> <filter>
+# ASAN SETTINGS
+###############################################################################
+target_compile_options(
+  ${PROJECT_NAME}
+  PRIVATE
+    $<$<BOOL:${ASAN}>:-fsanitize=address -g>
+)
+
+target_link_options(
+  ${PROJECT_NAME}
+  PRIVATE
+    $<$<BOOL:${ASAN}>:-fsanitize=address -g -shared-libsan>
+)
