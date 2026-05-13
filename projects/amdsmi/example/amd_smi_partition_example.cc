@@ -57,6 +57,24 @@
 // Partition name converters
 // ---------------------------------------------------------------------------
 
+[[nodiscard]] static std::string_view resource_type_str(
+    amdsmi_accelerator_partition_resource_type_t t) {
+  switch (t) {
+    case AMDSMI_ACCELERATOR_XCC:
+      return "XCC";
+    case AMDSMI_ACCELERATOR_ENCODER:
+      return "ENCODER";
+    case AMDSMI_ACCELERATOR_DECODER:
+      return "DECODER";
+    case AMDSMI_ACCELERATOR_DMA:
+      return "DMA";
+    case AMDSMI_ACCELERATOR_JPEG:
+      return "JPEG";
+    default:
+      return "N/A";
+  }
+}
+
 [[nodiscard]] static std::string_view accel_partition_str(amdsmi_accelerator_partition_type_t t) {
   switch (t) {
     case AMDSMI_ACCELERATOR_PARTITION_SPX:
@@ -219,11 +237,11 @@ using PrimaryGpuList = std::vector<std::pair<uint32_t, amdsmi_processor_handle>>
 [[nodiscard]] static PrimaryGpuList get_primary_gpu_handles(
     const std::vector<amdsmi_processor_handle>& all_handles) {
   PrimaryGpuList primary;
-  for (uint32_t i = 0; i < all_handles.size(); ++i) {
+  for (size_t i = 0; i < all_handles.size(); ++i) {
     amdsmi_accelerator_partition_profile_config_t cfg{};
     if (amdsmi_get_gpu_accelerator_partition_profile_config(all_handles[i], &cfg) ==
         AMDSMI_STATUS_SUCCESS)
-      primary.emplace_back(i, all_handles[i]);
+      primary.emplace_back(static_cast<uint32_t>(i), all_handles[i]);
   }
   return primary;
 }
@@ -242,12 +260,11 @@ static void print_current_partition(uint32_t idx, amdsmi_processor_handle gpu) {
     std::cout << "    Accelerator profile type : " << accel_partition_str(profile.profile_type)
               << '\n'
               << "    Profile index            : " << profile.profile_index << '\n'
-              << "    Num partitions           : " << profile.num_partitions << '\n';
+              << "    Num partitions           : " << profile.num_partitions << '\n'
+              << "    Partition ID             : " << partition_ids[0] << '\n'
+              << "    Compatible NPS           : " << nps_caps_str(profile.memory_caps) << '\n';
   } else {
     std::cout << "    amdsmi_get_gpu_accelerator_partition_profile: " << status_str(ret) << '\n';
-    std::cout << "    Accelerator profile type : N/A\n"
-              << "    Profile index            : N/A\n"
-              << "    Num partitions           : N/A\n";
   }
 
   amdsmi_memory_partition_config_t mem_cfg{};
@@ -267,19 +284,25 @@ static void print_available_modes(uint32_t idx, amdsmi_processor_handle gpu) {
   if (ret == AMDSMI_STATUS_SUCCESS) {
     std::cout << "    Supported NPS modes     : " << nps_caps_str(cfg.partition_caps) << '\n';
   } else {
-    std::cout << "    amdsmi_get_gpu_memory_partition_config: " << status_str(ret) << '\n'
-              << "    Supported NPS modes     : N/A\n";
+    std::cout << "    amdsmi_get_gpu_memory_partition_config: " << status_str(ret) << '\n';
   }
 
   amdsmi_accelerator_partition_profile_config_t acc_cfg{};
   ret = amdsmi_get_gpu_accelerator_partition_profile_config(gpu, &acc_cfg);
   if (ret == AMDSMI_STATUS_SUCCESS) {
     std::cout << "    Available accelerator profiles (" << acc_cfg.num_profiles << "):\n";
+    uint32_t res_idx = 0;
     for (uint32_t p = 0; p < acc_cfg.num_profiles; ++p) {
       const auto& prof = acc_cfg.profiles[p];
       std::cout << "      Index " << prof.profile_index << " ("
                 << accel_partition_str(prof.profile_type) << ", " << prof.num_partitions
                 << " partition(s), compatible NPS: " << nps_caps_str(prof.memory_caps) << ")\n";
+      for (uint32_t r = 0; r < prof.num_resources; ++r, ++res_idx) {
+        const auto& res = acc_cfg.resource_profiles[res_idx];
+        std::cout << "        Resource " << r << ": " << resource_type_str(res.resource_type)
+                  << ", per_partition=" << res.partition_resource
+                  << ", shared_by=" << res.num_partitions_share_resource << "\n";
+      }
     }
   }
 }
