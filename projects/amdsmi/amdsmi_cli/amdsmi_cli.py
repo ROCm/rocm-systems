@@ -257,23 +257,6 @@ if __name__ == "__main__":
             amd_smi_commands.logger.destination,
         )
         sys.exit(abs(e.value))
-    # jcnii
-    # except amdsmi_exception.AmdSmiLibraryException as e:
-    #    exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
-    #        amd_smi_commands.logger.format, None, e.get_error_code()
-    #    )
-    #    _print_error(
-    #        f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
-    #        amd_smi_commands.logger.destination,
-    #    )
-    #    sys.exit(abs(exc.value))
-    # except amdsmi_cli_exceptions.AmdSmiLibraryErrorException as e:
-    #    exc = e
-    #    _print_error(
-    #        f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
-    #        amd_smi_commands.logger.destination,
-    #    )
-    #    sys.exit(abs(exc.value))
     except PermissionError as e:
         command = sys.argv[1] if len(sys.argv) > 1 else ""
         outputformat = amd_smi_commands.logger.format
