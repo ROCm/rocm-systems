@@ -1086,10 +1086,18 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 }
 
 // ================================================================================================
+void VirtualGPU::SetGpuQueue(hsa_queue_t* queue, void* metadata_ring_buffer) {
+  gpu_queue_ = queue;
+  metadata_preloader_.SetQueueBase(metadata_ring_buffer,
+                                   roc_device_.MetadataVersionHeader());
+}
+
+// ================================================================================================
 void VirtualGPU::AcquireQueueWithPreference() {
   std::scoped_lock lock(execution());
   if (!dedicated_queue_ && gpu_queue_ == nullptr && last_hwq_ != nullptr) {
-    gpu_queue_ = roc_device_.AcquireActiveQueue(priority_, last_hwq_);
+    void* md_rb = nullptr;
+    SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, last_hwq_, nullptr, &md_rb), md_rb);
     last_hwq_ = nullptr;
   }
 }
@@ -1105,7 +1113,8 @@ bool VirtualGPU::ReacquireQueueExcluding(const std::unordered_set<uint64_t>& exc
     roc_device_.releaseQueue(gpu_queue_, std::vector<uint32_t>{}, false, true);
     gpu_queue_ = nullptr;
   }
-  gpu_queue_ = roc_device_.AcquireActiveQueue(priority_, nullptr, &excluded_ids);
+  void* md_rb = nullptr;
+  SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, &excluded_ids, &md_rb), md_rb);
   return gpu_queue_ != nullptr;
 }
 
@@ -1114,8 +1123,8 @@ uint64_t VirtualGPU::getQueueID() {
   std::scoped_lock lock(execution());
   // Dedicated queues keep their HW queue, never acquire from pool
   if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-    gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
-    metadata_preloader_.Attach(gpu_queue_);
+    void* md_rb = nullptr;
+    SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
   }
   return gpu_queue_->id;
 }
@@ -1384,8 +1393,18 @@ bool VirtualGPU::dispatchAqlPacket(hsa_kernel_dispatch_packet_t* packet, uint16_
                                    uint16_t rest, bool blocking, bool capturing,
                                    const uint8_t* aqlPacket, bool attach_signal) {
   if (capturing == true) {
-    packet->header = header;
-    packet->setup = rest;
+    if (dev().settings().ext_dispatch_packet_) {
+      // For ext dispatch packets the first 32 bits are {header(16), amd_format(8), setup(8)}.
+      // rest already encodes (amd_format | (setup << 8)).
+      auto* ext_packet = reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(packet);
+      ext_packet->header = header;
+      ext_packet->amd_format =
+          static_cast<hsa_amd_packet_type8_t>(rest & 0xFF);
+      ext_packet->setup = static_cast<uint8_t>((rest >> 8) & 0xFF);
+    } else {
+      packet->header = header;
+      packet->setup = rest;
+    }
     std::memcpy(const_cast<uint8_t*>(aqlPacket), packet, sizeof(hsa_kernel_dispatch_packet_t));
     return true;
   } else {
@@ -1893,13 +1912,13 @@ VirtualGPU::~VirtualGPU() {
   ReleaseSdmaEngines();
 
   delete blitMgr_;
-  metadata_preloader_.Detach();
 
   if (tracking_created_) {
     std::scoped_lock l(execution());
     // Dedicated queues keep their HW queue, never acquire from pool
     if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-      gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
+      void* md_rb = nullptr;
+      SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
     }
     // Windows requires an interrupt in more cases than Linux for OS fence updates
     force_irq_ = IS_WINDOWS;
@@ -1965,10 +1984,10 @@ VirtualGPU::~VirtualGPU() {
 bool VirtualGPU::create() {
   // Pick a reasonable queue size
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
-  gpu_queue_ = roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
-                                         dedicated_queue_);
+  void* md_rb = nullptr;
+  SetGpuQueue(roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
+                                       dedicated_queue_, nullptr, nullptr, &md_rb), md_rb);
   if (!gpu_queue_) return false;
-  metadata_preloader_.Attach(gpu_queue_);
 
   if (!managed_kernarg_buffer_.Create(Device::MemorySegment::kKernArg)) {
     LogError("Couldn't allocate arguments/signals for the queue");
@@ -2173,8 +2192,7 @@ void VirtualGPU::ReleaseHwQueue() {
         if (IsQueueIdle()) {
           last_hwq_ = gpu_queue_;
           if (roc_device_.ReleaseActiveQueue(gpu_queue_, priority_)) {
-            metadata_preloader_.Detach();
-            gpu_queue_ = nullptr;
+            SetGpuQueue(nullptr);
           }
         }
       }
@@ -2191,8 +2209,8 @@ void VirtualGPU::ReleaseHwQueue() {
 void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
   // Dedicated queues keep their HW queue, never acquire from pool
   if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-    gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
-    metadata_preloader_.Attach(gpu_queue_);
+    void* md_rb = nullptr;
+    SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
   }
   // Track the current command
   command_ = &command;
@@ -4357,10 +4375,13 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       rest = (sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS);
     }
 
+    metadata_preloader_.PrepareDispatch(gpuKernel.MetadataKernelDescriptor(),
+                                        gpuKernel.MetadataPreloadLength(),
+                                        gpuKernel.MetadataPreloadOffset());
+
     if (isGraphCapture) {
       // Dispatch the packet
-      if (!dispatchAqlPacket(&dispatchPacket, aqlHeaderWithOrder,
-                             (sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS),
+      if (!dispatchAqlPacket(&dispatchPacket, aqlHeaderWithOrder, rest,
                              GPU_FLUSH_ON_EXECUTION, command_->getPktCapturingState(),
                              command_->getAqlPacket())) {
         return false;
@@ -4489,7 +4510,8 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     // It should be safe to call flush directly if there are not pending dispatches without
     // HSA signal callback
     if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-      gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
+      void* md_rb = nullptr;
+      SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
     }
     flush(vcmd.GetBatchHead());
   } else {
@@ -4721,138 +4743,97 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
 }
 
 // ================================================================================================
-void VirtualGPU::MetaDataPreloader::Attach(hsa_queue_t* queue) {
-  if (!DEBUG_CLR_ENABLE_PREFETCH_METADATA) {
-    return;
-  }
-  Detach();
-
-  void* ring_buffer = nullptr;
-  hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
-                         &ring_buffer);
-  if (ring_buffer == nullptr) {
-    return;  // Not supported on this device
-  }
-
-  uint8_t version_major = 0, version_minor = 0;
-  hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MAJOR,
-                         &version_major);
-  if (version_major >= (1 << 3)) {
-    // major is 3-bits
-    return;
-  }
-
-  hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MINOR,
-                         &version_minor);
-  if (version_minor >= (1 << 5)) {
-    // minor is 5 bits
-    return;
-  }
-  queue_base_ = ring_buffer;
-  version_major_ = version_major;
-  version_minor_ = version_minor;
-}
-
-// ================================================================================================
-void VirtualGPU::MetaDataPreloader::SetHeader(
-	 hsa_kernel_dispatch_packet_t* packet, uint16_t header,
-     hsa_amd_metadata_kernel_dispatch_packet_t* metadata_packet) const {
-  uint8_t type = GetType(header);
-  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
-     "prefetch: SetHeader: hsa_kernel_dispatch_packet_t type = %d", type);
-  uint32_t metadata_header = type;
-  metadata_header |= version_major_
-       << HSA_AMD_METADATA_PACKET_HEADER_VERSION_MAJOR;
-  metadata_header |= version_minor_
-       << HSA_AMD_METADATA_PACKET_HEADER_VERSION_MINOR;
-  metadata_packet->header0 = metadata_header;
-  metadata_packet->header1 = metadata_header;
-  metadata_packet->header2 = metadata_header;
-  metadata_packet->header3 = metadata_header;
-}
-
-// ================================================================================================
 void VirtualGPU::MetaDataPreloader::SetPacket(
     hsa_kernel_dispatch_packet_t* aql,  uint16_t header,
     hsa_amd_metadata_kernel_dispatch_packet_t* metadata) const {
-  const uint8_t*  kernargs = reinterpret_cast<const uint8_t*>(aql->kernarg_address);
-  assert(kernargs);
+  assert(pending_descriptor_ != nullptr);
+
+  // Headers must remain HSA_PACKET_TYPE_INVALID until we publish valid metadata headers
+  // at the end. Only clear fields that could otherwise contain stale required-zero data.
+  std::memset(metadata->reserved0, 0, sizeof(metadata->reserved0));
+  std::memset(metadata->reserved1, 0, sizeof(metadata->reserved1));
+
+  // Write event_id from amd_signal_t directly (non-interrupt signals have event_id == 0).
+  if (aql->completion_signal.handle) {
+    auto* signal = reinterpret_cast<amd_signal_t*>(aql->completion_signal.handle);
+    metadata->event_id = signal->event_id;
+  } else {
+    metadata->event_id = 0;
+  }
 
   // Fill hsa_amd_metadata_kernel_dispatch_packet->kernel_descriptor fields.
-  // The metadata packet kernel descriptor fields is a subset of
-  // kernel_descriptor_t(Code Object V3 Kernel Descriptor) from the AQL packet, from bytes
+  // The metadata packet kernel descriptor fields are a subset of
+  // kernel_descriptor_t (Code Object V3 Kernel Descriptor) from the AQL packet, from bytes
   // llvm::amdhsa::KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET(16) to sizeof(kernel_descriptor_t).
   // See include/llvm/Support/AMDHSAKernelDescriptor.h.
-  const void* host_address = nullptr;
-  Device::loaderQueryHostAddress(reinterpret_cast<void*>(aql->kernel_object), &host_address);
-  if (host_address == nullptr) {
-    return;
-  }
-
-  const size_t KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET = 16;
-  const hsa_amd_metadata_kernel_descriptor_t* kernel_descriptor =
-      reinterpret_cast<const hsa_amd_metadata_kernel_descriptor_t*>
-      (reinterpret_cast<const uint8_t*>(host_address) + KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET);
-
-  if (kernel_descriptor->kernarg_preload.length == 0) {
-    // If kernel args contain any class or structure, the length will be zero, thus need be
-    // skipped. Compiler will support any args later
-    ClPrint(amd::LOG_DEBUG, amd::LOG_AQL, "prefetch skipped: kernarg_preload_length=0");
-    return;
-  }
-
-  // The metadata can be prefected, so set all data as zeros for easy debug in CP.
-  std::memset(metadata, 0, sizeof(*metadata));
-
-  if (aql->completion_signal.handle) {
-    hsa_amd_signal_get_event_id(aql->completion_signal, &metadata->event_id);
-  }
-
-  std::memcpy(&metadata->kernel_descriptor, kernel_descriptor,
+  std::memcpy(&metadata->kernel_descriptor, pending_descriptor_,
               sizeof(metadata->kernel_descriptor));
 
   // Fill hsa_amd_metadata_kernel_dispatch_packet->kernarg_preload_* fields
-  uint16_t kernarg_preload_length = metadata->kernel_descriptor.kernarg_preload.length;
-  const uint16_t kernarg_preload_offset = metadata->kernel_descriptor.kernarg_preload.offset;
-  constexpr uint16_t kKernarg_preload_limit =
-                                   (sizeof(metadata->kernarg_preload_0_14) +
-                                    sizeof(metadata->kernarg_preload_15_29) +
-                                    sizeof(metadata->kernarg_preload_30_31)) / sizeof(uint32_t);
-  if (kernarg_preload_length > kKernarg_preload_limit) {
-    ClPrint(amd::LOG_DEBUG, amd::LOG_AQL,
-        "prefetch partial: kernarg_preload_length=%u, kernarg_preload_offset=%u, "
-        "kKernarg_preload_limit=%u, kernargs=%p",
-        kernarg_preload_length, kernarg_preload_offset, kKernarg_preload_limit, kernargs);
-    metadata->kernel_descriptor.kernarg_preload.length = kKernarg_preload_limit;
-    kernarg_preload_length = kKernarg_preload_limit;
+  constexpr uint16_t kPreload_limit =
+      (sizeof(metadata->kernarg_preload_0_14) +
+       sizeof(metadata->kernarg_preload_15_29) +
+       sizeof(metadata->kernarg_preload_30_31)) / sizeof(uint32_t);
+
+  uint16_t preload_length = pending_preload_length_;
+  if (preload_length > kPreload_limit) {
+    metadata->kernel_descriptor.kernarg_preload.length = kPreload_limit;
+    preload_length = kPreload_limit;
   }
+  ClPrint(amd::LOG_DEBUG, amd::LOG_AQL,
+          "metadata prefetch: preload_length=%u, preload_offset=%u, preload_limit=%u",
+          preload_length, pending_preload_offset_, kPreload_limit);
 
-  // Kernarg preload offset is in DWORDs
-  const uint8_t *kernarg_preload_address = kernargs + kernarg_preload_offset * sizeof(uint32_t);
-  int64_t preload_remain = kernarg_preload_length * sizeof(uint32_t);
+  if (preload_length > 0) {
+    const uint8_t* kernargs = reinterpret_cast<const uint8_t*>(aql->kernarg_address);
+    assert(kernargs);
+    // Kernarg preload offset is in DWORDs
+    const uint8_t* src = kernargs + pending_preload_offset_ * sizeof(uint32_t);
+    uint16_t remain = preload_length;
 
-  // Copy kernarg_preload 0-14
-  int64_t to_copy = std::min(preload_remain,
-		                     static_cast<int64_t>(sizeof(metadata->kernarg_preload_0_14)));
-  std::memcpy(metadata->kernarg_preload_0_14, kernarg_preload_address, to_copy);
-  preload_remain -= to_copy;
+    // Copy kernarg_preload 0-14
+    uint16_t n = std::min<uint16_t>(
+        remain, sizeof(metadata->kernarg_preload_0_14) / sizeof(uint32_t));
+    if (n < (sizeof(metadata->kernarg_preload_0_14) / sizeof(uint32_t))) {
+      std::memset(metadata->kernarg_preload_0_14, 0, sizeof(metadata->kernarg_preload_0_14));
+    }
+    std::memcpy(metadata->kernarg_preload_0_14, src, n * sizeof(uint32_t));
+    remain -= n;
 
-  // Copy kernarg_preload 15-29
-  if (preload_remain > 0) {
-    kernarg_preload_address += to_copy;
-    to_copy = std::min(preload_remain,
-                       static_cast<int64_t>(sizeof(metadata->kernarg_preload_15_29)));
-    std::memcpy(metadata->kernarg_preload_15_29, kernarg_preload_address, to_copy);
-    preload_remain -= to_copy;
+    // Copy kernarg_preload 15-29
+    if (remain > 0) {
+      src += n * sizeof(uint32_t);
+      n = std::min<uint16_t>(
+          remain, sizeof(metadata->kernarg_preload_15_29) / sizeof(uint32_t));
+      if (n < (sizeof(metadata->kernarg_preload_15_29) / sizeof(uint32_t))) {
+        std::memset(metadata->kernarg_preload_15_29, 0,
+                    sizeof(metadata->kernarg_preload_15_29));
+      }
+      std::memcpy(metadata->kernarg_preload_15_29, src, n * sizeof(uint32_t));
+      remain -= n;
 
-    // Copy kernarg_preload 30-31
-    if (preload_remain > 0) {
-      kernarg_preload_address += to_copy;
-      to_copy = std::min(preload_remain,
-                         static_cast<int64_t>(sizeof(metadata->kernarg_preload_30_31)));
-      std::memcpy(metadata->kernarg_preload_30_31, kernarg_preload_address, to_copy);
+      // Copy kernarg_preload 30-31
+      if (remain > 0) {
+        src += n * sizeof(uint32_t);
+        n = std::min<uint16_t>(
+            remain, sizeof(metadata->kernarg_preload_30_31) / sizeof(uint32_t));
+        if (n < (sizeof(metadata->kernarg_preload_30_31) / sizeof(uint32_t))) {
+          std::memset(metadata->kernarg_preload_30_31, 0,
+                      sizeof(metadata->kernarg_preload_30_31));
+        }
+        std::memcpy(metadata->kernarg_preload_30_31, src, n * sizeof(uint32_t));
+      }
     }
   }
-  SetHeader(aql, header, metadata);
+
+  // Write headers last — arms the metadata packet for the CP.
+  // Plain stores are sufficient here: the subsequent packet_store_release on the main
+  // AQL dispatch header provides a release fence that orders all metadata writes (body
+  // and headers) before the CP sees the valid dispatch packet.
+  uint32_t metadata_header = GetType(header) | metadata_version_header_;
+  metadata->header3 = metadata_header;
+  metadata->header2 = metadata_header;
+  metadata->header1 = metadata_header;
+  metadata->header0 = metadata_header;
 }
 }  // End of roc namespace
