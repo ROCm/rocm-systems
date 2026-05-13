@@ -95,10 +95,6 @@ private:
     std::unordered_map<std::uint32_t, std::uint32_t> m_kfd_node_to_gpu_index_cache;
     std::map<std::uint32_t, std::uint64_t>           m_unified_memory_fault_counts;
     output_file_registry&                            m_output_registry;
-
-    using gpu_perf_counter_name_map = std::unordered_map<std::string, std::string>;
-    std::unordered_map<uint32_t, gpu_perf_counter_name_map>
-        m_gpu_perf_counter_name_lookup;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys
