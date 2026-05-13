@@ -688,9 +688,6 @@ namespace hip {
 hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args,
                             size_t sharedMemBytes, hipStream_t stream, hipEvent_t startEvent,
                             hipEvent_t stopEvent, int flags, dim3 clusterDim = {1, 1, 1}) {
-  if (!hip::isValid(stream)) {
-    return hipErrorInvalidValue;
-  }
   if (hostFunction == nullptr) {
     return hipErrorInvalidDeviceFunction;
   }
