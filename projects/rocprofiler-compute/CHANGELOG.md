@@ -31,7 +31,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Optimized
 
 * Flattened the analyze-mode PMC dataframe to a single-index frame.
-* Accelerated analysis mode metric evaluation by introducing `PmcDataCache`, which exposes each PMC column as a cached `pd.Series` for repeated lookup-free access.
+* Accelerated analysis mode metric evaluation by introducing `PmcDataCache`, which exposes each PMC column as a cached `pd.Series` for repeated access.
 
 ### Resolved issues
 

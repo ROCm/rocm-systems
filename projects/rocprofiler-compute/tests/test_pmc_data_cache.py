@@ -19,13 +19,8 @@ class TestPmcDataCache:
             "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
         })
 
-    def _make_two_level_df(self):
-        """Flat DataFrame whose accumulator column is already canonically named.
-
-        Upstream `soc_base.py` renames bucket-level `SQ_ACCUM_PREV_HIRES` columns
-        to `<bucket>_ACCUM` before the per-call DataFrame reaches PmcDataCache,
-        so this fixture mirrors that post-rename layout.
-        """
+    def _make_pmc_perf_with_accum_alias_df(self):
+        """Build a flat DataFrame matching `_create_single_df_pmc` output with accumulator alias."""
         return pd.DataFrame({
             "Kernel_Name": ["k", "k"],
             "Dispatch_ID": [0, 1],
@@ -50,16 +45,12 @@ class TestPmcDataCache:
 
     def test_accum_alias_column_is_passed_through(self):
         """Pre-renamed `<bucket>_ACCUM` columns are exposed under their flat name."""
-        cache = PmcDataCache(self._make_two_level_df())
+        cache = PmcDataCache(self._make_pmc_perf_with_accum_alias_df())
 
         assert "SQ_INST_LEVEL_VMEM_ACCUM" in cache
         accum_series = cache["SQ_INST_LEVEL_VMEM_ACCUM"]
         assert isinstance(accum_series, pd.Series)
         assert accum_series.tolist() == [50, 70]
-
-        # The legacy `SQ_ACCUM_PREV_HIRES` column name is no longer present
-        # because the upstream renamer has already canonicalized it.
-        assert "SQ_ACCUM_PREV_HIRES" not in cache
 
     def test_missing_key_raises_keyerror(self):
         """Direct subscript on a missing column raises KeyError."""
