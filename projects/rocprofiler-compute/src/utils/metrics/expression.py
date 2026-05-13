@@ -88,10 +88,7 @@ class CodeTransformer(ast.NodeTransformer):
         return node
 
 
-def build_eval_string(
-    equation: str,
-    coll_level: str = "",
-) -> str:
+def build_eval_string(equation: str) -> str:
     """
     Convert user defined equation string to eval executable string.
     For example,
@@ -103,14 +100,6 @@ def build_eval_string(
             ) / to_sum(
                 pmc_df["GRBM_GUI_ACTIVE"] *
                 ammolite__numCU
-            )
-        input (with coll_level "SQ_INST_LEVEL_VMEM"):
-            SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQ_INSTS_VMEM)
-        output:
-            to_sum(
-                pmc_df["SQ_INST_LEVEL_VMEM_ACCUM"]
-            ) / to_sum(
-                pmc_df["SQ_INSTS_VMEM"]
             )
         We can not handle the below for now:
         input:
@@ -154,14 +143,6 @@ def build_eval_string(
     # the target is df['TCC_HIT[0]']
     equation_string = re.sub(r"\'\]\[(\d+)\]", r"[\g<1>]']", equation_string)
 
-    # Replace `SQ_ACCUM_PREV_HIRES` with `{coll_level}_ACCUM` only when
-    # `coll_level` is provided. Modern flat metric YAMLs already address
-    # accumulators via the canonical `<bucket>_ACCUM` column, so this
-    # rewrite is a no-op for them and runs only for legacy expressions.
-    if coll_level:
-        equation_string = re.sub(
-            "SQ_ACCUM_PREV_HIRES", f"{coll_level}_ACCUM", equation_string
-        )
     return equation_string
 
 
@@ -274,7 +255,6 @@ def build_metric_value_string(
     """Apply the real eval string to its field in the metric_table df."""
     for table_id, df in dfs.items():
         if dfs_type[table_id] == "metric_table":
-            has_coll_level = "coll_level" in df.columns
             for expr in df.columns:
                 if expr in SUPPORTED_FIELD:
                     # NB: apply all build-in before building the whole string
@@ -288,14 +268,8 @@ def build_metric_value_string(
                         for i in range(df.shape[0]):
                             row_idx_label = df.index.to_list()[i]
                             if expr.lower() != "alias":
-                                coll_level = (
-                                    df.at[row_idx_label, "coll_level"]
-                                    if has_coll_level
-                                    else ""
-                                )
                                 df.at[row_idx_label, expr] = build_eval_string(
                                     df.at[row_idx_label, expr],
-                                    coll_level,
                                 )
 
                 elif expr.lower() == "unit" or expr.lower() == "units":

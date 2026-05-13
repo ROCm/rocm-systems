@@ -10,7 +10,6 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from utils import schema
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.metrics.expression import build_eval_string
@@ -113,11 +112,7 @@ def calc_builtin_vars(
         if "PER_XCD" not in variable_key:
             continue
 
-        # NB: assume all built-in vars from pmc_perf.csv for now
-        eval_string = build_eval_string(
-            variable_value,
-            schema.PMC_PERF_FILE_PREFIX,
-        )
+        eval_string = build_eval_string(variable_value)
         try:
             # Create temporary evaluator for this calculation
             # Pass sys_vars so that $num_xcd and other system variables are available
@@ -135,10 +130,7 @@ def calc_builtin_vars(
         if "PER_XCD" in variable_key:
             continue
 
-        eval_string = build_eval_string(
-            variable_value,
-            schema.PMC_PERF_FILE_PREFIX,
-        )
+        eval_string = build_eval_string(variable_value)
         try:
             # Merge sys_vars with builtin_vars_collection for second pass
             combined_vars = {**sys_vars, **builtin_vars_collection}
