@@ -1952,8 +1952,21 @@ hsa_status_t hsa_amd_external_semaphore_handle_open(
       kmt_type,
       &kmt_handle);
 
-  if (s == HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (s != HSAKMT_STATUS_SUCCESS)        return HSA_STATUS_ERROR;
+  // libhsakmt distinguishes invalid input (null handle, unknown type)
+  // from "no node for this agent" and from generic KMD failures.
+  // Surface those distinctions to the public API instead of folding
+  // every non-success code into HSA_STATUS_ERROR.
+  switch (s) {
+    case HSAKMT_STATUS_SUCCESS:
+      break;
+    case HSAKMT_STATUS_INVALID_PARAMETER:  // e.g. null win32_handle
+    case HSAKMT_STATUS_NOT_SUPPORTED:      // unsupported handle type
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_INVALID_NODE_UNIT:  // no WDDM device for node
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    default:
+      return HSA_STATUS_ERROR;
+  }
 
   out_sem->handle = kmt_handle.handle;
   return HSA_STATUS_SUCCESS;
