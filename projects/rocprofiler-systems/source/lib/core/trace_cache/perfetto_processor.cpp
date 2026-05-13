@@ -494,7 +494,7 @@ perfetto_processor_t::get_session_data()
         auto _fnum_read = ::fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
         ::fclose(_fdata);
 
-        if(get_is_continuous_integration() && _fnum_read != _fnum_elem)
+        if(_fnum_read != _fnum_elem)
         {
             throw std::runtime_error(fmt::format(
                 "Error! read {} elements from perfetto trace file '{}'. Expected {}",

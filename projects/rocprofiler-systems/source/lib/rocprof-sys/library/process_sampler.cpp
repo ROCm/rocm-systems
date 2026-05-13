@@ -179,7 +179,7 @@ sampler::shutdown()
         }
 
         // during CI, throw an error if polling_finished is not valid
-        if(!polling_finished && get_is_continuous_integration())
+        if(!polling_finished)
         {
             throw std::runtime_error("polling_finished is not valid");
         }

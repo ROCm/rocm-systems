@@ -69,7 +69,7 @@ auto speedup_dist      = []() {
     size_t _nzero = std::ceil(_v.size() / 4.0);
     _v.resize(_v.size() + _nzero, 0);
     std::sort(_v.begin(), _v.end());
-    if(get_is_continuous_integration() && _v.back() > 100)
+    if(_v.back() > 100)
     {
         throw std::runtime_error(
             fmt::format("Error! last value is too large: {}", _v.back()));
@@ -803,9 +803,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             // unlikely this will be empty but just in case
             if(linfo.empty()) continue;
 
-            // debugging for continuous integration
-            if(ROCPROFSYS_UNLIKELY(config::get_is_continuous_integration() ||
-                                   config::get_debug()))
+            if(ROCPROFSYS_UNLIKELY(config::get_debug()))
             {
                 auto _location =
                     (_dl_info.location)
