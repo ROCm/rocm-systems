@@ -1930,6 +1930,16 @@ hsa_status_t hsa_amd_external_semaphore_handle_open(
       core_agent->device_type() != core::Agent::kAmdGpuDevice)
     return HSA_STATUS_ERROR_INVALID_AGENT;
 
+  // The descriptor union has separate active members per handle type
+  // (win32_handle for OPAQUE_WIN32 / OPAQUE_WIN32_KMT, fd for OPAQUE_FD).
+  // Only the Win32 NT-handle path is wired through libhsakmt today, so
+  // reject other types up front: reading an inactive union member is
+  // undefined behaviour in C++.
+  if (desc->type != HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32 &&
+      desc->type != HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
   // hsa_amd_external_semaphore_handle_type_t maps 1:1 to
   // HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE by design (see hsa_ext_amd.h).
   HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE kmt_type =
