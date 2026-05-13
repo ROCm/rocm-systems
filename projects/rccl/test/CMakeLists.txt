@@ -202,6 +202,7 @@ if(BUILD_TESTS)
       CommTests.cpp
       EnqueueCountTests.cpp
       device/TestOp128.cpp
+      device/GinDeviceTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
@@ -272,6 +273,7 @@ if(BUILD_TESTS)
       transport/ShmMPITests.cpp
       transport/NetIbMPI/GeneralTests.cpp
       transport/NetIbMPI/NicFusionTests.cpp
+      transport/GinMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       RegistrationMPITests.cpp
     )
