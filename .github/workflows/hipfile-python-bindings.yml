@@ -10,7 +10,7 @@ env:
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
   AIS_PKG_MGR: >-
     ${{
-      inputs.platform == 'rocky' && 'dnf' ||
+      startsWith(inputs.platform, 'rocky') && 'dnf' ||
       inputs.platform == 'suse' && 'zypper' ||
       inputs.platform == 'ubuntu' && 'apt'
     }}
