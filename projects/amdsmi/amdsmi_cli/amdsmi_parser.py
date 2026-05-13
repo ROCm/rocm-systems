@@ -61,7 +61,7 @@ class AMDSMISubParser(argparse.ArgumentParser):
     """Subcommand parser with custom error handling for AMDSMI CLI.
     Used as parser_class for subcommands so that argparse errors on
     subcommand arguments (e.g., --loglevel INVALID) are routed through
-    the same AmdSmiException framework instead of calling sys.exit(2).
+    the same AmdSmiException framework instead of calling sys.exit(202).
     """
 
     def error(self, message):

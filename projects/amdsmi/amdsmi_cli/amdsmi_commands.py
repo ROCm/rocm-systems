@@ -242,7 +242,7 @@ class AMDSMICommands:
             version_args.cpu_version = False
             version_args.nic_version = False
             self.version(version_args)
-            sys.exit(-1)
+            sys.exit(201)
 
     def version(self, args, gpu_version=None, cpu_version=None, nic_version=None):
         """Print Version String
@@ -8855,38 +8855,54 @@ class AMDSMICommands:
                             self.logger.clear_multiple_devices_output()
                             return
 
+                exc = None
                 try:
                     amdsmi_interface.amdsmi_set_gpu_fan_speed(args.gpu, 0, hw_value)
+                    result = (
+                        f"Successfully set fan speed to {hw_value} RPM/PWM ({fan_percentage}%)",
+                    )
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError("Command requires elevation") from e
-                    output_format = self.helpers.get_output_format()
-                    error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set fan speed to {hw_value} RPM/PWM ({fan_percentage}%)."
-                    raise AmdSmiLibraryErrorException(output_format, error_msg, e.get_error_code())
-                self.logger.store_output(
-                    args.gpu,
-                    "fan",
-                    f"Successfully set fan speed to {hw_value} RPM/PWM ({fan_percentage}%)",
-                )
+                    exc = e
+                    result = format_fan_error(
+                        f"[{e.get_error_info(detailed=False)}] Unable to set fan speed to {hw_value} RPM/PWM ({fan_percentage}%)",
+                        include_driver_note=has_gpu_od,
+                    )
+
+                self.logger.store_output(args.gpu, "fan", result)
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
+                if exc is not None:
+                    output_format = self.helpers.get_output_format()
+                    raise AmdSmiLibraryErrorException(output_format, result, exc.get_error_code())
                 return
             if args.perf_level:
                 perf_level = amdsmi_interface.AmdSmiDevPerfLevel[args.perf_level]
+                exc = None
                 try:
                     amdsmi_interface.amdsmi_set_gpu_perf_level(args.gpu, perf_level)
+                    result = f"Successfully set performance level {args.perf_level}"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError("Command requires elevation") from e
-                    output_format = self.helpers.get_output_format()
-                    error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set performance level to {args.perf_level}."
-                    raise AmdSmiLibraryErrorException(output_format, error_msg, e.get_error_code())
+                    exc = e
+                    result = f"[{e.get_error_info(detailed=False)}] Unable to set performance level to {args.perf_level}."
+                    perf_options = (
+                        str(self.helpers.get_perf_levels()[0][0:-1])
+                        .replace("[", "")
+                        .replace("]", "")
+                        .replace("'", "")
+                        .replace(" ", "")
+                    )
+                    print(f"\nPerformance Level Options:\n\t{perf_options}\n")
 
-                self.logger.store_output(
-                    args.gpu, "perflevel", f"Successfully set performance level {args.perf_level}"
-                )
+                self.logger.store_output(args.gpu, "perflevel", result)
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
+                if exc is not None:
+                    output_format = self.helpers.get_output_format()
+                    raise AmdSmiLibraryErrorException(output_format, result, exc.get_error_code())
                 return
             if args.profile:
                 try:
@@ -8988,7 +9004,6 @@ class AMDSMICommands:
                 future_set_count = 0
                 attempted_to_set = "N/A"
                 user_requested_partition_args = "N/A"
-                exc = None
                 try:
                     (accelerator_set_choices, accelerator_profiles) = (
                         self.helpers.get_accelerator_choices_types_indices()
@@ -9039,14 +9054,12 @@ class AMDSMICommands:
                         e.get_error_code()
                         == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
                     ):
-                        exc = e
                         self.helpers.increment_set_count()
                         future_set_count = self.helpers.get_set_count()
                         if current_set_count == future_set_count - 1:
                             error_msg = f"[AMDSMI_STATUS_NOT_SUPPORTED] Unable to set compute partition, {current_set_count}, to {user_requested_partition_args}."
                         else:
                             error_msg = f"[AMDSMI_STATUS_NOT_SUPPORTED] Unable to set compute partition to {user_requested_partition_args}."
-                        self.logger.store_output(args.gpu, "accelerator_partition", error_msg)
                     elif (
                         e.get_error_code()
                         == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SETTING_UNAVAILABLE
@@ -9056,20 +9069,15 @@ class AMDSMICommands:
                             f"\n[AMDSMI_STATUS_SETTING_UNAVAILABLE] Please check amd-smi partition --memory --accelerator for available profiles.\n"
                             "Users may need to switch memory partition to another mode in order to enable the desired accelerator partition.\n"
                         )
-                        exc = e
                         error_msg = f"[AMDSMI_STATUS_SETTING_UNAVAILABLE] Unable to set accelerator partition to {args.compute_partition} on {gpu_string}"
-                        self.logger.store_output(args.gpu, "accelerator_partition", error_msg)
                     else:
-                        exc = e
                         error_msg = f"Unable to set accelerator partition to {args.compute_partition} on {gpu_string}"
-                        self.logger.store_output(args.gpu, "accelerator_partition", error_msg)
-                self.logger.print_output()
-                self.logger.clear_multiple_devices_output()
-                if exc is not None:
+
+                    self.logger.store_output(args.gpu, "accelerator_partition", error_msg)
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
                     output_format = self.helpers.get_output_format()
-                    raise AmdSmiLibraryErrorException(
-                        output_format, error_msg, exc.get_error_code()
-                    )
+                    raise AmdSmiLibraryErrorException(output_format, error_msg, e.get_error_code())
                 return
 
             if args.memory_partition:
@@ -10285,7 +10293,7 @@ class AMDSMICommands:
                             output_format, error_msg, e.get_error_code()
                         )
                 else:
-                    error_code = 3
+                    error_code = 203
                     result = "Unable to reset non-amd GPU."
                 self.logger.store_output(args.gpu, "gpu_reset", result)
                 self.logger.print_output()

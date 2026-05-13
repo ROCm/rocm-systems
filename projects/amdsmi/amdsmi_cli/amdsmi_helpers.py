@@ -1756,7 +1756,7 @@ class AMDSMIHelpers:
             return
         else:
             print("Confirmation not given. Exiting without setting value")
-            sys.exit(1)
+            sys.exit(201)
 
     def is_valid_profile(self, profile):
         profile_presets = (
