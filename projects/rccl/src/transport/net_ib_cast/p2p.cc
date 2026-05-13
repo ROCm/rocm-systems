@@ -987,7 +987,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
       }
       TRACE(NCCL_NET, "NET/IB: %s: Got completion for a recv request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)", __func__, req, req->base, req->id, devIndex, wc->qp_num);
       struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)commBase;
-      commBase->rxPosts[wc->wr_id]--;
+
       if (recvComm->prepostReceiveWorkRequests) {
         // Post another receive work request on the QP
         ncclIbQp* qp = NULL;
@@ -995,7 +995,12 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
         NCCLCHECK(IbCastCommBaseGetQpByQpNum(commBase, devIndex, wc->qp_num, &qp, &qpIndex));
         req->recv.cmplsRecords->completions[qpIndex] = 1;
         IbCastPostRecvWorkRequest(qp->qp, &recvComm->ibRecvWorkRequest);
+      } else {
+        // In the prepost path wr_id is UINT64_MAX (sentinel); only decrement rxPosts
+        // in the non-prepost path where wr_id is a valid slot index.
+        commBase->rxPosts[wc->wr_id]--;
       }
+
       if (commBase->recvMatchingScheme == BY_INDEX) {
         if (be32toh(wc->imm_data) & WR_IMM_SPLIT_DATA_FLAG) {
           req->events[devIndex]--;
