@@ -92,7 +92,8 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | ``--hsa-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br|
        | ``--rccl-trace`` [BOOL] |br| |br| |br| |br|
        | ``--kokkos-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--rocdecode-trace`` [BOOL]
+       | ``--rocdecode-trace`` [BOOL] |br| |br|
+       | ``--rocshmem-trace`` [BOOL]
      - | Combination of ``--hip-runtime-trace`` and ``--hip-compiler-trace``. This option only enables the HIP API tracing. Unlike previous iterations of ``rocprof``, this option doesn't enable kernel tracing, memory copy tracing, and so on. |br| |br|
        | Collects marker (ROCTx) traces. Similar to ``--roctx-trace`` option in earlier ``rocprof`` versions, but with improved ``ROCTx`` library with more features. |br| |br|
        | Collects kernel dispatch traces. |br| |br|
@@ -103,7 +104,8 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | Collects ``--hsa-core-trace``, ``--hsa-amd-trace``, ``--hsa-image-trace``, and ``--hsa-finalizer-trace``. This option only enables the HSA API tracing. Unlike previous iterations of ``rocprof``, this doesn't enable kernel tracing, memory copy tracing, and so on. |br| |br|
        | Collects traces for RCCL (ROCm Communication Collectives Library), which is also pronounced as 'Rickle'. |br| |br|
        | Enables builtin Kokkos tools support, which implies enabling ``--marker-trace`` collection and ``--kernel-rename``. |br| |br|
-       | Collects traces for rocDecode APIs.
+       | Collects traces for rocDecode APIs. |br| |br|
+       | Collects traces for rocSHMEM (ROCm Shared Memory) host-stream APIs.
 
    * - Granular tracing
      - | ``--hip-runtime-trace`` [BOOL] |br| |br| |br| |br|
