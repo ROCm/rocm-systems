@@ -206,7 +206,7 @@ namespace impl {
 
     // unsigned int[N] is used in some cases, e.g. when T is wider than 32-bit
     typename __hip_internal::conditional<isPrimitiveType && (sizeof(Val) == 4 || sizeof(Val) == 2), permuteType,
-                                        permuteType[kNumOfPermutes]>::type result, permuteResult, exclusiveResult;
+                                        permuteType[kNumOfPermutes]>::type result, permuteResult;
     auto backwardPermute = [](int index, permuteType arg) {
       if constexpr (__hip_internal::is_floating_point<Val>::value &&
                   sizeof(Val) <= 4) {
@@ -220,10 +220,6 @@ namespace impl {
       result = val;
     } else {
       __builtin_memcpy(result, &val, sizeof(result));
-    }
-
-    if constexpr(!Inclusive) {
-      __builtin_memset(&exclusiveResult, 0, sizeof(exclusiveResult));
     }
 
     // the number of iterations needs to be at least log2(number of bits on)
@@ -294,7 +290,6 @@ namespace impl {
           toReturn = op(*reinterpret_cast<Val*>(result), *reinterpret_cast<Val*>(permuteResult));
         __builtin_memcpy(result, &toReturn, sizeof(Val));
         } else if constexpr (sizeof(Val) == 4 || sizeof(Val) == 2) {
-          exclusiveResult = op(exclusiveResult, permuteResult);
           result = op(result, permuteResult);
         } else if constexpr (sizeof(Val) == 8) {
           Val tmp;
@@ -312,7 +307,54 @@ namespace impl {
     if constexpr (Inclusive) {
       return *reinterpret_cast<Val*>(&result);
     } else {
-      return *reinterpret_cast<Val*>(&exclusiveResult);
+      int nextBit = laneId;
+
+      mask = impl::groupMask(group);
+
+      if (laneId) {
+        mask <<= 64 - laneId;
+        nextBit -= __builtin_clzll(mask) + 1;
+      } else {
+        mask = 0ull;
+      }
+
+      // clamp index; if out of bounds, the thread read its own value
+      nextBit = (nextBit < (laneId & ~(warpSize - 1))) ? laneId : nextBit;
+
+      // return the result of the aggregation of the previous lane
+      if constexpr (!isPrimitiveType) {
+        // ds_bpermute only deals with 32-bit sizes, so for other sizes
+        // we need to call the permute multiple times
+        for (int i = 0; i < kNumOfPermutes; i++) {
+          permuteResult[i] = backwardPermute(nextBit << 2, result[i]);
+        }
+      } else if constexpr (sizeof(Val) == 2) {
+        union {
+          int i;
+          Val f;
+        } tmp;
+
+        tmp.f = result;
+        tmp.i = __hip_ds_bpermute(nextBit << 2, tmp.i);
+        permuteResult = tmp.f;
+      } else if constexpr (sizeof(Val) == 4) {
+        auto bPermuteResult = backwardPermute(nextBit << 2, result);
+        __builtin_memcpy(&permuteResult, &bPermuteResult, sizeof(result));
+      } else {
+        // ds_bpermute only deals with 32-bit sizes, so for 8 bytes, we
+        // need to call it twice
+        permuteResult[0] = backwardPermute(nextBit << 2, result[0]);
+        permuteResult[1] = backwardPermute(nextBit << 2, result[1]);
+      }
+
+      if (mask) {
+        return *reinterpret_cast<Val*>(&permuteResult);
+      } else {
+        Val tmp;
+
+        std::memset(&tmp, 0, sizeof(tmp));
+        return tmp;
+      }
     }
   }
 }
