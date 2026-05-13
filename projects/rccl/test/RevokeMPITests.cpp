@@ -10,6 +10,7 @@
 #include "TestChecks.hpp"
 #include "nccl.h"
 
+#include <sched.h>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -860,6 +861,216 @@ TEST_F(RevokeMPITest, RepeatedRevokeShrinkCycles_ResourceCleanup)
     {
         ASSERT_EQ(ncclSuccess, ncclCommDestroy(child));
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// Revoke fixture using a non-blocking (config.blocking = 0) parent comm.
+// Exercises the worker-thread async-job path that RevokeMPITest skips.
+class RevokeNonBlockingMPITest : public MPITestBase
+{
+protected:
+    // ncclCommDestroy on a non-blocking comm can return ncclInProgress;
+    // use Abort to guarantee synchronous teardown between chained tests.
+    void TearDown() override
+    {
+        if(test_comm_)
+        {
+            (void)ncclCommAbort(test_comm_);
+            test_comm_ = nullptr;
+        }
+        MPITestBase::TearDown();
+    }
+
+    // Poll ncclCommGetAsyncError until the comm leaves ncclInProgress,
+    // yielding the CPU between checks. Returns the terminal state.
+    static ncclResult_t waitForAsyncResult(ncclComm_t comm)
+    {
+        ncclResult_t state = ncclInProgress;
+        while(state == ncclInProgress)
+        {
+            ncclResult_t r = ncclCommGetAsyncError(comm, &state);
+            if(r != ncclSuccess) return r;
+            if(state == ncclInProgress) sched_yield();
+        }
+        return state;
+    }
+
+    ncclResult_t createTestCommunicator() override
+    {
+        int world_rank = MPIEnvironment::world_rank;
+        int world_size = MPIEnvironment::world_size;
+
+        if(world_rank == 0)
+        {
+            RCCL_TEST_CHECK(ncclGetUniqueId(&nccl_id_));
+        }
+        MPI_Bcast(&nccl_id_, sizeof(ncclUniqueId), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+        ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+        config.blocking     = 0;
+
+        RCCL_TEST_CHECK(ncclGroupStart());
+        auto group_guard = makeScopeGuard([]() { (void)ncclGroupEnd(); });
+
+        ncclResult_t res = ncclCommInitRankConfig(
+            &test_comm_, world_size, nccl_id_, world_rank, &config);
+        if(res != ncclSuccess && res != ncclInProgress) return res;
+
+        auto comm_guard = makeScopeGuard(
+            [this]()
+            {
+                if(test_comm_)
+                {
+                    (void)ncclCommAbort(test_comm_);
+                    test_comm_ = nullptr;
+                }
+            });
+
+        res = ncclGroupEnd();
+        group_guard.dismiss();
+        if(res != ncclSuccess && res != ncclInProgress) return res;
+
+        // Drain ncclInProgress from the non-blocking init.
+        RCCL_TEST_CHECK(waitForAsyncResult(test_comm_));
+
+        HIP_TEST_CHECK(hipStreamCreate(&test_stream_));
+        auto stream_guard = makeScopeGuard(
+            [this]()
+            {
+                if(test_stream_)
+                {
+                    (void)hipStreamDestroy(test_stream_);
+                    test_stream_ = nullptr;
+                }
+            });
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        comm_guard.dismiss();
+        stream_guard.dismiss();
+        return ncclSuccess;
+    }
+};
+
+// Non-blocking revoke must return ncclSuccess/ncclInProgress, then drain
+// to ncclSuccess via ncclCommGetAsyncError; later collectives must reject.
+TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ReturnsInProgress)
+{
+    ASSERT_TRUE(validateTestPrerequisites(2,
+                                          kNoProcessLimit,
+                                          kNoPowerOfTwoRequired,
+                                          1,
+                                          kNoNodeLimit))
+        << "Test requires at least 2 MPI processes";
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    ncclResult_t res = ncclCommRevoke(comm, NCCL_REVOKE_DEFAULT);
+    ASSERT_MPI_TRUE(res == ncclSuccess || res == ncclInProgress);
+
+    ASSERT_MPI_EQ(ncclSuccess, waitForAsyncResult(comm));
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    void* buf = nullptr;
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&buf, sizeof(float)));
+    auto buf_guard = makeScopeGuard([&]() { if(buf) (void)hipFree(buf); });
+
+    ncclResult_t collRes =
+        ncclAllReduce(buf, buf, 1, ncclFloat, ncclSum, comm, stream);
+    ASSERT_MPI_EQ(ncclInvalidUsage, collRes);
+}
+
+// Race commRevokeAsync (worker thread) against an immediate ncclCommShrink
+// on the same parent; shrink must still succeed across kIterations runs.
+TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_ThenShrink_NoRace)
+{
+    ASSERT_TRUE(validateTestPrerequisites(2,
+                                          kNoProcessLimit,
+                                          kNoPowerOfTwoRequired,
+                                          1,
+                                          kNoNodeLimit))
+        << "Test requires at least 2 MPI processes";
+
+    constexpr int kIterations = 10;
+    int           rank        = MPIEnvironment::world_rank;
+    int           world_size  = MPIEnvironment::world_size;
+
+    for(int iter = 0; iter < kIterations; ++iter)
+    {
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+        ncclComm_t parent = getActiveCommunicator();
+
+        // Revoke parent and DO NOT poll before invoking shrink. This is
+        // the exact pattern that triggers the worker-thread race.
+        ncclResult_t res = ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT);
+        ASSERT_MPI_TRUE(res == ncclSuccess || res == ncclInProgress);
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        std::vector<int> excludeList;
+        bool             isExcluded = false;
+        computeSymmetricExclude(rank, world_size, excludeList, isExcluded);
+
+        ncclComm_t child = NCCL_COMM_NULL;
+        if(!isExcluded)
+        {
+            res = ncclCommShrink(parent,
+                                 excludeList.data(),
+                                 excludeList.size(),
+                                 &child,
+                                 nullptr,
+                                 NCCL_SHRINK_DEFAULT);
+            ASSERT_TRUE(res == ncclSuccess || res == ncclInProgress)
+                << "iter=" << iter << " shrink returned " << res;
+            ASSERT_NE(child, nullptr);
+            ASSERT_EQ(ncclSuccess, waitForAsyncResult(child));
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        if(!isExcluded && child)
+        {
+            ASSERT_EQ(ncclSuccess, ncclCommDestroy(child));
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Tear down parent so the next iteration starts from a clean state.
+        (void)cleanupTestCommunicator();
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+}
+
+// ncclCommAbort issued mid-flight on a non-blocking revoke must wind down
+// the async-job worker via its abortFlag and return without hanging.
+TEST_F(RevokeNonBlockingMPITest, Revoke_NonBlocking_AbortedMidFlight)
+{
+    ASSERT_TRUE(validateTestPrerequisites(2,
+                                          kNoProcessLimit,
+                                          kNoPowerOfTwoRequired,
+                                          1,
+                                          kNoNodeLimit))
+        << "Test requires at least 2 MPI processes";
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t comm = getActiveCommunicator();
+
+    ncclResult_t res = ncclCommRevoke(comm, NCCL_REVOKE_DEFAULT);
+    ASSERT_MPI_TRUE(res == ncclSuccess || res == ncclInProgress);
+
+    // Abort immediately; do not poll the revoke result first.
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommAbort(comm));
+
+    // Comm is now destroyed by Abort. Prevent the framework's TearDown
+    // from calling ncclCommDestroy on a dangling handle.
+    test_comm_ = nullptr;
 
     MPI_Barrier(MPI_COMM_WORLD);
 }
