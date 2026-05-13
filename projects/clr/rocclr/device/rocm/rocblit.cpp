@@ -2592,6 +2592,7 @@ bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Co
   return result;
 }
 
+// This layout must match the struct in blitcl.cpp
 struct CopyBufferBatchDescriptor {
   uint64_t source_address;
   uint64_t destination_address;
@@ -2602,8 +2603,7 @@ struct CopyBufferBatchDescriptor {
 
 // ================================================================================================
 bool KernelBlitManager::ShaderCopyBufferBatch(
-    const std::vector<amd::BatchCopyOp> &copy_operations,
-    bool attach_signal) const {
+    const std::vector<amd::BatchCopyOp> &copy_operations) const {
   std::scoped_lock transfer_operations_lock(lockXferOps_);
 
   constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
@@ -2617,6 +2617,8 @@ bool KernelBlitManager::ShaderCopyBufferBatch(
       static_cast<CopyBufferBatchDescriptor *>(descriptor_buffer);
   size_t descriptor_index = 0;
   uint64_t max_aligned_element_count = 0;
+  bool needs_system_scope = false;
+  bool attach_signal = false;
 
   for (const auto &copy_operation : copy_operations) {
     device::Memory *source_device_memory =
@@ -2630,6 +2632,12 @@ bool KernelBlitManager::ShaderCopyBufferBatch(
         source_device_memory->virtualAddress() + copy_operation.srcOffset;
     const uint64_t destination_address =
         destination_device_memory->virtualAddress() + copy_operation.dstOffset;
+    const bool source_svm_atomics =
+        (source_device_memory->owner()->getMemFlags() & CL_MEM_SVM_ATOMICS) != 0;
+    needs_system_scope |=
+        (!source_svm_atomics && source_device_memory->isHostMemDirectAccess()) ||
+        !copy_operation.metadata.isAsync_;
+    attach_signal |= !copy_operation.metadata.isAsync_;
     const bool addresses_aligned = ((source_address % kMaxAlignment) == 0) &&
                                    ((destination_address % kMaxAlignment) == 0);
     const uint32_t aligned_element_size =
@@ -2667,6 +2675,9 @@ bool KernelBlitManager::ShaderCopyBufferBatch(
   amd::NDRangeContainer nd_range(2, nullptr, global_work_size, local_work_size);
 
   address parameters = captureArguments(kernel);
+  if (needs_system_scope) {
+    gpu().addSystemScope();
+  }
   bool submit_result =
       gpu().submitKernelInternal(nd_range, *kernel, parameters, nullptr, 0,
                                  nullptr, nullptr, attach_signal);
@@ -2748,11 +2759,6 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
       gpu().Barriers().AddExternalSignal(priorSignal);
     }
 
-    bool attach_signal = false;
-    for (const auto &op : d2dCopyOps) {
-      attach_signal |= !op.metadata.isAsync_;
-    }
-
     std::map<size_t, std::vector<amd::BatchCopyOp>, std::greater<size_t>>
         d2d_copy_ops_by_size;
     for (const auto &op : d2dCopyOps) {
@@ -2761,7 +2767,7 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
 
     for (const auto &copy_ops_by_size_entry : d2d_copy_ops_by_size) {
       const auto &copy_ops_by_size = copy_ops_by_size_entry.second;
-      if (!ShaderCopyBufferBatch(copy_ops_by_size, attach_signal)) {
+      if (!ShaderCopyBufferBatch(copy_ops_by_size)) {
         LogError("KernelBlitManager::ShaderCopyBufferBatch: Intra-device batch "
                  "copy failed!");
         return false;

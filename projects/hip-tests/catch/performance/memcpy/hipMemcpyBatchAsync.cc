@@ -8,8 +8,6 @@
 
 #include <array>
 #include <cstdint>
-#include <iomanip>
-#include <iostream>
 #include <string>
 #include <vector>
 
@@ -35,26 +33,6 @@ std::string GetSizeSectionName(size_t size) {
 
 size_t AlignUp(size_t value, size_t alignment) {
   return ((value + alignment - 1) / alignment) * alignment;
-}
-
-double GetGbPerSecond(size_t bytes, float time_ms) {
-  constexpr double kBytesPerGb = 1'000'000'000.0;
-  return (static_cast<double>(bytes) / kBytesPerGb) /
-         (static_cast<double>(time_ms) / 1000.0);
-}
-
-void PrintBandwidthStats(size_t bytes, float mean_ms, float best_ms,
-                         float worst_ms) {
-  const auto flags = std::cout.flags();
-  const auto precision = std::cout.precision();
-
-  std::cout << std::fixed << std::setprecision(2)
-            << "Bandwidth: Average: " << GetGbPerSecond(bytes, mean_ms)
-            << " GB/s, Best: " << GetGbPerSecond(bytes, best_ms)
-            << " GB/s, Worst: " << GetGbPerSecond(bytes, worst_ms) << " GB/s\n";
-
-  std::cout.flags(flags);
-  std::cout.precision(precision);
 }
 
 class MemcpyBatchAsyncDtoDBenchmark
@@ -93,6 +71,7 @@ void RunBenchmark(size_t copy_size, size_t offset) {
   benchmark.AddSectionName(GetSizeSectionName(copy_size));
   benchmark.AddSectionName(offset == 0 ? "aligned" : "4-byte offset");
   benchmark.AddSectionName(std::to_string(kBatchCount) + " copies");
+  benchmark.RegisterBandwidth(copy_size * kBatchCount);
 
   constexpr size_t kAllocationAlignment = 256;
   const size_t stride = AlignUp(copy_size + offset, kAllocationAlignment);
@@ -116,11 +95,8 @@ void RunBenchmark(size_t copy_size, size_t offset) {
   }
 
   const StreamGuard stream_guard(Streams::created);
-  const auto [mean_ms, deviation_ms, best_ms, worst_ms] =
-      benchmark.Run(dsts.data(), srcs.data(), sizes.data(), sizes.size(),
-                    stream_guard.stream());
-  (void)deviation_ms;
-  PrintBandwidthStats(copy_size * kBatchCount, mean_ms, best_ms, worst_ms);
+  benchmark.Run(dsts.data(), srcs.data(), sizes.data(), sizes.size(),
+                stream_guard.stream());
 
   for (size_t i = 0; i < kBatchCount; ++i) {
     ValidateCopy(dsts[i], copy_size);
@@ -135,11 +111,11 @@ void RunBenchmark(size_t copy_size, size_t offset) {
 /**
  * Test Description
  * ------------------------
- *  - Executes `hipMemcpyBatchAsync` with a same-device D2D batch so the ROCclr
- * optimized intra-device batch path is selected:
- *    -# Copy sizes: 4 KB, 256 KB, 1 MB, 4 MB, 16 MB, 256 MB
- *    -# Batch shape: four D2D copies of the same size
- *    -# Allocation type: hipMalloc source and destination buffers on one device
+ *  - Executes `hipMemcpyBatchAsync` with 64 same-device D2D copies:
+ *    -# Copy sizes: 4 KB, 64 KB, 128 KB, 256 KB, 1 MB, 4 MB,
+ *       16 MB, 64 MB, 128 MB, 256 MB, 1024 MB
+ *    -# Source and destination allocation type: hipMalloc on the current device
+ *    -# Source and destination pointers are 256-byte aligned
  * Test source
  * ------------------------
  *  - performance/memcpy/hipMemcpyBatchAsync.cc
@@ -157,9 +133,13 @@ HIP_TEST_CASE(Performance_hipMemcpyBatchAsync_D2D_OptimizedPath_Aligned) {
 /**
  * Test Description
  * ------------------------
- *  - Executes `hipMemcpyBatchAsync` with same-device D2D copies whose source
- * and destination pointers are 4-byte aligned but not 16-byte aligned. Test
- * source
+ *  - Executes `hipMemcpyBatchAsync` with 64 same-device D2D copies:
+ *    -# Copy sizes: 4 KB, 64 KB, 128 KB, 256 KB, 1 MB, 4 MB,
+ *       16 MB, 64 MB, 128 MB, 256 MB, 1024 MB
+ *    -# Source and destination allocation type: hipMalloc on the current device
+ *    -# Source and destination pointers are offset by 4 bytes from a
+ *       256-byte-aligned stride
+ * Test source
  * ------------------------
  *  - performance/memcpy/hipMemcpyBatchAsync.cc
  * Test requirements
