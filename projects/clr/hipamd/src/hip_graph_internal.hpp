@@ -21,6 +21,11 @@
 #include "hip_mempool_impl.hpp"
 #include "hip_vm.hpp"
 
+namespace amd { namespace roc {
+  struct GraphSignalPool;
+  struct ProfilingSignal;
+}}
+
 typedef struct ihipExtKernelEvents {
   hipEvent_t startEvent_;
   hipEvent_t stopEvent_;
@@ -977,6 +982,12 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
       }
     }
 
+    // Destroy persistent pool. All parallel streams were finished above, so
+    // every signal owned by the pool is settled and no in-flight AQL packet
+    // still references it. Any IRQ signal used by an AccumulateCommand came
+    // from the runtime pool, not this one.
+    DestroyPersistentPool();
+
     segmentBatches_.clear();
   }
 
@@ -1134,7 +1145,32 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
 
   //! Cached signal counts for graph signal pool pre-allocation
   size_t graph_signal_count_ = 0;      //!< GPU-only signals, cached after first launch
-  size_t graph_irq_signal_count_ = 0;  //!< Interrupt signals, determined at instantiation
+
+  //! Persistent signal pool owned by this GraphExec and reused across launches.
+  //! Allocated lazily on the first call to EnqueueSegmentedGraph and destroyed
+  //! in ~GraphExec (after all parallel streams have finished). AccumulateCommand
+  //! holds only a non-owning reference to this pool — there is no ownership
+  //! transfer or recycle callback.
+  amd::roc::GraphSignalPool* persistent_pool_ = nullptr;
+  amd::Device* persistent_pool_device_ = nullptr;  //!< Device that owns persistent_pool_
+
+  //! Probe signals from the previous launch's leaf segments. Each one is a
+  //! GPU-only signal from persistent_pool_ that reaches 0 when its leaf
+  //! segment's completion barrier fires; the previous launch is fully done
+  //! iff every entry is at 0. Read at the next launch to decide CPU-fast-reset
+  //! vs GPU-reset. Pointers live inside persistent_pool_ — never released here.
+  std::vector<amd::roc::ProfilingSignal*> prev_leaf_signals_;
+
+  //! Drop persistent_pool_ in ~GraphExec. Caller must have already finished
+  //! every parallel stream so no in-flight AQL packet still references its
+  //! signals.
+  void DestroyPersistentPool() {
+    if (persistent_pool_ != nullptr && persistent_pool_device_ != nullptr) {
+      persistent_pool_device_->DestroyGraphSignalPool(persistent_pool_);
+      persistent_pool_ = nullptr;
+      prev_leaf_signals_.clear();
+    }
+  }
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {

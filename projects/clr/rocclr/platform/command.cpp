@@ -63,19 +63,20 @@ Event::~Event() {
 
 // ================================================================================================
 AccumulateCommand::~AccumulateCommand() {
-  if (owned_graph_signal_pool_ != nullptr) {
-    // Graph pool owns all signals (SyncPlan HW events + ActiveSignal signals).
-    // Skip per-device HW event release — pool destructor handles everything.
-    delete owned_graph_signal_pool_;
-  } else {
-    // Non-graph path: release HW events per device as before
-    for (auto& device_events_pair : hw_events_) {
-      Device* dev = device_events_pair.first;
-      if (dev != nullptr) {
-        for (void* hw_event : device_events_pair.second) {
-          if (hw_event != nullptr) {
-            dev->ReleaseGlobalSignal(hw_event);
-          }
+  // The graph signal pool (if any) is owned by GraphExec, not by us. Just
+  // release any per-device HW events we accumulated for non-graph commands.
+  // For graph commands those HW events live inside the persistent pool and
+  // must NOT be released individually here — they get released en masse when
+  // GraphExec destroys the pool.
+  if (graphSignalPool() != nullptr) {
+    return;
+  }
+  for (auto& device_events_pair : hw_events_) {
+    Device* dev = device_events_pair.first;
+    if (dev != nullptr) {
+      for (void* hw_event : device_events_pair.second) {
+        if (hw_event != nullptr) {
+          dev->ReleaseGlobalSignal(hw_event);
         }
       }
     }

@@ -180,6 +180,23 @@ const char* HipExtraSourceCode = BLIT_KERNELS(
       __ockl_dm_init_v1(heap_to_initialize, initial_blocks, heap_size, number_of_initial_blocks);
     }
 
+    // Resets graph-pool amd_signal_t.value fields back to a given value
+    // (default 1) so the pool can be recycled for the next launch.
+    // `valueAddrs` is a flat array of raw 64-bit device addresses (one per
+    // signal); each work-item casts an entry to a __global ulong* and performs
+    // a plain 64-bit store. Each address is written by exactly one work-item
+    // (no intra-kernel race), and the AQL packet's scope_release at kernel
+    // completion makes the writes visible to host signal-wait hardware before
+    // the next iteration's AQL barrier acquires them.
+    __kernel void __amd_rocclr_resetGraphSignals(__global ulong* valueAddrs, uint count,
+                                                 ulong resetValue) {
+      uint i = (uint)get_global_id(0);
+      if (i < count) {
+        __global ulong* p = (__global ulong*)(valueAddrs[i]);
+        *p = resetValue;
+      }
+    }
+
     __kernel void __amd_rocclr_gwsInit(uint value) { __builtin_amdgcn_ds_gws_init(value, 0); });
 
 const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
@@ -206,6 +223,17 @@ const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
     __kernel void __amd_rocclr_initHeap(ulong heap_to_initialize, ulong initial_blocks,
                                         uint heap_size, uint number_of_initial_blocks) {
       __ockl_dm_init_v1(heap_to_initialize, initial_blocks, heap_size, number_of_initial_blocks);
+    }
+
+    // See HipExtraSourceCode for the rationale; same kernel emitted in the
+    // no-GWS variant for parity.
+    __kernel void __amd_rocclr_resetGraphSignals(__global ulong* valueAddrs, uint count,
+                                                 ulong resetValue) {
+      uint i = (uint)get_global_id(0);
+      if (i < count) {
+        __global ulong* p = (__global ulong*)(valueAddrs[i]);
+        *p = resetValue;
+      }
     });
 
 const char* BlitImageSourceCode = BLIT_KERNELS(

@@ -1509,8 +1509,12 @@ class AccumulateCommand : public Command {
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
-  //! Graph signal pool owned by this command (deleted after GPU completion)
-  roc::GraphSignalPool* owned_graph_signal_pool_ = nullptr;
+  //
+  // NOTE: AccumulateCommand does NOT own the graph signal pool. The pool is
+  // owned by GraphExec (persistent across launches). AccumulateCommand only
+  // carries a non-owning reference (via Command::graphSignalPool_) so that
+  // segments dispatched on parallel streams can pull GPU-only signals from
+  // the same pool. ~AccumulateCommand therefore does not touch the pool.
 
  public:
   //! Create a new Marker
@@ -1533,9 +1537,6 @@ class AccumulateCommand : public Command {
       }
     }
   }
-
-  //! Transfer ownership of graph signal pool for cleanup after GPU completion
-  void SetOwnedGraphSignalPool(roc::GraphSignalPool* pool) { owned_graph_signal_pool_ = pool; }
 
   //! Add kernel name to the list if available
   void addKernelName(const std::string* kernelName) { kernelNames_.push_back(kernelName); }

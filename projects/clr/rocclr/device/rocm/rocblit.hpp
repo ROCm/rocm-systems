@@ -308,6 +308,7 @@ class KernelBlitManager : public DmaBlitManager {
     BatchMemOp,
     StreamOpsIncrement,
     StreamOpsDecrement,
+    ResetGraphSignals,
     BlitLinearTotal,
     FillImage = BlitLinearTotal,
     BlitCopyImage,
@@ -537,6 +538,17 @@ class KernelBlitManager : public DmaBlitManager {
   //! Batch memory ops- Submits batch of streamWaits and streamWrite operations.
   virtual bool batchMemOps(const void* paramArray, size_t paramSize, uint32_t count) const;
 
+  //! Reset graph-pool signal value fields back to a given value (default 1).
+  //! Dispatches a small compute kernel on this VirtualGPU's queue with
+  //! attach_signal=true, so submitKernelInternal acquires a real signal and
+  //! attaches it as the AQL packet's completion_signal. The caller can then
+  //! read that signal back via `gpu_queue->Barriers().GetLastSignal()` and
+  //! use it to serialize parallel-stream dispatches behind the reset.
+  //! valuePtrs holds raw device pointers to amd_signal_t.value of each
+  //! signal owned by the pool.
+  bool resetGraphSignals(const std::vector<uint64_t*>& valuePtrs,
+                         uint64_t resetValue = 1) const;
+
   virtual std::recursive_mutex* lockXfer() const { return &lockXferOps_; }
 
   virtual bool initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
@@ -627,6 +639,7 @@ static const char* BlitName[KernelBlitManager::BlitTotal] = {
     "__amd_rocclr_scheduler",          "__amd_rocclr_gwsInit",
     "__amd_rocclr_initHeap",           "__amd_rocclr_batchMemOp",
     "__amd_rocclr_streamOpsIncrement", "__amd_rocclr_streamOpsDecrement",
+    "__amd_rocclr_resetGraphSignals",
     "__amd_rocclr_fillImage",          "__amd_rocclr_copyImage",
     "__amd_rocclr_copyImage1DA",       "__amd_rocclr_copyImageToBuffer",
     "__amd_rocclr_copyBufferToImage"};

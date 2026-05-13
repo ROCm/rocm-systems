@@ -503,6 +503,11 @@ class VirtualGPU : public device::VirtualDevice {
   //! Acquire a HW queue using the preferred hint, then clear the hint
   void AcquireQueueWithPreference() override;
 
+  //! Same as AcquireQueueWithPreference() but assumes execution() is already held by the caller.
+  //! Use this when the caller needs to keep execution() locked across the acquire to prevent the
+  //! async signal handler thread from racing in and releasing the queue.
+  void AcquireQueueWithPreferenceLocked();
+
   //! Pin the HW queue so ReleaseHwQueue() becomes a no-op (used by graph internal streams)
   void PinQueue() override { queue_pinned_ = true; }
   //! Unpin the HW queue, allowing ReleaseHwQueue() to release it again
@@ -545,6 +550,12 @@ class VirtualGPU : public device::VirtualDevice {
 
   Timestamp* timestamp() const { return timestamp_; }
   amd::Command* command() const { return command_; }
+  //! Override the currently-tracked command. Used by callers (e.g. graph-pool
+  //! signal reset) that dispatch a blit kernel outside any host command and
+  //! want HwQueueTracker::ActiveSignal() to take the runtime-pool path
+  //! (graph pool requires command_ to carry a graphSignalPool reference).
+  //! Caller is responsible for save/restore of the prior command pointer.
+  void SetCommand(amd::Command* cmd) { command_ = cmd; }
 
   void* allocKernArg(size_t size, size_t alignment);
   bool isFenceDirty() const { return fence_dirty_.load(std::memory_order_acquire); }

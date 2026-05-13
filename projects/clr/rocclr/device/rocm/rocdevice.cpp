@@ -3712,19 +3712,6 @@ bool GraphSignalPool::Allocate(size_t count) {
   }
   capacity_.store(signals_.size(), std::memory_order_release);
   next_idx_.store(0);
-  irq_next_idx_.store(0);
-  return true;
-}
-
-bool GraphSignalPool::AllocateIrq(size_t count, bool system_scope) {
-  irq_signals_.reserve(count);
-  for (size_t i = irq_signals_.size(); i < count; ++i) {
-    auto* ps = AllocateOneSignal(true, system_scope);
-    if (ps == nullptr) return false;
-    irq_signals_.push_back(ps);
-  }
-  irq_capacity_.store(irq_signals_.size(), std::memory_order_release);
-  irq_next_idx_.store(0);
   return true;
 }
 
@@ -3740,20 +3727,100 @@ ProfilingSignal* GraphSignalPool::GrowAndAcquire(size_t idx) {
   return signals_[idx];
 }
 
-ProfilingSignal* GraphSignalPool::GrowAndAcquireIrq(size_t idx, bool system_scope) {
+// ================================================================================================
+// IRQ acquire with re-arm-on-acquire semantics. See header for invariants.
+// Single critical section: scan + silent_store happen under lock_ so two
+// concurrent acquires in the same launch can't both grab the same slot.
+//
+// Reuse criterion: flags_.done_ == true. This flag is set inside the async
+// handler chain (HsaAmdSignalHandler → updateCommandsState → process_signal,
+// which writes signal->flags_.done_ = true once the timestamps have been
+// drained). Checking the signal *value* alone is NOT safe: the GPU may have
+// already written 0 while the HSA worker has not yet invoked the registered
+// handler. Re-arming the value to init_val in that window causes the worker
+// to re-read value == init_val on the LT-init_val condition check and skip
+// the pending handler, so the previous launch's batch never gets drained
+// and the next sync/wait on it hangs.
+// ================================================================================================
+ProfilingSignal* GraphSignalPool::AcquireIrq(bool system_scope, hsa_signal_value_t init_val) {
   amd::ScopedLock sl(lock_);
-  if (idx < irq_signals_.size()) return irq_signals_[idx];
-  while (irq_signals_.size() <= idx) {
-    auto* ps = AllocateOneSignal(true, system_scope);
-    if (ps == nullptr) return nullptr;
-    irq_signals_.push_back(ps);
-  }
-  irq_capacity_.store(irq_signals_.size(), std::memory_order_release);
-  return irq_signals_[idx];
+  // Always allocate a fresh IRQ signal; never reuse an existing one. Each
+  // AC barrier needs a dedicated completion signal with its own async handler
+  // registration. Reusing a signal — even after flags_.done_ is set — risks
+  // a race with HSA's serial async handler dispatcher.
+  auto* ps = AllocateOneSignal(true, system_scope);
+  if (ps == nullptr) return nullptr;
+  Hsa::signal_silent_store_relaxed(ps->signal_, init_val);
+  ps->flags_.done_ = false;
+  ps->ResetCachedTiming();
+  irq_signals_.push_back(ps);
+  last_acquired_ = ps;
+  return ps;
 }
 
+// ================================================================================================
+// Pool reuse helpers — see header for contract.
+// ================================================================================================
+//
+// IRQ signals are managed via re-arm-on-acquire (see AcquireIrq). They are
+// NOT swept here: each AcquireIrq() scans for a *handler-completed* IRQ
+// (flags_.done_ == true, set by the handler chain after it has drained the
+// batch) and silently re-arms it, falling back to allocating a fresh one
+// when nothing is reusable. Sweeping IRQ signal values to 1 in bulk here
+// would mask still-pending handlers and cause the classic "silently re-
+// store 1 before HSA worker observes 0 → handler never fires" hang.
+// ================================================================================================
+bool GraphSignalPool::TryCpuReset() {
+  for (auto* ps : signals_) {
+    if (Hsa::signal_load_relaxed(ps->signal_) != 0) {
+      return false;
+    }
+  }
+
+  // Silent store ⇒ no events triggered.
+  for (auto* ps : signals_) {
+    Hsa::signal_silent_store_relaxed(ps->signal_, kInitSignalValueOne);
+    ps->flags_.done_ = false;
+    ps->ResetCachedTiming();
+  }
+
+  ResetCountersForReuse();
+  return true;
+}
+
+// ================================================================================================
+void GraphSignalPool::ResetCountersForReuse() {
+  next_idx_.store(0, std::memory_order_release);
+  last_acquired_ = nullptr;
+
+  // Clear cached timing so a stale value from the previous launch can never
+  // bleed into the next one. The GPU-reset path skips CacheTimingData reset
+  // since the kernel only touches the value byte. IRQ signals are excluded;
+  // their done_/timing state is reset inside AcquireIrq when re-armed.
+  for (auto* ps : signals_) {
+    ps->flags_.done_ = false;
+    ps->ResetCachedTiming();
+  }
+}
+
+// ================================================================================================
+void GraphSignalPool::CollectValuePtrs(std::vector<uint64_t*>& out) const {
+  // GPU-only signals only. IRQ signals are excluded — see TryCpuReset note.
+  amd::ScopedLock sl(lock_);
+  out.reserve(out.size() + signals_.size());
+  for (auto* ps : signals_) {
+    auto* amd_sig = reinterpret_cast<amd_signal_t*>(ps->signal_.handle);
+    auto* val_ptr = reinterpret_cast<uint64_t*>(const_cast<int64_t*>(&amd_sig->value));
+    out.push_back(val_ptr);
+  }
+}
+
+// ================================================================================================
 GraphSignalPool::~GraphSignalPool() {
   for (auto* ps : signals_) { ps->release(); }
+  // Safe to release IRQ signals here: ~GraphSignalPool only runs after
+  // ~GraphExec finished every parallel stream, which guarantees all async
+  // handlers attached to IRQ signals have already fired.
   for (auto* ps : irq_signals_) { ps->release(); }
 }
 
@@ -3774,8 +3841,7 @@ uint8_t* Device::CreateBarrierPacket() const {
 
 // ================================================================================================
 GraphSignalPool* Device::CreateGraphSignalPool(
-    size_t gpu_count, size_t irq_count,
-    size_t segment_count, std::vector<void*>& hw_events) const {
+    size_t gpu_count, size_t segment_count, std::vector<void*>& hw_events) const {
   // Clear upfront so every failure path honours the contract: caller sees an
   // empty hw_events whenever nullptr is returned, regardless of what was passed in.
   hw_events.clear();
@@ -3783,10 +3849,6 @@ GraphSignalPool* Device::CreateGraphSignalPool(
   auto* pool = new GraphSignalPool();
 
   if (gpu_count > 0 && !pool->Allocate(gpu_count)) {
-    delete pool;
-    return nullptr;
-  }
-  if (irq_count > 0 && !pool->AllocateIrq(irq_count, true)) {
     delete pool;
     return nullptr;
   }
@@ -3809,6 +3871,63 @@ GraphSignalPool* Device::CreateGraphSignalPool(
 // ================================================================================================
 size_t Device::GetGraphSignalPoolUsedCount(GraphSignalPool* pool) const {
   return pool ? pool->UsedCount() : 0;
+}
+
+// ================================================================================================
+// Out-of-line deleter so ~GraphSignalPool is actually invoked from generic
+// platform/ code (which only sees a forward declaration of GraphSignalPool).
+void Device::DestroyGraphSignalPool(GraphSignalPool* pool) const {
+  delete pool;
+}
+
+// ================================================================================================
+// Hybrid CPU/GPU reset for pool reuse:
+//   1. Try CPU-side reset — succeeds when every signal is already at 0
+//      (previous launch fully drained). This is the common steady-state
+//      case and avoids any GPU work at all.
+//   2. Otherwise dispatch the __amd_rocclr_resetGraphSignals kernel on
+//      vdev's queue. The kernel is naturally serialized behind any prior
+//      dispatches via AQL packet ordering, so the reset completes before
+//      the next graph segment is enqueued.
+bool Device::ResetGraphSignalPool(device::VirtualDevice* vdev, GraphSignalPool* pool,
+                                  bool prev_done, bool* out_did_gpu_reset) const {
+  if (out_did_gpu_reset != nullptr) *out_did_gpu_reset = false;
+
+  if (pool == nullptr) return false;
+
+  // CPU fast path: the caller has already verified every leaf signal is at
+  // 0, so every GPU-only signal in the pool is guaranteed to be settled.
+  // TryCpuReset is just a sanity loop + silent-store-1 + counter wind-back.
+  if (prev_done) {
+    if (pool->TryCpuReset()) {
+      return true;
+    }
+    // Race: leaves were 0 a moment ago but a still-pending non-leaf signal
+    // hasn't drained yet. Fall through to GPU reset.
+  }
+
+  // GPU reset path. Used when the previous launch is still in flight at
+  // this enqueue time (overlapping launches). Dispatched on launch_stream's
+  // queue with attach_signal=true; caller pulls the completion signal back
+  // via vdev->Barriers().GetLastSignal() and uses it as a dep for the
+  // level-0 wait markers on parallel internal streams.
+  if (vdev == nullptr) return false;
+
+  std::vector<uint64_t*> value_ptrs;
+  pool->CollectValuePtrs(value_ptrs);
+  if (value_ptrs.empty()) {
+    pool->ResetCountersForReuse();
+    return true;
+  }
+
+  auto& blit = static_cast<KernelBlitManager&>(vdev->blitMgr());
+  if (!blit.resetGraphSignals(value_ptrs, /*resetValue=*/kInitSignalValueOne)) {
+    return false;
+  }
+
+  if (out_did_gpu_reset != nullptr) *out_did_gpu_reset = true;
+  pool->ResetCountersForReuse();
+  return true;
 }
 
 // ================================================================================================

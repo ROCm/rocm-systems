@@ -38,6 +38,7 @@
 #endif
 #endif
 
+
 /**
  * HSA image object size in bytes (see HSA spec)
  */
@@ -378,10 +379,6 @@ bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
   // Update the batch, since signal is complete
   gpu->updateCommandsState(ts->command().GetBatchHead());
 
-  // Opportunistically try to release the HW queue if it's now idle
-  // This helps reclaim queues in async workloads without explicit sync
-  gpu->ReleaseHwQueue();
-
   // Reset API callback signal. It will release AQL queue and start commands processing
   if (callback_signal.handle != 0 && isBlocking) {
     Hsa::signal_subtract_relaxed(callback_signal, 1);
@@ -569,7 +566,11 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   amd::Command* cmd = gpu_.command();
 
   // Graph signal pool fast path: skip WaitCurrent/WaitNext, use graph-owned signals.
-  // No fallback to runtime pool — graph pool grows on demand.
+  // No fallback to runtime pool — graph pool grows on demand. IRQ signals come
+  // from the pool's IRQ sub-pool (AcquireIrq), which uses re-arm-on-acquire
+  // semantics: scans for a signal whose handler has already fired (value==0),
+  // silently re-arms it to init_val and returns it; only allocates a fresh one
+  // when nothing is reusable (i.e., when launches overlap).
   if (cmd != nullptr && cmd->graphSignalPool() != nullptr) {
     if (!attach_signal) {
       if (cmd->HwEvent() != nullptr) {
@@ -593,9 +594,14 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
     ProfilingSignal* ps;
     if (use_irq) {
       const Settings& settings = gpu_.dev().settings();
-      ps = pool->AcquireIrq(settings.system_scope_signal_);
+      ps = pool->AcquireIrq(settings.system_scope_signal_, init_val);
     } else {
       ps = pool->Acquire();
+      if (ps != nullptr) {
+        Hsa::signal_silent_store_relaxed(ps->signal_, init_val);
+        ps->flags_.done_ = false;
+        ps->ResetCachedTiming();
+      }
     }
 
     if (ps == nullptr) {
@@ -607,11 +613,8 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
       return hsa_signal_t{0};
     }
 
-    Hsa::signal_silent_store_relaxed(ps->signal_, init_val);
-    ps->flags_.done_ = false;
     ps->engine_ = engine_;
     ps->flags_.isPacketDispatch_ = false;
-    ps->ResetCachedTiming();
 
     if (cmd->HwEvent() != nullptr) {
       reinterpret_cast<ProfilingSignal*>(cmd->HwEvent())->release();
@@ -1204,6 +1207,12 @@ void VirtualGPU::AcquireQueueWithPreference() {
     SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, last_hwq_, nullptr, &md_rb), md_rb);
     last_hwq_ = nullptr;
   }
+}
+
+// ================================================================================================
+void VirtualGPU::AcquireQueueWithPreference() {
+  std::scoped_lock lock(execution());
+  AcquireQueueWithPreferenceLocked();
 }
 
 // ================================================================================================
