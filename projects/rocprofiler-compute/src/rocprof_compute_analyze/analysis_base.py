@@ -60,6 +60,8 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
     ),
 ])
 
+EXPERIMENTAL_PANEL_ID_MEMBW: int = 3000
+
 
 # ------------------------------------
 # Helper functions for join_prof()
@@ -69,6 +71,25 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
 def test_df_column_equality(df: pd.DataFrame) -> bool:
     """Test if all columns in dataframe are equal."""
     return df.eq(df.iloc[:, 0], axis=0).all(1).all()
+
+
+# ------------------------------------
+# Experimental panel filtering
+# ------------------------------------
+
+
+def _filter_experimental_panels(
+    panel_configs: OrderedDict[int, dict[str, Any]],
+    membw_analysis: bool,
+) -> OrderedDict[int, dict[str, Any]]:
+    """Remove experimental panels that require opt-in flags."""
+    if membw_analysis:
+        return panel_configs
+    return OrderedDict(
+        (pid, cfg)
+        for pid, cfg in panel_configs.items()
+        if pid != EXPERIMENTAL_PANEL_ID_MEMBW
+    )
 
 
 class OmniAnalyze_Base:
@@ -139,7 +160,10 @@ class OmniAnalyze_Base:
                         / arch
                     )
                 )
-            ac.panel_configs = load_panel_configs(arch_panel_config)
+            ac.panel_configs = _filter_experimental_panels(
+                load_panel_configs(arch_panel_config),
+                membw_analysis=self.get_args().membw_analysis,
+            )
 
         # TODO: filter_metrics should/might be one per arch
         parser.build_dfs(
