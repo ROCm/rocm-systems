@@ -181,14 +181,14 @@ trace_control::register_region_pauser_resume_callbacks(callback_t start_callback
 bool
 trace_control::should_write_markers() const
 {
-    if(!region_filter_active())
-    {
-        return true;
-    }
-
     if(m_user_paused.load(std::memory_order_relaxed))
     {
         return false;
+    }
+
+    if(!region_filter_active())
+    {
+        return true;
     }
 
     return m_active_region_count.load(std::memory_order_relaxed) > 0;

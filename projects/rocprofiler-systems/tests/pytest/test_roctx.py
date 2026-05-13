@@ -60,17 +60,14 @@ class TestROCTx(RocprofsysTest):
             "roctxRangePush_HIP_Kernel",
             "roctxRangePush_HIP_Kernel",
             "roctxGetThreadId",
-            "roctxMark_RoctxProfilerPause_End",
-            "roctxMark_Thread_Start",
-            "roctxMark_End",
             "roctxMark_Finished_GPU",
         ]
 
     def roctx_legacy_count(self) -> list[int]:
-        return [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        return [1, 1, 1, 1, 1, 1, 1, 1]
 
     def roctx_legacy_depth(self) -> list[int]:
-        return [1, 1, 2, 0, 3, 1, 2, 2, 0, 0, 1]
+        return [1, 1, 2, 0, 3, 1, 2, 1]
 
     def roctx_cached_labels(self) -> list[str]:
         return [
@@ -78,18 +75,15 @@ class TestROCTx(RocprofsysTest):
             "roctxRangePush_HIP_Kernel",
             "roctxRangeStart_GPU_Compute",
             "roctxGetThreadId",
-            "roctxMark_RoctxProfilerPause_End",
-            "roctxMark_Thread_Start",
-            "roctxMark_End",
             "roctxRangePush_run_profiling",
             "roctxMark_Finished_GPU",
         ]
 
     def roctx_cached_count(self) -> list[int]:
-        return [1, 2, 2, 1, 1, 1, 1, 1, 1]
+        return [1, 2, 2, 1, 1, 1]
 
     def roctx_cached_depth(self) -> list[int]:
-        return [1, 1, 1, 1, 1, 2, 1, 1, 1]
+        return [1, 1, 1, 1, 1, 1]
 
     REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
 

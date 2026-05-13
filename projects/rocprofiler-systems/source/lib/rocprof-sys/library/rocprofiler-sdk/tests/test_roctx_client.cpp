@@ -184,16 +184,11 @@ protected:
 // ---------------------------------------------------------------------------
 
 // Scenario (no region filter):
-//   CodeZ            => profiled
 //   CodeA            => profiled
-//   roctx_pause      => stop callback fires (controls main tracing context)
-//   CodeB            => markers still written (no filter => should_write always true)
-//   roctx_resume     => start callback fires
+//   roctx_pause      => stop callback fires; should_write becomes false
+//   CodeB            => NOT profiled (paused)
+//   roctx_resume     => start callback fires; should_write becomes true
 //   CodeC            => profiled
-//   CodeD            => profiled
-//
-// Without a region filter, should_write_markers() always returns true.
-// Pause/resume only affects the main tracing context via callbacks.
 TEST_F(roctx_client_control_test, pause_resume_no_filter)
 {
     auto client = make_client("");
@@ -202,12 +197,12 @@ TEST_F(roctx_client_control_test, pause_resume_no_filter)
     EXPECT_FALSE(ctrl->region_filter_active());
     EXPECT_TRUE(ctrl->should_write_markers());
 
-    // Pause: stop callback fires, but should_write stays true (no filter)
+    // Pause: stop callback fires, should_write becomes false
     ctrl->handle_pause();
     EXPECT_EQ(stop_count, 1);
-    EXPECT_TRUE(ctrl->should_write_markers());
+    EXPECT_FALSE(ctrl->should_write_markers());
 
-    // Resume: start callback fires
+    // Resume: start callback fires, should_write becomes true
     ctrl->handle_resume();
     EXPECT_EQ(start_count, 1);
     EXPECT_TRUE(ctrl->should_write_markers());

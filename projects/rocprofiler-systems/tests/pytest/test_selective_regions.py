@@ -291,12 +291,24 @@ class TestSelectiveRegionPause(RocprofsysTest):
             pass_regex=pass_regex,
             fail_regex=fail_regex,
         )
-        self.assert_perfetto(
-            result,
-            subtest_name=f"{subtest_name} markers",
-            categories=["rocm_marker_api"],
-            pass_regex=["Region1"],
-        )
+        if target == "selective_region_pause_2":
+            # Region1 is pushed while paused (pause fires before the range start),
+            # so the begin-marker is never written.
+            self.assert_perfetto(
+                result,
+                subtest_name=f"{subtest_name} markers absent",
+                categories=["rocm_marker_api"],
+                fail_regex=["Region1"],
+            )
+        else:
+            # Scenarios 1 and 3: Region1 is pushed before the pause fires,
+            # so the begin-marker is written and Region1 is visible.
+            self.assert_perfetto(
+                result,
+                subtest_name=f"{subtest_name} markers",
+                categories=["rocm_marker_api"],
+                pass_regex=["Region1"],
+            )
 
     def test_filtered(self, mode, target, marker_style, selective_region_env):
         """With Region1 filter: region filtering combined with pause/resume."""
