@@ -111,3 +111,15 @@ if(OPENMP_DIRECTIVE_USE_OFFLOAD)
         target_link_options(${OFFLOAD_EXAMPLE_NAME} PRIVATE --offload-arch=${arch})
     endforeach()
 endif()
+
+if(ROCPROFSYS_INSTALL_EXAMPLES)
+    foreach(_TARGET ${HOST_EXAMPLE_NAME} ${OFFLOAD_EXAMPLE_NAME})
+        if(TARGET ${_TARGET})
+            install(
+                TARGETS ${_TARGET}
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+                COMPONENT rocprofiler-systems-examples
+            )
+        endif()
+    endforeach()
+endif()
