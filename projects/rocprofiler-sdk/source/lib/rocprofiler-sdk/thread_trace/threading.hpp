@@ -120,11 +120,7 @@ struct triple_buffer_producer_data_t
     std::unique_ptr<hsa::TraceControlAQLPacket>  control_packet{};
     std::shared_ptr<triple_buffer_shared_data_t> shared{};
     std::unique_ptr<hsa::SQTTBufferingPackets>   buffer_packet{};
-    /// SE the producer attributes published chunks to (resolved from se_mask).
     int64_t                                      shader_engine_id{0};
-    /// First chunk_index the producer should emit. core.cpp may emit the
-    /// buffering header at chunk_index 0, in which case this is 1.
-    uint64_t                                     first_chunk_index{0};
 };
 
 // Worker flags have three states: stop (either stopped or stopping), running and (global)destructor

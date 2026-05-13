@@ -58,6 +58,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <unordered_map>
@@ -99,15 +100,6 @@ std::atomic<uint64_t> flag_end{0};
 std::atomic<uint64_t> flag_gpu_full{0};
 std::atomic<uint64_t> flag_cpu_full{0};
 
-// Cumulative timing, in nanoseconds.
-//   scanner_ns_total: only the rocprof_trace_decoder_quick_scan call
-//                     (including the in-API event callback we register).
-//   post_ns_total:    everything our callback does AFTER quick_scan returns
-//                     (currently just the mutex merge of any per-call locals).
-//   callback_ns_total: scanner_ns + post_ns; the budget for not falling
-//                      behind the GPU's data rate.
-std::atomic<uint64_t> scanner_ns_total{0};
-std::atomic<uint64_t> post_ns_total{0};
 std::atomic<uint64_t> callback_ns_total{0};
 
 // Time the trace context was actively collecting (ns). Accumulated across
@@ -348,7 +340,6 @@ scan_inline(rocprof_trace_decoder_handle_t handle,
 
     auto t0 = std::chrono::steady_clock::now();
     rocprof_trace_decoder_quick_scan(handle, chunk_index, buf, size, &event_callback, &cl);
-    auto t1 = std::chrono::steady_clock::now();
 
     chunks_processed.fetch_add(1, std::memory_order_relaxed);
     bytes_processed.fetch_add(size, std::memory_order_relaxed);
@@ -360,8 +351,6 @@ scan_inline(rocprof_trace_decoder_handle_t handle,
     auto ns = [](auto a, auto b) {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(b - a).count();
     };
-    scanner_ns_total.fetch_add(ns(t0, t1), std::memory_order_relaxed);
-    post_ns_total.fetch_add(ns(t1, t2), std::memory_order_relaxed);
     callback_ns_total.fetch_add(ns(t0, t2), std::memory_order_relaxed);
 }
 }  // namespace ScanState
@@ -385,7 +374,7 @@ rocprofiler_context_id_t tracing_ctx{};
 
 constexpr uint64_t TARGET_CU                 = 1;
 constexpr uint64_t SHADER_MASK               = 0x1;
-constexpr uint64_t GPU_BUFFER_SIZE_DEFAULT   = 64ul << 20;
+constexpr uint64_t GPU_BUFFER_SIZE_DEFAULT   = 32ul << 20;
 constexpr size_t   NUM_BUFFERS               = 4;
 
 // Allow override at startup for sweeping.  GPU_BUFFER_SIZE_MB=N picks N MB.
@@ -661,8 +650,6 @@ tool_fini(void* /*tool_data*/)
     size_t dispatches  = ScanState::dispatches_seen.load();
     size_t bytes       = ScanState::bytes_processed.load();
     size_t chunks      = ScanState::chunks_processed.load();
-    size_t scanner_ns  = ScanState::scanner_ns_total.load();
-    size_t post_ns     = ScanState::post_ns_total.load();
     size_t callback_ns = ScanState::callback_ns_total.load();
 
     // If the process exited while still resumed (no closing roctxProfilerPause),
@@ -696,9 +683,7 @@ tool_fini(void* /*tool_data*/)
             "[scan] %-8s  wall=%.3fs  throughput=%.2f GB/s\n",
             label, seconds, gb_per_s);
     };
-    report("scanner", scanner_ns);
-    report("post",    post_ns);
-    report("total",   callback_ns);
+    report("total", callback_ns);
 
     // GPU trace bandwidth: bytes / wall time the SQTT context was active.
     if(trace_active_ns > 0 && bytes > 0)
@@ -759,6 +744,25 @@ tool_fini(void* /*tool_data*/)
         }
         else
         {
+            char path[64];
+            std::snprintf(path,
+                          sizeof(path),
+                          "cut_dispatch_%lu.att",
+                          (unsigned long) ScanState::TARGET_DISPATCH_ID);
+            std::ofstream ofs(path, std::ios::binary);
+            if(ofs)
+            {
+                ofs.write(reinterpret_cast<const char*>(ct.bytes.data()),
+                          static_cast<std::streamsize>(ct.bytes.size()));
+                std::printf("[scan] wrote %lu B to %s\n",
+                            (unsigned long) ct.bytes.size(),
+                            path);
+            }
+            else
+            {
+                std::fprintf(stderr, "[scan] failed to open %s for writing\n", path);
+            }
+
             // Parse must run on the same agent's handle that produced the
             // standalone bytes — code objects are loaded per-handle, so a
             // different handle would fail to disassemble. We stored the

@@ -294,17 +294,6 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         // Emit the optional buffer header first so consumers can prime state
         // before the main payload arrives. The header is chunk_index 0; the
         // producer thread continues the sequence from 1.
-        uint64_t header_chunk_index = 0;
-        if(buffer_packet->header != 0)
-        {
-            params.shader_cb_fn(agent_id,
-                                shader_engine_id,
-                                header_chunk_index++,
-                                &buffer_packet->header,
-                                sizeof(buffer_packet->header),
-                                ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
-                                params.callback_userdata);
-        }
 
         auto worker_data   = std::make_shared<triple_buffer_shared_data_t>();
         worker_data->queue = queue.get();  // non-owning; ThreadTracerAgent owns queue
@@ -322,7 +311,6 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         producer_data.shared           = worker_data;
         producer_data.buffer_packet    = std::move(buffer_packet);
         producer_data.shader_engine_id = shader_engine_id;
-        producer_data.first_chunk_index = header_chunk_index;
 
         // Other call sites (kfd, internal_threading) wrap each std::thread
         // creation in its own pre/post pair, so match that convention.

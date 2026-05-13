@@ -173,10 +173,8 @@ producer_loop(
 
     auto start_t0 = std::chrono::system_clock::now();
     bool do_sleep{false};
-    uint64_t next_chunk_index = parameters.first_chunk_index;
+    uint64_t next_chunk_index = 0;
     int64_t  shader_engine_id = parameters.shader_engine_id;
-    // Wait until ATT start packets have been executed
-    signal_wait(*CHECK_NOTNULL(parameters.start_pkt_signal));
 
     auto sleep_fn = [&]() {
         sched_yield();
@@ -245,6 +243,27 @@ producer_loop(
             wptr.data, wptr.size, ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END, idx);
     };
 
+    std::array<uint64_t, 4> header_plus_zeros{}; // Used for warmup the decoder path
+    header_plus_zeros.at(0) = buffer_packet.header;
+
+    auto send_header = [&]
+    {
+        ROCP_INFO << "Restarting the trace!";
+        if (buffer_packet.header == 0) return;
+
+        size_t hidx = wait_for_free_slot();
+        send_to_consumer(header_plus_zeros.data(),
+                         sizeof(header_plus_zeros),
+                         ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
+                         hidx,
+                         true);
+    };
+
+    send_header();
+
+    // Wait until ATT start packets have been executed
+    signal_wait(*CHECK_NOTNULL(parameters.start_pkt_signal));
+
     while(worker_flag.load() == WORKER_FLAG_RUNNING)
     {
         if(do_sleep) sleep_fn();
@@ -281,18 +300,7 @@ producer_loop(
             if(cpu_full || status->gpu_full)
             {
                 iterate_trace();
-                ROCP_INFO << "Restarting the trace!";
-
-                // Resend the header if applicable.
-                if(buffer_packet.header != 0)
-                {
-                    size_t hidx = wait_for_free_slot();
-                    send_to_consumer(&buffer_packet.header,
-                                     sizeof(buffer_packet.header),
-                                     ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
-                                     hidx,
-                                     true);
-                }
+                send_header();
 
                 att_queue_submit_and_wait_last(queue,
                                                parameters.control_packet->before_krn_pkt);
