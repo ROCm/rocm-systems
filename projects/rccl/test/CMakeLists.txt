@@ -156,20 +156,26 @@ if(BUILD_TESTS)
     AllReduceTests.cpp
     AllToAllTests.cpp
     AllToAllVTests.cpp
+    AllGatherVTests.cpp
     BroadcastTests.cpp
+    CheckModeTests.cpp
     CommGrowTests.cpp
     CommQueryPropertiesTests.cpp
     CommSuspendResumeTests.cpp
+    EnvVarSmokeTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
+    OneSidedHostApiTests.cpp
     ReduceScatterTests.cpp
     ReduceTests.cpp
     RegisterTests.cpp
     ScatterTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
+    SymmetricKernelTests.cpp
     _RecorderTests.cpp
+    device/NewDeviceApiTests.cpp
     common/main.cpp
     common/CallCollectiveForked.cpp
     common/CollectiveArgs.cpp
