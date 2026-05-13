@@ -31,6 +31,8 @@ public:
     MOCK_METHOD(void, getStatus,
                 (unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp, BatchDeadline deadline),
                 (override));
+    MOCK_METHOD(void, cancelOperations, (), (override));
+    MOCK_METHOD(void, cancelOperationsAndWait, (), (override));
 };
 
 }

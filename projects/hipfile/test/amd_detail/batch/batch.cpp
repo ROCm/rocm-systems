@@ -370,6 +370,7 @@ struct HipFileBatchContext : public HipFileUnopened {
     {
         auto op = std::make_shared<StrictMock<MBatchOperation>>();
         EXPECT_CALL(*op, markPending()).Times(1);
+        EXPECT_CALL(*op, tryCancel()).Times(testing::AnyNumber()).WillRepeatedly(Return(false));
         return op;
     }
 
@@ -782,6 +783,176 @@ TEST(HipFileBatchDeadline, UnnormalizedNanosecondsThrowsInvalidArgument)
     };
 
     ASSERT_THROW(makeBatchDeadline(&timeout), std::invalid_argument);
+}
+
+TEST_F(HipFileBatchContext, CancelOperationsEmptySucceeds)
+{
+    EXPECT_CALL(*mock_task_group, cancel()).Times(1);
+
+    ASSERT_NO_THROW(_context->cancelOperations());
+}
+
+TEST_F(HipFileBatchContext, CancelOperationsCancelsTaskGroup)
+{
+    auto op = std::make_shared<StrictMock<MBatchOperation>>();
+    EXPECT_CALL(*op, markPending()).Times(1);
+    submitMockOperations({op});
+
+    EXPECT_CALL(*mock_task_group, cancel()).Times(1);
+    EXPECT_CALL(*op, tryCancel()).WillOnce(Return(true));
+
+    ASSERT_NO_THROW(_context->cancelOperations());
+}
+
+TEST_F(HipFileBatchContext, CancelOperationsAndWaitCancelsAndWaitsForTaskGroup)
+{
+    auto op = std::make_shared<StrictMock<MBatchOperation>>();
+    EXPECT_CALL(*op, markPending()).Times(1);
+    submitMockOperations({op});
+
+    EXPECT_CALL(*mock_task_group, cancel()).Times(1);
+    EXPECT_CALL(*mock_task_group, wait()).Times(1);
+    EXPECT_CALL(*op, tryCancel()).WillOnce(Return(true));
+
+    ASSERT_NO_THROW(_context->cancelOperationsAndWait());
+}
+
+TEST_F(HipFileBatchContext, CancelOperationsCancelsPendingOperations)
+{
+    auto op1 = std::make_shared<StrictMock<MBatchOperation>>();
+    auto op2 = std::make_shared<StrictMock<MBatchOperation>>();
+    EXPECT_CALL(*op1, markPending()).Times(1);
+    EXPECT_CALL(*op2, markPending()).Times(1);
+    submitMockOperations({op1, op2});
+
+    EXPECT_CALL(*mock_task_group, cancel()).Times(1);
+    EXPECT_CALL(*op1, tryCancel()).WillOnce(Return(true));
+    EXPECT_CALL(*op2, tryCancel()).WillOnce(Return(true));
+    ASSERT_NO_THROW(_context->cancelOperations());
+}
+
+TEST_F(HipFileBatchContext, CanceledOperationIsReportedWithoutRunningQueuedWork)
+{
+    int               cookie{};
+    hipFileIOEvents_t canceled_event{&cookie, hipFileCanceled, 0};
+    auto              op = std::make_shared<StrictMock<MBatchOperation>>();
+    EXPECT_CALL(*op, markPending()).Times(1);
+    submitMockOperations({op});
+
+    // A canceled operation's queued work is dropped by the task group, so cancel
+    // is what makes the operation retrievable.
+    EXPECT_CALL(*mock_task_group, cancel()).Times(1);
+    EXPECT_CALL(*op, tryCancel()).WillOnce(Return(true));
+    ASSERT_NO_THROW(_context->cancelOperations());
+
+    EXPECT_CALL(*op, event()).WillOnce(Return(canceled_event));
+
+    unsigned          nr = 1;
+    hipFileIOEvents_t event{};
+    const auto        deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+    ASSERT_NO_THROW(_context->getStatus(1, &nr, &event, deadline));
+    ASSERT_EQ(nr, 1);
+    ASSERT_EQ(event.cookie, &cookie);
+    ASSERT_EQ(event.status, hipFileCanceled);
+
+    nr = 1;
+    ASSERT_NO_THROW(_context->getStatus(0, &nr, &event, deadline));
+    ASSERT_EQ(nr, 0);
+}
+
+TEST_F(HipFileBatchContext, OperationThatCannotBeCanceledIsCompletedByItsQueuedWork)
+{
+    hipFileIOEvents_t complete_event{nullptr, hipFileComplete, 5};
+    auto              op = std::make_shared<StrictMock<MBatchOperation>>();
+    EXPECT_CALL(*op, markPending()).Times(1);
+    submitMockOperations({op});
+
+    EXPECT_CALL(*mock_task_group, cancel()).Times(1);
+    EXPECT_CALL(*op, tryCancel()).WillOnce(Return(false));
+    ASSERT_NO_THROW(_context->cancelOperations());
+
+    unsigned          nr = 1;
+    hipFileIOEvents_t event{};
+    const auto        deadline = std::chrono::steady_clock::now();
+    ASSERT_NO_THROW(_context->getStatus(0, &nr, &event, deadline));
+    ASSERT_EQ(nr, 0);
+
+    EXPECT_CALL(*op, event()).WillOnce(Return(complete_event));
+    completeOperation(op, 0);
+
+    nr = 1;
+    ASSERT_NO_THROW(_context->getStatus(0, &nr, &event, deadline));
+    ASSERT_EQ(nr, 1);
+    ASSERT_EQ(event.status, hipFileComplete);
+    ASSERT_EQ(event.ret, 5);
+
+    nr = 1;
+    ASSERT_NO_THROW(_context->getStatus(0, &nr, &event, deadline));
+    ASSERT_EQ(nr, 0);
+}
+
+TEST_F(HipFileBatchContext, CancelOperationsLeavesCompletedOperationsUnchanged)
+{
+    hipFileIOEvents_t complete_event{nullptr, hipFileComplete, 7};
+    hipFileIOEvents_t failed_event{nullptr, hipFileFailed, static_cast<size_t>(-hipFileInternalError)};
+    auto              complete_op = std::make_shared<StrictMock<MBatchOperation>>();
+    auto              failed_op   = std::make_shared<StrictMock<MBatchOperation>>();
+    EXPECT_CALL(*complete_op, markPending()).Times(1);
+    EXPECT_CALL(*failed_op, markPending()).Times(1);
+    submitMockOperations({complete_op, failed_op});
+    completeOperations({complete_op, failed_op});
+
+    // Both operations already completed, so cancel has nothing left to cancel.
+    EXPECT_CALL(*mock_task_group, cancel()).Times(1);
+    ASSERT_NO_THROW(_context->cancelOperations());
+
+    EXPECT_CALL(*complete_op, event()).WillRepeatedly(Return(complete_event));
+    EXPECT_CALL(*failed_op, event()).WillRepeatedly(Return(failed_event));
+
+    unsigned                         nr = 2;
+    std::array<hipFileIOEvents_t, 2> events{};
+    ASSERT_NO_THROW(_context->getStatus(2, &nr, events.data(), std::nullopt));
+    ASSERT_EQ(nr, 2);
+    ASSERT_THAT(events, UnorderedElementsAre(AllOf(Field(&hipFileIOEvents_t::status, hipFileComplete),
+                                                   Field(&hipFileIOEvents_t::ret, static_cast<size_t>(7))),
+                                             AllOf(Field(&hipFileIOEvents_t::status, hipFileFailed),
+                                                   Field(&hipFileIOEvents_t::ret,
+                                                         static_cast<size_t>(-hipFileInternalError)))));
+}
+
+TEST_F(HipFileBatchContext, CancelOperationsCancelableAndTerminalOp)
+{
+    int               pending_cookie{};
+    int               failed_cookie{};
+    hipFileIOEvents_t pending_event{&pending_cookie, hipFileCanceled, 0};
+    hipFileIOEvents_t failed_event{&failed_cookie, hipFileFailed, static_cast<size_t>(-hipFileInternalError)};
+    auto              pending_op = std::make_shared<StrictMock<MBatchOperation>>();
+    auto              failed_op  = std::make_shared<StrictMock<MBatchOperation>>();
+    EXPECT_CALL(*pending_op, markPending()).Times(1);
+    EXPECT_CALL(*failed_op, markPending()).Times(1);
+    submitMockOperations({pending_op, failed_op});
+    completeOperation(failed_op, 1);
+
+    EXPECT_CALL(*mock_task_group, cancel()).Times(1);
+    EXPECT_CALL(*pending_op, tryCancel()).WillOnce(Return(true));
+    ASSERT_NO_THROW(_context->cancelOperations());
+
+    EXPECT_CALL(*pending_op, event()).WillRepeatedly(Return(pending_event));
+    EXPECT_CALL(*failed_op, event()).WillRepeatedly(Return(failed_event));
+
+    unsigned                         nr = 2;
+    std::array<hipFileIOEvents_t, 2> events{};
+    ASSERT_NO_THROW(_context->getStatus(2, &nr, events.data(), std::nullopt));
+
+    ASSERT_EQ(nr, 2);
+    std::vector<hipFileIOEvents_t> returned_events{events.begin(), events.begin() + nr};
+    ASSERT_THAT(returned_events,
+                UnorderedElementsAre(
+                    AllOf(Field(&hipFileIOEvents_t::cookie, static_cast<void *>(&pending_cookie)),
+                          Field(&hipFileIOEvents_t::status, hipFileCanceled)),
+                    AllOf(Field(&hipFileIOEvents_t::cookie, static_cast<void *>(&failed_cookie)),
+                          Field(&hipFileIOEvents_t::status, hipFileFailed),
+                          Field(&hipFileIOEvents_t::ret, static_cast<size_t>(-hipFileInternalError)))));
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

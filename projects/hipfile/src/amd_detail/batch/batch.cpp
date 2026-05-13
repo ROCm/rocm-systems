@@ -360,8 +360,13 @@ BatchContext::submitOperations(BatchOperations pending_ops)
                 {
                     std::unique_lock<std::shared_mutex> _ulock{self->context_mutex};
 
-                    auto node = self->submitted_ops.extract(op);
-                    self->completed_ops.push_back(std::move(node.value()));
+                    // A cancel may have moved this operation to completed_ops
+                    // already. Cancellation only stops queued work that has not
+                    // started, so this work may still run after the operation was
+                    // canceled. See completeCanceledOperations().
+                    if (auto node = self->submitted_ops.extract(op); !node.empty()) {
+                        self->completed_ops.push_back(std::move(node.value()));
+                    }
                 }
                 self->status_cv.notify_all();
             });
@@ -413,6 +418,50 @@ BatchContext::getStatus(unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp,
     }
 
     collect_completed_events();
+}
+
+void
+BatchContext::cancelOperations()
+{
+    std::unique_lock<std::shared_mutex> lock{context_mutex};
+
+    task_group->cancel();
+    completeCanceledOperations();
+    status_cv.notify_all();
+}
+
+void
+BatchContext::cancelOperationsAndWait()
+{
+    {
+        std::unique_lock<std::shared_mutex> lock{context_mutex};
+
+        task_group->cancel();
+        completeCanceledOperations();
+    }
+    task_group->wait();
+    {
+        std::unique_lock<std::shared_mutex> lock{context_mutex};
+        status_cv.notify_all();
+    }
+}
+
+void
+BatchContext::completeCanceledOperations()
+{
+    // A canceled operation never runs, so its queued work will not move it to
+    // completed_ops. Move it here instead. Operations that could not be
+    // canceled are either running or already complete, and are moved by their
+    // own queued work.
+    for (auto op_iter = submitted_ops.begin(); op_iter != submitted_ops.end();) {
+        if (!(*op_iter)->tryCancel()) {
+            ++op_iter;
+            continue;
+        }
+
+        auto node = submitted_ops.extract(op_iter++);
+        completed_ops.push_back(std::move(node.value()));
+    }
 }
 
 void

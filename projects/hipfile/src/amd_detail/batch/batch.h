@@ -394,6 +394,8 @@ public:
     virtual void     submitOperations(BatchOperations ops) = 0;
     virtual void     getStatus(unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp,
                                BatchDeadline deadline)     = 0;
+    virtual void     cancelOperations()                    = 0;
+    virtual void     cancelOperationsAndWait()             = 0;
 };
 
 class BatchContext : public IBatchContext, public std::enable_shared_from_this<BatchContext> {
@@ -432,6 +434,16 @@ public:
     ///
     void getStatus(unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp, BatchDeadline deadline) override;
 
+    ///
+    /// @brief Cancel outstanding operations from this Context.
+    ///
+    void cancelOperations() override;
+
+    ///
+    /// @brief Cancel outstanding operations from this Context and wait for running ops
+    ///
+    void cancelOperationsAndWait() override;
+
 private:
     const unsigned capacity;
 
@@ -454,6 +466,13 @@ private:
     std::unique_ptr<ITaskGroup> task_group;
 
     BatchContext(unsigned capacity);
+
+    ///
+    /// @brief Cancel each submitted operation that can be canceled and move it
+    ///        to completed_ops.
+    /// @note Caller must hold context_mutex.
+    ///
+    void completeCanceledOperations();
 
     friend class BatchContextMap;
 };
