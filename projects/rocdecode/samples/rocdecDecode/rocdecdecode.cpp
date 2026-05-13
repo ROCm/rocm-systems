@@ -266,7 +266,7 @@ void save_frame_to_file(DecoderInfo *p_dec_info, void *surf_mem[], uint32_t *pit
 }
 
 /**
- * @brief Function to save internal frame buffer to file for host buffer
+ * @brief Function to save internal frame buffer to file for host backend
  * 
  * @param p_dec_info 
  * @param frame_mem 
