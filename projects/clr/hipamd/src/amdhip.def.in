@@ -191,6 +191,7 @@ hipProfilerStop
 hipProfilerEnableExt
 hipProfilerDisableExt
 hipProfilerGetRecordsExt
+hipProfilerRegisterChunkCallbackExt
 hipRuntimeGetVersion
 hipGetDeviceFlags
 hipSetDevice
