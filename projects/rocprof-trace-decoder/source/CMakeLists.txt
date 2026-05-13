@@ -205,7 +205,7 @@ if(SQTT_LOGGING)
     target_compile_definitions(rocprof-trace-decoder-objects PRIVATE SQTT_LOGGING)
 endif()
 
-option(ARCH_MODEL "Enable ARCH_MODEL stitcher path" ON)
+option(ARCH_MODEL "Enable ARCH_MODEL stitcher path" OFF)
 if(ARCH_MODEL)
     target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ARCH_MODEL)
 endif()
