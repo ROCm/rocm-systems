@@ -209,8 +209,10 @@ else()
         BUILD_IN_SOURCE 1
         ${_eu_patch_args}
         CONFIGURE_COMMAND
-            ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3
-            CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3
+            ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER}
+            CFLAGS=-fPIC\ -O3\ -Wno-error=maybe-uninitialized
+            CXX=${CMAKE_CXX_COMPILER}
+            CXXFLAGS=-fPIC\ -O3\ -Wno-error=maybe-uninitialized
             [=[LDFLAGS=-Wl,-rpath='$$ORIGIN']=] <SOURCE_DIR>/configure
             --enable-install-elfh --prefix=${_eu_root} --disable-libdebuginfod
             --disable-debuginfod --enable-thread-safety --disable-nls
