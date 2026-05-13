@@ -77,7 +77,7 @@ HSAKMTAPI int amdgpu_query_gpu_info(amdgpu_device_handle dev,
 }
 
 int amdgpu_device_get_fd_impl(amdgpu_device_handle dev) {
-  return dxg_runtime->dxg_fd;
+  return dxg_runtime().dxg_fd;
 }
 
 HSAKMTAPI int amdgpu_device_get_fd(amdgpu_device_handle dev) {

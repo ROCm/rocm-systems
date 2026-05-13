@@ -49,7 +49,6 @@ wsl::thunk::GpuMemory *get_gpu_mem(void *MemoryAddress);
 
 #include "runtime.h"
 
-#define dxg_runtime (&rocdxg::Runtime::Instance())
 extern HsaStructureSizes detected_abi_;
 
 #undef HSAKMTAPI
@@ -68,7 +67,7 @@ extern HsaStructureSizes detected_abi_;
 #define PORT_UINT64_TO_VPTR(v) ((void*)(unsigned long)(v))
 
 #define CHECK_DXG_OPEN() \
-	do { if (dxg_runtime->dxg_open_count == 0 || dxg_runtime->is_forked) return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED; } while (0)
+	do { if (dxg_runtime().dxg_open_count == 0 || dxg_runtime().is_forked) return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED; } while (0)
 
 /* 64KB BigK fragment size for TLB efficiency */
 #define GPU_BIGK_PAGE_SIZE (1 << 16)
@@ -77,11 +76,11 @@ extern HsaStructureSizes detected_abi_;
 #define GPU_HUGE_PAGE_SIZE (2 << 20)
 
 #define CHECK_PAGE_MULTIPLE(x) \
-	do { if ((uint64_t)PORT_VPTR_TO_UINT64(x) % dxg_runtime->page_size) return HSAKMT_STATUS_INVALID_PARAMETER; } while(0)
+	do { if ((uint64_t)PORT_VPTR_TO_UINT64(x) % dxg_runtime().page_size) return HSAKMT_STATUS_INVALID_PARAMETER; } while(0)
 
 #define ALIGN_UP(x,align) (((uint64_t)(x) + (align) - 1) & ~(uint64_t)((align)-1))
 #define ALIGN_UP_32(x,align) (((uint32_t)(x) + (align) - 1) & ~(uint32_t)((align)-1))
-#define PAGE_ALIGN_UP(x) ALIGN_UP(x,dxg_runtime->page_size)
+#define PAGE_ALIGN_UP(x) ALIGN_UP(x,dxg_runtime().page_size)
 #define BITMASK(n) ((n) ? (UINT64_MAX >> (sizeof(UINT64_MAX) * CHAR_BIT - (n))) : 0)
 #define ARRAY_LEN(array) (sizeof(array) / sizeof(array[0]))
 
@@ -103,7 +102,7 @@ extern HsaStructureSizes detected_abi_;
 #else
 #define hsakmt_print(level, fmt, ...)                                                                                            \
     do {                                                                                                                         \
-        if (level <= dxg_runtime->hsakmt_debug_level) {                                                                          \
+        if (level <= dxg_runtime().hsakmt_debug_level) {                                                                                \
             hsakmt_print_common(stdout, fmt, ##__VA_ARGS__);                                                                     \
         }                                                                                                                        \
     } while (false)

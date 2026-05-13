@@ -126,6 +126,6 @@ private:
 
 } // namespace rocdxg
 
-using hsakmtRuntime = rocdxg::Runtime;
+inline rocdxg::Runtime &dxg_runtime() { return rocdxg::Runtime::Instance(); }
 
 #endif

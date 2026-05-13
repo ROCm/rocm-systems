@@ -65,7 +65,7 @@ GpuMemory::~GpuMemory() {
     pr_err("Failed to wait on paging fence before destroy\n");
   FreePhysicalMemory();
   if (desc_.handle_ape_addr > 0)
-    dxg_runtime->HandleApertureFree(desc_.handle_ape_addr);
+    dxg_runtime().HandleApertureFree(desc_.handle_ape_addr);
 }
 
 ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
@@ -109,7 +109,7 @@ ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
   if (IsPhysicalOnly()) {
     code = CreatePhysicalMemory();
     if (code == ErrorCode::Success)
-      code = dxg_runtime->HandleApertureAlloc(desc_.size, &desc_.handle_ape_addr);
+      code = dxg_runtime().HandleApertureAlloc(desc_.size, &desc_.handle_ape_addr);
     return code;
   }
 
@@ -270,11 +270,11 @@ ErrorCode GpuMemory::ReserveGpuVirtualAddress(gpusize base_virt_addr, gpusize si
   if ((desc_.flags.is_sysmem_exporter || desc_.flags.is_imported_sys_memfd)
       && desc_.domain == thunk_proxy::AllocDomain::kSystem) {
     int mfd = (mem_fd_ > -1)? mem_fd_ : -1;
-    status = dxg_runtime->ReserveIPCSysMem(Size(), &gpu_virt_addr, desc_.alignment, mfd, desc_.flags.is_locked);
+    status = dxg_runtime().ReserveIPCSysMem(Size(), &gpu_virt_addr, desc_.alignment, mfd, desc_.flags.is_locked);
     if (status == ErrorCode::Success)
       mem_fd_ = mfd;
   } else {
-    status = dxg_runtime->ReserveGpuVirtualAddress(desc_.domain, base_virt_addr, size, &gpu_virt_addr, alignment,
+    status = dxg_runtime().ReserveGpuVirtualAddress(desc_.domain, base_virt_addr, size, &gpu_virt_addr, alignment,
         desc_.flags.is_locked);
   }
 
@@ -289,10 +289,10 @@ ErrorCode GpuMemory::ReserveGpuVirtualAddress(gpusize base_virt_addr, gpusize si
 
 ErrorCode GpuMemory::FreeGpuVirtualAddress(gpusize base_addr, gpusize size) {
   if (mem_fd_ > -1)
-    return dxg_runtime->FreeIPCSysMem(GpuAddress(), Size(), mem_fd_);
+    return dxg_runtime().FreeIPCSysMem(GpuAddress(), Size(), mem_fd_);
 
   return base_addr != 0 ?
-         dxg_runtime->FreeGpuVirtualAddress(desc_.domain, base_addr, size) :
+         dxg_runtime().FreeGpuVirtualAddress(desc_.domain, base_addr, size) :
          ErrorCode::Success;
 }
 
@@ -352,7 +352,7 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
     shared_info.adapter_luid = desc_.adapter_luid;
     shared_info.flags = reinterpret_cast<uint32_t>(desc_.flags.reserved);
     shared_info.mem_flags = desc_.mem_flags;
-    shared_info.pid = dxg_runtime->parent_pid;
+    shared_info.pid = dxg_runtime().parent_pid;
     shared_info.gpu_addr = desc_.gpu_addr;
     args.pPrivateRuntimeData = &shared_info;
     args.PrivateRuntimeDataSize = sizeof(shared_info);
@@ -555,7 +555,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info
       pr_err("open resource failed %d\n", static_cast<int>(ret));
       return ret;
     }
-    if (shared_info.pid == dxg_runtime->parent_pid &&
+    if (shared_info.pid == dxg_runtime().parent_pid &&
       create_info.flags.alloc_va &&
       IsSameAdapter(shared_info.adapter_luid) &&
       shared_info.gpu_addr) {
@@ -587,7 +587,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info
       return ret;
     } else {
       desc_.flags.is_imported_vram_vmem = 1;
-      return dxg_runtime->HandleApertureAlloc(desc_.size, &desc_.handle_ape_addr);
+      return dxg_runtime().HandleApertureAlloc(desc_.size, &desc_.handle_ape_addr);
     }
   }
 }

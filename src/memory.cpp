@@ -39,11 +39,11 @@
 using rocdxg::Allocation;
 
 static rocdxg::AllocationRegistry &allocation_registry() {
-  return dxg_runtime->Allocations();
+  return dxg_runtime().Allocations();
 }
 
 static wsl::SimpleHeap<rocdxg::BlockAllocator> &fragment_allocator() {
-  return dxg_runtime->FragmentAllocator();
+  return dxg_runtime().FragmentAllocator();
 }
 
 void clear_allocation_map(void)
@@ -140,7 +140,7 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
   } else
     *MemoryAddress = nullptr;
 
-  uint32_t node = (PreferredNode == 0) ? dxg_runtime->default_node : PreferredNode;
+  uint32_t node = (PreferredNode == 0) ? dxg_runtime().default_node : PreferredNode;
   wsl::thunk::WDDMDevice *dev = get_wddmdev(node);
   if (!dev)
     return HSAKMT_STATUS_ERROR;
@@ -156,15 +156,15 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
   create_info.alignment = Alignment;
   create_info.va_hint = reinterpret_cast<gpusize>(*MemoryAddress);
   if ((PreferredNode == 0 && MemFlags.ui32.HostAccess)
-    || dxg_runtime->zfb_support || MemFlags.ui32.GTTAccess) {
-    if (SizeInBytes > dxg_runtime->max_single_alloc_size)
+    || dxg_runtime().zfb_support || MemFlags.ui32.GTTAccess) {
+    if (SizeInBytes > dxg_runtime().max_single_alloc_size)
       return HSAKMT_STATUS_NO_MEMORY;
 
-    if (dxg_runtime->check_avail_sysram && !isSystemMemoryAvailable(SizeInBytes))
+    if (dxg_runtime().check_avail_sysram && !isSystemMemoryAvailable(SizeInBytes))
       return HSAKMT_STATUS_NO_MEMORY;
 
     /* If allocate VRAM under ZFB mode */
-    if (dxg_runtime->zfb_support && MemFlags.ui32.NonPaged == 1)
+    if (dxg_runtime().zfb_support && MemFlags.ui32.NonPaged == 1)
       MemFlags.ui32.CoarseGrain = 1;
 
     // AllocateNonPaged == AllocateIPC
@@ -255,7 +255,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
   return hsaKmtAllocMemoryAlignInternal(PreferredNode, SizeInBytes,
                                         Alignment, MemFlags,
                                         MemoryAddress,
-                                        !dxg_runtime->enable_thunk_sub_allocator);
+                                        !dxg_runtime().enable_thunk_sub_allocator);
 }
 
 HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,
@@ -409,7 +409,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryWithFlags(
   if ((MemFlags.ui32.HostAccess != 1) || (MemFlags.ui32.NonPaged == 1))
     return HSAKMT_STATUS_NOT_SUPPORTED;
 
-  if (!dxg_runtime->hsakmt_is_dgpu)
+  if (!dxg_runtime().hsakmt_is_dgpu)
     /* TODO: support mixed APU and dGPU configurations */
     return HSAKMT_STATUS_NOT_SUPPORTED;
 
@@ -450,7 +450,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
   HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 
   if (is_ipc_sysmemfd(GraphicsResourceHandle)) {
-    GraphicsResourceInfo->NodeId = dxg_runtime->default_node;
+    GraphicsResourceInfo->NodeId = dxg_runtime().default_node;
     pr_info("skip register sysmemfd. It would be released in next step\n");
     return HSAKMT_STATUS_SUCCESS;
   }
@@ -458,7 +458,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
   if (NumberOfNodes == 0) {
     RegisterFlags.ui32.requiresVAddr = 0;
     NumberOfNodes = 1;
-    NodeArray = (HSAuint32*)&(dxg_runtime->default_node);
+    NodeArray = (HSAuint32*)&(dxg_runtime().default_node);
   }
 
   pr_debug("number of nodes %lu\n", NumberOfNodes);
@@ -671,7 +671,7 @@ HSAKMT_STATUS import_dmabuf_fd(int DMABufFd,
     struct stat st;
     fstat(DMABufFd, &st);
     uint64_t sz = st.st_size;
-    if (4096 <= sz && sz < dxg_runtime->SystemHeapSize() && (sz & 0xfff) == 0) {
+    if (4096 <= sz && sz < dxg_runtime().SystemHeapSize() && (sz & 0xfff) == 0) {
       pr_debug("DMABufFd %d is sys mem fd(IPC signal), get size:%ld from it\n", DMABufFd, st.st_size);
       create_info.flags.sysmem_ipc_sig_importer = 1;        // set to 1 when backend is system memory
       create_info.size = st.st_size;
@@ -815,7 +815,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
                                              HSAuint64 *AlternateVAGPU) {
 
   HSAuint64 NumberOfNodes = 1;
-  HSAuint32 NodeArray[] = {dxg_runtime->default_node};
+  HSAuint32 NodeArray[] = {dxg_runtime().default_node};
   HsaMemMapFlags MemMapFlags;
   MemMapFlags.Value = 0;
 

@@ -363,7 +363,7 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props) {
 
   std::memset(&props, 0, sizeof(props));
 
-  dxg_runtime->HeapFini();
+  dxg_runtime().HeapFini();
   for (auto device : dxg_topology->wdevices_)
     delete device;
   dxg_topology->wdevices_.clear();
@@ -377,10 +377,10 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props) {
   }
 
   dxg_topology->num_sysfs_nodes = num_adapters + 1;
-  dxg_runtime->HeapInit();
+  dxg_runtime().HeapInit();
   props.NumNodes = dxg_topology->num_sysfs_nodes;
-  if (dxg_runtime->default_node > num_adapters)
-    dxg_runtime->default_node = num_adapters;
+  if (dxg_runtime().default_node > num_adapters)
+    dxg_runtime().default_node = num_adapters;
 
   return ret;
 }
@@ -389,7 +389,7 @@ void topology_setup_is_dgpu_param(HsaNodeProperties *props) {
   /* if we found a dGPU node, then treat the whole system as dGPU */
   /* noted that some APUs are also treated as dGPU in runtime */
   if (!props->NumCPUCores && props->NumFComputeCores)
-    dxg_runtime->hsakmt_is_dgpu = true;
+    dxg_runtime().hsakmt_is_dgpu = true;
 }
 
 static HSAKMT_STATUS topology_get_cpu_model_name(HsaNodeProperties& props,
@@ -597,7 +597,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
   snprintf((char *)props.AMDName, sizeof(props.AMDName) - 1, "GFX%06x",
            HSA_GET_GFX_VERSION_FULL(props.EngineId.ui32));
 
-  if (!dxg_runtime->is_svm_api_supported)
+  if (!dxg_runtime().is_svm_api_supported)
     props.Capability.ui32.SVMAPISupported = 0;
   props.Capability.ui32.DoorbellType = 2;
 
@@ -629,7 +629,7 @@ static HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id,
     /* props.SizeInBytes is the actual physical system
      * memory size. Reserve 1/16th for WSL system usage.
      */
-    dxg_runtime->max_single_alloc_size = info.totalram - (info.totalram >> 4);
+    dxg_runtime().max_single_alloc_size = info.totalram - (info.totalram >> 4);
 
     props.Flags.MemoryProperty = 0;
     /* TODO: sudo dmidecode --type memory doesn't work on wsl */
@@ -1171,7 +1171,7 @@ hsaKmtAcquireSystemProperties(HsaSystemProperties *SystemProperties) {
   if (!SystemProperties)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  pthread_mutex_lock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_lock(&dxg_runtime().hsakmt_mutex);
 
   /* We already have a valid snapshot. Avoid double initialization that
    * would leak memory.
@@ -1205,16 +1205,16 @@ init_process_apertures_failed:
   topology_drop_snapshot();
 
 out:
-  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_unlock(&dxg_runtime().hsakmt_mutex);
   return err;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtReleaseSystemProperties(void) {
-  pthread_mutex_lock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_lock(&dxg_runtime().hsakmt_mutex);
 
   topology_drop_snapshot();
 
-  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_unlock(&dxg_runtime().hsakmt_mutex);
 
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -1254,7 +1254,7 @@ hsaKmtGetNodeProperties(HSAuint32 NodeId, HsaNodeProperties *NodeProperties) {
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   CHECK_DXG_OPEN();
-  pthread_mutex_lock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_lock(&dxg_runtime().hsakmt_mutex);
 
   err = validate_nodeid(NodeId, &gpu_id);
   if (err != HSAKMT_STATUS_SUCCESS)
@@ -1277,7 +1277,7 @@ hsaKmtGetNodeProperties(HSAuint32 NodeId, HsaNodeProperties *NodeProperties) {
   }
 
 out:
-  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_unlock(&dxg_runtime().hsakmt_mutex);
   return err;
 }
 
@@ -1307,7 +1307,7 @@ hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId, HSAuint32 NumBanks,
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   CHECK_DXG_OPEN();
-  pthread_mutex_lock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_lock(&dxg_runtime().hsakmt_mutex);
 
   memset(MemoryProperties, 0, NumBanks * sizeof(HsaMemoryProperties));
   for (i = 0; i < wsl::Min(dxg_topology->g_props[NodeId].node.NumMemoryBanks, NumBanks); i++) {
@@ -1337,7 +1337,7 @@ hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId, HSAuint32 NumBanks,
   }
 
 out:
-  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_unlock(&dxg_runtime().hsakmt_mutex);
   return err;
 }
 
@@ -1351,7 +1351,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeCacheProperties(
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   CHECK_DXG_OPEN();
-  pthread_mutex_lock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_lock(&dxg_runtime().hsakmt_mutex);
 
   /* KFD ADD page 18, snapshot protocol violation */
   if (!dxg_topology->g_system || NodeId >= dxg_topology->g_system->NumNodes) {
@@ -1372,7 +1372,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeCacheProperties(
   err = HSAKMT_STATUS_SUCCESS;
 
 out:
-  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_unlock(&dxg_runtime().hsakmt_mutex);
   return err;
 }
 
@@ -1397,7 +1397,7 @@ hsaKmtGetNodeIoLinkProperties(HSAuint32 NodeId, HSAuint32 NumIoLinks,
 
   CHECK_DXG_OPEN();
 
-  pthread_mutex_lock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_lock(&dxg_runtime().hsakmt_mutex);
 
   /* KFD ADD page 18, snapshot protocol violation */
   if (!dxg_topology->g_system || NodeId >= dxg_topology->g_system->NumNodes) {
@@ -1414,7 +1414,7 @@ hsaKmtGetNodeIoLinkProperties(HSAuint32 NodeId, HSAuint32 NumIoLinks,
   err = topology_get_iolink_props(NodeId, NumIoLinks, IoLinkProperties);
 
 out:
-  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_unlock(&dxg_runtime().hsakmt_mutex);
   return err;
 }
 

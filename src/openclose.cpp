@@ -36,55 +36,56 @@
 #include <cassert>
 
 bool is_forked_child(void) {
-  return dxg_runtime->IsForkedChild();
+  return dxg_runtime().IsForkedChild();
 }
 
 static void clear_after_fork(void) {
-  dxg_runtime->ClearAfterFork();
+  dxg_runtime().ClearAfterFork();
 }
 
 static inline void init_page_size(void) {
-  dxg_runtime->page_size = sysconf(_SC_PAGESIZE);
-  dxg_runtime->page_shift = ffs(dxg_runtime->page_size) - 1;
+  dxg_runtime().page_size = sysconf(_SC_PAGESIZE);
+  dxg_runtime().page_shift = ffs(dxg_runtime().page_size) - 1;
 }
 
 static HSAKMT_STATUS init_vars_from_env(void) {
   char *envvar;
   int debug_level;
+  auto &rt = dxg_runtime();
 
   /* Normally libraries don't print messages. For debugging purpose, we'll
    * print messages if an environment variable, HSAKMT_DEBUG_LEVEL, is set.
    */
   envvar = getenv("HSAKMT_DEBUG_LEVEL");
   if (envvar) {
-    dxg_runtime->hsakmt_debug_level = atoi(envvar);
+    rt.hsakmt_debug_level = atoi(envvar);
   }
 
   /* Check whether to support Zero frame buffer */
   envvar = getenv("HSA_ZFB");
   if (envvar)
-    dxg_runtime->zfb_support = atoi(envvar);
+    rt.zfb_support = atoi(envvar);
 
   /* Check whether to handle vendor specific aql packet */
   envvar = getenv("WSLKMT_VENDOR_PACKET");
   if (envvar)
-    dxg_runtime->vendor_packet_process = atoi(envvar);
+    rt.vendor_packet_process = atoi(envvar);
 
   /* Decide whether to check available system memory before allocation */
   envvar = getenv("WSL_CHECK_AVAIL_SYSRAM");
   if (envvar)
-    dxg_runtime->check_avail_sysram = !strcmp(envvar, "1");
+    rt.check_avail_sysram = !strcmp(envvar, "1");
 
   envvar = getenv("WSL_ENABLE_THUNK_SUB_ALLOCATOR");
   if (envvar)
-    dxg_runtime->enable_thunk_sub_allocator = atoi(envvar);
+    rt.enable_thunk_sub_allocator = atoi(envvar);
 
   envvar = getenv("ROCR_VISIBLE_DEVICES");
   if (envvar) {
     std::string devices(envvar);
     size_t first_num_pos = devices.find_first_of("0123456789");
     if (first_num_pos != std::string::npos)
-      dxg_runtime->default_node = std::stoi(devices.substr(first_num_pos)) + 1;
+      rt.default_node = std::stoi(devices.substr(first_num_pos)) + 1;
   }
 
   return HSAKMT_STATUS_SUCCESS;
@@ -95,8 +96,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
   int fd = -1;
   HsaSystemProperties sys_props;
   char *error;
+  auto &rt = dxg_runtime();
 
-  pthread_mutex_lock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_lock(&rt.hsakmt_mutex);
 
   /* If the process has forked, the child process must re-initialize
    * it's connection to DXG. Any references tracked by dxg_open_count
@@ -105,20 +107,20 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
   if (is_forked_child())
     clear_after_fork();
 
-  if (dxg_runtime->dxg_open_count == 0) {
+  if (rt.dxg_open_count == 0) {
     result = init_vars_from_env();
     if (result != HSAKMT_STATUS_SUCCESS)
       goto open_failed;
 
-    if (dxg_runtime->dxg_fd < 0) {
-      fd = open(dxg_runtime->dxg_device_name, O_RDWR | O_CLOEXEC);
+    if (rt.dxg_fd < 0) {
+      fd = open(rt.dxg_device_name, O_RDWR | O_CLOEXEC);
 
       if (fd == -1) {
         result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
         goto open_failed;
       }
 
-      dxg_runtime->dxg_fd = fd;
+      rt.dxg_fd = fd;
     }
     if (!wsl::thunk::dxcore::DxcoreLoader::Instance().Initialize()) {
         pr_err("Failed to load libdxcore.so\n");
@@ -130,43 +132,44 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
     init_page_size();
 
     char *useSvmStr = getenv("HSA_USE_SVM");
-    dxg_runtime->is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0")) && false;
+    rt.is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0")) && false;
 
-    dxg_runtime->dxg_open_count = 1;
+    rt.dxg_open_count = 1;
 
-    dxg_runtime->InstallAtForkHandlers();
+    rt.InstallAtForkHandlers();
   } else {
-    dxg_runtime->dxg_open_count++;
+    rt.dxg_open_count++;
     result = HSAKMT_STATUS_KERNEL_ALREADY_OPENED;
   }
 
   reset_suballocator();
-  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_unlock(&rt.hsakmt_mutex);
   return result;
 dxcore_loader_failed:
   close(fd);
 open_failed:
-  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_unlock(&rt.hsakmt_mutex);
 
   return result;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) {
   HSAKMT_STATUS result;
+  auto &rt = dxg_runtime();
 
-  pthread_mutex_lock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_lock(&rt.hsakmt_mutex);
 
-  if (dxg_runtime->dxg_open_count > 0) {
-    if (--dxg_runtime->dxg_open_count == 0) {
+  if (rt.dxg_open_count > 0) {
+    if (--rt.dxg_open_count == 0) {
       wsl::thunk::dxcore::DxcoreLoader::Instance().Shutdown();
-      dxg_runtime->Reset();
+      rt.Reset();
     }
 
     result = HSAKMT_STATUS_SUCCESS;
   } else
     result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
 
-  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
+  pthread_mutex_unlock(&rt.hsakmt_mutex);
 
   return result;
 }
