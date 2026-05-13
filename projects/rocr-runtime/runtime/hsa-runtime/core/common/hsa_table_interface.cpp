@@ -1384,7 +1384,7 @@ hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t hsa_amd_external_semaphore_handle_open(
+hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
     hsa_agent_t agent,
     const hsa_amd_external_semaphore_handle_descriptor_t *desc,
     hsa_amd_external_semaphore_t *out_sem) {
@@ -1392,7 +1392,7 @@ hsa_status_t hsa_amd_external_semaphore_handle_open(
 }
 
 // Mirrors Amd Extension Apis
-hsa_status_t hsa_amd_external_semaphore_handle_close(
+hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
     hsa_amd_external_semaphore_t sem) {
   return amdExtTable->hsa_amd_external_semaphore_handle_close_fn(sem);
 }
