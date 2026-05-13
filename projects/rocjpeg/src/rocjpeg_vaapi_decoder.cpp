@@ -310,7 +310,7 @@ RocJpegStatus RocJpegVaapiMemoryPool::GetHipInteropMem(VASurfaceID surface_id, H
         }
     }
     // it shouldn't reach here unless the requested surface_id is not in the memory pool.
-    ErrorLog(g_rocjpeg_logger, "The surface_id: " + TOSTR(surface_id) + " was not found in the memory pool!");
+    ErrorLog(g_rocjpeg_logger, "The surface_id: " + ROCJPEG_TOSTR(surface_id) + " was not found in the memory pool!");
     return ROCJPEG_STATUS_INVALID_PARAMETER;
 }
 

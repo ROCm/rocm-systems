@@ -193,7 +193,7 @@ RocJpegStatus ROCJPEGAPI rocJpegGetImageInfo(RocJpegHandle handle, RocJpegStream
         rocjpeg_status = rocjpeg_handle->rocjpeg_decoder->GetImageInfo(jpeg_stream_handle, num_components, subsampling, widths, heights);
     } catch (const std::exception& e) {
         rocjpeg_handle->CaptureError(e.what());
-        ERR(e.what());
+        ErrorLog(g_rocjpeg_logger, e.what());
         return ROCJPEG_STATUS_RUNTIME_ERROR;
     }
 
@@ -225,7 +225,7 @@ RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle
         rocjpeg_status = rocjpeg_handle->rocjpeg_decoder->Decode(jpeg_stream_handle, decode_params, destination);
     } catch (const std::exception& e) {
         rocjpeg_handle->CaptureError(e.what());
-        ERR(e.what());
+        ErrorLog(g_rocjpeg_logger, e.what());
         return ROCJPEG_STATUS_RUNTIME_ERROR;
     }
 
@@ -253,7 +253,7 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeBatched(RocJpegHandle handle, RocJpegStrea
         rocjpeg_status = rocjpeg_handle->rocjpeg_decoder->DecodeBatched(jpeg_stream_handles, batch_size, decode_params, destinations);
     } catch (const std::exception& e) {
         rocjpeg_handle->CaptureError(e.what());
-        ERR(e.what());
+        ErrorLog(g_rocjpeg_logger, e.what());
         return ROCJPEG_STATUS_RUNTIME_ERROR;
     }
 

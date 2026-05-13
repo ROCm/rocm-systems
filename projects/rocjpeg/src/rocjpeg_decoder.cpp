@@ -439,7 +439,7 @@ RocJpegStatus RocJpegDecoder::CopyChannel(HipInteropDeviceMem& hip_interop_dev_m
                         channel_widths[0] = is_roi_width_valid ? roi_width : channel_width;
                         break;
                     default:
-                        ERR("Unknown output format!");
+                        ErrorLog(g_rocjpeg_logger, "Unknown output format!");
                         return ROCJPEG_STATUS_INVALID_PARAMETER;
                     }
                 break;
@@ -463,7 +463,7 @@ RocJpegStatus RocJpegDecoder::CopyChannel(HipInteropDeviceMem& hip_interop_dev_m
                         channel_widths[0] = is_roi_width_valid ? roi_width : channel_width;
                         break;
                     default:
-                        ERR("Unknown output format!");
+                        ErrorLog(g_rocjpeg_logger, "Unknown output format!");
                         return ROCJPEG_STATUS_INVALID_PARAMETER;
                     }
                 break;
