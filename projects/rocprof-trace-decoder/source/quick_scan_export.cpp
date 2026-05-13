@@ -254,15 +254,20 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
         auto decoder = HandleData::get_read_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
-        bool ready = decoder->cv.wait_for(decoder.lk, std::chrono::milliseconds(100), [&]() {
-            const CSRegisterHandler* p = decoder->pipestate.get(chunk_index);
-            if (!p) return false;
-            // Copy under the read lock; the borrowed pointer is invalid
-            // once we release it, but `local` now owns its own state
-            // (CowPtr refcount bumps on the shared codeobj vector + tables).
-            local = *p;
-            return true;
-        });
+        bool ready = decoder->cv.wait_for(
+            decoder.lk,
+            std::chrono::milliseconds(100),
+            [&]()
+            {
+                const CSRegisterHandler* p = decoder->pipestate.get(chunk_index);
+                if (!p) return false;
+                // Copy under the read lock; the borrowed pointer is invalid
+                // once we release it, but `local` now owns its own state
+                // (CowPtr refcount bumps on the shared codeobj vector + tables).
+                local = *p;
+                return true;
+            }
+        );
         if (!ready) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES;
     }
 
@@ -280,23 +285,6 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
     return status;
 }
 
-PUBLIC_API rocprofiler_thread_trace_decoder_status_t
-rocprof_trace_decoder_flush_chunk(rocprof_trace_decoder_handle_t handle, uint64_t chunk_index)
-{
-    // Reset the slot in place under the write lock. Pipestate::take()
-    // synchronously drops every CowPtr refcount the slot owned (move-assign
-    // from a default-constructed CSRegisterHandler) so the cost is paid
-    // here rather than deferred to the next put() that would otherwise
-    // overwrite the slot.
-    auto hd = HandleData::get_write_handle(handle);
-    if (!hd.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    if (!hd->pipestate.take(chunk_index + 1))
-        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
-}
-
 PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_build_standalone(
     rocprof_trace_decoder_handle_t handle,
     uint64_t chunk_index,
@@ -308,7 +296,7 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_build
     uint64_t* size_out
 )
 {
-    if (!data || data_size <= 8 || !data_out || !size_out || offset_begin+8 >= offset_end || offset_end > data_size)
+    if (!data || data_size <= 8 || !data_out || !size_out || offset_begin + 8 >= offset_end || offset_end > data_size)
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
     // Snapshot the gfxip, the saved arch header, and a copy of the
@@ -319,7 +307,6 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_build
     int gfxip = 0;
     uint64_t header_word = 0;
     CSRegisterHandler temp;
-    bool have_temp = false;
 
     {
         auto decoder = HandleData::get_read_handle(handle);
@@ -329,13 +316,11 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_build
         header_word = decoder->gfx9_header;
 
         if (const CSRegisterHandler* p = decoder->pipestate.get(chunk_index))
-        {
             temp = *p;
-            have_temp = true;
-        }
+        else
+            return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    if (!have_temp) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
     if (gfxip != 9) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     const uint8_t* buf = static_cast<const uint8_t*>(data);

@@ -24,14 +24,14 @@
 #include "trace_parser.hpp"
 
 #include <array>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
-#include <condition_variable>
 
 #ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
-#include "rocprof_trace_decoder/cxx/code_printing.hpp"
+#    include "rocprof_trace_decoder/cxx/code_printing.hpp"
 
 using AddressTable = rocprof_trace_decoder::codeobj::CodeobjAddressTranslate;
 #endif
@@ -39,12 +39,12 @@ using AddressTable = rocprof_trace_decoder::codeobj::CodeobjAddressTranslate;
 class Pipestate
 {
 public:
-    static constexpr size_t kCapacity = 4096;
+    static constexpr size_t kCapacity = 1024;
 
     struct Slot
     {
-        uint64_t          chunk_index = 0;
-        bool              occupied    = false;
+        uint64_t chunk_index = 0;
+        bool occupied = false;
         CSRegisterHandler handler{};
     };
 
@@ -58,49 +58,48 @@ public:
 
     void put(uint64_t chunk_index, CSRegisterHandler&& state)
     {
-        auto& s       = slots_[chunk_index % kCapacity];
-        s.chunk_index = chunk_index;
-        s.handler     = std::move(state);
-        s.occupied    = true;
-    }
-
-    bool take(uint64_t chunk_index)
-    {
         auto& s = slots_[chunk_index % kCapacity];
-        if (!s.occupied || s.chunk_index != chunk_index) return false;
-        s.handler  = CSRegisterHandler{};
-        s.occupied = false;
-        return true;
+        s.chunk_index = chunk_index;
+        s.handler = std::move(state);
+        s.occupied = true;
     }
 
 private:
     std::unique_ptr<Slot[]> slots_;
 };
 
-template<typename T>
-class ReadLock
+template <typename T> class ReadLock
 {
 public:
-    ReadLock(std::shared_ptr<T> instance, std::shared_mutex& mut): value(instance), lk(std::shared_lock{mut}) {}
+    ReadLock(std::shared_ptr<T> instance, std::shared_mutex& mut) : value(instance), lk(std::shared_lock{mut}) {}
 
     bool valid() const { return value != nullptr; }
-    const T* operator->() const { if(!value) throw std::runtime_error("Invalid lock"); return value.get(); }
+    const T* operator->() const
+    {
+        if (!value) throw std::runtime_error("Invalid lock");
+        return value.get();
+    }
 
     std::shared_lock<std::shared_mutex> lk;
+
 private:
     std::shared_ptr<const T> value;
 };
 
-template<typename T>
-class WriteLock
+template <typename T> class WriteLock
 {
 public:
-    WriteLock(std::shared_ptr<T> instance, std::shared_mutex& mut): value(instance), lk(std::unique_lock{mut}) {}
+    WriteLock(std::shared_ptr<T> instance, std::shared_mutex& mut) : value(instance), lk(std::unique_lock{mut}) {}
 
     bool valid() const { return value != nullptr; }
-    T* operator->() { if(!value) throw std::runtime_error("Invalid lock"); return value.get(); }
+    T* operator->()
+    {
+        if (!value) throw std::runtime_error("Invalid lock");
+        return value.get();
+    }
 
     std::unique_lock<std::shared_mutex> lk;
+
 private:
     std::shared_ptr<T> value;
 };
@@ -140,7 +139,7 @@ public:
     static ReadLock<HandleData> get_read_handle(rocprof_trace_decoder_handle_t handle)
     {
         static std::shared_mutex dummy_mut{};
-    
+
         std::lock_guard<std::mutex> lock(get_map_mutex());
         auto& map = get_map();
         auto it = map.find(handle.handle);
@@ -151,7 +150,7 @@ public:
     static WriteLock<HandleData> get_write_handle(rocprof_trace_decoder_handle_t handle)
     {
         static std::shared_mutex dummy_mut{};
-    
+
         std::lock_guard<std::mutex> lock(get_map_mutex());
         auto& map = get_map();
         auto it = map.find(handle.handle);
