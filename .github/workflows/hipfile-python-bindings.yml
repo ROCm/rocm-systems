@@ -134,14 +134,22 @@ jobs:
               .venv/bin/pip install --upgrade pip
               .venv/bin/pip install build
             '
-      - name: Build hipFile Python sdist
+      - name: Build hipFile Python sdist & capture metadata
+        id: sdist-metadata
         run: |
           docker exec \
+            -e "AIS_GITHUB_OUTPUT=${{ env.AIS_GHA_CMD_FILES_DOCKER_DIR }}/${GITHUB_OUTPUT##*/}" \
+            -e "_AIS_INPUT_PLATFORM=${AIS_INPUT_PLATFORM}" \
             -t \
             -w /ais/rocm-systems/projects/hipfile \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
               .venv/bin/python -m build --sdist ./python
+              shopt -s nullglob
+              OLD_FILENAME="$(basename ./python/dist/hipfile-*.tar.gz)"
+              NEW_FILENAME="${OLD_FILENAME%.tar.gz}-${_AIS_INPUT_PLATFORM}.tar.gz"
+              mv ./python/dist/${OLD_FILENAME} ./python/dist/${NEW_FILENAME}
+              echo "HIPFILE_PYTHON_SDIST_FILENAME=${NEW_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
             '
       - name: Install hipFile Python sdist into virtual environment
         run: |
@@ -150,7 +158,7 @@ jobs:
             -w /ais/rocm-systems/projects/hipfile \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              .venv/bin/pip install ./python/dist/hipfile-*.tar.gz
+              .venv/bin/pip install ./python/dist/${{ steps.sdist-metadata.outputs.HIPFILE_PYTHON_SDIST_FILENAME }}
             '
       - name: Verify hipFile Python package installation
         run: |
@@ -160,19 +168,6 @@ jobs:
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
               .venv/bin/python -c "import hipfile; print(f\"hipfile {hipfile.__version__} installed successfully\")"
-            '
-      - name: Capture sdist metadata
-        id: sdist-metadata
-        run: |
-          docker exec \
-            -e "AIS_GITHUB_OUTPUT=${{ env.AIS_GHA_CMD_FILES_DOCKER_DIR }}/${GITHUB_OUTPUT##*/}" \
-            -t \
-            -w /ais/rocm-systems/projects/hipfile/python/dist \
-            "${AIS_CONTAINER_NAME}" \
-            /bin/bash -c '
-              shopt -s nullglob
-              HIPFILE_PYTHON_SDIST_FILENAME="$(echo hipfile-*.tar.gz)"
-              echo "HIPFILE_PYTHON_SDIST_FILENAME=${HIPFILE_PYTHON_SDIST_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
             '
       - name: Copy sdist out of the container
         run: |
