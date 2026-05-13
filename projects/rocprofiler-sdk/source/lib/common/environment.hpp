@@ -39,7 +39,6 @@ namespace impl
 struct sfinae
 {};
 
-// Exposed for presence checks - distinguishes "not set" from "set to empty"
 std::optional<std::string> get_env_direct(std::string_view);
 
 std::string get_env(std::string_view, std::string_view);
