@@ -230,7 +230,9 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
         comm->wrs[r].num_sge = 1;
       }
 
-      if ((r == (nreqs - 1)) && (comm->base.recvMatchingScheme != BY_ORDER)) {
+      // wr_id remapping is only used for CAST scheduler RTT timing (BY_INDEX).
+      // BY_ID (used by PORT_FAILOVER/RECOVERY) and BY_ORDER skip remapping.
+      if ((r == (nreqs - 1)) && (comm->base.recvMatchingScheme == BY_INDEX)) {
         struct ncclIbRemapWrId *remapWrId;
         NCCLCHECK(IbCastQpSchedGetRemap(&comm->base, wr_id, qpIndex, &remapWrId));
         lastWr->wr_id = (uint64_t) remapWrId;
@@ -748,15 +750,18 @@ static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetC
     *req = recvComm->recvReqs[wc->wr_id];
   } else {
     struct ncclIbSendComm* sendComm = (struct ncclIbSendComm*)base;
-    struct ncclIbRemapWrId *remapWrId = (struct ncclIbRemapWrId *) wc->wr_id;
-    assert(remapWrId != NULL);
-    assert(remapWrId->state == NCCL_NET_IB_REMAP_USED);
-    // On the sender side, the lower 8 bits of wr_id are used to retrieve the
-    // request, since in multi-send case, multiple IDs are encoded in the same
-    // wr_id.,
-    *req = sendComm->sendReqs[remapWrId->origWrId & 0xff][0];
-    if (remapWrId->parms.enable) IbCastQpSchedUpdateTxStats(remapWrId, base);
-    IbCastQpSchedFreeRemap(remapWrId);
+    if (base->recvMatchingScheme == BY_INDEX) {
+      // BY_INDEX: wr_id was remapped by CAST scheduler for RTT timing
+      struct ncclIbRemapWrId *remapWrId = (struct ncclIbRemapWrId *) wc->wr_id;
+      assert(remapWrId != NULL);
+      assert(remapWrId->state == NCCL_NET_IB_REMAP_USED);
+      *req = sendComm->sendReqs[remapWrId->origWrId & 0xff][0];
+      if (remapWrId->parms.enable) IbCastQpSchedUpdateTxStats(remapWrId, base);
+      IbCastQpSchedFreeRemap(remapWrId);
+    } else {
+      // BY_ID / other: wr_id is raw slot-encoded value (no remap)
+      *req = sendComm->sendReqs[wc->wr_id & 0xff][0];
+    }
   }
   TRACE(NCCL_NET, "NET/IB: %s: Retrieved a %s request (req=%p, comm=%p, id=%ld, type=%s, wc.wr_id=%ld, wc.opcode=%s, wc.imm_data=%d, wc.byte_len=%d, wc.qp_num=%u)", __func__, base->isSend ? "send" : "recv", *req, (*req)->base, (*req)->id, IbCastReqTypeStr[(*req)->type], wc->wr_id, ibvWcOpcodeStr(wc->opcode), be32toh(wc->imm_data), wc->byte_len, wc->qp_num);
   return ncclSuccess;
