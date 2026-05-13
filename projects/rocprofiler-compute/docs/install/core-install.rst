@@ -73,6 +73,19 @@ This includes the ROCm profilers, dependencies, and base packages.
 
             sudo zypper install amdrocm-profiler
 
+Configuration and modulefile usage
+==================================
+
+For runtime configuration options and modulefile-based environment setup, see
+:doc:`./source-install`:
+
+* :ref:`core-install-rocprof-var` — configure the ``ROCPROF`` environment
+  variable to select a profiling backend.
+* :ref:`core-install-modulefiles` — load ROCm Compute Profiler via Lmod
+  modulefiles for shared multi-user installations.
+* :ref:`core-install-cmake-vars` — CMake variables for custom install paths,
+  Python dependency locations, and build options.
+
 .. _tarball-install:
 
 Install from the tarball
@@ -91,8 +104,3 @@ The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
 nightly builds for the ROCm Core SDK and its components, including ROCm Compute
 Profiler. See `Nightly release status
 <https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
-
-Post-installation
-=================
-
-See :ref:`core-install-rocprof-var` to configure your environment for profiling.

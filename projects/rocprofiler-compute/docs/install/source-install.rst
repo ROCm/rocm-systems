@@ -1,6 +1,6 @@
 .. meta::
    :description: ROCm Compute Profiler installation and deployment
-   :keywords: Omniperf, ROCm Compute Profiler, ROCm, tool, Instinct, accelerator, AMD,
+   :keywords: rocm, comp, compute, perf, rocprofiler-compute, Instinct, accelerator, AMD,
               install, deploy, client, configuration, modulefiles
 
 *****************************************
