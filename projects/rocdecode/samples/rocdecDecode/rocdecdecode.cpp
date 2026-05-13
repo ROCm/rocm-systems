@@ -69,7 +69,7 @@ __attribute__((visibility("hidden"))) inline void report_error(
     std::exit(EXIT_FAILURE);
 }
 
-//hardcoding for initial creation of decoder. Will get adjusted based on the input stream after reconfigure
+// Hard-coded defaults for initial decoder creation. They will be adjusted based on the input stream after reconfiguration.
 #define DEFAULT_WIDTH 2912
 #define DEFAULT_HEIGHT 1888
 
