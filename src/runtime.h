@@ -48,7 +48,12 @@ public:
   ~Runtime() = default;
 
   void Reset();
-  void ResetAfterFork();
+  bool IsForkedChild();
+  void ClearAfterFork();
+  void InstallAtForkHandlers();
+  void PrepareFork();
+  void ParentFork();
+  void ChildFork();
 
   void HeapInit();
   void HeapFini();

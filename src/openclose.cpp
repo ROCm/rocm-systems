@@ -35,44 +35,12 @@
 #include <strings.h>
 #include <cassert>
 
-/* is_forked_child detects when the process has forked since the last
- * time this function was called. We cannot rely on pthread_atfork
- * because the process can fork without calling the fork function in
- * libc (using clone or calling the system call directly).
- */
 bool is_forked_child(void) {
-  if (dxg_runtime->is_forked)
-    return true;
-
-  pid_t cur_pid = getpid();
-  if (dxg_runtime->parent_pid != cur_pid) {
-    dxg_runtime->is_forked = true;
-    dxg_runtime->parent_pid = cur_pid;
-    return true;
-  }
-
-  return false;
+  return dxg_runtime->IsForkedChild();
 }
 
-/* Callbacks from pthread_atfork */
-static void prepare_fork_handler(void) { pthread_mutex_lock(&dxg_runtime->hsakmt_mutex); }
-static void parent_fork_handler(void) { pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex); }
-static void child_fork_handler(void) {
-  pthread_mutex_init(&dxg_runtime->hsakmt_mutex, NULL);
-  dxg_runtime->is_forked = true;
-}
-
-/* Call this from the child process after fork. This will clear all
- * data that is duplicated from the parent process, that is not valid
- * in the child.
- * The topology information is duplicated from the parent is valid
- * in the child process so it is not cleared
- */
 static void clear_after_fork(void) {
-  reset_suballocator();
-  clear_allocation_map();
-
-  dxg_runtime->ResetAfterFork();
+  dxg_runtime->ClearAfterFork();
 }
 
 static inline void init_page_size(void) {
@@ -138,8 +106,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
     clear_after_fork();
 
   if (dxg_runtime->dxg_open_count == 0) {
-    static bool atfork_installed = false;
-
     result = init_vars_from_env();
     if (result != HSAKMT_STATUS_SUCCESS)
       goto open_failed;
@@ -168,16 +134,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
 
     dxg_runtime->dxg_open_count = 1;
 
-    if (!atfork_installed) {
-      /* Atfork handlers cannot be uninstalled and
-       * must be installed only once. Otherwise
-       * prepare will deadlock when trying to take
-       * the same lock multiple times.
-       */
-      pthread_atfork(prepare_fork_handler, parent_fork_handler,
-                     child_fork_handler);
-      atfork_installed = true;
-    }
+    dxg_runtime->InstallAtForkHandlers();
   } else {
     dxg_runtime->dxg_open_count++;
     result = HSAKMT_STATUS_KERNEL_ALREADY_OPENED;

@@ -29,6 +29,14 @@
 
 namespace rocdxg {
 
+namespace {
+
+void PrepareForkHandler() { Runtime::Instance().PrepareFork(); }
+void ParentForkHandler() { Runtime::Instance().ParentFork(); }
+void ChildForkHandler() { Runtime::Instance().ChildFork(); }
+
+} // namespace
+
 Runtime &Runtime::Instance() {
   static Runtime *runtime = new Runtime();
   return *runtime;
@@ -63,8 +71,58 @@ void Runtime::Reset() {
   ResetState();
 }
 
-void Runtime::ResetAfterFork() {
+/* Detect when the process has forked since the last call. We cannot rely
+ * on pthread_atfork because the process can fork without calling the fork
+ * function in libc, such as through clone or a direct syscall.
+ */
+bool Runtime::IsForkedChild() {
+  if (is_forked)
+    return true;
+
+  pid_t cur_pid = getpid();
+  if (parent_pid != cur_pid) {
+    is_forked = true;
+    parent_pid = cur_pid;
+    return true;
+  }
+
+  return false;
+}
+
+/* Call from the child process after fork. This clears data duplicated from
+ * the parent process that is not valid in the child. Topology information
+ * remains valid in the child process, so it is not cleared.
+ */
+void Runtime::ClearAfterFork() {
+  reset_suballocator();
+  clear_allocation_map();
   Reset();
+}
+
+void Runtime::InstallAtForkHandlers() {
+  static bool atfork_installed = false;
+  /* Atfork handlers cannot be uninstalled and must be installed only once.
+   * Otherwise prepare will deadlock when trying to take the same lock
+   * multiple times.
+   */
+  if (atfork_installed)
+    return;
+
+  pthread_atfork(PrepareForkHandler, ParentForkHandler, ChildForkHandler);
+  atfork_installed = true;
+}
+
+void Runtime::PrepareFork() {
+  pthread_mutex_lock(&hsakmt_mutex);
+}
+
+void Runtime::ParentFork() {
+  pthread_mutex_unlock(&hsakmt_mutex);
+}
+
+void Runtime::ChildFork() {
+  pthread_mutex_init(&hsakmt_mutex, NULL);
+  is_forked = true;
 }
 
 void Runtime::HeapInit() { heap.Init(); }
