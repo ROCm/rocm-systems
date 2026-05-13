@@ -20,7 +20,10 @@ class TestPmcDataCache:
         })
 
     def _make_pmc_perf_with_accum_alias_df(self):
-        """Build a flat DataFrame matching `_create_single_df_pmc` output with accumulator alias."""
+        """
+        Build a flat DataFrame matching `_create_single_df_pmc` output 
+        with accumulator alias.
+        """
         return pd.DataFrame({
             "Kernel_Name": ["k", "k"],
             "Dispatch_ID": [0, 1],
