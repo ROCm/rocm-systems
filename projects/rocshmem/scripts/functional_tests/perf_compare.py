@@ -487,12 +487,22 @@ def main():
     make_heatmap(baseline_data, variant_datasets, args.outdir)
 
     # Print summary table to stdout
+    _RAW_FMT = {
+        "latency_us":  "{:.3f}",
+        "peak_bw_gbs": "{:.2f}",
+    }
+    # Column layout: value in VAL_W chars, pct as "+NNN.N%" in PCT_W chars.
+    # Both parts are fixed-width so values and percentages align across rows.
+    VAL_W = 8   # e.g. "   0.523" or "  24.50"
+    PCT_W = 7   # e.g. " +4.2%"  or "-100.0%" — sign + 5.1f + "%"
+    COL_W = VAL_W + 1 + PCT_W  # variant columns; baseline uses VAL_W only
+
     print("\n" + "=" * 80)
     print("SUMMARY: metrics for tests common to all variants")
     print("=" * 80)
-    header = f"{'Test':<30} {'Metric':<12}"
+    header = f"{'Test':<30} {'Metric':<12} {'baseline':>{VAL_W}}"
     for vname in variant_datasets:
-        header += f" {vname:>14}"
+        header += f"  {vname:>{COL_W}}"
     print(header)
     print("-" * len(header))
 
@@ -500,17 +510,27 @@ def main():
         bdf = baseline_data[test_name]
         for metric_name, metric_fn in METRICS.items():
             bval = metric_fn(bdf)
-            row = f"{test_name:<30} {metric_name:<12}"
+            raw_fmt = _RAW_FMT.get(metric_name)
+            if raw_fmt:
+                braw = raw_fmt.format(bval)
+                row = f"{test_name:<30} {metric_name:<12} {braw:>{VAL_W}}"
+            else:
+                row = f"{test_name:<30} {metric_name:<12} {'':>{VAL_W}}"
             for vname in variant_datasets:
                 if test_name in variant_datasets[vname]:
                     vval = metric_fn(variant_datasets[vname][test_name])
                     if bval != 0:
                         pct = (vval - bval) / abs(bval) * 100
-                        row += f" {pct:>+13.1f}%"
+                        if raw_fmt:
+                            vraw = f"{raw_fmt.format(vval):>{VAL_W}}"
+                            vpct = f"{pct:+6.1f}%"   # always PCT_W chars
+                            row += f"  {vraw} {vpct}"
+                        else:
+                            row += f"  {'':>{VAL_W}} {pct:+6.1f}%"
                     else:
-                        row += f" {'N/A':>14}"
+                        row += f"  {'N/A':>{COL_W}}"
                 else:
-                    row += f" {'missing':>14}"
+                    row += f"  {'missing':>{COL_W}}"
             print(row)
 
 
