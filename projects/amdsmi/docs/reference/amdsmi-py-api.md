@@ -5684,6 +5684,102 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_gpu_memory_partition_config
+
+Description: Get the current memory partition mode and supported NPS modes for the given GPU.
+
+Input parameters:
+
+* `processor_handle` the device handle
+
+Output: Dictionary with fields:
+
+Field | Description
+---|---
+`partition_caps` | List of supported NPS modes (e.g. `["NPS1", "NPS4"]`)
+`mp_mode` | String of the current memory partition mode (e.g. `"NPS1"`)
+`num_numa_ranges` | Number of NUMA ranges (currently `"N/A"`)
+`numa_range` | NUMA range information (currently `"N/A"`)
+
+Exceptions that can be thrown by `amdsmi_get_gpu_memory_partition_config` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            try:
+                config = amdsmi.amdsmi_get_gpu_memory_partition_config(device)
+                print("Current mode:", config["mp_mode"])
+                print("Supported modes:", config["partition_caps"])
+            except amdsmi.AmdSmiException as e:
+                print(e)
+                continue
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+Refer to [amd_smi_partition_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_partition_example.py) for a complete example.
+
+### amdsmi_set_gpu_memory_partition_mode
+
+Description: Set the memory partition mode for the given GPU using the newer partition mode API. All GPU processes must be idle before calling this function.
+
+Input parameters:
+
+* `processor_handle` the device handle
+* `memory_partition` the target NPS mode (`AmdSmiMemoryPartitionType`)
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_memory_partition_mode` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    memory_partition = amdsmi.AmdSmiMemoryPartitionType.NPS4
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        # Memory partition is hive-wide -- setting it on one device affects all.
+        amdsmi.amdsmi_set_gpu_memory_partition_mode(devices[0], memory_partition)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+Refer to [amd_smi_partition_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_partition_example.py) for a complete example.
+
 ### amdsmi_get_gpu_uma_carveout_info
 
 **Note:** This is a kernel UAPI feature (sysfs), not libdrm.
@@ -5913,8 +6009,6 @@ finally:
 
 ### amdsmi_get_gpu_accelerator_partition_profile
 
-**Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
-
 Description: Get partition information for target device
 
 Input parameters:
@@ -5959,6 +6053,130 @@ except amdsmi.AmdSmiException as e:
 finally:
     amdsmi.amdsmi_shut_down()
 ```
+
+### amdsmi_get_gpu_accelerator_partition_profile_config
+
+Description: Get all supported accelerator partition profiles for the given GPU. Returns the full profile configuration including each profile's type, partition count, compatible NPS modes, and per-resource allocation details.
+
+Input parameters:
+
+* `processor_handle` the device handle
+
+Output: Dictionary with fields:
+
+Field | Description
+---|---
+`num_profiles` | Total number of supported accelerator partition profiles
+`num_resource_profiles` | Number of resource profile entries
+`resource_profiles` | List of resource allocation dicts (see `resources` below)
+`default_profile_index` | Index of the default profile
+`profiles` | List of profile dicts (see below)
+
+Each entry in `profiles`:
+
+Field | Description
+---|---
+`profile_type` | Partition mode string (e.g. `"SPX"`, `"CPX"`)
+`num_partitions` | Number of logical partitions for this profile
+`profile_index` | Index to pass to `amdsmi_set_gpu_accelerator_partition_profile()`
+`memory_caps` | List of compatible NPS modes (e.g. `["NPS1", "NPS4"]`)
+`num_resources` | Number of resource entries
+`resources` | List of resource allocation dicts
+
+Each entry in `resources`:
+
+Field | Description
+---|---
+`profile_index` | Profile index this resource entry belongs to
+`resource_type` | Resource type string (e.g. `"PARTITION_RESOURCE_XCC"`)
+`partition_resource` | Number of this resource per partition
+`num_partitions_share_resource` | Number of partitions sharing this resource
+
+Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_profile_config` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            try:
+                config = amdsmi.amdsmi_get_gpu_accelerator_partition_profile_config(device)
+                print("Default profile index:", config["default_profile_index"])
+                for profile in config["profiles"]:
+                    print(profile["profile_type"], "index:", profile["profile_index"])
+            except amdsmi.AmdSmiException as e:
+                print(e)
+                continue
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+Refer to [amd_smi_partition_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_partition_example.py) for a complete example.
+
+### amdsmi_set_gpu_accelerator_partition_profile
+
+Description: Set the accelerator partition profile by profile index. The index must be obtained from `amdsmi_get_gpu_accelerator_partition_profile_config()`. All GPU processes must be idle before calling this function.
+
+Input parameters:
+
+* `processor_handle` the device handle
+* `profile_index` integer index of the target profile (from `amdsmi_get_gpu_accelerator_partition_profile_config()`)
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_accelerator_partition_profile` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            try:
+                config = amdsmi.amdsmi_get_gpu_accelerator_partition_profile_config(device)
+                target_index = config["default_profile_index"]
+                amdsmi.amdsmi_set_gpu_accelerator_partition_profile(device, target_index)
+            except amdsmi.AmdSmiException as e:
+                print(e)
+                continue
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+Refer to [amd_smi_partition_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_partition_example.py) for a complete example.
 
 ### amdsmi_get_xgmi_info
 

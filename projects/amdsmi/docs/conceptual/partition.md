@@ -30,8 +30,8 @@ understanding how partitioning works.
 - **XCD (Accelerator Complex Die)** -- The GPU compute die. Each XCD contains:
   - Shader arrays (Compute Units) organized as Compute Units (CUs)
   - ACEs (Asynchronous Compute Engines) for scheduling compute dispatches
-  - Fixed-function media engines: video encode, video decode, DMA (Direct Memory Access),
-    and JPEG engines
+  - Fixed-function media engines: video decode (DECODER) and JPEG engines
+  - DMA (Direct Memory Access) engines for memory copy operations
   - A local L2 cache
 
   An **MI300X** has **8 XCDs**. An **MI300A** has **6 XCDs**.
@@ -255,7 +255,7 @@ determines how memory is interleaved and assigned across NUMA domains.
 | :--- | :--- | :--- |
 | `NPS1` | 1 NUMA node | All 8 HBM stacks are interleaved across the entire GPU |
 | `NPS2` | 2 NUMA nodes | 2 sets of 4 HBM stacks, one per AID pair |
-| `NPS4` | 4 NUMA nodes | Each XCD's data interleaved across its local IOD's HBM stacks |
+| `NPS4` | 4 NUMA nodes | Each XCD's data interleaved across its local AID's HBM stacks |
 | `NPS8` | 8 NUMA nodes | Each XCD uses a single dedicated HBM stack |
 
 ### Compatibility matrix
@@ -263,31 +263,36 @@ determines how memory is interleaved and assigned across NUMA domains.
 Not every accelerator partition mode can be combined with every memory partition mode. The
 following table reflects MI300X support:
 
-| | NPS1 | NPS4 |
-| :--- | :---: | :---: |
-| **SPX** | ✅ | -- |
-| **CPX** | ✅ | ✅ |
+| | NPS1 | NPS2 | NPS4 |
+| :--- | :---: | :---: | :---: |
+| **SPX** | ✅ | -- | -- |
+| **DPX** | ✅ | ✅ | -- |
+| **QPX** | ✅ | -- | ✅ |
+| **CPX** | ✅ | -- | ✅ |
 
 ```{note}
-NPS4 requires CPX mode, because the number of memory partitions cannot exceed the number of
-compute partitions. See the [AMD CDNA 3 Architecture White Paper](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/white-papers/amd-cdna-3-white-paper.pdf)
-for the full compatibility matrix for other modes.
+NPS4 requires QPX or CPX mode, and NPS2 requires DPX mode, because the number of memory
+partitions cannot exceed the number of compute partitions. See the
+[AMD CDNA 3 Architecture White Paper](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/white-papers/amd-cdna-3-white-paper.pdf)
+for further details.
 
-To find the valid memory partition modes for each accelerator profile on your specific GPU,
-run `sudo amd-smi partition --accelerator`. The output includes a **Memory Caps** column
-listing the memory partition modes that are compatible with each accelerator profile.
+Supported combinations vary by GPU model and firmware. Always verify available configurations
+on your specific device by running `sudo amd-smi partition --accelerator`. The output includes
+a **Memory Caps** column listing the memory partition modes compatible with each accelerator
+profile.
 ```
 
 ### Performance trade-offs
 
 - **NPS1** provides a uniform, single-pool memory view. Each XCD has access to all HBM
-  stacks interleaved across all IODs, which gives consistent bandwidth regardless of which
-  XCDs are active. It is simpler to program but has higher inter-IOD traffic.
-- **NPS4** localizes memory to each IOD. When a single XCD is the only active XCD on its
-  IOD, it can achieve the full IOD bandwidth (~1 TB/s on MI300X). This makes CPX/NPS4 well
+  stacks interleaved across all AIDs, which gives consistent bandwidth regardless of which
+  XCDs are active. It is simpler to program but has higher inter-AID traffic.
+- **NPS4** localizes memory to each AID. When a single XCD is the only active XCD on its
+  AID, it can achieve the full AID bandwidth (~1 TB/s on MI300X). This makes CPX/NPS4 well
   suited for bandwidth-bound workloads with sufficient parallelism to use multiple partitions.
-  CPX/NPS4 can achieve approximately 5–10% higher aggregate memory bandwidth and 10–15% higher
-  GEMM throughput than SPX/NPS1 on MI300X.
+  CPX/NPS4 reduces cross-AID traffic and can improve both memory bandwidth and compute
+  throughput compared to SPX/NPS1. For measured benchmark data, see the
+  [Deep dive into MI300 partition modes](https://rocm.blogs.amd.com/software-tools-optimization/compute-memory-modes/README.html).
 
 ## Device enumeration
 
@@ -299,15 +304,19 @@ On a single MI300X in CPX mode, 8 logical GPUs are reported (IDs 0–7).
 
 ```{note}
 When using `amd-smi list`, all logical GPUs from the same physical GPU share the same
-`gpu_uuid` and `gpu_bdf` (Bus:Device.Function). They are distinguished by the partition ID
-encoded in the BDF (see [BDF encoding](#bdf-encoding)).
+physical PCIe Bus:Device address. The function field in the displayed BDF (Bus:Device.Function) encodes the
+partition number — for example, `0000:0c:00.0` through `0000:0c:00.7` for an 8-partition
+CPX device. Each partition has its own `UUID` and `PARTITION_ID`.
+See [BDF encoding](#bdf-encoding) for details.
 ```
 
 ### BDF encoding
 
 BDF (Bus:Device.Function) addresses uniquely identify PCI devices. For partitioned GPUs,
-the **partition ID is encoded in bits [31:28]** of the full 64-bit BDF ID, not in the PCIe
-function field:
+the **partition ID is primarily encoded in bits [31:28]** of the full 64-bit BDF ID.
+Due to driver changes within KFD, some devices report the partition ID in **bits [2:0]**
+(the PCIe function field) instead. AMD SMI falls back to bits [2:0] when bits [31:28] are
+zero and bits [2:0] are non-zero (common in non-SPX modes on certain driver versions):
 
 ```text
 BDFID = ((DOMAIN & 0xFFFFFFFF) << 32) | ((Partition & 0xF) << 28)
@@ -317,14 +326,16 @@ BDFID = ((DOMAIN & 0xFFFFFFFF) << 32) | ((Partition & 0xF) << 28)
 | Field | Bits | Source |
 | :--- | :--- | :--- |
 | Domain | [63:32] | PCIe domain |
-| **Partition ID** | **[31:28]** | KFD location ID upper nibble |
+| **Partition ID (primary)** | **[31:28]** | KFD location ID upper nibble |
 | Bus | [15:8] | PCIe bus number |
 | Device | [7:3] | PCIe device number |
-| Function | [2:0] | PCIe function number |
+| **Partition ID (fallback)** / Function | **[2:0]** | PCIe function number; also carries partition ID on non-SPX driver versions where bits [31:28] are zero |
 
-This is why all CPX partitions of the same physical GPU show the same `Domain:Bus:Device.Function`
-in `amd-smi list` -- the partition ID occupies the bits above the standard PCIe BDF field.
-The `PARTITION_ID` field in the `amd-smi` output is the decoded value from bits [31:28].
+In `amd-smi list`, the function field of the displayed BDF encodes the partition number
+(for example, `.0` through `.7` for an 8-partition CPX device). All partitions of the same
+physical GPU share the same Bus:Device address; the `PARTITION_ID` field in the output is
+decoded from bits [31:28] of the internal BDFID, falling back to bits [2:0] if bits [31:28]
+are zero.
 
 ### UUID behavior
 
@@ -418,7 +429,7 @@ Calling `amdsmi_set_gpu_memory_partition()` or `amdsmi_set_gpu_memory_partition_
 The driver reload step is mandatory. If the reload is skipped, the system continues using the old
 configuration until the next driver load.
 
-This two-step workflow was introduced in **ROCm 7.0.0**. Prior to that release, calling the
+This two-step workflow was introduced in **ROCm 7.0**. Prior to that release, calling the
 set function automatically triggered an immediate driver reload. The reload was separated to
 give applications control over when the disruptive reload occurs. Additionally, as of
 **ROCm 7.13.0**, `amd-smi reset -r` is no longer available for driver reloading — use
@@ -428,7 +439,10 @@ give applications control over when the disruptive reload occurs. Additionally, 
 ## Workload isolation and assignment
 
 When running multiple workloads across partitions, each logical partition behaves as an
-independent GPU to the runtime. To assign a workload to specific partitions:
+independent GPU to the runtime. Environment variables such as `HIP_VISIBLE_DEVICES` and
+`ROCR_VISIBLE_DEVICES` apply only to HIP workloads and are not recognized by amd-smi.
+Container `--device` flags and cgroup rules do restrict what amd-smi sees, because those
+operate at the kernel level. To assign a workload to specific partitions:
 
 - **`HIP_VISIBLE_DEVICES`** or **`ROCR_VISIBLE_DEVICES`** -- environment variables that
   restrict which logical GPU IDs an application can see. For example, to expose only CPX
@@ -484,8 +498,14 @@ independent GPU to the runtime. To assign a workload to specific partitions:
   echo "c 226:128 rwm" > /sys/fs/cgroup/devices/devices.deny
   ```
 
-  See [GPU isolation techniques](https://rocm.docs.amd.com/en/latest/conceptual/gpu-isolation.html)
-  for the full reference.
+  ```{note}
+  This uses the cgroup v1 API. On cgroup v2 systems (RHEL 9, Ubuntu 22.04+, Fedora 31+),
+  `/sys/fs/cgroup/devices/` does not exist. Refer to your distribution's cgroup v2 BPF
+  device controller documentation, or use container `--device` flags instead.
+  ```
+
+  See [Using Linux control groups](https://rocm.blogs.amd.com/software-tools-optimization/compute-memory-modes/README.html#using-linux-control-groups)
+  for a detailed walkthrough of major/minor device IDs and cgroup rules for partitioned GPUs.
 
 ```{note}
 When a workload is assigned to a logical GPU in CPX or DPX mode, it runs **only** on that
@@ -656,6 +676,9 @@ int main() {
 For a complete, self-contained example including enumeration, capability discovery, and
 re-initialization handling, see
 [`example/amd_smi_partition_example.cc`](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_partition_example.cc).
+For usage of the older `amdsmi_get_gpu_compute_partition` / `amdsmi_set_gpu_compute_partition`
+APIs, see
+[`example/amd_smi_drm_example.cc`](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_drm_example.cc).
 
 **Bare metal and SR-IOV host:**
 - `amdsmi_get_gpu_accelerator_partition_profile_config()` -- Get all supported accelerator
@@ -753,7 +776,7 @@ sudo amd-smi partition --memory
 sudo amd-smi partition --accelerator -g 0
 
 # Step 3: Set memory partition mode (must be a supported mode from step 2)
-sudo amd-smi set -M <NPS1|NPS2|NPS4>
+sudo amd-smi set -M <NPS1|NPS2|NPS4|NPS8>
 
 # Step 4: Reload the driver (required -- must be triggered manually after set)
 sudo modprobe -r amdgpu && sudo modprobe amdgpu
