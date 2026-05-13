@@ -56,7 +56,7 @@ sudo make install
 
 ### 4. Load the AMD ROCDXG libary
 
-Set the environment variable HSA_ENABLE_DXG_DETECTION=1 to load librocdxg.so.
+For legacy ROCm releases, HSA_ENABLE_DXG_DETECTION=1 MUST be set; this requirement is removed starting with the ROCk release 7.13.
 
 ```bash
 export HSA_ENABLE_DXG_DETECTION=1
@@ -94,7 +94,7 @@ When you launch the container, add these WSL-specific arguments (they do not rep
 | ---- | ------- |
 | `--device /dev/dxg` | Pass the `/dev/dxg` device node into the container so applications inside the container can access the GPU. |
 | `-v /usr/lib/wsl/lib/libdxcore.so:/usr/lib/libdxcore.so`<br>`-v /opt/rocm/lib/librocdxg.so:/usr/lib/librocdxg.so` | Make the AMD ROCDXG and Microsoft DXCore libraries available inside the container so that ROCm/HIP applications can route their GPU compute calls through ROCDXG and DXCore to communicate with the GPU. |
-| `-e HSA_ENABLE_DXG_DETECTION=1` | Tells the HSA runtime to detect GPU exposed via the DXG device (`/dev/dxg`) and to load the ROCDXG library. |
+| `-e HSA_ENABLE_DXG_DETECTION=1` | For legacy ROCm releases, HSA_ENABLE_DXG_DETECTION=1 MUST be set; this requirement is removed starting with the ROCk release 7.13. |
 
 Example docker run command:
 
@@ -102,7 +102,6 @@ Example docker run command:
 docker run -it  \
     -v /usr/lib/wsl/lib/libdxcore.so:/usr/lib/libdxcore.so \
     -v /opt/rocm/lib/librocdxg.so:/usr/lib/librocdxg.so \
-    -e HSA_ENABLE_DXG_DETECTION=1 \
     --device=/dev/dxg \
     --cap-add=SYS_PTRACE \
     --security-opt seccomp=unconfined \
@@ -111,10 +110,26 @@ docker run -it  \
     rocm/pytorch:latest
 ```
 
+> ***Note***
+> - For ROCm releases prior to 7.13, pass `-e HSA_ENABLE_DXG_DETECTION=1` to the `docker run` command:
+>
+>   ```bash
+>   docker run -it  \
+>       -v /usr/lib/wsl/lib/libdxcore.so:/usr/lib/libdxcore.so \
+>       -v /opt/rocm/lib/librocdxg.so:/usr/lib/librocdxg.so \
+>       -e HSA_ENABLE_DXG_DETECTION=1 \
+>       --device=/dev/dxg \
+>       --cap-add=SYS_PTRACE \
+>       --security-opt seccomp=unconfined \
+>       --ipc=host \
+>       --shm-size 8G \
+>       rocm/pytorch:latest
+>   ```
+
 ## 7. Known Issues and Limitations
 
-- The ROCm-supported version of JAX is not currently enabled or validated under WSL. As a result, JAX workloads on WSL may fail to install, initialize, or execute correctly.
-- Monitoring: `AMD-smi` are not supported. GPU metrics (temperature, clocks, and power) must be monitored via Windows-native tools such as Task Manager or AMD Software: Adrenalin Edition.
+- JAX is supported from version 0.9.1 onwards.
+- AMD-SMI currently provides a limited set of features on WSL2. The source code is available in the develop branch, and a formal release plan is under development.
 - Debugging/Profiling: `ROCm-profiler`, `Debugger` are not supported.
 
 ## WSL Compatiblity Matrix
@@ -124,7 +139,7 @@ docker run -it  \
 
 | AMD Rocdxg Lib Version | AMD ROCm Version | AMD Windows Driver Version | Supported AMD GPU Products |
 | ---------------------- | ---------------- | -------------------------- | -------------------------- |
-| 1.2.0                  | 7.2.x              | AMD Windows x86 drivers can be directly downloaded from [AMD Driver](https://www.amd.com/en/support/download/drivers.html) | ***Radeon***<br><br>AMD Radeon RX 9070<br>AMD Radeon RX 9070 XT<br>AMD Radeon RX 9070 GRE<br>AMD Radeon AI PRO R9700<br>AMD Radeon RX 9060<br>AMD Radeon RX 9060 XT<br>AMD Radeon RX 7900 XTX<br>AMD Radeon RX 7900 XT<br>AMD Radeon RX 7900 GRE<br>AMD Radeon PRO W7900<br>AMD Radeon PRO W7900 Dual Slot<br>AMD Radeon PRO W7800<br>AMD Radeon PRO W7800 48GB<br>AMD Radeon RX 7800 XT<br>AMD Radeon PRO W7700<br><br>***Ryzen***<br><br>AMD Ryzen AI Max+ 395<br>AMD Ryzen AI Max 390<br>AMD Ryzen AI Max 385<br>AMD Ryzen AI 9 HX 375<br>AMD Ryzen AI 9 HX 370<br>AMD Ryzen AI 9 365 |
+| 1.2.0                  | 7.2.x / 7.13       | AMD Windows x86 drivers can be directly downloaded from [AMD Driver](https://www.amd.com/en/support/download/drivers.html) | ***Radeon***<br><br>AMD Radeon RX 9070<br>AMD Radeon RX 9070 XT<br>AMD Radeon RX 9070 GRE<br>AMD Radeon AI PRO R9700<br>AMD Radeon RX 9060<br>AMD Radeon RX 9060 XT<br>AMD Radeon RX 7900 XTX<br>AMD Radeon RX 7900 XT<br>AMD Radeon RX 7900 GRE<br>AMD Radeon PRO W7900<br>AMD Radeon PRO W7900 Dual Slot<br>AMD Radeon PRO W7800<br>AMD Radeon PRO W7800 48GB<br>AMD Radeon RX 7800 XT<br>AMD Radeon PRO W7700<br><br>***Ryzen***<br><br>AMD Ryzen&trade; AI 9 HX PRO 475<br>AMD Ryzen&trade; AI 9 HX PRO 470<br>AMD Ryzen&trade; AI 9 PRO 465<br>AMD Ryzen&trade; AI 9 HX 475<br>AMD Ryzen&trade; AI 9 HX 470<br>AMD Ryzen&trade; AI 9 465<br>AMD Ryzen&trade; AI 7 PRO 450<br>AMD Ryzen&trade; AI 5 PRO 440<br>AMD Ryzen&trade; AI 7 450<br>AMD Ryzen&trade; AI Max+ PRO 395<br>AMD Ryzen&trade; AI Max PRO 390<br>AMD Ryzen&trade; AI Max PRO 385<br>AMD Ryzen&trade; AI Max PRO 380<br>AMD Ryzen&trade; AI Max+ 395<br>AMD Ryzen&trade; AI Max 390<br>AMD Ryzen&trade; AI Max 385<br>AMD Ryzen&trade; AI Max+ 392<br>AMD Ryzen&trade; AI Max+ 388<br>AMD Ryzen AI 9 HX 375<br>AMD Ryzen AI 9 HX 370<br>AMD Ryzen AI 9 365 |
 
 
 ## Documentation
