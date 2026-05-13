@@ -400,54 +400,136 @@ constexpr bool is_blocking(MemcpyKind k) {
   return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
 }
 
-template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int UNROLL>
-__device__ __forceinline__ void copy_chunk(uint8_t*& dst_bytes, uint8_t*& src_bytes,
-                                           size_t& size, int tid, int block_size) {
-  if (size < ChunkSize) return;
-
-  int cpy_size = size / ChunkSize;
-  int i = tid;
-  int unroll_limit =
-      cpy_size >= (block_size * UNROLL) ? cpy_size - (block_size * UNROLL) : -1;
-
+template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
+__device__ __forceinline__ void copy_bulk(uint8_t* dst_bytes, uint8_t* src_bytes, size_t N16,
+                                             int tid, int stride) {
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
   using T = typename Acc::type;
 
-  // issue all loads first, then all stores
-  for (; i <= unroll_limit; i += block_size * UNROLL) {
-    T regs[UNROLL];
-    #pragma unroll
-    for (int u = 0; u < UNROLL; ++u) {
-      regs[u] = Acc::load(src_bytes + (i + u * block_size) * ChunkSize);
+  size_t i = tid;
+
+  // Unrolled block copy to hide latency
+  for (; i + stride * Unroll <= N16; i += stride * Unroll) {
+    T regs[Unroll];
+
+    #pragma Unroll
+    for (int u = 0; u < Unroll; ++u) {
+      regs[u] = Acc::load(src_bytes + (i + u * stride) * ChunkSize);
     }
-    #pragma unroll
-    for (int u = 0; u < UNROLL; ++u) {
-      // Manually insert waitcnts for custom assembly load policies
+
+    #pragma Unroll
+    for (int u = 0; u < Unroll; ++u) {
       if constexpr (LoadPolicy != CachePolicy::Standard) {
-        pipeline_wait_on_loads(UNROLL - 1 - u);
+        pipeline_wait_on_loads(Unroll - 1 - u);
       }
-      Acc::store(dst_bytes + (i + u * block_size) * ChunkSize, regs[u]);
+      Acc::store(dst_bytes + (i + u * stride) * ChunkSize, regs[u]);
     }
   }
 
-  // 2. Tail
-  for (; i < cpy_size; i += block_size) {
+  // Tail loop for remaining ChunkSize-byte chunks
+  for (; i < N16; i += stride) {
     T val = Acc::load(src_bytes + i * ChunkSize);
     if constexpr (LoadPolicy != CachePolicy::Standard) {
       pipeline_wait_on_loads(0);
     }
     Acc::store(dst_bytes + i * ChunkSize, val);
   }
-
-  int bytes_processed = cpy_size * ChunkSize;
-  size -= bytes_processed;
-  dst_bytes += bytes_processed;
-  src_bytes += bytes_processed;
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 16>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src,
-                                                             size_t size) {
+// ==============================================================================
+// SMART DISPATCHER (Register Pressure / Unroll Manager)
+// ==============================================================================
+template <CachePolicy LP, CachePolicy SP>
+__device__ __forceinline__ void copy_dispatcher(uint8_t* dst, uint8_t* src, size_t N16, int tid,
+                                                int stride) {
+  if (N16 == 0) return;
+
+  // Adapt the Unroll strategy based on thread-count (stride) to cap VGPR usage,
+  // while ensuring we only instantiate heavy Unrolls if the message size warrants it.
+  if (stride >= 512) {
+    // Extreme register pressure
+    if (N16 >= stride * 2) {
+      copy_bulk<16, LP, SP, 2>(dst, src, N16, tid, stride);
+    } else {
+      copy_bulk<16, LP, SP, 1>(dst, src, N16, tid, stride);
+    }
+  } else if (stride >= 64) {
+    // High register pressure
+    if (N16 >= stride * 8) {
+      copy_bulk<16, LP, SP, 8>(dst, src, N16, tid, stride);
+    } else if (N16 >= stride * 4) {
+      copy_bulk<16, LP, SP, 4>(dst, src, N16, tid, stride);
+    } else if (N16 >= stride * 2) {
+      copy_bulk<16, LP, SP, 2>(dst, src, N16, tid, stride);
+    } else {
+      copy_bulk<16, LP, SP, 1>(dst, src, N16, tid, stride);
+    }
+  } else {
+    // Safe register pressure
+    if (N16 >= stride * 16) {
+      copy_bulk<16, LP, SP, 16>(dst, src, N16, tid, stride);
+    } else if (N16 >= stride * 8) {
+      copy_bulk<16, LP, SP, 8>(dst, src, N16, tid, stride);
+    } else if (N16 >= stride * 4) {
+      copy_bulk<16, LP, SP, 4>(dst, src, N16, tid, stride);
+    } else if (N16 >= stride * 2) {
+      copy_bulk<16, LP, SP, 2>(dst, src, N16, tid, stride);
+    } else {
+      copy_bulk<16, LP, SP, 1>(dst, src, N16, tid, stride);
+    }
+  }
+}
+
+// ==============================================================================
+// REMAINDER COPY (< 16 Bytes Fast Path)
+// ==============================================================================
+template <CachePolicy LP, CachePolicy SP>
+__device__ __forceinline__ void copy_remainder(uint8_t* dst, uint8_t* src, int remainder) {
+  // Uses bitwise operations to jump directly to necessary loads
+  // Executed exclusively by Thread 0 to sidestep wave divergence and sync overhead
+  if (remainder & 8) {
+    auto val = AsmAccess<8, LP, SP>::load(src);
+    if constexpr (LP != CachePolicy::Standard) {
+      pipeline_wait_on_loads(0);
+    }
+    AsmAccess<8, LP, SP>::store(dst, val);
+    dst += 8;
+    src += 8;
+  }
+  if (remainder & 4) {
+    auto val = AsmAccess<4, LP, SP>::load(src);
+    if constexpr (LP != CachePolicy::Standard) {
+      pipeline_wait_on_loads(0);
+    }
+    AsmAccess<4, LP, SP>::store(dst, val);
+    dst += 4;
+    src += 4;
+  }
+  if (remainder & 2) {
+    auto val = AsmAccess<2, LP, SP>::load(src);
+    if constexpr (LP != CachePolicy::Standard) {
+      pipeline_wait_on_loads(0);
+    }
+    AsmAccess<2, LP, SP>::store(dst, val);
+    dst += 2;
+    src += 2;
+  }
+  if (remainder & 1) {
+    auto val = AsmAccess<1, LP, SP>::load(src);
+    if constexpr (LP != CachePolicy::Standard) {
+      pipeline_wait_on_loads(0);
+    }
+    AsmAccess<1, LP, SP>::store(dst, val);
+  }
+}
+
+// ==============================================================================
+// LANE, WAVE, AND WG IMPLEMENTATIONS
+// ==============================================================================
+
+// Note: Unroll template param kept for API compatibility, but handled smartly internally.
+template <MemcpyKind Kind = MemcpyKind::Put>
+[[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
   constexpr CachePolicy LP =
@@ -458,16 +540,18 @@ template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 16>
   uint8_t* dst_bytes = static_cast<uint8_t*>(dst);
   uint8_t* src_bytes = static_cast<uint8_t*>(src);
 
-  copy_chunk<16, LP, SP, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
-  copy_chunk<8,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
-  copy_chunk<4,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
-  copy_chunk<2,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
-  copy_chunk<1,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, 0, 1);
+  size_t N16 = size / 16;
+  int remainder = size % 16;
+
+  copy_dispatcher<LP, SP>(dst_bytes, src_bytes, N16, 0, 1);
+
+  if (remainder > 0) {
+    copy_remainder<LP, SP>(dst_bytes + N16 * 16, src_bytes + N16 * 16, remainder);
+  }
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 16>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src,
-                                                             size_t size) {
+template <MemcpyKind Kind = MemcpyKind::Put>
+[[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
   constexpr CachePolicy LP =
@@ -481,16 +565,19 @@ template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 16>
   uint8_t* dst_bytes = static_cast<uint8_t*>(dst);
   uint8_t* src_bytes = static_cast<uint8_t*>(src);
 
-  copy_chunk<16, LP, SP, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
-  copy_chunk<8,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
-  copy_chunk<4,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
-  copy_chunk<2,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
-  copy_chunk<1,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, wave_tid, wave_size);
+  size_t N16 = size / 16;
+  int remainder = size % 16;
+
+  copy_dispatcher<LP, SP>(dst_bytes, src_bytes, N16, wave_tid, wave_size);
+
+  // Remainder handled uniquely by the first thread in the wave
+  if (remainder > 0 && wave_tid == 0) {
+    copy_remainder<LP, SP>(dst_bytes + N16 * 16, src_bytes + N16 * 16, remainder);
+  }
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 16>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src,
-                                                           size_t size) {
+template <MemcpyKind Kind = MemcpyKind::Put>
+[[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
   constexpr CachePolicy LP =
@@ -504,11 +591,15 @@ template <MemcpyKind Kind = MemcpyKind::Put, int UNROLL = 16>
   uint8_t* dst_bytes = static_cast<uint8_t*>(dst);
   uint8_t* src_bytes = static_cast<uint8_t*>(src);
 
-  copy_chunk<16, LP, SP, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
-  copy_chunk<8,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
-  copy_chunk<4,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
-  copy_chunk<2,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
-  copy_chunk<1,  LP, SP, UNROLL>(dst_bytes, src_bytes, size, thread_id, block_size);
+  size_t N16 = size / 16;
+  int remainder = size % 16;
+
+  copy_dispatcher<LP, SP>(dst_bytes, src_bytes, N16, thread_id, block_size);
+
+  // Remainder handled uniquely by the first thread in the workgroup
+  if (remainder > 0 && thread_id == 0) {
+    copy_remainder<LP, SP>(dst_bytes + N16 * 16, src_bytes + N16 * 16, remainder);
+  }
 }
 
 int rocm_init();
