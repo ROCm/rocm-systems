@@ -46,13 +46,6 @@ fail:
 ncclResult_t ncclTransportTreeConnect(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
   if (comm && comm->nRanks > 1) {
-    // Tree topology search runs per-node, so nodes with different GPU counts produce
-    // inconsistent tree structures (e.g. rank A's tree.up points to B, but B has no matching tree.down).
-    if (comm->minLocalRanks != comm->maxLocalRanks) {
-      INFO(NCCL_INIT, "Skipping tree connect for asymmetric topology (%d/%d local ranks)",
-           comm->minLocalRanks, comm->maxLocalRanks);
-      goto exit;
-    }
     // Connect Trees
     for (int c = 0; c < comm->nChannels; c++) {
       struct ncclChannel* channel = comm->channels + c;
