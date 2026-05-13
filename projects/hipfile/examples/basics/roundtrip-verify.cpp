@@ -110,8 +110,8 @@ main(int argc, char *argv[])
     buf_registered = true;
 
     /* 3. Phase 1: write CREATED from registered GPU buffer */
-    if (open_file(created_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &fd,
-                  &handle)) {
+    if (open_file(created_path, O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
+                  &fd, &handle)) {
         goto deregister_buf;
     }
 
@@ -141,7 +141,7 @@ main(int argc, char *argv[])
      * This overwrites devbuf with whatever is on disk. If the round trip is
      * lossless, devbuf now holds the same payload it did after the H2D copy
      * in step 2. */
-    if (open_file(created_path, O_RDONLY, 0, &fd, &handle))
+    if (open_file(created_path, O_RDONLY | O_DIRECT, 0, &fd, &handle))
         goto deregister_buf;
 
     nbytes = hipFileRead(handle, devbuf, alloc_size, /*file_offset=*/0, /*buf_offset=*/0);
@@ -160,8 +160,8 @@ main(int argc, char *argv[])
     fd = -1;
 
     /* 5. Phase 3: write the read-back contents to COPIED */
-    if (open_file(copied_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &fd,
-                  &handle)) {
+    if (open_file(copied_path, O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
+                  &fd, &handle)) {
         goto deregister_buf;
     }
 

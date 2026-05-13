@@ -96,8 +96,8 @@ main(int argc, char *argv[])
     }
 
     /* 3. open file with O_DIRECT + hipFileHandleRegister (no buf registration) */
-    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd,
-                  &out_handle)) {
+    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
+                  &out_fd, &out_handle)) {
         goto free_devbuf;
     }
 

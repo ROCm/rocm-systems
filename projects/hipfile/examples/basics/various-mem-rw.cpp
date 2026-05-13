@@ -198,7 +198,7 @@ main(int argc, char *argv[])
     }
 
     /* 2. Open + register input file */
-    if (open_file(in_path, O_RDONLY, 0, &in_fd, &in_handle))
+    if (open_file(in_path, O_RDONLY | O_DIRECT, 0, &in_fd, &in_handle))
         return EXIT_FAILURE;
 
     /* 3. Allocate buffer of the chosen memory type + zero it */
@@ -222,8 +222,8 @@ main(int argc, char *argv[])
     }
 
     /* 5. Open + register output file + hipFileWrite + ftruncate */
-    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd,
-                  &out_handle)) {
+    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
+                  &out_fd, &out_handle)) {
         goto release_buf;
     }
 

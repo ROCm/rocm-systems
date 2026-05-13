@@ -44,19 +44,16 @@ int hash_file(const char *path, size_t size, uint64_t *out_hash);
 /// @return zero on success, non-zero on failure.
 int hash_file_range(const char *path, off_t offset, size_t size, uint64_t *out_hash);
 
-/// @brief Open a file with O_DIRECT and register it with hipFile.
+/// @brief Open a file and register it with hipFile.
 /// @param path   Path to the file.
-/// @param flags  Flags to pass to open(2); O_DIRECT is added automatically.
+/// @param flags  Flags to pass to open(2). Pass O_DIRECT to take hipFile's
+///               GPU-direct fast path; omit it to route through the POSIX-IO
+///               compat path.
 /// @param mode   Mode bits for open(2) (used when O_CREAT is set).
 /// @param fd     [out] Resulting file descriptor.
 /// @param handle [out] Resulting hipFile handle.
 /// @return zero on success, non-zero on failure.
 int open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *handle);
-
-/// @brief Open a file (caller-controlled flags, no O_DIRECT added) and register it with hipFile.
-/// Routes hipFile through its POSIX-IO compat path.
-/// @return zero on success, non-zero on failure.
-int open_file_no_odirect(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *handle);
 
 /// @brief Deregister a hipFile handle and close the underlying file descriptor.
 /// @return zero on success, non-zero on failure.

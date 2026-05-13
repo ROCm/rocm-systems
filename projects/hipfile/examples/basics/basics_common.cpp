@@ -95,29 +95,6 @@ hash_file(const char *path, size_t size, uint64_t *out_hash)
 int
 open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *handle)
 {
-    *fd = open(path, flags | O_DIRECT, mode);
-    if (-1 == *fd) {
-        fprintf(stderr, "Could not open %s (%s)\n", path, strerror(errno));
-        return 1;
-    }
-
-    hipFileDescr_t descr{};
-    descr.type      = hipFileHandleTypeOpaqueFD;
-    descr.handle.fd = *fd;
-
-    hipFileError_t hipfile_err = hipFileHandleRegister(handle, &descr);
-    if (hipFileSuccess != hipfile_err.err) {
-        fprintf(stderr, "Could not register %s (%s)\n", path, hipFileGetOpErrorString(hipfile_err.err));
-        close(*fd);
-        return 1;
-    }
-
-    return 0;
-}
-
-int
-open_file_no_odirect(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *handle)
-{
     *fd = open(path, flags, mode);
     if (-1 == *fd) {
         fprintf(stderr, "Could not open %s (%s)\n", path, strerror(errno));

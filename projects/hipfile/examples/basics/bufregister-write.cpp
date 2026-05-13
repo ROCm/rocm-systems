@@ -105,8 +105,8 @@ main(int argc, char *argv[])
     buf_registered = true;
 
     /* 4. open file with O_DIRECT + hipFileHandleRegister */
-    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd,
-                  &out_handle)) {
+    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
+                  &out_fd, &out_handle)) {
         goto deregister_buf;
     }
 
