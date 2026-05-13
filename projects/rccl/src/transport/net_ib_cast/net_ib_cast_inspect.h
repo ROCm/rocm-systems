@@ -8,6 +8,7 @@
 #define RCCL_NET_IB_CAST_INSPECT_H_
 
 #include <stdint.h>
+#include "net_ib_limits.h"
 
 #ifdef __cplusplus
 #include "nccl.h"  /* ncclResult_t */
@@ -19,14 +20,10 @@ extern "C" {
 /*
  * Test-only introspection API for the net-ib-cast WRR scheduler.
  *
- * Implementation lives in src/transport/net_ib_cast.cc and is compiled into
- * librccl.so.  Both the library and the unit tests include this one header so
- * the struct layout and function signatures can never diverge.
- *
- * NCCL_IB_MAX_QPS is the maximum number of QPs per connection.
- * Defined here so both the library and the tests share the same value.
+ * Implementation lives in src/transport/net_ib_cast/scheduler.cc and is
+ * compiled into librccl.so.  Both the library and the unit tests include this
+ * one header so the struct layout and function signatures can never diverge.
  */
-#define NCCL_IB_MAX_QPS 128
 
 struct ncclIbCastSchedState {
   int      nqps;
