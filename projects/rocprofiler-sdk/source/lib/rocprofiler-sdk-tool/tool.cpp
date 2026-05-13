@@ -3497,9 +3497,8 @@ generate_output(cleanup_mode _cleanup_mode)
         tool::pc_sampling_host_trap_buffered_output_t{tool::get_config().pc_sampling_host_trap};
     auto rocdecode_output =
         tool::rocdecode_buffered_output_t{tool::get_config().rocdecode_api_trace};
-    auto rocjpeg_output = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
-    auto rocshmem_output =
-        tool::rocshmem_buffered_output_t{tool::get_config().rocshmem_api_trace};
+    auto rocjpeg_output  = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
+    auto rocshmem_output = tool::rocshmem_buffered_output_t{tool::get_config().rocshmem_api_trace};
     auto pc_sampling_stochastic_output =
         tool::pc_sampling_stochastic_buffered_output_t{tool::get_config().pc_sampling_stochastic};
 
