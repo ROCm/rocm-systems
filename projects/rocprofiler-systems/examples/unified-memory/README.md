@@ -69,7 +69,7 @@ Output files (written to the standard rocprofiler-systems output directory):
 | File | Contents |
 | ------ | ---------- |
 | `unified_memory.txt` | Human-readable per-GPU summary: total page faults, trigger breakdown (`gpu_page_fault`, `cpu_page_fault`, `prefetch`), and Host-to-Device / Device-to-Host migration bandwidth. |
-| `unified_memory.json` | Machine-readable equivalent with the same fields, plus an `xnack` flag and an always-present `device_to_device` bucket for schema stability. |
+| `unified_memory.json` | Machine-readable equivalent with the same fields, plus an `xnack_enabled` flag and an always-present `device_to_device` bucket for schema stability. |
 | `perfetto-trace.proto` | Standard Perfetto trace, including KFD page-fault and migration tracks. |
 | `rocpd.db` *(optional)* | Standard ROCpd database; KFD events are recorded in the `kfd_page_fault` / `kfd_page_migrate` tables. |
 
@@ -83,12 +83,11 @@ Output files (written to the standard rocprofiler-systems output directory):
 | `ROCPROFSYS_TRACE` | `true` | Generate the Perfetto trace alongside the unified-memory reports. |
 
 ```bash
-rocprof-sys-run \
-    -e HSA_XNACK=1 \
-    -e ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
-    -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,kfd_events \
-    -e ROCPROFSYS_TRACE=true \
-    -- ./unified-memory -s 32 -p 256 -i 4
+HSA_XNACK=1 \
+ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
+ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,kfd_events \
+ROCPROFSYS_TRACE=true \
+rocprof-sys-run -- ./unified-memory -s 32 -p 256 -i 4
 ```
 
 ## See Also

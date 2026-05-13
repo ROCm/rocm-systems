@@ -566,7 +566,7 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = nic_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
-        if "kfd" in item.keywords:
+        if "kfd" in item.keywords or "unified_memory" in item.keywords:
             _msg = kfd_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
