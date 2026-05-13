@@ -49,7 +49,7 @@ struct SymbolLoweredName {
 };
 
 //! A program object for a specific device.
-class Program : public amd::HeapObject {
+class Program {
  public:
   typedef std::pair<const void* /* binary_image */, size_t /* binary size */> binary_t;
   typedef std::pair<amd::Os::FileDesc /* file_desc */, size_t /* file_offset */> finfo_t;
