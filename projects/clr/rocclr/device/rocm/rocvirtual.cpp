@@ -1341,8 +1341,9 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   // Optimization for native AQL path in Windows has problems with PM4 emulation,
   // skipping the doorbell will not wake up the AQL worker thread
   uint32_t skip_limit = DEBUG_CLR_DOORBELL_SKIP;
+  bool ring_for_non_profiler_signal = attach_signal && (packet->completion_signal.handle != 0);
   bool ring_doorbell = IS_LINUX || dev().IsPm4Emulation() || blocking ||
-                       (skippedDispatches_ >= skip_limit);
+                       (skippedDispatches_ >= skip_limit) || ring_for_non_profiler_signal;
   if (ring_doorbell) {
     Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
     skippedDispatches_ = 0;
