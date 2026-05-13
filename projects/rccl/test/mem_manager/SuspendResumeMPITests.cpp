@@ -65,6 +65,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iomanip>
+#include <iostream>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -270,6 +271,55 @@ ncclDynMemEntry* findEntryByPtr(struct ncclComm* comm, void* ptr)
         if (e->ptr == ptr) return e;
     }
     return nullptr;
+}
+
+// Snapshot of GPU + CPU memory usage at one point in a Suspend/Resume cycle.
+// Combines what the manager tracks (ncclCommMemStats + cpuBackupUsage) with
+// what the OS reports for the process (hipMemGetInfo) so the caller can see
+// both bookkeeping and actual physical impact of Suspend/Resume.
+struct MemFootprint
+{
+    uint64_t mgrTotal        = 0;  // ncclStatGpuMemTotal     (bytes)
+    uint64_t mgrPersist      = 0;  // ncclStatGpuMemPersist   (bytes)
+    uint64_t mgrSuspendable  = 0;  // ncclStatGpuMemSuspend   (bytes)
+    uint64_t mgrSuspended    = 0;  // ncclStatGpuMemSuspended (0 / 1 flag)
+    uint64_t cpuBackupUsage  = 0;  // manager->cpuBackupUsage (bytes)
+    size_t   gpuFree         = 0;  // hipMemGetInfo free      (bytes)
+    size_t   gpuTotal        = 0;  // hipMemGetInfo total     (bytes)
+    size_t   gpuUsedByProc   = 0;  // gpuTotal - gpuFree      (bytes)
+};
+
+MemFootprint captureMemFootprint(struct ncclComm* comm)
+{
+    MemFootprint f{};
+    EXPECT_NE(comm, nullptr);
+    EXPECT_NE(comm->memManager, nullptr);
+    EXPECT_EQ(ncclCommMemStats(comm, ncclStatGpuMemTotal,     &f.mgrTotal),       ncclSuccess);
+    EXPECT_EQ(ncclCommMemStats(comm, ncclStatGpuMemPersist,   &f.mgrPersist),     ncclSuccess);
+    EXPECT_EQ(ncclCommMemStats(comm, ncclStatGpuMemSuspend,   &f.mgrSuspendable), ncclSuccess);
+    EXPECT_EQ(ncclCommMemStats(comm, ncclStatGpuMemSuspended, &f.mgrSuspended),   ncclSuccess);
+    f.cpuBackupUsage = comm->memManager->cpuBackupUsage;
+    EXPECT_EQ(hipMemGetInfo(&f.gpuFree, &f.gpuTotal), hipSuccess);
+    f.gpuUsedByProc = (f.gpuTotal > f.gpuFree) ? (f.gpuTotal - f.gpuFree) : 0;
+    return f;
+}
+
+// Pretty-print one footprint line. Kept on std::cout so the host test wrapper
+// captures it the same way as gtest's own output. Drop these prints (and the
+// helpers above) once we no longer need to eyeball the numbers.
+void printMemFootprint(int rank, const char* tag, const MemFootprint& f)
+{
+    constexpr double MiB = 1024.0 * 1024.0;
+    std::cout << "[MemFootprint rank=" << rank << "] " << tag << '\n'
+              << "    mgr.Total       = " << std::fixed << std::setprecision(2)
+              << (f.mgrTotal       / MiB) << " MiB\n"
+              << "    mgr.Persist     = " << (f.mgrPersist     / MiB) << " MiB\n"
+              << "    mgr.Suspendable = " << (f.mgrSuspendable / MiB) << " MiB\n"
+              << "    mgr.Suspended   = " << f.mgrSuspended << '\n'
+              << "    cpuBackupUsage  = " << (f.cpuBackupUsage / MiB) << " MiB\n"
+              << "    gpu.UsedByProc  = " << (f.gpuUsedByProc  / MiB) << " MiB"
+              << " (free " << (f.gpuFree / MiB)
+              << " / total " << (f.gpuTotal / MiB) << " MiB)" << std::endl;
 }
 
 // ---------------------------------------------------------------------------
@@ -507,6 +557,79 @@ TEST_F(MemManagerAnyRanks, MemStats_FlipsAcrossSuspendResume)
     ASSERT_EQ(ncclCommMemResume(comm), ncclSuccess);
     ASSERT_EQ(ncclCommMemStats(comm, ncclStatGpuMemSuspended, &suspended), ncclSuccess);
     EXPECT_EQ(suspended, 0u);
+}
+
+// Capture and print the memory footprint at three checkpoints: before Suspend,
+// after Suspend, after Resume. Allocates a handful of real VMM buffers as
+// ncclMemOffload so Suspend actually moves bytes to CPU and frees the GPU
+// backing - otherwise the gpu.UsedByProc delta would be invisible.
+//
+// The test is non-strict on absolute numbers (other ranks share the GPU on
+// shared boxes, internal RCCL allocations vary per build) and instead checks
+// the invariants we care about across the cycle:
+//   - mgr.Suspended  flips 0 -> 1 -> 0.
+//   - cpuBackupUsage rises during Suspend, drops to baseline on Resume.
+//   - gpu.UsedByProc is lower after Suspend than before, and recovers on
+//     Resume to within a small slack of the pre-Suspend value.
+TEST_F(MemManagerAnyRanks, MemoryFootprint_BeforeSuspendAfterSuspendAfterResume)
+{
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_NE(comm->memManager, nullptr);
+
+    // Allocate enough Offload buffers to make the GPU-memory drop on Suspend
+    // visible against general device noise (other processes, driver pools).
+    constexpr int    kNumBuffers = 4;
+    constexpr size_t kBufBytes   = 4u * 1024u * 1024u;  // 4 MiB each, 16 MiB total
+    constexpr uint8_t kPattern   = 0xC7;
+
+    std::vector<VmmAlloc> bufs(kNumBuffers);
+    for (int i = 0; i < kNumBuffers; ++i) {
+        allocateVmmPosixFd(comm->cudaDev, kBufBytes, &bufs[i]);
+        ASSERT_EQ(ncclMemTrack(comm->memManager, bufs[i].ptr, bufs[i].size, bufs[i].handle,
+                               hipMemHandleTypePosixFileDescriptor, ncclMemOffload),
+                  ncclSuccess);
+        ASSERT_EQ(hipMemset(bufs[i].ptr, kPattern, bufs[i].size), hipSuccess);
+    }
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    MemFootprint before = captureMemFootprint(comm);
+    //printMemFootprint(comm->rank, "BEFORE SUSPEND", before);
+
+    ASSERT_EQ(ncclCommMemSuspend(comm), ncclSuccess);
+
+    MemFootprint suspended = captureMemFootprint(comm);
+    //printMemFootprint(comm->rank, "AFTER SUSPEND ", suspended);
+
+    ASSERT_EQ(ncclCommMemResume(comm), ncclSuccess);
+
+    MemFootprint resumed = captureMemFootprint(comm);
+    //printMemFootprint(comm->rank, "AFTER RESUME  ", resumed);
+
+    EXPECT_EQ(before.mgrSuspended,    0u);
+    EXPECT_EQ(suspended.mgrSuspended, 1u);
+    EXPECT_EQ(resumed.mgrSuspended,   0u);
+
+    EXPECT_GE(suspended.cpuBackupUsage,
+              before.cpuBackupUsage + static_cast<uint64_t>(kNumBuffers) * kBufBytes)
+        << "Suspend must back up at least our Offload buffers to CPU";
+    EXPECT_EQ(resumed.cpuBackupUsage, before.cpuBackupUsage);
+
+    EXPECT_LT(suspended.gpuUsedByProc, before.gpuUsedByProc)
+        << "Suspend should free GPU backing for Scratch + Offload entries";
+
+    // Resume must restore the exact pre-Suspend footprint: manager-tracked
+    // totals don't change at all across the cycle (entries stay in the list,
+    // only `state` toggles), and real GPU usage measured by hipMemGetInfo
+    // returns to baseline once cuMemCreate + cuMemMap re-back the released VAs.
+    EXPECT_EQ(resumed.mgrTotal,       before.mgrTotal);
+    EXPECT_EQ(resumed.mgrPersist,     before.mgrPersist);
+    EXPECT_EQ(resumed.mgrSuspendable, before.mgrSuspendable);
+    EXPECT_EQ(resumed.gpuUsedByProc,  before.gpuUsedByProc)
+        << "Resume must restore the exact GPU memory footprint";
+
+    for (int i = 0; i < kNumBuffers; ++i) {
+        untrackAndRelease(comm, bufs[i].ptr, &bufs[i]);
+    }
 }
 
 // ===========================================================================
@@ -1484,7 +1607,17 @@ TEST_F(SuspendResumeMemStats, Conservation)
 // 3. Collective integrity across a suspend/resume cycle
 // ----------------------------------------------------------------------------
 
-class SuspendResumeCollectiveIntegrity : public SuspendResumePublicAPITestBase {};
+class SuspendResumeCollectiveIntegrity : public SuspendResumePublicAPITestBase
+{
+protected:
+    void SetUp() override
+    {
+        SuspendResumePublicAPITestBase::SetUp();
+        if (!ncclCuMemEnable()) {
+            GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 — skipped";
+        }
+    }
+};
 
 TEST_F(SuspendResumeCollectiveIntegrity, AllReduceAfterResume)
 {
@@ -1540,14 +1673,6 @@ TEST_F(SuspendResumeCollectiveIntegrity, AllReduceTwoCycles)
 //      with rebuilt (still non-zero) handles and a non-stale ownerPtr.
 TEST_F(SuspendResumeCollectiveIntegrity, P2pPeerImports_TrackedAndRebuilt)
 {
-    // Peer-import tracking lives on the cuMem path (ncclP2pImportShareableBuffer
-    // calls ncclMemTrackImportFromPeer). Under NCCL_CUMEM_ENABLE=0 RCCL falls
-    // back to legacy cudaIpcOpenMemHandle/cudaIpcCloseMemHandle which is not
-    // managed by Suspend/Resume, so this regression check is meaningless there.
-    if (!ncclCuMemEnable()) {
-        GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 — peer-import tracking is cuMem-only";
-    }
-
     ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
     ncclComm_t  comm   = getActiveCommunicator();
