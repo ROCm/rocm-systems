@@ -66,8 +66,8 @@ class TestROCTx(RocprofsysTest):
             "roctxRangePush_run_profiling",
             "roctxRangeStart_GPU_Compute",  # d=2: main thread (inside run_profiling)
             "roctxRangeStart_GPU_Compute",  # d=0: worker thread (top-level)
-            "roctxRangePush_HIP_Kernel",    # d=3: main thread
-            "roctxRangePush_HIP_Kernel",    # d=1: worker thread
+            "roctxRangePush_HIP_Kernel",  # d=3: main thread
+            "roctxRangePush_HIP_Kernel",  # d=1: worker thread
             "roctxMark_Thread_Start",
             "roctxMark_Thread_End",
             "roctxGetThreadId",
