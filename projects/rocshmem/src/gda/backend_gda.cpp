@@ -490,12 +490,12 @@ void GDABackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
   std::memcpy(&tmp_buffer[my_pe_in_new_team * num_bytes], inbuf, num_bytes);
 
   // Build a vector of world ranks for the new team
-  std::vector<int> pes_in_world;
-  pes_in_world.reserve(num_pes);
+  std::vector<int> world_ranks;
+  world_ranks.reserve(num_pes);
   for (int i = 0; i < num_pes; i++) {
-    pes_in_world.push_back(new_team_info_wrt_world.pe_start + i * new_team_info_wrt_world.stride);
+    world_ranks.push_back(new_team_info_wrt_world.pe_start + i * new_team_info_wrt_world.stride);
   }
-  backend_bootstr->groupAllGather(tmp_buffer, num_bytes, pes_in_world);
+  backend_bootstr->groupAllGather(tmp_buffer, num_bytes, world_ranks);
 
   for (size_t i = 0; i < num_bytes; i++) {
     outbuf[i] = tmp_buffer[i];
