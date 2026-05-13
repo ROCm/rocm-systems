@@ -52,15 +52,7 @@ void Runtime::ResetState() {
   check_avail_sysram = false;
   max_single_alloc_size = 0;
   enable_thunk_sub_allocator = 0;
-  local_heap_space_start_ = 0;
-  local_heap_space_size_ = 0;
-  local_heap_mgr_.reset();
-  system_heap_space_start_ = 0;
-  system_heap_space_size_ = 0;
-  system_heap_mgr_.reset();
-  handle_aperture_start_ = 0;
-  handle_aperture_size_ = 0;
-  handle_aperture_mgr_.reset();
+  heap.Reset();
   default_node = 1;
 }
 
@@ -73,6 +65,74 @@ void Runtime::Reset() {
 
 void Runtime::ResetAfterFork() {
   Reset();
+}
+
+void Runtime::HeapInit() { heap.Init(); }
+
+void Runtime::HeapFini() { heap.Fini(); }
+
+bool Runtime::ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t align) {
+  return heap.ReserveSvmSpace(base, size, align);
+}
+
+bool Runtime::FreeSvmSpace(uint64_t &base, uint64_t &size) {
+  return heap.FreeSvmSpace(base, size);
+}
+
+bool Runtime::ReserveLocalHeapSpace() { return heap.ReserveLocalHeapSpace(); }
+
+bool Runtime::FreeLocalHeapSpace() { return heap.FreeLocalHeapSpace(); }
+
+bool Runtime::ReserveSystemHeapSpace() { return heap.ReserveSystemHeapSpace(); }
+
+bool Runtime::FreeSystemHeapSpace() { return heap.FreeSystemHeapSpace(); }
+
+bool Runtime::CommitSystemHeapSpace(void* addr, int64_t size, bool lock) {
+  return heap.CommitSystemHeapSpace(addr, size, lock);
+}
+
+bool Runtime::DecommitSystemHeapSpace(void* addr, int64_t size) {
+  return heap.DecommitSystemHeapSpace(addr, size);
+}
+
+ErrorCode Runtime::ReserveGpuVirtualAddress(
+    const thunk_proxy::AllocDomain domain, gpusize hit_base_addr, gpusize size,
+    gpusize *out_gpu_virt_addr, gpusize alignment, bool lock) {
+  return heap.ReserveGpuVirtualAddress(domain, hit_base_addr, size,
+                                       out_gpu_virt_addr, alignment, lock);
+}
+
+ErrorCode Runtime::FreeGpuVirtualAddress(
+    const thunk_proxy::AllocDomain domain, gpusize gpu_addr, gpusize size) {
+  return heap.FreeGpuVirtualAddress(domain, gpu_addr, size);
+}
+
+bool Runtime::CommitSystemHeapSpaceIPC(void* addr, int64_t size, int &fd,
+                                       bool lock) {
+  return heap.CommitSystemHeapSpaceIPC(addr, size, fd, lock);
+}
+
+bool Runtime::DecommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd) {
+  return heap.DecommitSystemHeapSpaceIPC(addr, size, memfd);
+}
+
+ErrorCode Runtime::ReserveIPCSysMem(gpusize size, gpusize *out_gpu_virt_addr,
+                                    gpusize alignment, int &memfd, bool lock) {
+  return heap.ReserveIPCSysMem(size, out_gpu_virt_addr, alignment, memfd, lock);
+}
+
+ErrorCode Runtime::FreeIPCSysMem(gpusize gpu_addr, gpusize size, int &memfd) {
+  return heap.FreeIPCSysMem(gpu_addr, size, memfd);
+}
+
+bool Runtime::InitHandleApertureSpace() { return heap.InitHandleApertureSpace(); }
+
+ErrorCode Runtime::HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt_addr) {
+  return heap.HandleApertureAlloc(size, out_gpu_virt_addr);
+}
+
+void Runtime::HandleApertureFree(gpusize gpu_addr) {
+  heap.HandleApertureFree(gpu_addr);
 }
 
 } // namespace rocdxg

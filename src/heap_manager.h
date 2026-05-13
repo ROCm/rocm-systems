@@ -23,85 +23,71 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef LIBROCDXG_RUNTIME_H_INCLUDED
-#define LIBROCDXG_RUNTIME_H_INCLUDED
+#ifndef LIBROCDXG_HEAP_MANAGER_H_INCLUDED
+#define LIBROCDXG_HEAP_MANAGER_H_INCLUDED
 
-#include <pthread.h>
-#include <stdint.h>
+#include <cstdint>
 #include <memory>
-#include <unistd.h>
 
-#include "heap_manager.h"
 #include "impl/wddm/va_mgr.h"
 #include "shared/include/d3dkmt_types.h"
-#include "shared/include/dxcore_loader.h"
 #include "shared/include/status.h"
 #include "shared/include/thunk_proxy/thunk_proxy.h"
 
 namespace rocdxg {
 
-class Runtime {
+class HeapManager {
 public:
-  static Runtime &Instance();
-
-  Runtime();
-  ~Runtime() = default;
-
+  void Init();
+  void Fini();
   void Reset();
-  void ResetAfterFork();
 
-  void HeapInit();
-  void HeapFini();
   bool ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t align);
   bool FreeSvmSpace(uint64_t &base, uint64_t &size);
   bool ReserveLocalHeapSpace();
   bool FreeLocalHeapSpace();
   bool ReserveSystemHeapSpace();
-  uint64_t SystemHeapSize() const { return heap.SystemHeapSize(); }
+  uint64_t SystemHeapSize() const { return system_heap_space_size_; }
   bool FreeSystemHeapSpace();
-  bool CommitSystemHeapSpace(void* addr, int64_t size, bool lock);
-  bool DecommitSystemHeapSpace(void* addr, int64_t size);
-  ErrorCode ReserveGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
-          gpusize hit_base_addr, gpusize size,
-          gpusize *out_gpu_virt_addr, gpusize alignment, bool lock);
-  ErrorCode FreeGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
-          gpusize gpu_addr, gpusize size);
-  bool CommitSystemHeapSpaceIPC(void* addr, int64_t size, int &fd, bool lock=false);
-  bool DecommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd);
-  ErrorCode ReserveIPCSysMem(gpusize size,
-          gpusize *out_gpu_virt_addr, gpusize alignment,
-          int &memfd, bool lock);
+
+  bool CommitSystemHeapSpace(void *addr, int64_t size, bool lock);
+  bool DecommitSystemHeapSpace(void *addr, int64_t size);
+  ErrorCode ReserveGpuVirtualAddress(thunk_proxy::AllocDomain domain,
+                                     gpusize hint_base_addr, gpusize size,
+                                     gpusize *out_gpu_virt_addr,
+                                     gpusize alignment, bool lock);
+  ErrorCode FreeGpuVirtualAddress(thunk_proxy::AllocDomain domain,
+                                  gpusize gpu_addr, gpusize size);
+
+  bool CommitSystemHeapSpaceIPC(void *addr, int64_t size, int &fd,
+                                bool lock = false);
+  bool DecommitSystemHeapSpaceIPC(void *addr, int64_t size, int &memfd);
+  ErrorCode ReserveIPCSysMem(gpusize size, gpusize *out_gpu_virt_addr,
+                             gpusize alignment, int &memfd, bool lock);
   ErrorCode FreeIPCSysMem(gpusize gpu_addr, gpusize size, int &memfd);
+
   bool InitHandleApertureSpace();
   ErrorCode HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt_addr);
   void HandleApertureFree(gpusize gpu_addr);
 
-  pthread_mutex_t hsakmt_mutex;
-  const char *dxg_device_name = "/dev/dxg";
-  long page_size;
-  int page_shift;
-  int dxg_fd = -1;
-  pid_t parent_pid = -1;
-  bool is_forked = false;
-  int hsakmt_debug_level;
-  unsigned long dxg_open_count;
-  bool hsakmt_is_dgpu;
-  bool is_svm_api_supported;
-  int zfb_support;
-  int vendor_packet_process;
-  bool check_avail_sysram;
-  size_t max_single_alloc_size;
-  int enable_thunk_sub_allocator;
-  uint32_t default_node;
-
 private:
-  void ResetState();
+  void InitLocalHeapMgr();
+  void InitSystemHeapMgr();
+  void InitHandleApertureMgr();
 
-  HeapManager heap;
+  uint64_t local_heap_space_start_ = 0;
+  uint64_t local_heap_space_size_ = 0;
+  std::unique_ptr<wsl::thunk::VaMgr> local_heap_mgr_;
+
+  uint64_t system_heap_space_start_ = 0;
+  uint64_t system_heap_space_size_ = 0;
+  std::unique_ptr<wsl::thunk::VaMgr> system_heap_mgr_;
+
+  uint64_t handle_aperture_start_ = 0;
+  uint64_t handle_aperture_size_ = 0;
+  std::unique_ptr<wsl::thunk::VaMgr> handle_aperture_mgr_;
 };
 
 } // namespace rocdxg
-
-using hsakmtRuntime = rocdxg::Runtime;
 
 #endif

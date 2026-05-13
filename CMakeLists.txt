@@ -122,6 +122,7 @@ endif ()
 ## Source files
 set ( ROCDXG_SRC "src/debug.cpp"
                  "src/events.cpp"
+                 "src/heap_manager.cpp"
                  "src/memory.cpp"
                  "src/libdrm.cpp"
                  "src/hsa.cpp"
