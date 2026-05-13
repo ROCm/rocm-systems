@@ -4128,10 +4128,11 @@ inline bool MapHandleType(amd::ExternalSemaphoreHandleType t,
       *out = HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT;
       return true;
     default:
-      // Other amd::ExternalSemaphoreHandleType values are not wired
-      // through libhsakmt yet; reject them up front so callers get
-      // HIP's standard "unsupported" failure instead of a runtime
-      // round-trip through an invalid enum value.
+      // Reject amd:: enum values with no HSA counterpart
+      // (D3D11/D3D12Fence, NvSciSync, KeyedMutex*, TimelineSemaphore*).
+      // Types we do map (e.g. OpaqueFd, OpaqueWin32Kmt) may still fail
+      // at libhsakmt import time on platforms without KMD support;
+      // capability ground-truth lives in the lower layer.
       return false;
   }
 }
