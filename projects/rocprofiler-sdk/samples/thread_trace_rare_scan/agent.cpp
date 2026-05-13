@@ -58,6 +58,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <unordered_map>
@@ -759,6 +760,25 @@ tool_fini(void* /*tool_data*/)
         }
         else
         {
+            char path[64];
+            std::snprintf(path,
+                          sizeof(path),
+                          "cut_dispatch_%lu.att",
+                          (unsigned long) ScanState::TARGET_DISPATCH_ID);
+            std::ofstream ofs(path, std::ios::binary);
+            if(ofs)
+            {
+                ofs.write(reinterpret_cast<const char*>(ct.bytes.data()),
+                          static_cast<std::streamsize>(ct.bytes.size()));
+                std::printf("[scan] wrote %lu B to %s\n",
+                            (unsigned long) ct.bytes.size(),
+                            path);
+            }
+            else
+            {
+                std::fprintf(stderr, "[scan] failed to open %s for writing\n", path);
+            }
+
             // Parse must run on the same agent's handle that produced the
             // standalone bytes — code objects are loaded per-handle, so a
             // different handle would fail to disassemble. We stored the
