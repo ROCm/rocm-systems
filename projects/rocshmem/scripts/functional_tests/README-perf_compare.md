@@ -64,13 +64,13 @@ Fields in each spec (separated by `:`):
 If you already have log directories from a previous run:
 
 ```bash
-python3 scripts/perf_compare.py \
+python3 scripts/functional_tests/perf_compare.py \
   --baseline "path/to/build-baseline/logs-heatmap-*" \
   --variants "mybranch:path/to/build-branch/logs-heatmap-*" \
   --outdir plots/
 
 # With multiple variants:
-python3 scripts/perf_compare.py \
+python3 scripts/functional_tests/perf_compare.py \
   --baseline "build-develop/logs-heatmap-*" \
   --variants \
     "sdma-off:build-sdma-off/logs-heatmap-*" \

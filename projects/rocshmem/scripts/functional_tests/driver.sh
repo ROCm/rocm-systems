@@ -895,7 +895,7 @@ if [[ -n "$ARTIFACT_DIR" && $EXIT_STATUS -eq 0 ]]; then
       echo "Generating performance artifact -> $ARTIFACT_DIR"
       echo "========================================================================"
       SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-      RUN_COMPARE="$SCRIPT_DIR/../run_perf_compare.sh"
+      RUN_COMPARE="$SCRIPT_DIR/run_perf_compare.sh"
 
       mkdir -p "$ARTIFACT_DIR"
 
@@ -914,7 +914,7 @@ if [[ -n "$ARTIFACT_DIR" && $EXIT_STATUS -eq 0 ]]; then
         echo "CI ARTIFACT: $ARTIFACT_DIR/per_test/"
       else
         # Single-build: generate per-test latency plots only (no baseline to compare against)
-        COMPARE="$SCRIPT_DIR/../perf_compare.py"
+        COMPARE="$SCRIPT_DIR/perf_compare.py"
         VENV_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)/.perf-venv"
         if [[ ! -d "$VENV_DIR" ]]; then
           python3 -m venv "$VENV_DIR" 2>/dev/null || { VENV_DIR=""; }

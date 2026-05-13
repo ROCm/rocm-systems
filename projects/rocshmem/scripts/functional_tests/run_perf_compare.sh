@@ -89,10 +89,10 @@ done
 # Paths
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROCSHMEM_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROCSHMEM_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PROJECTS_DIR="$(cd "$ROCSHMEM_DIR/.." && pwd)"
 DRIVER="$ROCSHMEM_DIR/scripts/functional_tests/driver.sh"
-COMPARE="$ROCSHMEM_DIR/scripts/perf_compare.py"
+COMPARE="$ROCSHMEM_DIR/scripts/functional_tests/perf_compare.py"
 VENV_DIR="$PROJECTS_DIR/.perf-venv"
 
 # Open MPI
