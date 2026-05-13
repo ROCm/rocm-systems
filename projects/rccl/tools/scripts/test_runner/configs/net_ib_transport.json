@@ -368,6 +368,25 @@
       ]
     },
 
+    "net_ib_cts_stress": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_IB_P2P_DISABLE_CTS": "1",
+        "CTS_NUM_CONNS":  "16",
+        "CTS_QP_DEPTH":   "256",
+        "CTS_SNAP_EVERY": "4"
+      },
+      "tests": [
+        {
+          "name": "NetIB_CtsDepthStress",
+          "description": "Stress CTS match-table depth (16 P2P conns x 256 outstanding recvs) and sample hw_counters; with RCCL_IB_P2P_DISABLE_CTS=1 the workaround should keep retx/ack_timeout at 0",
+          "test_filter": "NetIbMPITest.CtsDepthStress"
+        }
+      ]
+    },
+
     "cast_base": {
       "extends": "net_ib_base",
       "env_variables": {
@@ -702,6 +721,12 @@
       "name": "NET IB - MultiRecv",
       "description": "irecv(n>1) multi-slot batching tests",
       "config": "net_ib_multirecv",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CTS Depth Stress",
+      "description": "CTS match-table depth stress / overflow reproducer (AINIC); fully under RCCL_IB_P2P_DISABLE_CTS=1 workaround so passes cleanly on healthy stacks",
+      "config": "net_ib_cts_stress",
       "enabled": true
     },
     {
