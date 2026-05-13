@@ -31,6 +31,7 @@
 #include <rocprofiler-sdk/rccl.h>
 #include <rocprofiler-sdk/rocdecode.h>
 #include <rocprofiler-sdk/rocjpeg.h>
+#include <rocprofiler-sdk/rocshmem.h>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_amd_tool.h>
@@ -134,6 +135,16 @@ typedef struct rocprofiler_callback_tracing_rocjpeg_api_data_t
     rocprofiler_rocjpeg_api_args_t   args;
     rocprofiler_rocjpeg_api_retval_t retval;
 } rocprofiler_callback_tracing_rocjpeg_api_data_t;
+
+/**
+ * @brief ROCProfiler rocSHMEM API Callback Data.
+ */
+typedef struct rocprofiler_callback_tracing_rocshmem_api_data_t
+{
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_rocshmem_api_args_t   args;
+    rocprofiler_rocshmem_api_retval_t retval;
+} rocprofiler_callback_tracing_rocshmem_api_data_t;
 
 /**
  * @brief ROCProfiler Code Object Load Tracer Callback Record.
