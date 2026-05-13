@@ -65,14 +65,34 @@
 // SetProfiling) and then queries hsa_amd_profiling_get_dispatch_records
 // to fetch the buffer info.
 //
-// SENTINEL-SCAN DESIGN: The substrate publishes neither a host-readable FW
-// write pointer nor any other end-of-records marker. The drainer locates
-// fresh records by scanning the ring sequentially from a host-managed
-// monotonic cursor (next_idx). A slot whose record_type is 0 is "empty"
-// (FW writes record_type ∈ {1,2}, and the buffer is pre-zeroed at alloc
-// in AqlQueue::SetProfiling). After consuming a slot the drainer clears
-// the record_type sentinel so wraparound rewrites are re-detectable. See drain_one_queue
-// below for the canonical implementation.
+// TWO-MODE DRAIN DESIGN: drain_one_queue runs in one of two modes per
+// queue, chosen at QueueProfilingAcquire time based on whether
+// AqlQueue::GetDispatchLogPointers (see core/runtime/amd_aql_queue.cpp)
+// returns a host-VA wptr/rptr/signal triple:
+//
+//   - PATH A (preferred, signal-bound): newer kernel/FW publish a
+//     host-readable FW write pointer (wptr) and a per-queue signal that
+//     the drainer waits on. The drainer reads wptr to bound the live
+//     region [next_idx, wptr) and consumes that range. See the
+//     signal-bound branch in drain_one_queue (and the registration in
+//     the per-queue enable block, where GetDispatchLogPointers is
+//     called and the wptr/rptr/signal pointers are captured).
+//
+//   - PATH B (legacy fallback, sentinel-scan): when GetDispatchLogPointers
+//     returns NOT_INITIALIZED (older kernel/FW or libhsakmt without
+//     host-VA pointer support), the substrate publishes neither a
+//     host-readable FW write pointer nor any other end-of-records marker.
+//     The drainer falls back to scanning the ring sequentially from a
+//     host-managed monotonic cursor (next_idx). A slot whose record_type
+//     is 0 is "empty" (FW writes record_type ∈ {1,2}, and the buffer is
+//     pre-zeroed at alloc in AqlQueue::SetProfiling). After consuming a
+//     slot the drainer clears the record_type sentinel so wraparound
+//     rewrites are re-detectable. See the "PATH B: SENTINEL-SCAN
+//     FALLBACK" branch in drain_one_queue.
+//
+// Both paths share the same 16-byte FW record stride, the same per-queue
+// next_idx cursor, the same batched LTTng emit path, and the same
+// drop-accounting; only the bound-of-live-region computation differs.
 
 #include "core/inc/dispatch_log.h"
 

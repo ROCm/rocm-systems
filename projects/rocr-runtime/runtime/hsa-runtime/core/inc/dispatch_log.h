@@ -43,9 +43,27 @@
 // HSA-resident firmware-ring drainer with LTTng emission for kernel-dispatch
 // timestamps. Public API surface for the dispatch_log subsystem. See
 // projects/rocr-runtime/runtime/hsa-runtime/core/runtime/dispatch_log.cpp
-// for the implementation (in particular the sentinel-scan design in
-// drain_one_queue), and the Phase A spec (2026-04-27) for the full
+// for the implementation, and the Phase A spec (2026-04-27) for the full
 // design contract.
+//
+// Two-mode drain design (see drain_one_queue in dispatch_log.cpp):
+//
+//   - Path A (preferred, signal-bound): when AqlQueue::GetDispatchLogPointers
+//     returns a host-VA wptr/rptr/signal triple (newer kernel/FW that
+//     exposes the FW write pointer to the host), the drainer waits on the
+//     FW signal, reads the wptr to bound the live region, and consumes
+//     [next_idx, wptr). This is the steady-state path.
+//
+//   - Path B (legacy fallback, sentinel-scan): when GetDispatchLogPointers
+//     returns NOT_INITIALIZED (older kernel/FW or libhsakmt without
+//     host-VA pointer support), the drainer falls back to scanning the
+//     ring sequentially from a host-managed monotonic cursor (next_idx)
+//     and uses per-slot record_type==0 as the empty-slot sentinel.
+//
+// Path A is registered at queue enable in QueueProfilingAcquire (see the
+// GetDispatchLogPointers call in dispatch_log.cpp around the per-queue
+// enable block); Path B is the unconditional fallback when those pointers
+// are unavailable.
 
 #ifndef HSA_RUNTME_CORE_INC_DISPATCH_LOG_H_
 #define HSA_RUNTME_CORE_INC_DISPATCH_LOG_H_
@@ -69,11 +87,15 @@ namespace dispatch_log {
 //
 // The buffer layout was originally defined as `header + ring data`. The
 // current substrate instead hands the drainer a flat ring of N records
-// at the 16-byte FW record stride, with no host-visible FW write pointer:
-// the drainer locates fresh records via sentinel scan over per-slot
-// record_type and advances a host-managed monotonic cursor. The header
-// and DISPATCH_LOG_VERSION are no longer used; they are retained here
-// only as historical constants for now and may be removed.
+// at the 16-byte FW record stride. The drainer consumes that ring in one
+// of two modes (see top-of-file two-mode drain design comment above):
+// preferred Path A reads a host-VA FW wptr published via
+// AqlQueue::GetDispatchLogPointers; legacy Path B falls back to a
+// sentinel-scan over per-slot record_type when the wptr is unavailable.
+// In both modes the drainer advances a host-managed monotonic cursor
+// (next_idx). The original buffer header and DISPATCH_LOG_VERSION are no
+// longer used; they are retained here only as historical constants for
+// now and may be removed.
 // -----------------------------------------------------------------------------
 
 // NOTE: the per-queue ring record count is NOT a build-time constant.
