@@ -43,6 +43,7 @@ public:
     MOCK_METHOD(void, getStatus,
                 (unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp, struct timespec *timeout),
                 (override));
+    MOCK_METHOD(void, cancelOperations, (), (override));
 };
 
 }

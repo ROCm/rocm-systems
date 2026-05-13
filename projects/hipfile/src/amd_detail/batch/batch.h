@@ -372,6 +372,7 @@ public:
                                       IBatchOperationFactory *operation_factory = nullptr) = 0;
     virtual void     getStatus(unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp,
                                struct timespec *timeout)                                   = 0;
+    virtual void     cancelOperations()                                                    = 0;
 };
 
 class BatchContext : public IBatchContext, public std::enable_shared_from_this<BatchContext> {
@@ -413,6 +414,11 @@ public:
     ///
     void getStatus(unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp,
                    struct timespec *timeout) override;
+
+    ///
+    /// @brief Cancel outstanding operations from this Context and wait for running ops.
+    ///
+    void cancelOperations() override;
 
 private:
     const unsigned capacity;

@@ -245,8 +245,8 @@ TEST_F(DriverNoInit, hipFileBatchIOGetStatus)
 
 TEST_F(DriverNoInit, hipFileBatchIOCancelNullArgs)
 {
-#ifdef __HIP_PLATFORM_AMD__ // Not implemented on AMD
-    ASSERT_EQ(hipFileBatchIOCancel(nullptr), HipFileOpError(hipFileInternalError));
+#ifdef __HIP_PLATFORM_AMD__
+    ASSERT_EQ(hipFileBatchIOCancel(nullptr), HipFileOpError(hipFileInvalidValue));
 #else
     ASSERT_EQ(hipFileBatchIOCancel(nullptr), HIPFILE_SUCCESS);
 #endif
@@ -256,8 +256,8 @@ TEST_F(DriverNoInit, hipFileBatchIOCancel)
 {
     hipFileBatchHandle_t handle{};
 
-#ifdef __HIP_PLATFORM_AMD__ // Not implemented on AMD
-    ASSERT_EQ(hipFileBatchIOCancel(handle), HipFileOpError(hipFileInternalError));
+#ifdef __HIP_PLATFORM_AMD__
+    ASSERT_EQ(hipFileBatchIOCancel(handle), HipFileOpError(hipFileInvalidValue));
 #else
     ASSERT_EQ(hipFileBatchIOCancel(handle), HIPFILE_SUCCESS); // Weird
 #endif
