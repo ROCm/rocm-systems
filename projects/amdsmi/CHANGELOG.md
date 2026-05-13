@@ -16,6 +16,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Wrapped ESMI functions in `amdsmi_go_shim`**.  
   - Go callers can now access ESMI CPU functionality through the existing `amdsmi_go_shim` interface.
 
+- **Added GPU partitioning conceptual guide and usage examples**.  
+  - New guide at `docs/conceptual/partition.md` covering accelerator partition modes (SPX/DPX/TPX/QPX/CPX), memory partition modes (NPS1/NPS2/NPS4/NPS8), API generations, device enumeration after partition, and BDF encoding.
+  - New C++ example: `example/amd_smi_partition_example.cc`.
+  - New Python example: `example/amd_smi_partition_example.py`.
+
 - **Improved Python test runner behavior**.  
   - Added `-l`/`--list` flag to list all available tests and exit without running them.
   - Added shadow detection: if `amdsmi` loads from a path other than the resolved expected path (`AMDSMI_PATH`, `ROCM_HOME`, `ROCM_PATH`, or `/opt/rocm` default), tests exit early with a clear error message and remediation steps.

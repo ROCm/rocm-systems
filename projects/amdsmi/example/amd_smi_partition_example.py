@@ -41,6 +41,7 @@
 #     post-change handle list before issuing any further queries or sets.
 
 import amdsmi
+from typing import Any, Dict, List, Tuple
 
 # ---------------------------------------------------------------------------
 # Partition name converters
@@ -48,7 +49,7 @@ import amdsmi
 
 
 # Returns a comma-separated list of supported NPS modes (e.g. "NPS1,NPS2,NPS4").
-def nps_caps_str(caps):
+def nps_caps_str(caps: List[str]) -> str:
     filtered = [c for c in caps if c != "N/A"]
     return ",".join(filtered) if filtered else "none"
 
@@ -61,7 +62,7 @@ _FILL = "-" * 70
 _NPS_ORDER = {"NPS1": 1, "NPS2": 2, "NPS4": 4, "NPS8": 8}
 
 
-def print_separator(title=""):
+def print_separator(title: str = "") -> None:
     if not title:
         print(_FILL)
         return
@@ -86,10 +87,13 @@ def print_separator(title=""):
 # Treat every processor handle as valid only within the session that
 # obtained it.
 class AmdsmiSession:
-    def __init__(self):
+    def __init__(self) -> None:
         self._ok = False
 
-    def __enter__(self):
+    def is_ok(self) -> bool:
+        return self._ok
+
+    def __enter__(self) -> "AmdsmiSession":
         try:
             amdsmi.amdsmi_init()
             self._ok = True
@@ -98,7 +102,7 @@ class AmdsmiSession:
             print(f"amdsmi_init failed: {e}")
         return self
 
-    def __exit__(self, *_):
+    def __exit__(self, *_: Any) -> None:
         if not self._ok:
             return
         amdsmi.amdsmi_shut_down()
@@ -111,7 +115,7 @@ class AmdsmiSession:
 
 
 # Enumerate all AMD GPU handles into a flat list.
-def get_all_gpu_handles():
+def get_all_gpu_handles() -> List:
     try:
         return amdsmi.amdsmi_get_processor_handles()
     except amdsmi.AmdSmiException as e:
@@ -126,14 +130,14 @@ def get_all_gpu_handles():
 # partition config; sub-partition handles return NOT_SUPPORTED. Calling set on
 # a sub-partition handle is a no-op (NOT_SUPPORTED), so filter them out first.
 # Each entry is (amd-smi GPU index, handle).
-def get_primary_gpu_handles(all_gpus):
+def get_primary_gpu_handles(all_gpus: List) -> List[Tuple[int, Any]]:
     primary = []
     for i, gpu in enumerate(all_gpus):
         try:
             amdsmi.amdsmi_get_gpu_accelerator_partition_profile_config(gpu)
             primary.append((i, gpu))
         except amdsmi.AmdSmiException:
-            pass
+            pass  # sub-partition handles are expected to raise here
     return primary
 
 
@@ -142,7 +146,7 @@ def get_primary_gpu_handles(all_gpus):
 # ---------------------------------------------------------------------------
 
 
-def print_current_partition(idx, gpu):
+def print_current_partition(idx: int, gpu: Any) -> None:
     print(f"  GPU {idx}:")
     try:
         cur_profile = amdsmi.amdsmi_get_gpu_accelerator_partition_profile(gpu)
@@ -162,7 +166,7 @@ def print_current_partition(idx, gpu):
         print(f"    amdsmi_get_gpu_memory_partition_config: {e}")
 
 
-def print_available_modes(idx, gpu):
+def print_available_modes(idx: int, gpu: Any) -> None:
     print(f"  GPU {idx}:")
     try:
         mem_config = amdsmi.amdsmi_get_gpu_memory_partition_config(gpu)
@@ -175,12 +179,12 @@ def print_available_modes(idx, gpu):
         acc_config = amdsmi.amdsmi_get_gpu_accelerator_partition_profile_config(gpu)
         profiles = acc_config.get("profiles", [])
         print(f"    Available accelerator profiles ({len(profiles)}):")
-        for p in profiles:
+        for profile in profiles:
             print(
-                f"      Index {p.get('profile_index')} "
-                f"({p.get('profile_type')}, "
-                f"{p.get('num_partitions')} partition(s), "
-                f"compatible NPS: {nps_caps_str(p.get('memory_caps', []))})"
+                f"      Index {profile.get('profile_index')} "
+                f"({profile.get('profile_type')}, "
+                f"{profile.get('num_partitions')} partition(s), "
+                f"compatible NPS: {nps_caps_str(profile.get('memory_caps', []))})"
             )
     except amdsmi.AmdSmiException as e:
         print(f"    amdsmi_get_gpu_accelerator_partition_profile_config: {e}")
@@ -194,7 +198,7 @@ def print_available_modes(idx, gpu):
 # Maps each NPS mode to the accelerator profiles that are compatible with it.
 # Built by inverting the memory_caps list on every profile returned by
 # amdsmi_get_gpu_accelerator_partition_profile_config.
-def build_nps_to_profiles_map(acc_config):
+def build_nps_to_profiles_map(acc_config: Dict) -> Dict[str, List[Dict]]:
     nps_map = {}
     for prof in acc_config.get("profiles", []):
         for nps in prof.get("memory_caps", []):
@@ -208,20 +212,20 @@ def build_nps_to_profiles_map(acc_config):
 # ---------------------------------------------------------------------------
 
 
-def print_current_partition_info(gpus):
+def print_current_partition_info(gpus: List) -> None:
     print_separator("Current partition settings")
     for idx, gpu in enumerate(gpus):
         print_current_partition(idx, gpu)
 
 
-def print_available_partition_modes(gpus):
+def print_available_partition_modes(gpus: List) -> None:
     print_separator("Available partition modes")
     for idx, gpu in enumerate(gpus):
         print_available_modes(idx, gpu)
 
 
 # Returns True if the memory partition was set successfully.
-def set_memory_partition(gpu0, target):
+def set_memory_partition(gpu0: Any, target: amdsmi.AmdSmiMemoryPartitionType) -> bool:
     print_separator("Set memory partition")
     # Memory partition is hive-wide -- setting it on one device affects all.
     # Change the target mode to another supported mode as needed.
@@ -237,10 +241,11 @@ def set_memory_partition(gpu0, target):
 
 
 # Returns True if the driver was reloaded successfully.
-def reload_driver():
+def reload_driver() -> bool:
     print_separator("Reload driver")
     # Mandatory to apply memory partition change. All GPU activity must be
     # stopped first. The reload may reset the accelerator partition to default.
+    # Root privileges (sudo) are required for driver reload.
     print("  Reloading driver, this may take some time...")
     try:
         amdsmi.amdsmi_gpu_driver_reload()
@@ -253,7 +258,7 @@ def reload_driver():
 
 # For each GPU: build the NPS->profiles map, print every entry, then demonstrate
 # iterating over only the profiles compatible with the currently active NPS mode.
-def print_profiles_by_nps(gpus):
+def print_profiles_by_nps(gpus: List) -> None:
     print_separator("Accelerator profiles grouped by NPS mode")
     for gpu_idx, gpu in enumerate(gpus):
         print(f"  GPU {gpu_idx}:")
@@ -310,7 +315,9 @@ def print_profiles_by_nps(gpus):
 #   logical partition (e.g. 64 handles for 8 physical GPUs in CPX). Only the
 #   root handle of each physical GPU owns the partition config; the rest return
 #   NOT_SUPPORTED. Calling set on them is noise, so we filter first.
-def set_accelerator_partition_all_devices(all_gpus, profile_index, profile_type_name):
+def set_accelerator_partition_all_devices(
+    all_gpus: List, profile_index: int, profile_type_name: str
+) -> None:
     print_separator(f"Set accelerator partition -> index={profile_index} ({profile_type_name})")
     primary = get_primary_gpu_handles(all_gpus)
     print(f"  Primary handles: {len(primary)} of {len(all_gpus)} total")
@@ -326,7 +333,7 @@ def set_accelerator_partition_all_devices(all_gpus, profile_index, profile_type_
         )
 
 
-def main():
+def main() -> None:
     mem_changed = False
 
     # -----------------------------------------------------------------------
@@ -338,7 +345,9 @@ def main():
     # reload is skipped and accelerator partition changes are attempted
     # immediately within this same session.
     # -----------------------------------------------------------------------
-    with AmdsmiSession():
+    with AmdsmiSession() as session:
+        if not session.is_ok():
+            return
         gpus = get_all_gpu_handles()
         if not gpus:
             print("No GPUs found.")
@@ -362,15 +371,16 @@ def main():
                 target_memory_partition = amdsmi.AmdSmiMemoryPartitionType.NPS4
             elif "NPS2" in caps:
                 target_memory_partition = amdsmi.AmdSmiMemoryPartitionType.NPS2
-        except amdsmi.AmdSmiException:
-            pass
+        except amdsmi.AmdSmiException as e:
+            print(f"  [warn] Could not query NPS capabilities: {e}; defaulting to NPS1")
         print(f"  Selected NPS target: {target_memory_partition.name}")
         mem_changed = set_memory_partition(gpus[0], target_memory_partition)
 
         if mem_changed:
             if not reload_driver():
                 print(
-                    "[warn] Driver reload failed; memory partition change may not have taken effect."
+                    "[warn] Driver reload failed; memory partition change "
+                    "may not have taken effect."
                 )
         else:
             print("\n[info] Memory partition unchanged; skipping driver reload.")
@@ -386,7 +396,9 @@ def main():
     # boundaries and can be saved here for use in Phase 3.
     # -----------------------------------------------------------------------
     profiles_to_test = []
-    with AmdsmiSession():
+    with AmdsmiSession() as session:
+        if not session.is_ok():
+            return
         gpus = get_all_gpu_handles()
         if not gpus:
             print("No GPUs found after driver reload.")
@@ -410,8 +422,8 @@ def main():
                     f"\n[info] {len(profiles_to_test)} accelerator profile(s) to iterate "
                     f"for current NPS mode ({current_nps})."
                 )
-        except amdsmi.AmdSmiException:
-            pass
+        except amdsmi.AmdSmiException as e:
+            print(f"[warn] Could not build accelerator profile map: {e}")
 
     # -----------------------------------------------------------------------
     # Phase 3: For each accelerator profile compatible with the current NPS mode:
@@ -423,16 +435,23 @@ def main():
     #      is required to get the correct post-change device count and handles
     #      before displaying topology or issuing further queries.
     # -----------------------------------------------------------------------
+    if not profiles_to_test:
+        print("[info] No accelerator profiles available for current NPS mode; skipping Phase 3.")
+        return
+
     for target in profiles_to_test:
         profile_index = target.get("profile_index")
         profile_type = target.get("profile_type")
 
         # a) Set accelerator partition on all devices.
-        with AmdsmiSession():
+        with AmdsmiSession() as session:
+            if not session.is_ok():
+                continue
             gpus = get_all_gpu_handles()
             if not gpus:
                 print(
-                    f"\n[warn] No GPUs found; skipping profile index={profile_index} ({profile_type})."
+                    f"\n[warn] No GPUs found; skipping profile "
+                    f"index={profile_index} ({profile_type})."
                 )
                 continue
             print(
@@ -442,11 +461,14 @@ def main():
             set_accelerator_partition_all_devices(gpus, profile_index, profile_type)
 
         # b) Re-enumerate and show resulting device topology.
-        with AmdsmiSession():
+        with AmdsmiSession() as session:
+            if not session.is_ok():
+                continue
             gpus = get_all_gpu_handles()
             if not gpus:
                 print(
-                    f"\n[warn] No GPUs found; skipping profile index={profile_index} ({profile_type})."
+                    f"\n[warn] No GPUs found; skipping profile "
+                    f"index={profile_index} ({profile_type})."
                 )
                 continue
             print(

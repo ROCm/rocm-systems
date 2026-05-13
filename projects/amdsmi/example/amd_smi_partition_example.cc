@@ -147,28 +147,32 @@ static void print_separator(std::string_view title = "") {
 //     built at amdsmi_init is stale even without a driver reload.
 // Treat every amdsmi_processor_handle as valid only within the session that
 // obtained it.
-struct AmdsmiSession {
-  bool ok = false;
-
+class AmdsmiSession {
+ public:
   explicit AmdsmiSession(uint64_t init_flags = AMDSMI_INIT_AMD_GPUS) {
     auto ret = amdsmi_init(init_flags);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       std::cout << "amdsmi_init failed: " << status_str(ret) << '\n';
       return;
     }
-    ok = true;
+    ok_ = true;
     std::cout << "AMDSMI session started (amdsmi_init called)\n";
   }
   ~AmdsmiSession() {
-    if (!ok) return;
+    if (!ok_) return;
     amdsmi_shut_down();
     std::cout << "AMDSMI session ended (amdsmi_shut_down called)\n";
   }
+
+  bool is_ok() const { return ok_; }
 
   AmdsmiSession(const AmdsmiSession&) = delete;
   AmdsmiSession& operator=(const AmdsmiSession&) = delete;
   AmdsmiSession(AmdsmiSession&&) = delete;
   AmdsmiSession& operator=(AmdsmiSession&&) = delete;
+
+ private:
+  bool ok_ = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -232,7 +236,7 @@ static void print_current_partition(uint32_t idx, amdsmi_processor_handle gpu) {
   std::cout << "  GPU " << idx << ":\n";
 
   amdsmi_accelerator_partition_profile_t profile{};
-  std::array<uint32_t, 8> partition_ids{};
+  std::array<uint32_t, AMDSMI_MAX_ACCELERATOR_PARTITIONS> partition_ids{};
   if (auto ret = amdsmi_get_gpu_accelerator_partition_profile(gpu, &profile, partition_ids.data());
       ret == AMDSMI_STATUS_SUCCESS) {
     std::cout << "    Accelerator profile type : " << accel_partition_str(profile.profile_type)
@@ -271,7 +275,7 @@ static void print_available_modes(uint32_t idx, amdsmi_processor_handle gpu) {
   ret = amdsmi_get_gpu_accelerator_partition_profile_config(gpu, &acc_cfg);
   if (ret == AMDSMI_STATUS_SUCCESS) {
     std::cout << "    Available accelerator profiles (" << acc_cfg.num_profiles << "):\n";
-    for (auto p = 0u; p < acc_cfg.num_profiles; ++p) {
+    for (uint32_t p = 0; p < acc_cfg.num_profiles; ++p) {
       const auto& prof = acc_cfg.profiles[p];
       std::cout << "      Index " << prof.profile_index << " ("
                 << accel_partition_str(prof.profile_type) << ", " << prof.num_partitions
@@ -293,7 +297,7 @@ using NpsProfileMap =
 [[nodiscard]] static NpsProfileMap build_nps_to_profiles_map(
     const amdsmi_accelerator_partition_profile_config_t& cfg) {
   NpsProfileMap m;
-  for (auto p = 0u; p < cfg.num_profiles; ++p) {
+  for (uint32_t p = 0; p < cfg.num_profiles; ++p) {
     const auto& prof = cfg.profiles[p];
     const auto& f = prof.memory_caps.nps_flags;
     if (f.nps1_cap) m[AMDSMI_MEMORY_PARTITION_NPS1].push_back(prof);
@@ -338,6 +342,7 @@ static void print_available_partition_modes(const std::vector<amdsmi_processor_h
   print_separator("Reload driver");
   // Mandatory to apply memory partition change. All GPU activity must be
   // stopped first. The reload may reset the accelerator partition to default.
+  // Root privileges (sudo) are required for driver reload.
   std::cout << "  Reloading driver, this may take some time...\n";
   auto ret = amdsmi_gpu_driver_reload();
   std::cout << "  amdsmi_gpu_driver_reload: " << status_str(ret) << '\n';
