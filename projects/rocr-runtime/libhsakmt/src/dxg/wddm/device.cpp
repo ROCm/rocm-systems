@@ -526,13 +526,16 @@ bool WDDMDevice::CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr) {
   return false;
 }
 
-void WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
+bool WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
   D3DKMT_DESTROYSYNCHRONIZATIONOBJECT args = {0};
   args.hSyncObject = handle;
 
   NTSTATUS ret = DXCORE_CALL(D3DKMTDestroySynchronizationObject(&args));
-  if (ret != STATUS_SUCCESS)
+  if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
+    return false;
+  }
+  return true;
 }
 
 bool WDDMDevice::OpenSyncobjFromNtHandle(void *nt_handle,

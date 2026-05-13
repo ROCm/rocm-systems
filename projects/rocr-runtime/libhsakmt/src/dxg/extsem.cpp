@@ -81,6 +81,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyExternalSemaphore(
   WDDMDevice *device = get_wddmdev(node_id);
   if (device == nullptr) return HSAKMT_STATUS_INVALID_NODE_UNIT;
 
-  device->DestroySyncobj(syncobj);
+  // Propagate WDDM destroy failure so the HSA layer can fail close()
+  // and callers don't silently leak the imported sync object.
+  if (!device->DestroySyncobj(syncobj))
+    return HSAKMT_STATUS_ERROR;
   return HSAKMT_STATUS_SUCCESS;
 }
