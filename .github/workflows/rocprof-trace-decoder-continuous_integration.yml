@@ -147,21 +147,6 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
-      # The ubuntu-22.04 rocprofiler-private image ships git 2.17, which is
-      # too old for actions/checkout@v6 to perform a real clone -- it falls
-      # back to a tarball download with no .git directory, breaking the
-      # subsequent submodule steps. Install a modern git from the git-core PPA
-      # before checkout.
-      - name: Ensure modern git (required by actions/checkout@v6)
-        shell: bash
-        run: |
-          apt-get update
-          apt-get install -y software-properties-common
-          add-apt-repository -y ppa:git-core/ppa
-          apt-get update
-          apt-get install -y git
-          git --version
-
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
         uses: actions/checkout@v6
         with:
