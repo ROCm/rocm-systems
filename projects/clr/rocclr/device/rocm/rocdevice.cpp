@@ -4096,11 +4096,33 @@ bool Device::importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& ha
   hsa_amd_external_semaphore_handle_descriptor_t desc = {};
   if (!MapHandleType(sem_handle_type, &desc.type)) return false;
 
+  // Populate the descriptor union by the *mapped* HSA type, not by
+  // build platform: amd::Os::FileDesc is void* on Windows and int on
+  // POSIX, but the HSA layer reads the union member dictated by
+  // desc.type. Reading a member that wasn't written is undefined
+  // behaviour, so reject combinations where the platform's FileDesc
+  // shape doesn't match the requested handle type.
+  switch (desc.type) {
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32:
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT:
 #if defined(_WIN32)
-  desc.handle.win32_handle = handle;
+      desc.handle.win32_handle = handle;
+      break;
 #else
-  desc.handle.fd = handle;
+      // Win32 NT handles aren't routable through a non-Windows KMD.
+      return false;
 #endif
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD:
+#if defined(_WIN32)
+      // POSIX FDs aren't routable through WDDM.
+      return false;
+#else
+      desc.handle.fd = handle;
+      break;
+#endif
+    default:
+      return false;
+  }
 
   // Heap-allocated holder so the caller gets an opaque pointer for
   // DestroyExtSemaphore. Storing the hsa_amd_external_semaphore_t
