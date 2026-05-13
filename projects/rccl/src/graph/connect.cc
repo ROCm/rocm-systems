@@ -1043,7 +1043,7 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
    * The following if/else assumes cluster is homogeneous w.r.t gfx arch
    * Ideally All the ranks should have consensus on to graphs.
    */
-  if ( IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151") ) {
+  if ( IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151") ||  rcclParamInterGraphGen()) {
     NCCLCHECK(connectRingsLoadBalanced(comm, ringRecv, ringSend, ringPrev, ringNext));
   } else {
     // Connect rings and trees. This should also duplicate the channels.
