@@ -114,7 +114,7 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
             REQUIRE(result == expected);
           }
         } else {
-          compareFloatingPoint(result, expected, mask, input.ptr(), lane);
+          compareFloatingPoint<std::plus<T>>(result, expected, mask, input.ptr(), lane);
         }
       }
 
