@@ -92,7 +92,7 @@ set(HOST_EXAMPLE_NAME "openmp-fortran-host")
 set(HOST_EXAMPLE_FLAGS "-fopenmp")
 
 add_executable(${HOST_EXAMPLE_NAME})
-# TODO: Once SDK issue if fixed (early_fulfill arriving after task_complete causes failure),
+# TODO: Once SDK issue is fixed (early_fulfill arriving after task_complete causes failure),
 # uncomment the call to run_task_detach_phase in host.f90
 target_sources(${HOST_EXAMPLE_NAME} PRIVATE host.f90)
 target_compile_options(${HOST_EXAMPLE_NAME} PRIVATE ${HOST_EXAMPLE_FLAGS})
