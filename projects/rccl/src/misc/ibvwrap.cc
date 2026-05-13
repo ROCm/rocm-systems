@@ -139,6 +139,7 @@ ncclResult_t wrap_ibv_get_device_list(struct ibv_device ***ret, int *num_devices
 }
 
 ncclResult_t wrap_ibv_free_device_list(struct ibv_device **list) {
+  if (list == NULL) return ncclSuccess;
   IBV_PASSTHRU(ibvSymbols, ibv_internal_free_device_list, ibv_internal_free_device_list(list));
 }
 

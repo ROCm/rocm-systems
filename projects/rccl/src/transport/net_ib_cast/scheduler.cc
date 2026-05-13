@@ -425,7 +425,7 @@ ncclResult_t IbCastQpSchedFreeRemap(struct ncclIbRemapWrId* r) {
 // Test introspection API — exposes internal WRR scheduler state from a
 // sendComm handle.  Only intended for unit tests; not part of the public net
 // plugin ABI.
-// Struct definition and function prototypes live in src/include/net_ib_cast_inspect.h.
+// Struct definition and function prototypes live in src/transport/net_ib_cast/net_ib_cast_inspect.h.
 // =============================================================================
 
 // ncclIbCastGetSchedState — copy WRR scheduler state out of a sendComm.

@@ -322,10 +322,7 @@ function(rocprofiler_add_integration_execute_test NAME)
     if(DEFINED arg_COMMAND AND NOT DEFINED arg_DEPENDS)
         message(SEND_ERROR "COMMAND signature without DEPENDS specified")
 
-    elseif(
-        DEFINED arg_COMMAND
-        AND DEFINED arg_DEPENDS
-        AND TARGET ${arg_DEPENDS})
+    elseif(DEFINED arg_COMMAND AND DEFINED arg_DEPENDS)
 
         add_test(NAME "${arg_NAME}" COMMAND ${arg_COMMAND})
 
