@@ -57,8 +57,7 @@ template <typename Tp>
 auto
 get_default_retval()
 {
-    static_assert(std::is_empty<Tp>::value,
-                  "Error! unsupported return type for rocSHMEM API");
+    static_assert(std::is_empty<Tp>::value, "Error! unsupported return type for rocSHMEM API");
     return Tp{};
 }
 
@@ -66,8 +65,7 @@ template <typename DataT, typename Tp>
 void
 set_data_retval(DataT& _data, Tp /*_val*/)
 {
-    static_assert(std::is_empty<Tp>::value,
-                  "Error! unsupported return type for rocSHMEM API");
+    static_assert(std::is_empty<Tp>::value, "Error! unsupported return type for rocSHMEM API");
     // every traced rocSHMEM API returns void; populate the union placeholder
     _data.no_retval.empty = '\0';
 }
@@ -465,7 +463,8 @@ template <size_t TableIdx>
 const char*
 name_by_id(uint32_t id)
 {
-    return name_by_id<TableIdx>(id, std::make_index_sequence<rocshmem_domain_info<TableIdx>::last>{});
+    return name_by_id<TableIdx>(id,
+                                std::make_index_sequence<rocshmem_domain_info<TableIdx>::last>{});
 }
 
 template <size_t TableIdx>
