@@ -52,6 +52,7 @@ public:
   bool hasImpliedLiteral();
   using OpEncoding = SopkMachineInst;
   const OpEncoding inst_;
+  uint32_t literal_ = 0;
 };
 
 class Sop2 : public IsaInstruction<Isa> {
@@ -117,6 +118,7 @@ public:
   bool hasImpliedLiteral();
   using OpEncoding = Vop2MachineInst;
   const OpEncoding inst_;
+  uint32_t literal_ = 0;
   uint32_t dpp_ctrl_ = 0;
   uint32_t dpp_row_mask_ = 0xF;
   uint32_t dpp_bank_mask_ = 0xF;
