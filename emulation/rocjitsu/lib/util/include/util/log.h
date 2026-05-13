@@ -128,6 +128,15 @@ public:
     }
   }
 
+  /// @brief Emit a warning unconditionally (always enabled, not group-gated).
+  template <typename... Args> static void warn(Args &&...args) {
+    std::ostringstream buf;
+    buf << "[rj warn] ";
+    (buf << ... << args);
+    buf << '\n';
+    emit(buf.str());
+  }
+
   /// @brief Convenience for logging in GROUP_VM, variadic.
   template <typename... Args> static void vm(Args &&...args) {
     print<GROUP_VM>(std::forward<Args>(args)...);
