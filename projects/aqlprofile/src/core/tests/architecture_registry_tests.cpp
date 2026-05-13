@@ -26,7 +26,7 @@ class MockArchitecture : public HardwareArchitecture {
   const GpuBlockInfo* GetBlockInfo(uint32_t block_id) const override { return nullptr; }
   uint32_t FindBlockByName(const char* name) const override { return UINT32_MAX; }
   uint32_t GetBlockCount() const override { return 0; }
-  pm4_builder::CmdBuilder* CreateCmdBuilder() const override { return nullptr; }
+  pm4_builder::CmdBuilder* CreateCmdBuilder(const reg_base_offset_table*) const override { return nullptr; }
   pm4_builder::PrimitivesProvider* CreatePrimitivesProvider() const override { return nullptr; }
 
  private:

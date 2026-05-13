@@ -29,6 +29,7 @@
 #include "pm4/pmc_builder.h"
 #include "pm4/spm_builder.h"
 #include "pm4/sqtt_builder.h"
+#include "util/reg_offsets.h"
 
 namespace aql_profile {
 
@@ -42,7 +43,7 @@ Pm4Factory::Pm4Factory(HardwareArchitecture* arch, const AgentInfo* agent_info)
 }
 
 void Pm4Factory::InitializeBuilders(const AgentInfo* agent_info) {
-  cmd_builder_ = architecture_->CreateCmdBuilder();
+  cmd_builder_ = architecture_->CreateCmdBuilder(acquire_ip_offset_table(agent_info));
   prims_        = architecture_->CreatePrimitivesProvider();
   const auto& config = architecture_->GetConfig();
   pmc_builder_  = new pm4_builder::GpuPmcBuilder(config, cmd_builder_, prims_, concurrent_mode_);

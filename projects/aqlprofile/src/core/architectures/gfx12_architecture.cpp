@@ -23,6 +23,7 @@
 // Generic GFX12 (gfx1200/gfx1201) architecture implementation.
 // GFX12_VARIANT intentionally NOT defined here; gfx12_def.h defaults to GFX12_VARIANT_1200.
 #include "core/architectures/gfx12_architecture.hpp"
+#include "aqlprofile-sdk/aql_profile_v2.h"
 #include "def/gfx12_def.h"
 #include "pm4/gfx12_cmd_builder.h"
 #include "pm4/gfx12_primitives_provider.hpp"
@@ -85,7 +86,7 @@ void Gfx12Architecture::InitializeRegisterSchema() {
 }
 
 void Gfx12Architecture::InitializeBlockTable() {
-  static const GpuBlockInfo* table[LastCounterBlockId + 1]{};
+  static const GpuBlockInfo* table[AQLPROFILE_BLOCKS_NUMBER]{};
 
   table[__BLOCK_ID(CHA)]         = &ChaCounterBlockInfo;
   table[__BLOCK_ID(CHC)]         = &ChcCounterBlockInfo;
@@ -119,7 +120,7 @@ void Gfx12Architecture::InitializeBlockTable() {
   table[__BLOCK_ID_HSA(TD)]      = &TdCounterBlockInfo;
 
   block_table_ = table;
-  block_count_ = LastCounterBlockId + 1;
+  block_count_ = AQLPROFILE_BLOCKS_NUMBER;
 }
 
 const GpuBlockInfo* Gfx12Architecture::GetBlockInfo(uint32_t block_id) const {
@@ -139,8 +140,8 @@ uint32_t Gfx12Architecture::GetBlockCount() const {
   return block_count_;
 }
 
-pm4_builder::CmdBuilder* Gfx12Architecture::CreateCmdBuilder() const {
-  return new pm4_builder::Gfx12CmdBuilder(nullptr);
+pm4_builder::CmdBuilder* Gfx12Architecture::CreateCmdBuilder(const reg_base_offset_table* table) const {
+  return new pm4_builder::Gfx12CmdBuilder(table);
 }
 
 pm4_builder::PrimitivesProvider* Gfx12Architecture::CreatePrimitivesProvider() const {

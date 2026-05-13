@@ -25,6 +25,7 @@
 // so that the correct register headers and block table entries are used.
 #define GFX12_VARIANT 0x1250
 #include "core/architectures/gfx12_architecture.hpp"
+#include "aqlprofile-sdk/aql_profile_v2.h"
 #include "def/gfx12_def.h"
 #include "pm4/gfx12_cmd_builder.h"
 
@@ -41,7 +42,7 @@ Mi450Architecture::Mi450Architecture(const AgentInfo* agent_info)
 }
 
 void Mi450Architecture::InitializeBlockTable() {
-  static const GpuBlockInfo* table[LastCounterBlockId + 1]{};
+  static const GpuBlockInfo* table[AQLPROFILE_BLOCKS_NUMBER]{};
 
   // AIGC blocks
   table[__BLOCK_ID(GCEA_SE)]   = &GceaSeCounterBlockInfo;
@@ -79,7 +80,7 @@ void Mi450Architecture::InitializeBlockTable() {
   table[__BLOCK_ID_HSA(TCP)]   = &TcpCounterBlockInfo;
 
   block_table_ = table;
-  block_count_ = LastCounterBlockId + 1;
+  block_count_ = AQLPROFILE_BLOCKS_NUMBER;
 }
 
 }  // namespace aql_profile

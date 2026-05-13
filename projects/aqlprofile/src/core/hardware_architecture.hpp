@@ -31,6 +31,8 @@
 #include "core/register_schema.hpp"
 #include "def/gpu_block_info.h"
 
+struct reg_base_offset_table;
+
 namespace pm4_builder {
 class CmdBuilder;
 class PrimitivesProvider;
@@ -64,7 +66,7 @@ class HardwareArchitecture {
 
   /// Create a command builder for this architecture
   /// The caller takes ownership of the returned pointer
-  virtual pm4_builder::CmdBuilder* CreateCmdBuilder() const = 0;
+  virtual pm4_builder::CmdBuilder* CreateCmdBuilder(const reg_base_offset_table* table) const = 0;
 
   /// Create a primitives provider for this architecture
   /// The caller takes ownership of the returned pointer
@@ -82,11 +84,13 @@ class HardwareArchitecture {
   virtual bool IsMI300() const { return false; }
   virtual bool IsMI350() const { return false; }
 
-  /// Get the number of WGPs (Work Group Processors)
-  /// For GFX10+, this is architecture-dependent
-  /// For earlier architectures, approximated from CU count
+  /// Get the number of WGPs per shader array (matching GpuPmcBuilder::wgp_per_sa_)
   virtual uint32_t GetNumWGPs() const {
-    return GetConfig().GetTotalWGPs();
+    const auto& c = GetConfig();
+    uint32_t wgp_per_sa =
+        (c.cu_count / 2 + c.sa_per_se_count * c.GetSEPerXCC() - 1) /
+        (c.GetSEPerXCC() * c.sa_per_se_count);
+    return wgp_per_sa / c.xcc_count;
   }
 
   /// Get accumulator register IDs (for SQ counters)

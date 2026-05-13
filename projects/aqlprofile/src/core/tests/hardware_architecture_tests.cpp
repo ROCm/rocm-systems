@@ -73,7 +73,7 @@ class TestArchitecture : public HardwareArchitecture {
 
   uint32_t GetBlockCount() const override { return 2; }
 
-  pm4_builder::CmdBuilder* CreateCmdBuilder() const override { return nullptr; }
+  pm4_builder::CmdBuilder* CreateCmdBuilder(const reg_base_offset_table*) const override { return nullptr; }
   pm4_builder::PrimitivesProvider* CreatePrimitivesProvider() const override { return nullptr; }
 
  private:

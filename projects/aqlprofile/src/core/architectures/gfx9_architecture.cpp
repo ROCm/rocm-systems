@@ -152,8 +152,8 @@ uint32_t Gfx9Architecture::GetBlockCount() const {
   return block_count_;
 }
 
-pm4_builder::CmdBuilder* Gfx9Architecture::CreateCmdBuilder() const {
-  return new pm4_builder::Gfx9CmdBuilder(nullptr);
+pm4_builder::CmdBuilder* Gfx9Architecture::CreateCmdBuilder(const reg_base_offset_table* table) const {
+  return new pm4_builder::Gfx9CmdBuilder(table);
 }
 
 pm4_builder::PrimitivesProvider* Gfx9Architecture::CreatePrimitivesProvider() const {
