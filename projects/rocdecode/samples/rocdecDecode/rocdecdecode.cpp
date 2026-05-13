@@ -109,7 +109,7 @@ static inline rocDecVideoCodec CodecTypeToRocDecVideoCodec(int codec_type) {
     }
 }
 
-// helper function for ChromaWidthFactor based on surface_format
+// helper function for GetChromaWidthFactor based on surface_format
 static inline float GetChromaWidthFactor(rocDecVideoSurfaceFormat surface_format) {
     float factor = 0.5;
     switch (surface_format) {
