@@ -38,18 +38,16 @@ constexpr uint16_t USERDATA2_ADDR = 0xC342;
 inline StatusToken encode_reg_cs(uint8_t me, uint8_t pipe, uint8_t regaddr, uint32_t regdata)
 {
     const uint64_t enc_me = (1u - (me & 1u)) & 1u;
-    uint64_t v = static_cast<uint64_t>(gfx9::TOKEN_REG_CS) | (static_cast<uint64_t>(pipe & 0x3) << 5) |
-                 (enc_me << 7) | (static_cast<uint64_t>(regaddr & 0x7F) << 9) |
-                 (static_cast<uint64_t>(regdata) << 16);
+    uint64_t v = static_cast<uint64_t>(gfx9::TOKEN_REG_CS) | (static_cast<uint64_t>(pipe & 0x3) << 5) | (enc_me << 7) |
+                 (static_cast<uint64_t>(regaddr & 0x7F) << 9) | (static_cast<uint64_t>(regdata) << 16);
     return {v, 6};
 }
 
 inline StatusToken encode_reg(uint8_t me, uint8_t pipe, uint16_t regaddr, uint32_t regdata)
 {
     const uint64_t enc_me = (1u - (me & 1u)) & 1u;
-    uint64_t v = static_cast<uint64_t>(gfx9::TOKEN_REG) | (static_cast<uint64_t>(pipe & 0x3) << 5) |
-                 (enc_me << 7) | (uint64_t{1} << 15) | (static_cast<uint64_t>(regaddr) << 16) |
-                 (static_cast<uint64_t>(regdata) << 32);
+    uint64_t v = static_cast<uint64_t>(gfx9::TOKEN_REG) | (static_cast<uint64_t>(pipe & 0x3) << 5) | (enc_me << 7) |
+                 (uint64_t{1} << 15) | (static_cast<uint64_t>(regaddr) << 16) | (static_cast<uint64_t>(regdata) << 32);
     return {v, 8};
 }
 
@@ -57,7 +55,7 @@ inline void emit_codeobj_field(std::vector<StatusToken>& out, uint32_t marker_ty
 {
     rocprof_trace_decoder_packet_header_t hdr{};
     hdr.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_CODEOBJ;
-    hdr.type   = marker_type;
+    hdr.type = marker_type;
     hdr.data20 = 0;
     out.push_back(encode_reg(0, 0, USERDATA2_ADDR, hdr.u32All));
     out.push_back(encode_reg(0, 0, USERDATA2_ADDR, payload));
@@ -84,9 +82,7 @@ std::vector<StatusToken> build_status_tokens(const CSRegisterHandler& reg)
             if (dpkt != 0)
             {
                 out.push_back(encode_reg_cs(me, pipe, COMPUTE_DISPATCH_PKT_LO, static_cast<uint32_t>(dpkt)));
-                out.push_back(
-                    encode_reg_cs(me, pipe, COMPUTE_DISPATCH_PKT_HI, static_cast<uint32_t>(dpkt >> 32))
-                );
+                out.push_back(encode_reg_cs(me, pipe, COMPUTE_DISPATCH_PKT_HI, static_cast<uint32_t>(dpkt >> 32)));
             }
         }
     }
@@ -109,33 +105,25 @@ std::vector<StatusToken> build_status_tokens(const CSRegisterHandler& reg)
 
         for (const auto& co : reg.active_codeobjs.read())
         {
-            uint64_t id   = co.id;
+            uint64_t id = co.id;
             uint64_t addr = co.addr;
             uint64_t size = co.size;
 
-            emit_codeobj_field(
-                out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ID_LO, static_cast<uint32_t>(id)
-            );
-            emit_codeobj_field(
-                out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ID_HI, static_cast<uint32_t>(id >> 32)
-            );
-            emit_codeobj_field(
-                out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_SIZE_LO, static_cast<uint32_t>(size)
-            );
+            emit_codeobj_field(out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ID_LO, static_cast<uint32_t>(id));
+            emit_codeobj_field(out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ID_HI, static_cast<uint32_t>(id >> 32));
+            emit_codeobj_field(out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_SIZE_LO, static_cast<uint32_t>(size));
             emit_codeobj_field(
                 out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_SIZE_HI, static_cast<uint32_t>(size >> 32)
             );
-            emit_codeobj_field(
-                out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ADDR_LO, static_cast<uint32_t>(addr)
-            );
+            emit_codeobj_field(out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ADDR_LO, static_cast<uint32_t>(addr));
             emit_codeobj_field(
                 out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ADDR_HI, static_cast<uint32_t>(addr >> 32)
             );
 
             rocprof_trace_decoder_codeobj_marker_tail_t tail{};
-            tail.isUnload   = 0;
+            tail.isUnload = 0;
             tail.bFromStart = 1;
-            tail.legacy_id  = 0;
+            tail.legacy_id = 0;
             emit_codeobj_field(out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_TAIL, tail.raw);
         }
     }

@@ -34,7 +34,7 @@ namespace gfx9::build_standalone
 struct StatusToken
 {
     uint64_t bits;
-    uint8_t  bytes;
+    uint8_t bytes;
 };
 
 std::vector<StatusToken> build_status_tokens(const CSRegisterHandler& reg);

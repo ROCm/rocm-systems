@@ -25,8 +25,7 @@
 #include <memory>
 #include <utility>
 
-template <typename T>
-class CowPtr
+template <typename T> class CowPtr
 {
 public:
     CowPtr() = default;

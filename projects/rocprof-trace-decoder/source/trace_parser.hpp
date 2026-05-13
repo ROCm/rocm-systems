@@ -336,11 +336,11 @@ public:
     uint64_t counter_frequency{0};
 
     bool bIsROCMFormat = false;
-    int  userdata_state{};
+    int userdata_state{};
 
     CowPtr<std::vector<address_range_t>> active_codeobjs{};
-    CowPtr<CodeobjTableTranslator>       table{};
-    CowPtr<CodeobjTableTranslator>       table_from_start{};
+    CowPtr<CodeobjTableTranslator> table{};
+    CowPtr<CodeobjTableTranslator> table_from_start{};
 
     std::vector<att_decoder_realtime_t> realtime{};
 
@@ -438,7 +438,7 @@ public:
         if (!bIsROCMFormat && isUserdataHeader(token))
         {
             userdata_state = ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_LAST;
-            bIsROCMFormat  = true;
+            bIsROCMFormat = true;
             return {};
         }
 
@@ -465,12 +465,16 @@ public:
 
                 bool active = false;
                 for (const auto& co : active_codeobjs.read())
-                    if (co.id == id) { active = true; break; }
+                    if (co.id == id)
+                    {
+                        active = true;
+                        break;
+                    }
 
                 if (!header.isUnload && !active)
                 {
-                    uint64_t        base_addr = current_codeobj_addr.at_reg(token);
-                    uint64_t        size      = current_codeobj_size.at_reg(token);
+                    uint64_t base_addr = current_codeobj_addr.at_reg(token);
+                    uint64_t size = current_codeobj_size.at_reg(token);
                     address_range_t arange{base_addr, size, id};
                     active_codeobjs.write().push_back(arange);
                     table.write().insert(arange);
@@ -486,7 +490,12 @@ public:
                         {
                             uint64_t addr = it->addr;
                             v.erase(it);
-                            try { table.write().remove(addr); } catch (...) {}
+                            try
+                            {
+                                table.write().remove(addr);
+                            }
+                            catch (...)
+                            {}
                             break;
                         }
                     }
@@ -508,8 +517,7 @@ public:
         return event;
     }
 
-    rocprofiler_thread_trace_decoder_dispatch_t
-    PopulateDispatch(int time, int me, int pipe, int tt_version = 0)
+    rocprofiler_thread_trace_decoder_dispatch_t PopulateDispatch(int time, int me, int pipe, int tt_version = 0)
     {
         rocprofiler_thread_trace_decoder_dispatch_t event{};
         event.size = sizeof(rocprofiler_thread_trace_decoder_dispatch_t);
@@ -520,7 +528,11 @@ public:
         uint64_t pc = wave_start_addr.at(me).at(pipe) << 8;
         event.entry_point = pcinfo_t{.address = pc, .code_object_id = 0};
         for (const auto& co : active_codeobjs.read())
-            if (co.inrange(pc)) { event.entry_point = {pc - co.addr, co.id}; break; }
+            if (co.inrange(pc))
+            {
+                event.entry_point = {pc - co.addr, co.id};
+                break;
+            }
 
         event.thread_dim_x = num_thread_x;
         event.thread_dim_y = num_thread_y;
