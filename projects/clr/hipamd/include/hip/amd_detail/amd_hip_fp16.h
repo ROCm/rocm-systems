@@ -1164,6 +1164,10 @@ template <typename MaskT> __device__ inline __half __reduce_max_sync(MaskT mask,
   return __reduce_op_sync(mask, val, op, wfReduce);
 }
 
+GENERATE_SCAN_FUNC(add, f16, __half);
+GENERATE_SCAN_FUNC(min, f16, __half);
+GENERATE_SCAN_FUNC(max, f16, __half);
+
 #endif  // __HIP_NO_HALF_OPERATORS__
 
 #endif  // defined(__cplusplus)

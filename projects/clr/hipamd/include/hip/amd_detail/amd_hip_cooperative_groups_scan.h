@@ -15,15 +15,6 @@ namespace cooperative_groups {
 namespace impl {
   // these functions allow to make use of C++ function overloads, instead of having to code
   // a big if-constexpr according to operand type
-  #define GENERATE_SCAN_FUNC(OP, TYPE_ALIAS, TYPE) \
-  extern "C" __device__ __attribute__((const)) TYPE __ockl_wfscan_ ## OP ## _ ## TYPE_ALIAS(TYPE, bool);\
-\
-    template <bool Inclusive>\
-    __CG_QUALIFIER__ TYPE scan_ ## OP(TYPE val)\
-    {\
-      return __ockl_wfscan_ ## OP ## _ ## TYPE_ALIAS(val, Inclusive);\
-    }
-
   GENERATE_SCAN_FUNC(add, i32, int);
   GENERATE_SCAN_FUNC(add, u32, unsigned int);
 
