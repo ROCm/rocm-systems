@@ -12,7 +12,7 @@
 #   --iterations N        Number of test iterations per config (default: 10)
 #   --suite SUITE         Test suite: "heatmap", "all", "rma", etc (default: heatmap)
 #   --build-config CFG    Build config script name under scripts/build_configs/
-#                         (default: ipc_single)
+#                         (default: all_backends)
 #   --cmake-args ARGS     Extra cmake args for all builds (quoted string)
 #   --branch-args ARGS    Extra cmake args for the branch build only (quoted string)
 #   --variant-args SPEC   Additional named variant: NAME:ENV1=V1,...:cmake-args

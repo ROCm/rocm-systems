@@ -176,7 +176,7 @@ $ROCSHMEM_DIR/scripts/functional_tests/run_perf_compare.sh \
 |--------|---------|-------------|
 | `--iterations N` | 10 | Iterations per config |
 | `--suite SUITE` | heatmap | Test suite (`heatmap`, `all`, `rma`, …) |
-| `--build-config CFG` | ipc_single | Build config under `scripts/build_configs/` |
+| `--build-config CFG` | all_backends | Build config under `scripts/build_configs/` |
 | `--cmake-args ARGS` | — | Extra cmake args for all builds |
 | `--branch-args ARGS` | — | Extra cmake args for branch build only |
 | `--variant-args SPEC` | — | Additional variant (repeatable) |
