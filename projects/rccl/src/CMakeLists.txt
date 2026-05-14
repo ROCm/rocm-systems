@@ -314,9 +314,9 @@ set(SRC_FILES
   include/os/windows.h
   include/os/linux.h
   include/os/windows.h
-  rma/rma.cc
-  rma/rma_ce.cc
-  rma/rma_proxy.cc
+  # rma/rma.cc             # RCCL_COMPAT_STUB: NCCL RMA path not wired through RCCL on AMD
+  # rma/rma_ce.cc          # RCCL_COMPAT_STUB: NCCL RMA CE path depends on CUDA-only state
+  # rma/rma_proxy.cc       # RCCL_COMPAT_STUB: NCCL RMA proxy path depends on unsupported RMA plumbing
   include/rma/rma.h
   include/rma/rma_ce.h
   include/rma/rma_proxy.h
@@ -345,7 +345,7 @@ set(SRC_FILES
   plugin/tuner/tuner_v5.cc
   plugin/tuner/tuner_v6.cc
   plugin/tuner/csv_tuner.cc
-  plugin/gin.cc
+  # plugin/gin.cc          # RCCL_COMPAT_STUB: NCCL plugin GIN bindings disabled on AMD
   plugin/gin/gin_v11.cc
   plugin/gin/gin_v12.cc
   plugin/gin/gin_v13.cc
@@ -375,8 +375,8 @@ set(SRC_FILES
   transport/p2p.cc
   transport/profiler.cc
   transport/shm.cc
-  gin/gin_host.cc
-  gin/gin_host_proxy.cc
+  # gin/gin_host.cc          # RCCL_COMPAT_STUB: NCCL GIN host code disabled on AMD; stubs provided separately
+  # gin/gin_host_proxy.cc    # RCCL_COMPAT_STUB: NCCL GIN host code disabled on AMD; stubs provided separately
   transport/net_ib/gdaki/gin_host_gdaki.h
   include/latency_profiler/CollTrace.h
   include/latency_profiler/CollTraceEvent.h
