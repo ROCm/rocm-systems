@@ -4,35 +4,29 @@ test_categories:
     test_patterns:
       - test_profile_misc
       - test_metric_validation
-      - test_utils_metrics_aggregation
-      - test_utils_metrics_expression
-      - test_utils_metrics_evaluation_pipeline
-      - test_utils_metrics_metric_evaluator
+      - test_metric_utils
       - test_profile_section
       - test_pc_sampling
       - test_analyze_workloads
       - test_profile_iteration_multiplexing_1
       - test_profile_sets_func
-      - test_utils_utils_common
-      - test_utils_utils_profile
-      - test_utils_utils_analysis
-      - test_utils_tty
-      - test_rocprof_compute_analyze_pc_sampling
-      - test_rocprof_compute_tui_components
-      - test_rocprof_compute_analyze_analysis_db
-      - test_rocprof_compute_analyze_torch_trace
+      - test_utils
+      - test_pc_sampling_analysis
+      - test_tui_components
+      - test_analysis_db
+      - test_torch_trace_analysis
       - test_torch_trace_coverage
       - test_L1_cache_counters
-      - test_utils_roofline_calc
+      - test_data_imputation
+      - test_roofline_calc_ai_analyze
       - test_num_xcds_spec_class
-      - test_rocprof_compute_profile_profiler_base
+      - test_profiler_base
       - test_num_xcds_cli_output
-      - test_utils_utils_profile_csv
+      - test_utils_profile_csv
       - test_autogen_config
       - test_import_guard
-      - test_utils_mem_chart_gfx9
-      - test_utils_mem_chart_gfx11
-      - test_utils_native_tool_finder
+      - test_mem_chart
+      - test_native_tool_finder
       - test-rocprofiler-compute-tool
     exclude:
       - test_profile_live_attach_detach
@@ -44,7 +38,7 @@ test_categories:
   standard:
     description: "Core functionality - Run on every PR (target: < 30 min)"
     test_patterns:
-      - test_utils_utils_analysis
+      - test_data_imputation
       - test_profile_dispatch
       - test_profile_kernel_execution
       - test_profile_join
@@ -56,33 +50,26 @@ test_categories:
       - test_profile_iteration_multiplexing_1
       - test_profile_iteration_multiplexing_2
       - test_metric_validation
-      - test_utils_metrics_aggregation
-      - test_utils_metrics_expression
-      - test_utils_metrics_evaluation_pipeline
-      - test_utils_metrics_metric_evaluator
+      - test_metric_utils
       - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
       - test_num_xcds_spec_class
-      - test_utils_utils_common
-      - test_utils_utils_profile
-      - test_utils_utils_analysis
-      - test_utils_tty
+      - test_utils
       - test_L1_cache_counters
-      - test_utils_roofline_calc
-      - test_rocprof_compute_analyze_torch_trace
+      - test_roofline_calc_ai_analyze
+      - test_torch_trace_analysis
       - test_torch_trace_coverage
-      - test_rocprof_compute_tui_components
+      - test_tui_components
       - test_import_guard
       - test_profile_multi_rank
-      - test_rocprof_compute_analyze_analysis_db
-      - test_rocprof_compute_analyze_pc_sampling
-      - test_utils_utils_profile_csv
-      - test_rocprof_compute_profile_profiler_base
-      - test_utils_mem_chart_gfx9
-      - test_utils_mem_chart_gfx11
-      - test_utils_native_tool_finder
+      - test_analysis_db
+      - test_pc_sampling_analysis
+      - test_utils_profile_csv
+      - test_profiler_base
+      - test_mem_chart
+      - test_native_tool_finder
       - test-rocprofiler-compute-tool
     exclude:
       - test_profile_live_attach_detach
@@ -93,7 +80,7 @@ test_categories:
   comprehensive:
     description: "Extended testing - Run nightly (target: < 2 hours)"
     test_patterns:
-      - test_utils_utils_analysis
+      - test_data_imputation
       - test_profile_dispatch
       - test_profile_kernel_execution
       - test_profile_join
@@ -109,33 +96,26 @@ test_categories:
       - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic
       - test_metric_validation
-      - test_utils_metrics_aggregation
-      - test_utils_metrics_expression
-      - test_utils_metrics_evaluation_pipeline
-      - test_utils_metrics_metric_evaluator
+      - test_metric_utils
       - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
       - test_num_xcds_spec_class
-      - test_utils_utils_common
-      - test_utils_utils_profile
-      - test_utils_utils_analysis
-      - test_utils_tty
+      - test_utils
       - test_L1_cache_counters
-      - test_utils_roofline_calc
-      - test_rocprof_compute_analyze_torch_trace
+      - test_roofline_calc_ai_analyze
+      - test_torch_trace_analysis
       - test_torch_trace_coverage
-      - test_rocprof_compute_tui_components
+      - test_tui_components
       - test_import_guard
       - test_profile_multi_rank
-      - test_rocprof_compute_analyze_analysis_db
-      - test_rocprof_compute_analyze_pc_sampling
-      - test_utils_utils_profile_csv
-      - test_rocprof_compute_profile_profiler_base
-      - test_utils_mem_chart_gfx9
-      - test_utils_mem_chart_gfx11
-      - test_utils_native_tool_finder
+      - test_analysis_db
+      - test_pc_sampling_analysis
+      - test_utils_profile_csv
+      - test_profiler_base
+      - test_mem_chart
+      - test_native_tool_finder
       - test-rocprofiler-compute-tool
     exclude:
       - test_profile_live_attach_detach
@@ -146,7 +126,7 @@ test_categories:
   full:
     description: "Full testing - Run weekly (target: < 4 hours)"
     test_patterns:
-      - test_utils_utils_analysis
+      - test_data_imputation
       - test_profile_dispatch
       - test_profile_kernel_execution
       - test_profile_join
@@ -162,33 +142,26 @@ test_categories:
       - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic
       - test_metric_validation
-      - test_utils_metrics_aggregation
-      - test_utils_metrics_expression
-      - test_utils_metrics_evaluation_pipeline
-      - test_utils_metrics_metric_evaluator
+      - test_metric_utils
       - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
       - test_num_xcds_spec_class
-      - test_utils_utils_common
-      - test_utils_utils_profile
-      - test_utils_utils_analysis
-      - test_utils_tty
+      - test_utils
       - test_L1_cache_counters
-      - test_utils_roofline_calc
-      - test_rocprof_compute_analyze_torch_trace
+      - test_roofline_calc_ai_analyze
+      - test_torch_trace_analysis
       - test_torch_trace_coverage
-      - test_rocprof_compute_tui_components
+      - test_tui_components
       - test_import_guard
       - test_profile_multi_rank
-      - test_rocprof_compute_analyze_analysis_db
-      - test_rocprof_compute_analyze_pc_sampling
-      - test_utils_utils_profile_csv
-      - test_rocprof_compute_profile_profiler_base
-      - test_utils_mem_chart_gfx9
-      - test_utils_mem_chart_gfx11
-      - test_utils_native_tool_finder
+      - test_analysis_db
+      - test_pc_sampling_analysis
+      - test_utils_profile_csv
+      - test_profiler_base
+      - test_mem_chart
+      - test_native_tool_finder
       - test-rocprofiler-compute-tool
     exclude:
       - test_profile_live_attach_detach
