@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 
+#include "rocjitsu/vm/amdgpu/command_processor.h"
+
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
@@ -175,15 +177,6 @@ void ComputeUnitCore::retire_halted_wfs_no_lds_reset() {
 void ComputeUnitCore::retire_halted_wfs() {
   for (auto &w : wfs_) {
     if (w->is_halted() && w->sgpr_alloc().count > 0) {
-      util::Logger::vm([&](auto &os) {
-        static thread_local uint64_t retire_count = 0;
-        static thread_local uint32_t max_wg = 0;
-        if (w->wg_id() > max_wg)
-          max_wg = w->wg_id();
-        if (++retire_count <= 5 || (retire_count % 40) == 0)
-          os << std::format("CU {}: retire #{} wg={} insts={} max_wg_seen={}", this->name(),
-                            retire_count, w->wg_id(), w->trace_inst_count_, max_wg);
-      });
       sgpr_file_.free(w->sgpr_alloc().base);
       free_vgprs(w->vgpr_alloc().base);
       w->trace_inst_count_ = 0;
@@ -192,6 +185,16 @@ void ComputeUnitCore::retire_halted_wfs() {
   }
   if (!has_active_wfs()) {
     reset_lds_alloc();
+  }
+}
+
+void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id) {
+  auto key = wg_key(dispatch_id, wg_id);
+  auto it = active_wgs_.find(key);
+  if (it != active_wgs_.end() && --it->second == 0) {
+    active_wgs_.erase(it);
+    if (cp_)
+      cp_->notify_wg_complete(dispatch_id, wg_id);
   }
 }
 
@@ -286,6 +289,37 @@ void ComputeUnitCore::issue_local_mem(const std::array<uint64_t, 64> &addrs, uin
 bool ComputeUnitCore::step() {
   tick_pipelines();
 
+  {
+    static thread_local uint64_t step_count = 0;
+    if ((++step_count % 2000000) == 0) {
+      util::Logger::vm([&](auto &os) {
+        for (auto &w : wfs_) {
+          if (w->sgpr_alloc().count == 0)
+            continue;
+          const char *st = "?";
+          switch (w->state()) {
+          case WfState::HALTED:
+            st = "H";
+            break;
+          case WfState::RUNNING:
+            st = "R";
+            break;
+          case WfState::WAITCNT:
+            st = "W";
+            break;
+          case WfState::BARRIER:
+            st = "B";
+            break;
+          case WfState::ENDING:
+            st = "E";
+            break;
+          }
+          os << std::format("wf{}[d={} wg={} {}] ", w->wf_id(), w->dispatch_id(), w->wg_id(), st);
+        }
+      });
+    }
+  }
+
   if (!has_active_wfs()) {
     // Final pipeline drain: complete deferred load writebacks for wavefronts
     // that halted on the previous step (after tick_pipelines ran but before
@@ -343,6 +377,13 @@ bool ComputeUnitCore::step() {
           if (w2->wg_id() == wg && w2->state() == WfState::BARRIER)
             w2->set_state(WfState::RUNNING);
       }
+    }
+    // Drain WAITCNT and ENDING wavefronts that are ready to proceed.
+    for (auto &w : wfs_) {
+      if (w->state() == WfState::WAITCNT && w->wait_satisfied())
+        w->set_state(WfState::RUNNING);
+      else if (w->state() == WfState::ENDING && w->wait_counters().empty())
+        w->halt();
     }
     retire_halted_wfs();
     return has_active_wfs();

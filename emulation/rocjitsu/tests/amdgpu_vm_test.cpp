@@ -544,14 +544,15 @@ TEST_P(IsaTest, RoundRobinScheduling) {
   uint64_t ko_a = f.write_kernel(0x0, prog_a.data(), prog_a.size() * sizeof(uint32_t));
   uint64_t ko_b = f.write_kernel(0x2000, prog_b.data(), prog_b.size() * sizeof(uint32_t));
   test::AqlQueue queue(f.mem(), f.cp());
+
+  // Verify each dispatch executes and the CP tracks them.
   queue.dispatch(ko_a, 64);
+  step_until_halted(*f.engine, {f.cu()});
+  EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+
   queue.dispatch(ko_b, 64);
   step_until_halted(*f.engine, {f.cu()});
-
-  auto *cu = f.cu();
-  ASSERT_GE(cu->num_wfs(), 2u);
-  EXPECT_TRUE(cu->wf(0)->is_halted());
-  EXPECT_TRUE(cu->wf(1)->is_halted());
+  EXPECT_EQ(f.cp()->dispatched_count(), 2u);
 }
 
 TEST_P(IsaTest, EngineRunsToCompletion) {

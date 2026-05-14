@@ -34,11 +34,14 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+class CommandProcessor;
 
 /// @brief Base AMDGPU compute unit that owns wavefront slots and register files.
 ///
@@ -147,6 +150,21 @@ public:
   /// The command processor uses this to detect when all CUs are done.
   /// @param cb Callback to invoke when idle.
   void set_on_idle(std::function<void()> cb) { on_idle_ = std::move(cb); }
+
+  /// @brief Set the command processor for WG completion notification.
+  void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
+
+  /// @brief Register a new workgroup with its expected WF count.
+  /// @details Called by the DispatchController when assigning a WG to this CU.
+  /// Initializes the refcount so retire_halted_wfs() can detect WG completion.
+  void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count) {
+    active_wgs_[wg_key(dispatch_id, wg_id)] = wf_count;
+  }
+
+  /// @brief Called by Wavefront::halt() to decrement the WG refcount.
+  /// @details When the refcount reaches zero, all WFs in the WG have halted
+  /// and the CP is notified via notify_wg_complete.
+  void release_wf(uint32_t dispatch_id, uint32_t wg_id);
 
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
@@ -425,6 +443,13 @@ protected:
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
+  CommandProcessor *cp_ = nullptr;
+
+  static uint64_t wg_key(uint32_t dispatch_id, uint32_t wg_id) {
+    return (uint64_t(dispatch_id) << 32) | wg_id;
+  }
+  std::unordered_map<uint64_t, uint32_t> active_wgs_;
+
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
   simdojo::Port *cpl_ = nullptr; ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
