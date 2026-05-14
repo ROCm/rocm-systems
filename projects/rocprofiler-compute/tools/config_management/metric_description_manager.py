@@ -557,7 +557,7 @@ def main() -> int:
     parser.add_argument(
         "--sync-arch",
         metavar="ARCH",
-        help="Sync descriptions for specific architecture",
+        help="Sync descriptions for a single architecture",
     )
     parser.add_argument(
         "--sync-all",
@@ -567,7 +567,7 @@ def main() -> int:
     parser.add_argument(
         "--validate",
         metavar="ARCH",
-        help="Validate descriptions for specific architecture",
+        help="Validate descriptions for a single architecture",
     )
     parser.add_argument(
         "--generate-docs",
@@ -580,28 +580,44 @@ def main() -> int:
         metavar="ARCH",
         dest="docs_archs",
         help=(
-            "With --generate-docs, only emit docs for these architectures "
-            "(repeatable). Default: all per-arch *_metrics_description.yaml files."
+            "Restrict --generate-docs to one or more architectures "
+            "(repeatable). Defaults to every per-arch description file."
         ),
     )
     parser.add_argument(
-        "configs_dir", nargs="?", help="Path to analysis_configs directory"
+        "configs_dir", nargs="?", help="Path to the analysis_configs directory"
     )
     parser.add_argument(
         "--per-arch-output",
         default="tools/per_arch_metric_definitions",
-        help="Output directory for per-arch files",
+        help="Output directory for the per-arch description YAMLs",
     )
     parser.add_argument(
         "--docs-output-dir",
         default="docs/data/metrics",
-        help="Output directory for per-arch docs files",
+        help="Output directory for the generated docs YAMLs",
     )
 
     args = parser.parse_args()
 
+    if args.docs_archs and not args.generate_docs:
+        print("Error: --docs-arch requires --generate-docs")
+        return 1
+
     if args.generate_docs:
-        target_archs = args.docs_archs if args.docs_archs else None
+        available_archs = set(resolved_docs_target_archs(args.per_arch_output))
+        if args.docs_archs:
+            unknown = sorted(set(args.docs_archs) - available_archs)
+            if unknown:
+                print(
+                    "Error: --docs-arch values are not in the docs target set "
+                    f"(available: {', '.join(sorted(available_archs))}): "
+                    f"{', '.join(unknown)}"
+                )
+                return 1
+            target_archs = args.docs_archs
+        else:
+            target_archs = None
         ok = generate_docs_from_per_arch(
             args.per_arch_output, args.docs_output_dir, target_archs
         )
