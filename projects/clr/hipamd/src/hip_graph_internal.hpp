@@ -430,15 +430,13 @@ class GraphNode : public hipGraphNodeDOTAttribute {
       }
       if (segment_id_ == -1) {
         out << "\nStreamId:" << stream_id_;
-        out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
       }
+      out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
       out << "\nDeviceId:" << dev_id_;
     }
     out << "\"";
     if (DEBUG_HIP_GRAPH_DOT_PRINT) {
-      // Add color coding based on segment ID for better visualization
       if (segment_id_ != -1) {
-        // Color nodes based on segment ID for better visual grouping
         const char* colors[] = {"lightcoral", "lightblue", "lightgreen", "lightyellow",
                                 "lightpink",  "lightgray", "lightcyan",  "lightsalmon"};
         int color_index = segment_id_ % (sizeof(colors) / sizeof(colors[0]));
@@ -873,7 +871,8 @@ class Graph {
   // Segment dependency structures
   struct Segment {
     int id = -1;
-    int stream_id = -1;                         // Assigned stream for this segment
+    int dev_id = -1;                            // Device this segment runs on (derived from first node)
+    int stream_id = -1;                         // Assigned stream index within this device's stream pool
     int dependency_level = -1;                  // Topological level (0 = root, 1 = depends on root, etc.)
     std::vector<Node> nodes;
     std::vector<int> segment_ids_dependencies;  // Segments this segment depends on (within same graph)
@@ -883,6 +882,8 @@ class Graph {
 
     // Hierarchical child graph information
     Graph* child_graph_ptr = nullptr;           // Direct pointer to child graph for quick access
+
+    bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
   };
 
   //! Segment information for batch scheduling
@@ -1027,19 +1028,14 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   //! Find the number of streams required per device for packet engine mode
   //! This method analyzes segments to determine per-device stream requirements
   void FindStreamsReqPerDevForSegments();
+  //! Pre-compute segment-to-stream-index mapping and same-stream dep flags at instantiate
+  void PrecomputeStreamAssignment();
   //! Get the parallel streams map for synchronization before destruction
   const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
     return parallel_streams_;
   }
 
  protected:
-  //! Assign streams to segments at a given dependency level
-  void AssignStreamsToSegments(
-      const std::vector<int>& segments_at_level,
-      hip::Stream* launch_stream,
-      const std::vector<hip::Stream*>& streams,
-      std::unordered_map<int, hip::Stream*>& segment_to_stream);
-
   //! parallel streams per device
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
   uint64_t flags_ = 0;
@@ -1108,20 +1104,17 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   //! Map from segment ID to SegmentBatch for O(1) lookup
   std::unordered_map<int, SegmentBatch> segmentBatches_;
 
-  struct SegmentSyncInfo {
-    int segment_id;
-    std::vector<int> barrier_dep_indices;
-  };
-
   struct SyncPlan {
-    int num_segments = 0;
-    std::vector<SegmentSyncInfo> segment_sync;
+    int num_segments = 0;   // total segment count (used for bounds checks)
+    int num_hw_events = 0;  // HW event slots to allocate (one per ncs=true segment)
+
+    // Dense index into segment_hw_events for each segment.
+    // seg_to_hw_event[seg_id] == -1  ->  no completion signal emitted.
+    // seg_to_hw_event[seg_id] >= 0  ->  index into the compact hw_events vector.
+    std::vector<int> seg_to_hw_event;
 
     std::vector<amd::Device::HwEventPatch> patch_list;
     std::vector<uint8_t*> barrier_packets;
-
-    // Leaf segment IDs (segments with no outgoing edges) that are NOT on the
-    // launch stream — these need their completion signals waited on.
     std::vector<int> leaf_segment_ids;
 
     ~SyncPlan() {
@@ -1310,8 +1303,8 @@ class GraphKernelNode : public GraphNode {
       }
       if (segment_id_ == -1) {
         out << "\nStreamId:" << stream_id_;
-        out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
       }
+      out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
       out << "\nDeviceId:" << dev_id_;
     }
     out << "\"";
