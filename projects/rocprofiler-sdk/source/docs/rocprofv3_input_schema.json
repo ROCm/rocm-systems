@@ -82,6 +82,10 @@
                           "type": "boolean",
                           "description": "For Collecting rocJPEG Traces"
                      },
+		     "rocshmem_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting rocSHMEM Traces"
+                     },
                      "scratch_memory_trace": {
                           "type": "boolean",
                           "description": "For Collecting Scratch Memory operations Traces"
