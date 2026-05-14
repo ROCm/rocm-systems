@@ -23,6 +23,7 @@ test_categories:
       - test_profiler_base
       - test_num_xcds_cli_output
       - test_utils_profile_csv
+      - test_utils_profile
       - test_autogen_config
       - test_import_guard
       - test_mem_chart
@@ -67,6 +68,7 @@ test_categories:
       - test_analysis_db
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_utils_profile
       - test_profiler_base
       - test_mem_chart
       - test_native_tool_finder
@@ -113,6 +115,7 @@ test_categories:
       - test_analysis_db
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_utils_profile
       - test_profiler_base
       - test_mem_chart
       - test_native_tool_finder
@@ -159,6 +162,7 @@ test_categories:
       - test_analysis_db
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_utils_profile
       - test_profiler_base
       - test_mem_chart
       - test_native_tool_finder
