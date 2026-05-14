@@ -131,15 +131,6 @@ namespace impl {
     }
   }
 
-  template <class T>
-  __CG_QUALIFIER__ constexpr bool isPrimitiveType() {
-    return __hip_internal::is_same<T, int>::value ||
-    __hip_internal::is_same<T, unsigned int>::value ||
-    __hip_internal::is_same<T, long long>::value ||
-    __hip_internal::is_same<T, unsigned long long>::value ||
-    __hip_internal::is_same<T, float>::value ||
-    __hip_internal::is_same<T, double>::value;
-  }
   // TODO g-h-c half
 
   template <bool Inclusive, typename TyGroup, typename TyVal, typename TyFn>
@@ -148,11 +139,11 @@ namespace impl {
     using Op = typename __hip_internal::remove_cvref<TyFn>::type;
     using Val = typename __hip_internal::remove_cvref<TyVal>::type;
 
-    constexpr bool isPrimitiveType = impl::isPrimitiveType<Val>();
+    constexpr bool isPrimitiveType = impl::has_arithmetic_scan<Val>::value;
     using permuteType = typename __hip_internal::conditional<isPrimitiveType && (sizeof(Val) == 4 || sizeof(Val) == 2), Val, unsigned int>::type;
 
     // the number of backward permutes will be: size(Val) / 4 rounded up
-    static constexpr int kNumOfPermutes = (sizeof(Val) < 4)?
+    static constexpr int kNumOfPermutes = (sizeof(Val) <= 4)?
                                           1 :
                                           (sizeof(Val) + sizeof(unsigned int) - 1) / sizeof(unsigned int);
     static_assert(cooperative_groups::impl::is_param_type_same<Val, decltype(op(val, val))>::value, "Operator input and output types differ");
@@ -187,7 +178,7 @@ namespace impl {
       // for tiled_groups we know at compile time that whether we can call the ockl intrinsics or
       // not; if the block tile is actually the whole warp
       if (impl::tiledGroupSize<TyGroup>::value == warpSize) {
-        if constexpr (impl::isArithmeticFunc<Val, TyFn >::value && impl::has_arithmetic_scan<Val, Op>::value ||
+        if constexpr (impl::isArithmeticFunc<Val, TyFn >::value && impl::has_arithmetic_scan<Val>::value ||
                       impl::isBooleanFunc<Val, TyFn >::value && impl::has_boolean_scan<Val, Op>::value) {
           return impl::call_scan<Val, Op, Inclusive>(val);
         }
@@ -196,7 +187,7 @@ namespace impl {
       // for the coalesced_group case we do need to check at runtime, adding a slight overhead on
       // this branch
       if (maskNumBits == warpSize) {
-        if constexpr (impl::isArithmeticFunc<Val, TyFn >::value && impl::has_arithmetic_scan<Val, Op>::value ||
+        if constexpr (impl::isArithmeticFunc<Val, TyFn >::value && impl::has_arithmetic_scan<Val>::value ||
                       impl::isBooleanFunc<Val, TyFn >::value && impl::has_boolean_scan<Val, Op>::value) {
           return impl::call_scan<Val, Op, Inclusive>(val);
         }
@@ -207,14 +198,6 @@ namespace impl {
     // unsigned int[N] is used in some cases, e.g. when T is wider than 32-bit
     typename __hip_internal::conditional<isPrimitiveType && (sizeof(Val) == 4 || sizeof(Val) == 2), permuteType,
                                         permuteType[kNumOfPermutes]>::type result, permuteResult;
-    auto backwardPermute = [](int index, permuteType arg) {
-      if constexpr (__hip_internal::is_floating_point<Val>::value &&
-                  sizeof(Val) <= 4) {
-        return __hip_ds_bpermutef(index, arg);
-      } else {
-        return __hip_ds_bpermute(index, arg);
-      }
-    };
 
     if constexpr (isPrimitiveType && (sizeof(Val) == 2 || sizeof(Val) == 4)) {
       result = val;
@@ -258,31 +241,8 @@ namespace impl {
 
       // clamp index; if out of bounds, the thread read its own value
       nextBit = (nextBit < (laneId & ~(warpSize - 1))) ? laneId : nextBit;
+      bPermute<isPrimitiveType, permuteType, kNumOfPermutes>(permuteResult, result, nextBit);
 
-      if constexpr (!isPrimitiveType) {
-        // ds_bpermute only deals with 32-bit sizes, so for other sizes
-        // we need to call the permute multiple times
-        for (int i = 0; i < kNumOfPermutes; i++) {
-          permuteResult[i] = backwardPermute(nextBit << 2, result[i]);
-        }
-      } else if constexpr (sizeof(Val) == 2) {
-        union {
-          int i;
-          Val f;
-        } tmp;
-
-        tmp.f = result;
-        tmp.i = __hip_ds_bpermute(nextBit << 2, tmp.i);
-        permuteResult = tmp.f;
-      } else if constexpr (sizeof(Val) == 4) {
-        auto bPermuteResult = backwardPermute(nextBit << 2, result);
-        __builtin_memcpy(&permuteResult, &bPermuteResult, sizeof(result));
-      } else {
-        // ds_bpermute only deals with 32-bit sizes, so for 8 bytes, we
-        // need to call it twice
-        permuteResult[0] = backwardPermute(nextBit << 2, result[0]);
-        permuteResult[1] = backwardPermute(nextBit << 2, result[1]);
-      }
 
       if (insideLanes) {
         if constexpr (!isPrimitiveType) {
@@ -304,6 +264,7 @@ namespace impl {
       modulo <<= 1;
       numIterations--;
     }
+
     if constexpr (Inclusive) {
       return *reinterpret_cast<Val*>(&result);
     } else {
@@ -320,32 +281,7 @@ namespace impl {
 
       // clamp index; if out of bounds, the thread read its own value
       nextBit = (nextBit < (laneId & ~(warpSize - 1))) ? laneId : nextBit;
-
-      // return the result of the aggregation of the previous lane
-      if constexpr (!isPrimitiveType) {
-        // ds_bpermute only deals with 32-bit sizes, so for other sizes
-        // we need to call the permute multiple times
-        for (int i = 0; i < kNumOfPermutes; i++) {
-          permuteResult[i] = backwardPermute(nextBit << 2, result[i]);
-        }
-      } else if constexpr (sizeof(Val) == 2) {
-        union {
-          int i;
-          Val f;
-        } tmp;
-
-        tmp.f = result;
-        tmp.i = __hip_ds_bpermute(nextBit << 2, tmp.i);
-        permuteResult = tmp.f;
-      } else if constexpr (sizeof(Val) == 4) {
-        auto bPermuteResult = backwardPermute(nextBit << 2, result);
-        __builtin_memcpy(&permuteResult, &bPermuteResult, sizeof(result));
-      } else {
-        // ds_bpermute only deals with 32-bit sizes, so for 8 bytes, we
-        // need to call it twice
-        permuteResult[0] = backwardPermute(nextBit << 2, result[0]);
-        permuteResult[1] = backwardPermute(nextBit << 2, result[1]);
-      }
+      bPermute<isPrimitiveType, permuteType, kNumOfPermutes>(permuteResult, result, nextBit);
 
       if (mask) {
         return *reinterpret_cast<Val*>(&permuteResult);
