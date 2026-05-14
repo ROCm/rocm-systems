@@ -7,6 +7,7 @@ Test Executor Module
 Handles test execution, build processes, and result tracking
 """
 
+import glob
 import json
 import os
 import re
@@ -1264,11 +1265,11 @@ class TestExecutor:
             if self.args.verbose:
                 print(f"Found library: {librccl_so}")
 
-        # Add test binaries
+        # Add test binaries. Glob rather than maintain a hard-coded list so
+        # newly added rccl-UnitTests* executables are picked up automatically.
         test_dir = os.path.join(self.build_dir, "test")
-        for binary in ["rccl-UnitTestsFixtures", "rccl-UnitTests", "rccl-UnitTestsMPI"]:
-            binary_path = os.path.join(test_dir, binary)
-            if os.path.isfile(binary_path):
+        for binary_path in sorted(glob.glob(os.path.join(test_dir, "rccl-UnitTests*"))):
+            if os.path.isfile(binary_path) and os.access(binary_path, os.X_OK):
                 object_files.extend(["--object", binary_path])
                 if self.args.verbose:
                     print(f"Found binary: {binary_path}")
