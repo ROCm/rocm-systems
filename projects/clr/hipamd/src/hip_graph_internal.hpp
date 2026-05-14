@@ -1130,6 +1130,10 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     // seg_to_hw_event[seg_id] >= 0  ->  index into the compact hw_events vector.
     std::vector<int> seg_to_hw_event;
 
+    // Stable ProfilingSignal* per HW event, allocated at instantiate time.
+    // Size == num_hw_events; indexed by seg_to_hw_event[seg_id].
+    std::vector<void*> segment_hw_events;
+
     std::vector<amd::Device::HwEventPatch> patch_list;
     std::vector<uint8_t*> barrier_packets;
     std::vector<int> leaf_segment_ids;
@@ -1144,22 +1148,19 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   void BuildSyncPlan();
 
   //! Cached signal counts for graph signal pool pre-allocation
-  size_t graph_signal_count_ = 0;      //!< GPU-only signals, cached after first launch
+  size_t graph_signal_count_ = 0;      //!< GPU-only signals (= num_hw_events after BuildSyncPlan)
 
-  //! Persistent signal pool owned by this GraphExec and reused across launches.
-  //! Allocated lazily on the first call to EnqueueSegmentedGraph and destroyed
-  //! in ~GraphExec (after all parallel streams have finished). AccumulateCommand
-  //! holds only a non-owning reference to this pool — there is no ownership
-  //! transfer or recycle callback.
+  //! Persistent signal pool owned by this GraphExec, allocated at instantiate time
+  //! in CaptureAndFormPacketsForGraph and destroyed in ~GraphExec.
+  //! AccumulateCommand holds only a non-owning reference.
   amd::roc::GraphSignalPool* persistent_pool_ = nullptr;
   amd::Device* persistent_pool_device_ = nullptr;  //!< Device that owns persistent_pool_
 
-  //! Probe signals from the previous launch's leaf segments. Each one is a
-  //! GPU-only signal from persistent_pool_ that reaches 0 when its leaf
-  //! segment's completion barrier fires; the previous launch is fully done
-  //! iff every entry is at 0. Read at the next launch to decide CPU-fast-reset
-  //! vs GPU-reset. Pointers live inside persistent_pool_ — never released here.
-  std::vector<amd::roc::ProfilingSignal*> prev_leaf_signals_;
+  //! Dedicated completion signal for the pre-baked reset kernel.
+  //! CPU re-arms to 1 before each launch; GPU reset kernel drives it to 0.
+  //! Internal-stream reset-wait barriers (pre-baked in flat buffers) block on it.
+  //! Owned by persistent_pool_ — never freed here.
+  amd::roc::ProfilingSignal* reset_signal_ = nullptr;
 
   //! Drop persistent_pool_ in ~GraphExec. Caller must have already finished
   //! every parallel stream so no in-flight AQL packet still references its
@@ -1168,7 +1169,8 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     if (persistent_pool_ != nullptr && persistent_pool_device_ != nullptr) {
       persistent_pool_device_->DestroyGraphSignalPool(persistent_pool_);
       persistent_pool_ = nullptr;
-      prev_leaf_signals_.clear();
+      reset_signal_ = nullptr;        // owned by pool, not freed here
+      sync_plan_.segment_hw_events.clear();
     }
   }
 };
