@@ -2856,6 +2856,14 @@ get_session()
 }
 
 void
+ensure_roctx_initialized()
+{
+    // Drive lazy construction so the roctx trigger attaches to the session
+    // before library.cpp's force_initial_pause runs. Discarded result.
+    (void) get_roctx_client();
+}
+
+void
 reset_sdk_session_guards()
 {
     tool_fini_done.store(false);

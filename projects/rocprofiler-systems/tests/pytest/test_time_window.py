@@ -123,6 +123,18 @@ class TestTraceTimeWindow(RocprofsysTest):
 # ============================================================================
 
 
+@pytest.fixture
+def transpose_trace_delay_env() -> dict[str, str]:
+    """Env vars for the TRACE_DELAY HIP regression test."""
+    return {
+        "ROCPROFSYS_TRACE_DELAY": "60.0",
+        "ROCPROFSYS_ROCM_DOMAINS": (
+            "hip_runtime_api,kernel_dispatch,memory_copy,"
+            "memory_allocation,hsa_api"
+        ),
+    }
+
+
 @pytest.mark.transpose
 @pytest.mark.gpu
 class TestTraceDelayHip(RocprofsysTest):
@@ -133,26 +145,23 @@ class TestTraceDelayHip(RocprofsysTest):
     kernel_dispatch even though the direct push was suppressed by the
     trace_categories trait flip.
 
-    Workload: transpose (~3s on a typical run). DELAY=4.0 just exceeds the
-    workload runtime, so a passing fix produces zero kernel records and a
-    regression produces the full set."""
+    Workload: transpose (~3s on a typical run). DELAY is set well above the
+    worst-case workload runtime under parallel ctest contention so a passing
+    fix reliably produces zero kernel records; the test still finishes when
+    the workload exits, not when the delay elapses."""
 
     REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
     RUNTIME_ARGS = ["-e", "-v", "1", "-E", "uniform_int_distribution"]
 
+    @pytest.mark.rocpd("transpose_trace_delay_env")
     @pytest.mark.parametrize("mode", ["binary_rewrite", "runtime_instrument"])
-    def test_delay_with_hip(self, mode, validation_rules_dir):
-        env = {
-            "ROCPROFSYS_TRACE_DELAY": "4.0",
-            "ROCPROFSYS_ROCM_DOMAINS": (
-                "hip_runtime_api,kernel_dispatch,memory_copy,"
-                "memory_allocation,hsa_api"
-            ),
-        }
+    def test_delay_with_hip(
+        self, mode, transpose_trace_delay_env, validation_rules_dir
+    ):
         result = self.run_test(
             mode,
             "transpose",
-            env=env,
+            env=transpose_trace_delay_env,
             rewrite_args=self.REWRITE_ARGS,
             runtime_args=self.RUNTIME_ARGS,
             rewrite_timeout=120,
@@ -164,6 +173,66 @@ class TestTraceDelayHip(RocprofsysTest):
             rules_files=[
                 validation_rules_dir
                 / "transpose-trace-delay"
+                / "validation-rules.json",
+            ],
+        )
+
+
+# ============================================================================
+# Test Class: SAMPLING_DELAY with HIP workload (wired sampling-only window)
+# ============================================================================
+
+
+@pytest.fixture
+def transpose_sampling_delay_env() -> dict[str, str]:
+    """Env vars for the SAMPLING_DELAY HIP regression test."""
+    return {
+        "ROCPROFSYS_SAMPLING_DELAY": "60.0",
+        "ROCPROFSYS_ROCM_DOMAINS": (
+            "hip_runtime_api,kernel_dispatch,memory_copy,"
+            "memory_allocation,hsa_api"
+        ),
+    }
+
+
+@pytest.mark.transpose
+@pytest.mark.gpu
+@pytest.mark.sampling
+class TestSamplingDelay(RocprofsysTest):
+    """Regression coverage: ROCPROFSYS_SAMPLING_DELAY must defer CPU sampling
+    via the sampling_only-scope time_window. DELAY is set well above the
+    worst-case workload runtime under parallel ctest contention so zero
+    timer_sampling rows reach the cached rocpd output. Pre-fix, SAMPLING_DELAY
+    was an unwired config setting."""
+
+    REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
+    RUNTIME_ARGS = ["-e", "-v", "1", "-E", "uniform_int_distribution"]
+
+    # runtime-instrument mode is excluded: Dyninst attach + instrument adds
+    # unpredictable overhead before the workload runs. Sampling delay would
+    # elapse during instrumentation rather than in the active workload
+    # window, causing the assertion to be timing-flaky. Binary-rewrite mode
+    # proves the SAMPLING_DELAY plumbing works.
+    @pytest.mark.rocpd("transpose_sampling_delay_env")
+    @pytest.mark.parametrize("mode", ["binary_rewrite"])
+    def test_sampling_delay(
+        self, mode, transpose_sampling_delay_env, validation_rules_dir
+    ):
+        result = self.run_test(
+            mode,
+            "transpose",
+            env=transpose_sampling_delay_env,
+            rewrite_args=self.REWRITE_ARGS,
+            runtime_args=self.RUNTIME_ARGS,
+            rewrite_timeout=120,
+            runtime_timeout=300,
+        )
+        self.assert_regex(result)
+        self.assert_rocpd(
+            result,
+            rules_files=[
+                validation_rules_dir
+                / "transpose-sampling-delay"
                 / "validation-rules.json",
             ],
         )

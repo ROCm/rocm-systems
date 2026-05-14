@@ -30,6 +30,7 @@ struct instance
     std::function<void()> sample       = []() {};
     std::function<void()> post_process = []() {};
     std::function<void()> pause        = []() {};
+    std::function<void()> resume       = []() {};
 };
 //
 struct sampler

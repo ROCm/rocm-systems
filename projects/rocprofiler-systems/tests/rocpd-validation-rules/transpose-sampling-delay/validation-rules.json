@@ -1,0 +1,24 @@
+{
+    "_comment": "Used by test_time_window.TestSamplingDelay. Asserts that no CPU sampling rows reach the cached output when ROCPROFSYS_SAMPLING_DELAY exceeds the workload runtime \u2014 proves the sampling subsystem honors the sampling_only-scope time_window from the SAMPLING_DELAY env var.",
+    "required_tables": [
+        {
+            "min_rows": 0,
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "No timer_sampling rows should reach the cached output during a SAMPLING_DELAY window that exceeds the workload runtime",
+                    "error_message": "CPU sampling rows leaked into the cached trace despite SAMPLING_DELAY",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM regions WHERE category = 'timer_sampling'"
+                }
+            ]
+        }
+    ]
+}

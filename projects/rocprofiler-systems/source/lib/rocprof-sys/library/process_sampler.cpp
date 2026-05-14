@@ -219,6 +219,11 @@ void
 sampler::resume()
 {
     sampler_paused.store(false, std::memory_order_relaxed);
+
+    for(auto& itr : instances)
+    {
+        itr->resume();
+    }
 }
 
 void

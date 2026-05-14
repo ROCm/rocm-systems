@@ -715,12 +715,12 @@ rocprofsys_init_tooling_hidden(void)
 
         if(auto _trace_specs = constraint::get_trace_specs(); !_trace_specs.empty())
         {
-            const auto& _spec = _trace_specs.front();
-            const auto  _delay =
-                std::chrono::nanoseconds{ static_cast<int64_t>(_spec.delay * 1.0e9) };
-            const auto _dur =
-                std::chrono::nanoseconds{ static_cast<int64_t>(_spec.duration * 1.0e9) };
-            g_trace_window = std::make_unique<trace_window_t>(
+            const auto& _spec  = _trace_specs.front();
+            const auto  _delay = std::chrono::nanoseconds{ static_cast<std::int64_t>(
+                _spec.delay * 1.0e9) };
+            const auto  _dur   = std::chrono::nanoseconds{ static_cast<std::int64_t>(
+                _spec.duration * 1.0e9) };
+            g_trace_window     = std::make_unique<trace_window_t>(
                 *session, g_trace_window_clock, trace_window_t::config{ _delay, _dur });
 
             // Safety-net subscriber for category-traited recording paths
@@ -742,17 +742,29 @@ rocprofsys_init_tooling_hidden(void)
             g_trace_window->start();
         }
 
-        if(const auto _samp_dur = config::get_sampling_duration(); _samp_dur > 0.0)
+        const auto _samp_delay = config::get_sampling_delay();
+        const auto _samp_dur   = config::get_sampling_duration();
+        if(_samp_delay > 0.0 || _samp_dur > 0.0)
         {
+            const auto _delay_ns = std::chrono::nanoseconds{ static_cast<std::int64_t>(
+                _samp_delay * 1.0e9) };
             const auto _dur_ns =
-                std::chrono::nanoseconds{ static_cast<int64_t>(_samp_dur * 1.0e9) };
+                std::chrono::nanoseconds{ static_cast<std::int64_t>(_samp_dur * 1.0e9) };
             g_sampling_dur_window = std::make_unique<trace_window_t>(
                 *session, g_sampling_dur_window_clock,
-                trace_window_t::config{ {}, _dur_ns }, control::scope::sampling_only);
+                trace_window_t::config{ _delay_ns, _dur_ns },
+                control::scope::sampling_only);
 
             session->attach(*g_sampling_dur_window);
             g_sampling_dur_window->start();
         }
+
+        // Ensure the roctx trigger is attached to the session before the
+        // initial broadcast — otherwise a configured region filter would
+        // not be in the votes table at force_initial_pause time and
+        // subscribers (process_sampler, sampling, ...) would not observe
+        // the paused initial state.
+        rocprofiler_sdk::ensure_roctx_initialized();
 
         session->force_initial_pause();
 
