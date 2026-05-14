@@ -374,6 +374,7 @@ bool Os::isThreadAlive(const Thread& thread) {
 static size_t tlsSize = 0;
 
 // Try to guess the size of TLS (plus some frames)
+__attribute__((no_sanitize("address"), noinline))
 void* guessTlsSizeThread(void* param) {
   address stackBase;
   address currentFrame;
