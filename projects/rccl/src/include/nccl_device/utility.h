@@ -7,7 +7,31 @@
 #ifndef _NCCL_DEVICE_UTILITY_H_
 #define _NCCL_DEVICE_UTILITY_H_
 
-#if __CUDACC__
+// Portable device-compilation gates.
+//
+// NCCL_CHECK_CUDACC      : 1 when this TU is being compiled by a device-aware
+//                          compiler (NVCC for CUDA, HIP-Clang / amdclang++ for
+//                          HIP). Use this in place of `#if __CUDACC__` so the
+//                          same headers work for both the CUDA host compile
+//                          and the HIP-Clang `-x hip` bitcode build (which
+//                          defines __HIPCC__).
+// NCCL_CHECK_CUDA_ARCH   : 1 only inside a device-side codegen pass
+//                          (CUDA: __CUDA_ARCH__; HIP: __HIP_DEVICE_COMPILE__).
+//                          Use this in place of `#if __CUDA_ARCH__` to pick
+//                          device intrinsics over portable fallbacks.
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  #define NCCL_CHECK_CUDACC 1
+#else
+  #define NCCL_CHECK_CUDACC 0
+#endif
+
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+  #define NCCL_CHECK_CUDA_ARCH 1
+#else
+  #define NCCL_CHECK_CUDA_ARCH 0
+#endif
+
+#if NCCL_CHECK_CUDACC
   #define NCCL_DEVICE_INLINE __device__ __forceinline__
   #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __forceinline__
 #else
@@ -27,7 +51,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 #if __HIP_PLATFORM_AMD__
 #include <atomic>
 #else
@@ -111,14 +135,14 @@ NCCL_HOST_DEVICE_INLINE constexpr uint64_t idivRcp64(uint64_t x) {
 }
 
 NCCL_HOST_DEVICE_INLINE uint32_t mul32hi(uint32_t a, uint32_t b) {
-#if __CUDA_ARCH__
+#if NCCL_CHECK_CUDA_ARCH
   return __umulhi(a, b);
 #else
   return uint64_t(a)*b >> 32;
 #endif
 }
 NCCL_HOST_DEVICE_INLINE uint64_t mul64hi(uint64_t a, uint64_t b) {
-#if __CUDA_ARCH__
+#if NCCL_CHECK_CUDA_ARCH
   return __umul64hi(a, b);
 #else
   return (uint64_t)(((unsigned __int128)a)*b >> 64);
@@ -183,7 +207,7 @@ NCCL_HOST_DEVICE_INLINE uint32_t imodFast64(uint64_t x, uint64_t y, uint64_t yrc
   return r;
 }
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 // Precomputed integer reciprocoals for denominator values 1..64 inclusive.
 // Pass these to idivFast64() for fast division on the GPU.
 NCCL_DEVICE_INLINE uint64_t idivRcp64_upto64(int x) {
@@ -210,13 +234,13 @@ NCCL_DEVICE_INLINE uint64_t idivRcp64_upto64(int x) {
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 NCCL_DEVICE_INLINE uint32_t idivRcp32_upto64(int x) {
   return idivRcp64_upto64(x)>>32;
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 NCCL_DEVICE_INLINE void fenceAcquireGpu() {
   static __device__ int dummy;
   int tmp;
@@ -237,7 +261,7 @@ NCCL_DEVICE_INLINE void fenceReleaseGpu() {
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 #if __HIP_PLATFORM_AMD__
 NCCL_HOST_DEVICE_INLINE constexpr std::memory_order acquireOrderOf(std::memory_order ord) {
   return ord == std::memory_order_release ? std::memory_order_relaxed :
@@ -274,7 +298,7 @@ NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order releaseOrderOf(cuda::memory
 #endif
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 NCCL_DEVICE_INLINE int lane() {
   int ret;
   asm("mov.u32 %0, %%laneid;" : "=r"(ret));
@@ -287,7 +311,7 @@ NCCL_DEVICE_INLINE unsigned int lanemask_lt() {
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 // Load anything, but cache like its constant memory.
 template<typename T>
 NCCL_DEVICE_INLINE T loadConst(T const *p) {

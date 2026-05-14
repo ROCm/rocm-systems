@@ -55,7 +55,10 @@
   #define NCCL_DEVICE_INLINE __device__ __attribute__((always_inline))
 #endif
 
-#if __CUDACC__   /* HIP-clang defines __CUDACC__; matches gating in nccl_device/*.h */
+#if NCCL_CHECK_CUDACC   /* Defined in nccl_device/utility.h; true under HIP-Clang -x hip
+                           (__HIPCC__) and NVCC (__CUDACC__). HIP-Clang does NOT
+                           define __CUDACC__, so a bare `#if __CUDACC__` here would
+                           silently drop the entire device body from the bitcode. */
 
 /* ========================================================================
  * [A] Always-on bodies
@@ -216,6 +219,6 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclBarrierSessionSync(
 
 #endif  /* 0 -- GIN / composite Barrier bodies */
 
-#endif  /* __CUDACC__ */
+#endif  /* NCCL_CHECK_CUDACC */
 
 #endif  /* _NCCL_DEVICE_WRAPPER__IMPL_H_ */
