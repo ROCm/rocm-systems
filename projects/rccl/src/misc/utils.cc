@@ -59,6 +59,12 @@ ncclResult_t pciPathToInt64(char* path, int64_t* id) {
   return ncclSuccess;
 }
 
+ncclResult_t pciPathToInt64(char* path, int offset, int minOffset, int64_t* id) {
+  (void)offset;
+  (void)minOffset;
+  return pciPathToInt64(path, id);
+}
+
 // Convert a logical cudaDev index to the NVML device minor number
 ncclResult_t getBusId(int cudaDev, int64_t *busId) {
   // On most systems, the PCI bus ID comes back as in the 0000:00:00.0
