@@ -1137,6 +1137,42 @@ def test_analyze_rocpd(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.misc
+def test_save_csv(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
+    workload_dir = common.get_output_dir(param_id="profile")
+    analysis_workload_dir = common.get_output_dir(param_id="analysis")
+    options = ["--format-rocprof-output", "rocpd"]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--output-format",
+        "csv",
+        "--output-name",
+        analysis_workload_dir,
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+
+    csv_dir = Path(analysis_workload_dir)
+    assert csv_dir.is_dir()
+
+    expected_view_csvs = ["kernel.csv", "kernel_metric.csv", "workload_metric.csv"]
+    for csv_name in expected_view_csvs:
+        csv_path = csv_dir / csv_name
+        assert csv_path.is_file(), f"Missing per-view CSV: {csv_path}"
+        df = pd.read_csv(csv_path)
+        assert len(df.index) >= 1, f"Per-view CSV is empty: {csv_path}"
+
+    assert not Path(f"{analysis_workload_dir}.db").exists()
+
+    common.clean_output_dir(config["cleanup"], analysis_workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
 @pytest.mark.roofline_1
 def test_roofline_workload_dir_not_set_error():
     """

@@ -15,7 +15,7 @@ import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import utils_analysis
-from utils.analysis_orm import Database, get_views
+from utils.analysis_orm import Database
 from utils.file_io import process_pc_sampling_kernel_trace
 from utils.logger import (
     console_debug,
@@ -204,14 +204,13 @@ class db_analysis(OmniAnalyze_Base):
                 )
             )
 
-        # Create views
-        for view_stmt in get_views():
-            Database.get_session().execute(view_stmt)
-
-        # Write database
-        Database.write()
-        console_debug("Completed writing database")
-        console_warning(f"Created file: {db_name}")
+        if self.get_args().output_format == "csv":
+            Database.commit()
+            Database.write_csv_dir(Path(db_name).with_suffix(""))
+        else:
+            Database.create_views()
+            Database.commit()
+            Database.write()
 
     def run_analysis_metrics(
         self,
