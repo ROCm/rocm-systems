@@ -4,6 +4,7 @@
 set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:lib-common-tests>
     $<TARGET_OBJECTS:trace-cache-tests>
+    $<TARGET_OBJECTS:control-tests>
     $<TARGET_OBJECTS:demangler-tests>
     $<TARGET_OBJECTS:progress-tests>
     $<TARGET_OBJECTS:logger-tests>

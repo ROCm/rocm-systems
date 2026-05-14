@@ -21,6 +21,8 @@ session::shutdown()
 {
     {
         std::scoped_lock const lk{ m_subscribers_mutex };
+        for(const auto& sub : m_subscribers)
+            sub.paused = false;
         m_subscribers.clear();
     }
     {
@@ -34,6 +36,12 @@ session::shutdown()
 void
 session::subscribe(subscriber sub)
 {
+    // Seed the subscriber's resolved paused state from current session state
+    // so a subscribe-after-attach ordering observes the right transitions.
+    // No callback is fired here; force_initial_pause() is the explicit
+    // broadcast for the production ordering.
+    sub.paused = subscriber_should_be_paused(sub);
+
     std::scoped_lock const lk{ m_subscribers_mutex };
     m_subscribers.push_back(std::move(sub));
 }
@@ -52,15 +60,8 @@ session::attach(trigger& trig)
 void
 session::force_initial_pause()
 {
-    std::scoped_lock const lk{ m_subscribers_mutex };
-    for(const auto& sub : m_subscribers)
-    {
-        const bool any_paused_for_sub =
-            std::any_of(sub.scopes.begin(), sub.scopes.end(),
-                        [this](scope s) { return !is_active(s); });
-
-        if(any_paused_for_sub && sub.on_pause) sub.on_pause();
-    }
+    for(std::size_t s = 0; s < scope_count; ++s)
+        dispatch_for_scope(static_cast<scope>(s));
 }
 
 void
@@ -69,11 +70,8 @@ session::publish(const trigger& trig, vote new_vote)
     const auto event_scope = trig.event_scope();
     const auto scope_idx   = static_cast<std::size_t>(event_scope);
     const auto name        = trig.name();
-    bool       was_active  = false;
-    bool       now_active  = false;
     {
         std::scoped_lock const lk{ m_votes_mutex };
-        was_active = m_active[scope_idx].load(std::memory_order_relaxed);
 
         auto it = std::find_if(m_votes.begin(), m_votes.end(),
                                [name, event_scope](const vote_entry& e) {
@@ -84,15 +82,13 @@ session::publish(const trigger& trig, vote new_vote)
         else
             it->current_vote = new_vote;
 
-        now_active = resolve_locked(event_scope);
-        m_active[scope_idx].store(now_active, std::memory_order_relaxed);
+        m_active[scope_idx].store(resolve_locked(event_scope), std::memory_order_relaxed);
     }
 
-    if(was_active == now_active) return;
-    if(now_active)
-        notify_resume(event_scope);
-    else
-        notify_pause(event_scope);
+    // A subscriber's resolved paused state can change even when this scope's
+    // active state did not (multi-scope subscriber crossing the OR boundary),
+    // so we always run dispatch and let it dedupe per-subscriber.
+    dispatch_for_scope(event_scope);
 }
 
 // Any paused vote (within the given scope) pauses the scope. Abstain is
@@ -121,27 +117,35 @@ session::is_active_excluding(std::string_view name, scope event_scope) const noe
     return true;
 }
 
-void
-session::notify_pause(scope event_scope)
+bool
+session::subscriber_should_be_paused(const subscriber& sub) const noexcept
 {
-    std::scoped_lock const lk{ m_subscribers_mutex };
-    for(const auto& sub : m_subscribers)
-    {
-        const bool listens = std::find(sub.scopes.begin(), sub.scopes.end(),
-                                       event_scope) != sub.scopes.end();
-        if(listens && sub.on_pause) sub.on_pause();
-    }
+    return std::any_of(sub.scopes.begin(), sub.scopes.end(),
+                       [this](scope s) { return !is_active(s); });
 }
 
 void
-session::notify_resume(scope event_scope)
+session::dispatch_for_scope(scope event_scope)
 {
     std::scoped_lock const lk{ m_subscribers_mutex };
     for(const auto& sub : m_subscribers)
     {
         const bool listens = std::find(sub.scopes.begin(), sub.scopes.end(),
                                        event_scope) != sub.scopes.end();
-        if(listens && sub.on_resume) sub.on_resume();
+        if(!listens) continue;
+
+        const bool should_be_paused = subscriber_should_be_paused(sub);
+        if(should_be_paused == sub.paused) continue;
+
+        sub.paused = should_be_paused;
+        if(should_be_paused)
+        {
+            if(sub.on_pause) sub.on_pause();
+        }
+        else
+        {
+            if(sub.on_resume) sub.on_resume();
+        }
     }
 }
 }  // namespace rocprofsys::control

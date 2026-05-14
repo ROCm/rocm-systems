@@ -69,7 +69,7 @@ private:
     std::mutex         m_subscribers_mutex;
 
     [[nodiscard]] bool resolve_locked(scope event_scope) const noexcept;
-    void               notify_pause(scope event_scope);
-    void               notify_resume(scope event_scope);
+    [[nodiscard]] bool subscriber_should_be_paused(const subscriber& sub) const noexcept;
+    void               dispatch_for_scope(scope event_scope);
 };
 }  // namespace rocprofsys::control
