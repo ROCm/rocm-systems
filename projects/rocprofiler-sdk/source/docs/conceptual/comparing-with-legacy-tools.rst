@@ -179,6 +179,13 @@ The following table provides a comparison between the CLI tool options of ``rocp
      - ``--rocjpeg-trace``
      - Tracing rocJPEG library.
      -
+   * - Advanced tracing options
+     - rocSHMEM trace
+     - *Not available*
+     - *Not available*
+     - ``--rocshmem-trace``
+     - Tracing rocSHMEM (ROCm SHared MEMory) host-stream APIs.
+     -
    * - Aggregate tracing options
      - Sys trace
      - ``--sys-trace`` [``hip-trace``| ``hsa-trace``| ``roctx-trace``| ``kernel-trace``].

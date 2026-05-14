@@ -283,7 +283,7 @@ When using ``0`` as the thread ID argument, the control applies to all threads. 
 
 The ``--selected-regions`` option works with all tracing and profiling options:
 
-- API tracing: ``--hip-trace``, ``--hsa-trace``, ``--marker-trace``, ``--rccl-trace``, etc.
+- API tracing: ``--hip-trace``, ``--hsa-trace``, ``--marker-trace``, ``--rccl-trace``, ``--rocshmem-trace``, etc.
 - Kernel tracing: ``--kernel-trace``
 - Memory tracing: ``--memory-copy-trace``, ``--memory-allocation-trace``, ``--scratch-memory-trace``
 - Counter collection: ``--pmc``
