@@ -10,6 +10,7 @@
 
 #include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/common/static_object.hpp"
 
 #include <thread>
 #include <condition_variable>
@@ -276,7 +277,13 @@ private:
     std::map<aqlprofile_handle_t, std::unique_ptr<ManagerThread>> threads{};
 };
 
-auto* spm_state_map = new SpmStateMap{};
+// Lazy-init via rocprofiler::common::static_object; destroyed in destroy_static_objects() at exit.
+SpmStateMap*
+spm_state_map()
+{
+    static auto*& _v = rocprofiler::common::static_object<SpmStateMap>::construct();
+    return _v;
+}
 
 hsa_status_t
 _internal_aqlprofile_spm_create_packets(aqlprofile_handle_t*          handle,
@@ -325,7 +332,7 @@ _internal_aqlprofile_spm_create_packets(aqlprofile_handle_t*          handle,
     handle->handle = memory->GetHandler();
     out_desc->data = memory->GetOutputBuf();
     out_desc->size = SPM_DESC_SIZE;
-    spm_state_map->insert(*handle, s);
+    spm_state_map()->insert(*handle, s);
 
     {
         aql_profile::Pm4Factory* pm4_factory = nullptr;
@@ -424,7 +431,7 @@ aqlprofile_spm_start(aqlprofile_handle_t            handle,
                      aqlprofile_spm_data_callback_t data_cb,
                      void*                          userdata)
 {
-    auto s = aqlprofile::spm::spm_state_map->query(handle);
+    auto s = aqlprofile::spm::spm_state_map()->query(handle);
     if(!s) return HSA_STATUS_ERROR_NOT_INITIALIZED;
 
     // The first page of output_buffer is reserved for SpmBufferDesc
@@ -459,7 +466,7 @@ aqlprofile_spm_start(aqlprofile_handle_t            handle,
         auto manager = std::make_unique<ManagerThread>(s, data_cb, userdata);
 
         CHECKHSA(manager->status, return manager->status);
-        aqlprofile::spm::spm_state_map->setthread(handle, std::move(manager));
+        aqlprofile::spm::spm_state_map()->setthread(handle, std::move(manager));
     } catch(...)
     {
         return HSA_STATUS_ERROR;
@@ -470,14 +477,14 @@ aqlprofile_spm_start(aqlprofile_handle_t            handle,
 PUBLIC_API hsa_status_t
 aqlprofile_spm_stop(aqlprofile_handle_t handle)
 {
-    bool b = aqlprofile::spm::spm_state_map->setthread(handle, nullptr);
+    bool b = aqlprofile::spm::spm_state_map()->setthread(handle, nullptr);
     return b ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_NOT_INITIALIZED;
 }
 
 PUBLIC_API void
 aqlprofile_spm_delete_packets(aqlprofile_handle_t handle)
 {
-    aqlprofile::spm::spm_state_map->remove(handle);
+    aqlprofile::spm::spm_state_map()->remove(handle);
 }
 
 struct consumer_thread_handle_t
