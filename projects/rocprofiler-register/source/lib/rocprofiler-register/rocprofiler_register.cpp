@@ -169,6 +169,7 @@ enum rocp_reg_supported_library  // NOLINT(performance-enum-size)
     ROCP_REG_RCCL,
     ROCP_REG_ROCDECODE,
     ROCP_REG_ROCJPEG,
+    ROCP_REG_ROCSHMEM,
     ROCP_REG_ROCATTACH,
     ROCP_REG_LAST,
 };
@@ -238,6 +239,11 @@ ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCJPEG,
                                "rocjpeg",
                                "rocprofiler_register_import_rocjpeg",
                                "librocjpeg.so.[0-9]($|\\.[0-9\\.]+)")
+
+ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCSHMEM,
+                               "rocshmem",
+                               "rocprofiler_register_import_rocshmem",
+                               "librocshmem.so.[0-9]($|\\.[0-9\\.]+)")
 
 ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCATTACH,
                                "rocattach",
