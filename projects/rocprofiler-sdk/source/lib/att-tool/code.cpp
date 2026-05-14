@@ -183,7 +183,6 @@ CodeFile::~CodeFile()
     json["version"] = TOOL_VERSION;
     json["header"]  = "ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency, Stall, Idle";
 
-    // Funcmap metadata consumed by ROCProfiler-ATT-Viewer's SqttFuncmapJson code.json path.
     nlohmann::json jfuncmap = nlohmann::json::array();
     for(auto cid : codeobj_ids)
     {
