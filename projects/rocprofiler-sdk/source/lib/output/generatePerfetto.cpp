@@ -676,6 +676,18 @@ write_perfetto(
                                 mid);
                             (*it)->end_timestamp     = mid;
                             (*next)->start_timestamp = mid;
+
+                            // The modified start may have pushed *next rightward in sort
+                            // order. Bubble the pointer forward to restore sorted order so
+                            // subsequent iterations see correct neighbors.
+                            auto bubble_it = next;
+                            while(std::next(bubble_it) != qitr.second.end() &&
+                                  (*bubble_it)->start_timestamp >
+                                      (*std::next(bubble_it))->start_timestamp)
+                            {
+                                std::iter_swap(bubble_it, std::next(bubble_it));
+                                ++bubble_it;
+                            }
                         }
 
                         if(demangled.find(name) == demangled.end())
