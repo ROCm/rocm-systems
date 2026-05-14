@@ -7,7 +7,7 @@ This directory contains example applications demonstrating various profiling sce
 ### GPU Compute
 
 | Example | Description | Dependencies |
-|---------|-------------|--------------|
+| --------- | ------------- | -------------- |
 | [transpose](transpose/) | Tiled matrix transpose on GPU with multi-threaded stream execution | HIP |
 | [scratch-memory](scratch-memory/) | GPU scratch memory allocation stress test across primary and overflow slots | HIP, HSA |
 | [sdma_test](sdma_test/) | SDMA engine bandwidth benchmark for H2D, D2D, and D2H transfers | HIP |
@@ -16,7 +16,7 @@ This directory contains example applications demonstrating various profiling sce
 ### Profiler API
 
 | Example | Description | Dependencies |
-|---------|-------------|--------------|
+| --------- | ------------- | -------------- |
 | [user-api](user-api/) | User API for named regions, annotations, and selective thread tracing | rocprofiler-systems user library |
 | [roctx](roctx/) | ROCTx range/marker API with thread naming, pause/resume, and device labeling | rocprofiler-sdk-roctx, HIP |
 | [causal](causal/) | Causal profiling with slow/fast parallel workloads and progress point tracking | rocprofiler-systems user library |
@@ -26,7 +26,7 @@ This directory contains example applications demonstrating various profiling sce
 ### CPU Threading
 
 | Example | Description | Dependencies |
-|---------|-------------|--------------|
+| --------- | ------------- | -------------- |
 | [thread-limit](thread-limit/) | Thread scaling stress test with batched Fibonacci workers | pthreads |
 | [parallel-overhead](parallel-overhead/) | Mutex vs. atomic synchronization overhead comparison | pthreads |
 | [code-coverage](code-coverage/) | Dual code-path execution for coverage analysis testing | pthreads |
@@ -35,7 +35,7 @@ This directory contains example applications demonstrating various profiling sce
 ### Distributed Computing
 
 | Example | Description | Dependencies |
-|---------|-------------|--------------|
+| --------- | ------------- | -------------- |
 | [mpi](mpi/) | MPI collective and point-to-point operations with communicator patterns | MPI |
 | [rccl](rccl/) | RCCL collective communication performance tests across GPUs | HIP, RCCL |
 | [shmem](shmem/) | OpenSHMEM hello world and ping-pong latency benchmark | OpenSHMEM (oshcc) |
@@ -43,27 +43,27 @@ This directory contains example applications demonstrating various profiling sce
 ### OpenMP
 
 | Example | Description | Dependencies |
-|---------|-------------|--------------|
+| --------- | ------------- | -------------- |
 | [openmp](openmp/) | NAS Parallel Benchmarks (CG, LU) with OpenMP threading | OpenMP |
 
 ### GPU Libraries
 
 | Example | Description | Dependencies |
-|---------|-------------|--------------|
+| --------- | ------------- | -------------- |
 | [jpegdecode](jpegdecode/) | Batch JPEG decoding performance benchmark using rocJPEG | HIP, rocJPEG |
 | [videodecode](videodecode/) | Batch video decoding benchmark using ROCDecode with VCN hardware | HIP, ROCDecode, FFmpeg |
 
 ### HPC
 
 | Example | Description | Dependencies |
-|---------|-------------|--------------|
+| --------- | ------------- | -------------- |
 | [lulesh](lulesh/) | LULESH shock hydrodynamics mini-app with Kokkos parallelism | Kokkos, optional MPI |
 | [hpc](hpc/) | Six HPC training examples covering Jacobi solvers, matrix exponentials, and stream overlap | HIP, rocBLAS, Fortran (varies) |
 
 ### Python
 
 | Example | Description | Dependencies |
-|---------|-------------|--------------|
+| --------- | ------------- | -------------- |
 | [python](python/) | Python profiling with decorators, user regions, and selective tracing | Python 3, optional NumPy |
 
 ## Building All Examples
@@ -110,7 +110,7 @@ cmake -B <build_dir> -DROCPROFSYS_GFX_TARGETS="gfx90a;gfx942" ...
 rocprofiler-systems supports several instrumentation modes:
 
 | Mode | Command | Description |
-|------|---------|-------------|
+| ------ | --------- | ------------- |
 | System-level | `rocprof-sys-run -- ./app` | Lightweight tracing via `LD_PRELOAD`, no binary modification |
 | Binary rewrite | `rocprof-sys-instrument -o app.inst -- ./app` then `rocprof-sys-run -- ./app.inst` | Statically rewrite the binary for repeated profiling |
 | Runtime instrument | `rocprof-sys-instrument -- ./app` | Dynamically instrument at launch without modifying the binary |
@@ -120,7 +120,7 @@ rocprofiler-systems supports several instrumentation modes:
 ### Common Environment Variables
 
 | Variable | Description | Default |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | `ROCPROFSYS_TRACE` | Enable Perfetto trace output | `true` |
 | `ROCPROFSYS_PROFILE` | Enable call-stack profile output | `true` |
 | `ROCPROFSYS_USE_ROCPD` | Generate `rocpd` database output | `false` |

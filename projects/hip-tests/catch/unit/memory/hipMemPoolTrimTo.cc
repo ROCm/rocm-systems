@@ -190,7 +190,7 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_VaryingMinBytesToHold) {
       // create a stream
       hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  constexpr int N = 1 << 20;
+  const int N = isQuickLevel() ? (1 << 12) : (1 << 20);
   REQUIRE(true == checkhipMemPoolTrimTo(stream, N));
   HIP_CHECK(hipStreamDestroy(stream));
 }
@@ -206,7 +206,7 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_VaryingMinBytesToHold) {
  *    - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold) {
-  constexpr int N = 1 << 20;
+  const int N = isQuickLevel() ? (1 << 12) : (1 << 20);
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
