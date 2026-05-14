@@ -28,16 +28,16 @@ class TestMatrixLayoutDescriptor:
     def test_lane_for_row_mfma(self):
         d = MFMA_F32_16X16X16_F16
         assert d.lane_for_row(0) == 0
-        assert d.lane_for_row(4) == 20
-        assert d.lane_for_row(8) == 40
-        assert d.lane_for_row(12) == 60
+        assert d.lane_for_row(4) == 16
+        assert d.lane_for_row(8) == 32
+        assert d.lane_for_row(12) == 48
 
     def test_lane_for_row_wmma(self):
         d = WMMA_F32_16X16X16_F16
         assert d.lane_for_row(0) == 0
-        assert d.lane_for_row(4) == 36
-        assert d.lane_for_row(8) == 24
-        assert d.lane_for_row(12) == 60
+        assert d.lane_for_row(4) == 32
+        assert d.lane_for_row(8) == 16
+        assert d.lane_for_row(12) == 48
 
     def test_num_row_groups(self):
         assert MFMA_F32_16X16X16_F16.num_row_groups == 4

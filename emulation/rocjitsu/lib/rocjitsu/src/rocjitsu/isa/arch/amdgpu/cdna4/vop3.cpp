@@ -1451,7 +1451,7 @@ void VFmacF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
                         double v = [&]() {
                           double v = std::fma(
                               [&]() {
-                                double sv = static_cast<double>(src0.read_lane64(wf, lane));
+                                double sv = std::bit_cast<double>(src0.read_lane64(wf, lane));
                                 if (inst_.abs & (1u << 0))
                                   sv = std::fabs(sv);
                                 if (inst_.neg & (1u << 0))
@@ -1459,7 +1459,7 @@ void VFmacF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
                                 return sv;
                               }(),
                               [&]() {
-                                double sv = static_cast<double>(src1.read_lane64(wf, lane));
+                                double sv = std::bit_cast<double>(src1.read_lane64(wf, lane));
                                 if (inst_.abs & (1u << 1))
                                   sv = std::fabs(sv);
                                 if (inst_.neg & (1u << 1))

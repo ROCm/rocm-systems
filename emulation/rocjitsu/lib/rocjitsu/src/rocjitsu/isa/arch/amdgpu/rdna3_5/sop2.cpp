@@ -1308,7 +1308,7 @@ SMinF32Sop2::SMinF32Sop2(const MachineInst *inst)
 void SMinF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   float result = std::min(std::bit_cast<float>(ssrc0.read_scalar(wf)),
                           std::bit_cast<float>(ssrc1.read_scalar(wf)));
-  sdst.write_scalar(wf, result);
+  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
 }
 
 SMaxF32Sop2::SMaxF32Sop2(const MachineInst *inst)
@@ -1334,7 +1334,7 @@ SMaxF32Sop2::SMaxF32Sop2(const MachineInst *inst)
 void SMaxF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   float result = std::max(std::bit_cast<float>(ssrc0.read_scalar(wf)),
                           std::bit_cast<float>(ssrc1.read_scalar(wf)));
-  sdst.write_scalar(wf, result);
+  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
 }
 
 SMulF32Sop2::SMulF32Sop2(const MachineInst *inst)
@@ -1528,8 +1528,8 @@ SMinF16Sop2::SMinF16Sop2(const MachineInst *inst)
 }
 
 void SMinF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t result = std::min(util::f16_to_f32(static_cast<uint16_t>(ssrc0.read_scalar(wf))),
-                             util::f16_to_f32(static_cast<uint16_t>(ssrc1.read_scalar(wf))));
+  float result = std::min(util::f16_to_f32(static_cast<uint16_t>(ssrc0.read_scalar(wf))),
+                          util::f16_to_f32(static_cast<uint16_t>(ssrc1.read_scalar(wf))));
   sdst.write_scalar(wf, util::f32_to_f16(result));
 }
 
@@ -1554,8 +1554,8 @@ SMaxF16Sop2::SMaxF16Sop2(const MachineInst *inst)
 }
 
 void SMaxF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t result = std::max(util::f16_to_f32(static_cast<uint16_t>(ssrc0.read_scalar(wf))),
-                             util::f16_to_f32(static_cast<uint16_t>(ssrc1.read_scalar(wf))));
+  float result = std::max(util::f16_to_f32(static_cast<uint16_t>(ssrc0.read_scalar(wf))),
+                          util::f16_to_f32(static_cast<uint16_t>(ssrc1.read_scalar(wf))));
   sdst.write_scalar(wf, util::f32_to_f16(result));
 }
 

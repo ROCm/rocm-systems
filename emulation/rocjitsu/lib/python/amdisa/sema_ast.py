@@ -67,7 +67,7 @@ class SemaType:
                 return 'int32_t'
             return 'int64_t'
         if self.base == 'BF':
-            return 'uint16_t'
+            return 'uint8_t' if self.size <= 8 else 'uint16_t'
         if self.base == 'FP':
             if self.size <= 4:
                 return 'uint8_t'

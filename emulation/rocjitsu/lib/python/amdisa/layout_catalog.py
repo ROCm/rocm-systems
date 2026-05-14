@@ -51,8 +51,9 @@ class MatrixLayoutDescriptor:
         return self.m // self.dst_vgprs
 
     def lane_for_row(self, row: int) -> int:
+        """Base lane for a given row (column offset not included)."""
         group = row // self.dst_vgprs
-        return self.row_group_lanes[group] + (row % self.n)
+        return self.row_group_lanes[group]
 
 
 def _mfma_row_group_lanes(m: int, n: int, dst_vgprs: int) -> tuple[int, ...]:
@@ -235,7 +236,8 @@ def compute_xor_mask(
     if xor_lane == 0:
         return None
 
-    return (xor_lane * 4, range_start, range_end)
+    bytes_per_lane = guest.dst_elem_bits // 8
+    return (xor_lane * bytes_per_lane, range_start, range_end)
 
 
 def find_descriptor(mnemonic: str) -> MatrixLayoutDescriptor | None:

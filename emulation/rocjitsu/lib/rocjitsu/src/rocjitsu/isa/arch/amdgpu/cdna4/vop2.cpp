@@ -496,8 +496,8 @@ void VFmacF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     vdst.write_lane64(
         wf, lane,
-        std::bit_cast<uint64_t>(std::fma(static_cast<double>(src0.read_lane64(wf, lane)),
-                                         static_cast<double>(vsrc1.read_lane64(wf, lane)),
+        std::bit_cast<uint64_t>(std::fma(std::bit_cast<double>(src0.read_lane64(wf, lane)),
+                                         std::bit_cast<double>(vsrc1.read_lane64(wf, lane)),
                                          std::bit_cast<double>(vdst.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();

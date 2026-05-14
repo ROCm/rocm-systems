@@ -165,9 +165,10 @@ void VAddF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vdst.write_lane64(wf, lane,
-                      std::bit_cast<uint64_t>((static_cast<double>(src0.read_lane64(wf, lane)) +
-                                               static_cast<double>(vsrc1.read_lane64(wf, lane)))));
+    vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>((std::bit_cast<double>(src0.read_lane64(wf, lane)) +
+                                 std::bit_cast<double>(vsrc1.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();
@@ -536,9 +537,10 @@ void VMulF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    vdst.write_lane64(wf, lane,
-                      std::bit_cast<uint64_t>((static_cast<double>(src0.read_lane64(wf, lane)) *
-                                               static_cast<double>(vsrc1.read_lane64(wf, lane)))));
+    vdst.write_lane64(
+        wf, lane,
+        std::bit_cast<uint64_t>((std::bit_cast<double>(src0.read_lane64(wf, lane)) *
+                                 std::bit_cast<double>(vsrc1.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();
@@ -1134,8 +1136,8 @@ void VMinNumF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     vdst.write_lane64(
         wf, lane,
-        std::bit_cast<uint64_t>(std::fmin(static_cast<double>(src0.read_lane64(wf, lane)),
-                                          static_cast<double>(vsrc1.read_lane64(wf, lane)))));
+        std::bit_cast<uint64_t>(std::fmin(std::bit_cast<double>(src0.read_lane64(wf, lane)),
+                                          std::bit_cast<double>(vsrc1.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();
@@ -1233,8 +1235,8 @@ void VMaxNumF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     vdst.write_lane64(
         wf, lane,
-        std::bit_cast<uint64_t>(std::fmax(static_cast<double>(src0.read_lane64(wf, lane)),
-                                          static_cast<double>(vsrc1.read_lane64(wf, lane)))));
+        std::bit_cast<uint64_t>(std::fmax(std::bit_cast<double>(src0.read_lane64(wf, lane)),
+                                          std::bit_cast<double>(vsrc1.read_lane64(wf, lane)))));
   }
   src0.clear_delegate();
   vsrc1.clear_delegate();

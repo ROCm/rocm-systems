@@ -342,7 +342,9 @@ def _lower_assign(node: SemaNode, ctx: LoweringContext) -> list[str]:
         var_name = lhs_node.id_name
         if var_name not in ctx.declared and var_name not in _CONTEXT_READS:
             cpp_ty = 'uint32_t'
-            if rhs_node.ty:
+            if lhs_node.ty:
+                cpp_ty = lhs_node.ty.cpp_type
+            elif rhs_node.ty:
                 cpp_ty = rhs_node.ty.cpp_type
             elif node.ty:
                 cpp_ty = node.ty.cpp_type
@@ -670,8 +672,7 @@ def _is_reinterpret(node: SemaNode, target: SemaType | None = None) -> bool:
         return False
     if node.kind == SemaNodeKind.INSTOPERAND:
         if target.base in ('F', 'BF', 'FP'):
-            src_size = node.ty.size if node.ty else 32
-            return src_size == target.size
+            return True
         return False
     if node.kind == SemaNodeKind.CAST and node.children:
         return _is_reinterpret(node.children[0], target)
@@ -778,9 +779,11 @@ def _rhs_is_float_expr(node: SemaNode) -> int:
     if node.ty and node.ty.base in ('F', 'BF') and node.ty.size in (32, 64):
         if node.kind in (SemaNodeKind.ADD, SemaNodeKind.SUB, SemaNodeKind.MUL,
                          SemaNodeKind.DIV, SemaNodeKind.FMA,
-                         SemaNodeKind.SQRT, SemaNodeKind.SIN, SemaNodeKind.COS,
+                         SemaNodeKind.SQRT, SemaNodeKind.SIN, SemaNodeKind.COS, SemaNodeKind.ABS,
                          SemaNodeKind.LOG2, SemaNodeKind.FLOOR, SemaNodeKind.TRUNC,
-                         SemaNodeKind.FRACT, SemaNodeKind.LDEXP):
+                         SemaNodeKind.FRACT, SemaNodeKind.LDEXP,
+                         SemaNodeKind.UMINUS, SemaNodeKind.UPLUS,
+                         SemaNodeKind.ID):
             return node.ty.size
         if node.kind == SemaNodeKind.CALL:
             return node.ty.size
@@ -802,6 +805,9 @@ def _lower_dst_write(
         rhs = f'util::f32_to_f16({rhs})'
     elif lhs_ty and lhs_ty.base == 'BF' and lhs_ty.size == 16:
         rhs = f'util::f32_to_bf16({rhs})'
+    elif lhs_ty and lhs_ty.size == 16 and lhs_ty.base in ('I', 'U'):
+        cpp = lhs_ty.cpp_type
+        rhs = f'static_cast<uint32_t>(static_cast<uint16_t>(static_cast<{cpp}>({rhs})))' if cpp == 'int16_t' else f'static_cast<uint32_t>(static_cast<{cpp}>({rhs}))'
     elif needs_bitcast == 32:
         rhs = f'std::bit_cast<uint32_t>({rhs})'
     elif needs_bitcast == 64:
@@ -912,6 +918,31 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'clz64': '[&]() {{ auto s = static_cast<uint64_t>({0});'
              ' return s == 0 ? 64u : static_cast<uint32_t>(std::countl_zero(s)); }}()',
     'cvt_hi_f32_f16': 'std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(({0}) >> 16)))',
+    'brev64': '[&]() {{ uint64_t s = {0}; uint64_t r = 0;'
+              ' for (int i = 0; i < 64; ++i) r |= ((s >> i) & 1ULL) << (63 - i);'
+              ' return r; }}()',
+    'wqm64': '[&]() {{ uint64_t s = {0}; uint64_t r = 0;'
+             ' for (int i = 0; i < 16; ++i)'
+             ' if (s & (0xFULL << (i * 4))) r |= (0xFULL << (i * 4));'
+             ' return r; }}()',
+    'quadmask64': '[&]() {{ uint64_t s = {0}; uint64_t r = 0;'
+                  ' for (int i = 0; i < 16; ++i)'
+                  ' if (s & (0xFULL << (i * 4))) r |= (1ULL << i);'
+                  ' return r; }}()',
+    'ff064': '[&]() {{ auto s = ~static_cast<uint64_t>({0});'
+             ' return s == 0 ? static_cast<uint32_t>(-1)'
+             ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
+    'ff164': '[&]() {{ auto s = static_cast<uint64_t>({0});'
+             ' return s == 0 ? static_cast<uint32_t>(-1)'
+             ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
+    'flbit64': '[&]() {{ auto s = static_cast<uint64_t>({0});'
+               ' return s == 0 ? static_cast<uint32_t>(-1)'
+               ' : static_cast<uint32_t>(std::countl_zero(s)); }}()',
+    'ctz64': '[&]() {{ auto s = static_cast<uint64_t>({0});'
+             ' return s == 0 ? static_cast<uint32_t>(-1)'
+             ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
+    'bcnt164': 'static_cast<uint32_t>(std::popcount(static_cast<uint64_t>({0})))',
+    'bcnt064': 'static_cast<uint32_t>(std::popcount(~static_cast<uint64_t>({0})))',
     'quadmask': '[&]() {{ uint32_t s = {0}; uint32_t r = 0;'
                 ' for (int i = 0; i < 8; ++i)'
                 ' if (s & (0xFu << (i * 4))) r |= (1u << i);'
@@ -1033,6 +1064,8 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     'std::max': 'std::max({0}, {1})',
     'std::fmin': 'std::fmin({0}, {1})',
     'std::fmax': 'std::fmax({0}, {1})',
+    'is_ordered': '(!std::isnan({0}) && !std::isnan({1}))',
+    'is_unordered': '(std::isnan({0}) || std::isnan({1}))',
     'fp_class_test': '[&]() -> bool {{'
                      ' float s0 = std::bit_cast<float>(static_cast<uint32_t>({0}));'
                      ' uint32_t mask = {1}; bool match = false;'
@@ -1090,6 +1123,32 @@ _INLINE_BINARY_OPS: dict[str, str] = {
            ' if (width == 0) return 0u;'
            ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
            ' return (base >> offset) & mask; }}()',
+    'bfe_i32': '[&]() {{ uint32_t base = {0}, field = {1};'
+               ' uint32_t offset = field & 31u;'
+               ' uint32_t width = (field >> 16) & 127u;'
+               ' if (width == 0) return 0u;'
+               ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
+               ' uint32_t extracted = (base >> offset) & mask;'
+               ' if (width < 32 && (extracted & (1u << (width - 1))))'
+               '   extracted |= ~mask;'
+               ' return extracted; }}()',
+    'bfe64': '[&]() {{ uint64_t base = {0};'
+             ' uint32_t field = static_cast<uint32_t>({1});'
+             ' uint32_t offset = field & 63u;'
+             ' uint32_t width = (field >> 16) & 127u;'
+             ' if (width == 0) return static_cast<uint64_t>(0);'
+             ' uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);'
+             ' return (base >> offset) & mask; }}()',
+    'bfe_i64': '[&]() {{ uint64_t base = {0};'
+               ' uint32_t field = static_cast<uint32_t>({1});'
+               ' uint32_t offset = field & 63u;'
+               ' uint32_t width = (field >> 16) & 127u;'
+               ' if (width == 0) return static_cast<int64_t>(0);'
+               ' uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);'
+               ' uint64_t extracted = (base >> offset) & mask;'
+               ' if (width < 64 && (extracted & (1ULL << (width - 1))))'
+               '   extracted |= ~mask;'
+               ' return static_cast<int64_t>(extracted); }}()',
     'ABSDIFF': '[&]() {{ auto a = static_cast<int32_t>({0});'
                ' auto b = static_cast<int32_t>({1});'
                ' return static_cast<uint32_t>(a > b ? a - b : b - a); }}()',
@@ -1236,7 +1295,7 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
               ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
               ' if (ax >= ay && ax >= az) return x >= 0 ? z : -z;'
               ' if (ay >= ax && ay >= az) return x;'
-              ' return x >= 0 ? -x : x; }}()',
+              ' return z >= 0 ? -x : x; }}()',
     'cubetc': '[&]() {{ auto x={0}; auto y={1}; auto z={2};'
               ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
               ' if (ax >= ay && ax >= az) return -y;'
