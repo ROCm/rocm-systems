@@ -559,8 +559,13 @@ class KernelBlitManager : public DmaBlitManager {
   //! kernarg slot that resetGraphSignals() requires.
   //! Like resetGraphSignals(), dispatches with attach_signal=true so the
   //! caller can read back the completion signal via GetLastSignal().
+  //! Normal path: dispatch the reset kernel on the GPU immediately.
+  //! Capture path: pass override_cmd with getPktCapturingState()==true so
+  //! submitKernelInternal routes kernargs to the graph pool and stores the
+  //! 64-byte AQL packet in override_cmd->gpuPackets_ without hardware dispatch.
   bool resetContSignalBuffer(uint64_t* deviceVaBuf, uint32_t count,
-                             uint64_t resetValue = 1) const;
+                             uint64_t resetValue = 1,
+                             amd::Command* override_cmd = nullptr) const;
 
   virtual std::recursive_mutex* lockXfer() const { return &lockXferOps_; }
 

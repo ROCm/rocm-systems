@@ -644,6 +644,13 @@ class Device : public NullDevice {
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 
+  //! Capture the reset kernel AQL packet at instantiate time without hardware
+  //! dispatch. captureCmd must have setPktCapturingState(true, ...) already
+  //! called; on return captureCmd->gpuPackets_[0] holds the 64-byte packet
+  //! with kernarg_address pointing into the graph kernarg pool and
+  //! completion_signal left as zero (caller patches it after rebuildFlatBuffer).
+  bool CaptureResetKernelPacket(GraphSignalPool* pool, amd::Command* captureCmd) const;
+
   //! Allocate host memory in terms of numa policy set by user
   void* hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const;
 

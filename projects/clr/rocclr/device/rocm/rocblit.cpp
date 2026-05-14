@@ -3195,7 +3195,8 @@ bool KernelBlitManager::resetGraphSignals(const std::vector<uint64_t*>& valuePtr
 // for the rationale behind holding execution() + lockXferOps_ together and
 // using AcquireQueueWithPreferenceLocked().
 bool KernelBlitManager::resetContSignalBuffer(uint64_t* deviceVaBuf, uint32_t count,
-                                              uint64_t resetValue) const {
+                                              uint64_t resetValue,
+                                              amd::Command* override_cmd) const {
   if (deviceVaBuf == nullptr || count == 0) return true;
 
   // Mirror the lock order of resetGraphSignals: execution() → lockXferOps_.
@@ -3237,10 +3238,12 @@ bool KernelBlitManager::resetContSignalBuffer(uint64_t* deviceVaBuf, uint32_t co
 
   address parameters = captureArguments(kernels_[blitType]);
 
-  // Clear command_ to force the runtime-pool signal path inside
-  // submitKernelInternal — same reasoning as resetGraphSignals.
+  // For normal dispatch: clear command_ to force the runtime-pool signal path.
+  // For capture mode: set override_cmd so submitKernelInternal sees
+  //   getPktCapturingState()==true, routes kernargs to the graph pool, and
+  //   stores the 64-byte AQL packet in override_cmd->gpuPackets_.
   amd::Command* saved_cmd = gpu().command();
-  gpu().SetCommand(nullptr);
+  gpu().SetCommand(override_cmd);
 
   constexpr bool kAttachSignal = true;
   bool result = gpu().submitKernelInternal(ndrange, *kernels_[blitType], parameters,

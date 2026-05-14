@@ -4013,6 +4013,26 @@ bool Device::ResetGraphSignalPool(device::VirtualDevice* vdev, GraphSignalPool* 
 }
 
 // ================================================================================================
+// Capture the reset-kernel AQL packet (with kernargs in the graph pool) at
+// instantiate time so it can be prepended to stream-0's flat buffer.
+// captureCmd must already have setPktCapturingState(true, ...) called before
+// this function is invoked.  On success captureCmd->gpuPackets_[0] holds the
+// 64-byte dispatch packet; completion_signal is left zero — the caller writes
+// reset_signal_->signal_ at flat-buffer offset 56 after rebuildFlatBuffer.
+bool Device::CaptureResetKernelPacket(GraphSignalPool* pool, amd::Command* captureCmd) const {
+  if (pool == nullptr || captureCmd == nullptr) return false;
+
+  uint64_t* cont_buf = pool->ContBuffer();
+  uint32_t  cont_cnt = pool->ContBufferCount();
+  if (cont_buf == nullptr || cont_cnt == 0) return false;
+
+  auto& blit = static_cast<KernelBlitManager&>(xferQueue()->blitMgr());
+  return blit.resetContSignalBuffer(cont_buf, cont_cnt,
+                                    /*resetValue=*/kInitSignalValueOne,
+                                    captureCmd);
+}
+
+// ================================================================================================
 void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                  const std::vector<void*>& hw_events) const {
   for (const auto& patch : patches) {
