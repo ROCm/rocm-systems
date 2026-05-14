@@ -14,6 +14,7 @@
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
 #include "platform/external_memory.hpp"
+#include "hip_apex.h"
 namespace hip {
 
 // Guards global hipArray set
@@ -81,6 +82,8 @@ hipError_t ihipFree(void* ptr) {
   if (ptr == nullptr) {
     return hipSuccess;
   }
+
+  if (apex::enabled()) apex::track_free(ptr);
 
   size_t offset = 0;
   amd::Memory* memory_object = getMemoryObject(ptr, offset);
@@ -355,6 +358,7 @@ hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
   amd::Memory* memObj = getMemoryObject(*ptr, offset);
   // saves the current device id so that it can be accessed later
   memObj->getUserData().deviceId = hip::getCurrentDevice()->deviceId();
+  if (apex::enabled()) apex::track_alloc(*ptr, sizeBytes, flags, false);
   return hipSuccess;
 }
 

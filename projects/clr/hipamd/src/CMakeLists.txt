@@ -93,6 +93,7 @@ endif()
 
 target_sources(amdhip64 PRIVATE
   hip_activity.cpp
+  hip_apex.cpp
   hip_code_object.cpp
   hip_context.cpp
   hip_device_runtime.cpp

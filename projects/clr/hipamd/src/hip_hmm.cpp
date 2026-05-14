@@ -11,6 +11,7 @@
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
 #include "os/os.hpp"
+#include "hip_apex.h"
 
 namespace hip {
 
@@ -308,6 +309,10 @@ hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_hos
   // saves the current device id so that it can be accessed later
   memObj->getUserData().deviceId = hip::getCurrentDevice()->deviceId();
 
+  if (apex::enabled()) {
+    apex::track_alloc(*ptr, size, CL_MEM_SVM_FINE_GRAIN_BUFFER, true);
+  }
+
   ClPrint(amd::LOG_INFO, amd::LOG_API, "ihipMallocManaged ptr=0x%zx", *ptr);
   return hipSuccess;
 }
@@ -345,6 +350,8 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
   } else {
     targetDevice = location.id;
   }
+
+  if (apex::enabled()) apex::record_prefetch(dev_ptr, count, cpuAccess ? -1 : targetDevice);
 
   amd::Device* dev = nullptr;
   if (cpuAccess == false) {

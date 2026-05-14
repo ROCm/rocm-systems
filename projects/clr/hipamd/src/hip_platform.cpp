@@ -11,6 +11,7 @@
 #include "platform/program.hpp"
 #include "platform/runtime.hpp"
 #include "utils/flags.hpp"
+#include "hip_apex.h"
 
 #include <unordered_map>
 #include <mutex>
@@ -694,6 +695,8 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   if (hostFunction == nullptr) {
     return hipErrorInvalidDeviceFunction;
   }
+
+  if (apex::enabled()) apex::pre_launch(hostFunction, args);
 
   const int deviceId = hip::Stream::DeviceId(stream);
 
