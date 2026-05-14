@@ -80,7 +80,7 @@ constexpr int LEN_BITS[16] = {16, 64, 64, 32, 16, 48, 16, 16, 16, 16, 16, 64, 48
 
 const Tables& tables()
 {
-    static const Tables t = []
+    thread_local const Tables t = []
     {
         Tables out{};
         for (int n = 0; n < 16; ++n)
@@ -190,7 +190,7 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,bmi2"))) size_t scan_gfx9_avx
     constexpr uint8_t SUCCESSOR_CAP = (CHUNK - 1) + 8;
     static_assert(SUCCESSOR_CAP <= 127, "vpermi2b successor indices must not wrap");
 
-    alignas(64) static constexpr uint8_t index_bytes[CHUNK] = {
+    alignas(64) thread_local constexpr uint8_t index_bytes[CHUNK] = {
         0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
         22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
         44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63};
@@ -447,7 +447,8 @@ __attribute__((target("avx2"))) size_t scan_gfx9_avx2(
     constexpr size_t CHUNK = 16;
     constexpr size_t TAIL_GUARD = 16;
 
-    alignas(16) static constexpr uint8_t index_bytes[CHUNK] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    alignas(16) thread_local constexpr uint8_t index_bytes[CHUNK] = {
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
     const __m128i index_v = _mm_load_si128(reinterpret_cast<const __m128i*>(index_bytes));
 
     size_t bp = 0;
@@ -562,7 +563,7 @@ ScanFn select_scanner()
 
 size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
 {
-    static const ScanFn fn = select_scanner();
+    thread_local const ScanFn fn = select_scanner();
     return fn(buf, size, out, out_cap);
 }
 

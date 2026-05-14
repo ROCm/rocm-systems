@@ -49,6 +49,7 @@ file(
     UNIT_TEST_LIB_SOURCES
     ${SRC_DIR}/trie.cpp
     ${SRC_DIR}/rocprof_trace_decoder.cpp
+    ${SRC_DIR}/quick_scan_export.cpp
     ${SRC_DIR}/stitch/stitch.cpp
     ${SRC_DIR}/stitch/pctranslator.cpp
     ${SRC_DIR}/trace_parser.cpp

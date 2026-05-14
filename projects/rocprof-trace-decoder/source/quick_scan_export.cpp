@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <sstream>
 #include <vector>
 
 #include "rocprof_trace_decoder/rocprof_trace_decoder.h"
@@ -139,6 +140,8 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
     void* userdata
 )
 {
+    thread_local std::vector<gfx9::quick_scan::QuickToken> raw{1u << 18};
+
     if (!data || data_size < 8 || !trace_callback)
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
@@ -188,14 +191,11 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
         auto decoder = HandleData::get_read_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
-        // Todo: Ensure it has been written
         gfxip = decoder->gfxip;
     }
 
     data_size -= header_skip;
     buf += header_skip;
-
-    thread_local std::vector<gfx9::quick_scan::QuickToken> raw{1u << 20};
 
     size_t ntokens = gfx9::quick_scan::scan_gfx9(buf, data_size, raw.data(), raw.size());
     while (ntokens == raw.size())
@@ -209,20 +209,28 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
         auto decoder = HandleData::get_read_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
-        bool ready = decoder->cv.wait_for(
-            decoder.lk,
-            std::chrono::milliseconds(100),
-            [&]()
-            {
-                const CSRegisterHandler* p = decoder->pipestate.get(chunk_index);
-                if (!p) return false;
-                // Copy under the read lock; the borrowed pointer is invalid
-                // once we release it, but `local` now owns its own state
-                // (CowPtr refcount bumps on the shared codeobj vector + tables).
-                local = *p;
-                return true;
-            }
-        );
+        bool ready = false;
+        int count = 0;
+
+        // wait up to a second
+        while (!ready && count < 100000 / 40)
+        {
+            count++;
+            ready = decoder->cv.wait_for(
+                decoder.lk,
+                std::chrono::microseconds(40),
+                [&]()
+                {
+                    const CSRegisterHandler* p = decoder->pipestate.get(chunk_index);
+                    if (!p) return false;
+                    // Copy under the read lock; the borrowed pointer is invalid
+                    // once we release it, but `local` now owns its own state
+                    // (CowPtr refcount bumps on the shared codeobj vector + tables).
+                    local = *p;
+                    return true;
+                }
+            );
+        }
         if (!ready) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES;
     }
 
@@ -232,11 +240,15 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
     else
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 
-    auto decoder = HandleData::get_write_handle(handle);
-    if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+    std::condition_variable_any* cv = nullptr;
+    {
+        auto decoder = HandleData::get_write_handle(handle);
+        if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    decoder->pipestate.put(chunk_index + 1, std::move(local));
-    decoder->cv.notify_all();
+        decoder->pipestate.put(chunk_index + 1, std::move(local));
+        cv = &decoder->cv;
+    }
+    cv->notify_all();
     return status;
 }
 

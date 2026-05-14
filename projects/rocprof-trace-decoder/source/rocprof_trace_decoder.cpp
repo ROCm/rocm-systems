@@ -268,6 +268,9 @@ rocprof_trace_decoder_create_handle(rocprof_trace_decoder_handle_t* handle)
 
     handle->handle = g_handle_counter.fetch_add(1);
 
+    // Warmup scan
+    rocprof_trace_decoder_quick_scan(*handle, 0, nullptr, 0, nullptr, nullptr);
+
     std::lock_guard<std::mutex> lock(HandleData::get_map_mutex());
     HandleData::get_map()[handle->handle] = std::move(hd);
 
