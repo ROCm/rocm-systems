@@ -61,11 +61,10 @@ Panel Config:
             + SQC_ICACHE_MISSES_DUPLICATE)))
           unit: Percent
         Instruction Fetch Latency:
-          avg: SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQ_IFETCH)
-          min: MIN((SQ_ACCUM_PREV_HIRES / SQ_IFETCH))
-          max: MAX((SQ_ACCUM_PREV_HIRES / SQ_IFETCH))
+          avg: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH)
+          min: MIN((SQ_IFETCH_LEVEL_ACCUM / SQ_IFETCH))
+          max: MAX((SQ_IFETCH_LEVEL_ACCUM / SQ_IFETCH))
           unit: Cycles
-          coll_level: SQ_IFETCH_LEVEL
   - metric_table:
       id: 1303
       title: L1I <-> L2 interface

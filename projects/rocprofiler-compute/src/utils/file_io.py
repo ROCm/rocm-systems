@@ -80,7 +80,7 @@ def load_profiling_config(config_dir: str) -> dict[str, Any]:
 
 @demarcate
 def create_df_kernel_top_stats(
-    df_in: dict[str, pd.DataFrame],
+    df_in: pd.DataFrame,
     raw_data_dir: str,
     filter_gpu_ids: Optional[list[str]],
     filter_dispatch_ids: Optional[list[str]],
@@ -96,7 +96,7 @@ def create_df_kernel_top_stats(
         A tuple of (kernel_top_df, dispatch_info_df).
     """
 
-    df = df_in["pmc_perf"].copy()
+    df = df_in.copy()
 
     # The logic below for filters are the same as in parser.apply_filters(),
     # which can be merged together if need it.
@@ -298,57 +298,26 @@ def create_df_pmc(
     def create_single_df_pmc(
         raw_data_dir: str, node_name: Optional[str], kernel_verbose: int, verbose: int
     ) -> pd.DataFrame:
-        dfs: list[pd.DataFrame] = []
-        coll_levels: list[str] = []
-
-        coll_level_map = {}
-        for file_name in Path(raw_data_dir).rglob("*.csv"):
-            # In csv format accumulator counters are specified as
-            # SQ_ACCUM_PREV_HIRES counter in the coll_level specific csv
-            if config_dict.get(
-                "format_rocprof_output"
-            ) == "csv" and file_name.name.startswith("pmc_perf_SQ"):
-                coll_level_map[file_name] = file_name.name[
-                    len("pmc_perf_") : -len(".csv")
-                ]
-
-            # coll_level for pmc_perf.csv
-            if file_name.name == f"{schema.PMC_PERF_FILE_PREFIX}.csv":
-                coll_level_map[file_name] = schema.PMC_PERF_FILE_PREFIX
-
-        for csv_file in coll_level_map:
-            tmp_df = pd.read_csv(csv_file)
-
-            if config_dict.get("format_rocprof_output") == "rocpd":
-                tmp_df = utils_analysis.process_rocpd_csv(tmp_df)
-
-            # Demangle original KernelNames
-            # Skip for Standalone Roofline with -1 to keep full kernel names
-            if kernel_verbose >= 0:
-                kernel_name_shortener(tmp_df, kernel_verbose)
-
-            # NB:
-            #   Idealy, the Node column should be added out of
-            #   multiindexing level. Here, we add it into pmc_perf
-            #   as it is the main sub-df which can be handled easily
-            #   later.
-            if (
-                csv_file.name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
-                and node_name is not None
-            ):
-                tmp_df.insert(0, "Node", node_name)
-
-            dfs.append(tmp_df)
-            coll_levels.append(coll_level_map[csv_file])
-
-        if not dfs:
+        pmc_perf_path = Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+        if not pmc_perf_path.is_file():
             return pd.DataFrame()
 
-        # TODO: double check the case if all tmp_df.shape[0] are not on the same page
-        final_df = pd.concat(dfs, keys=coll_levels, axis=1, join="inner", copy=False)
+        df = pd.read_csv(pmc_perf_path)
+
+        if config_dict.get("format_rocprof_output") == "rocpd":
+            df = utils_analysis.process_rocpd_csv(df)
+
+        # Demangle original KernelNames
+        # Skip for Standalone Roofline with -1 to keep full kernel names
+        if kernel_verbose >= 0:
+            kernel_name_shortener(df, kernel_verbose)
+
+        if node_name is not None:
+            df.insert(0, "Node", node_name)
+
         if verbose >= 2:
-            console_debug(f"pmc_raw_data final_single_df {final_df.info}")
-        return final_df
+            console_debug(f"pmc_raw_data final_single_df {df.info}")
+        return df
 
     root_path = Path(raw_data_root_dir)
 

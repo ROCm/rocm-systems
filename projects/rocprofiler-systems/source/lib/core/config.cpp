@@ -2012,6 +2012,15 @@ get_use_ompt()
 }
 
 bool
+get_group_by_queue()
+{
+    // When the `hip_stream` domain is unavailable, the setting is not registered
+    // and there is no stream concept to attach to, so fall back to queue grouping.
+    return config::get_setting_value<bool>("ROCPROFSYS_ROCM_GROUP_BY_QUEUE")
+        .value_or(true);
+}
+
+bool
 get_use_code_coverage()
 {
     static auto _v = get_config()->find("ROCPROFSYS_USE_CODE_COVERAGE");

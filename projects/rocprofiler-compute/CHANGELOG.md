@@ -11,6 +11,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* `--output-format csv` in analyze mode now uses the database analysis workflow and produces one CSV per analysis view. Requires `--format-rocprof-output rocpd` and no longer prints the report to the terminal (matching `db` format).
+
 * Changed ratio metric aggregation from `AVG(A/B)` (arithmetic mean of per-dispatch ratios) to `SUM(A)/SUM(B)` (ratio of totals) across all analysis YAML configurations and all GPU architectures. `SUM(A)/SUM(B)` is a weighted average where each dispatch contributes proportionally to its denominator magnitude (duration, access count, cycle count). Single-dispatch workloads are unaffected (mathematically identical). Multi-dispatch workloads with different kernels or varying durations will see corrected values.
 
 * Added operator statistics and per-operator summary table in the analysis output of torch operators profiling. Added the following statistics for every torch operators and its children:
@@ -20,6 +22,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Profile workload output folder name for Strix Halo series (gfx1151) is changed from `strix_halo` to `rdna35_halo`
 
+* Unified accumulator handling across profile and analyze so each `_ACCUM`-suffixed counter is preserved instead of collapsing to `SQ_ACCUM_PREV_HIRES`
+
 ### Removed
 
 * ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
@@ -28,6 +32,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Optimized
 
+* Flattened the analyze-mode PMC dataframe to a single-index frame.
+
 ### Resolved issues
 
 * Fixed `inf` display for metrics with zero-denominator counters (e.g., L2-Fabric Write Latency when no write requests are issued). The metric evaluation path now catches `inf` scalar results and returns `"N/A"`, consistent with existing `NaN` handling.
@@ -35,6 +41,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Kernels with missing counter data after iteration multiplexing imputation are now excluded from metrics calculations. A warning at analysis time lists the affected kernels. Their execution times remain visible in Top Stats.
 
 * Fixed empirical roofline benchmark to correctly produce double the Matrix BF16 Gflop/s on gfx90a (MI 200 series) GPUs
+
+* Fixed empty native counter-collection configuration when profiling a shell or shell-script workload, by republishing all ``ROCPROF``-prefixed env vars (``ROCPROF_*``, ``ROCPROFILER_*``, etc.) across the shell's fork/exec. Env changes after the script setup isn't propagated to the profiler.
 
 ### Upcoming changes
 

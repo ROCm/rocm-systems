@@ -48,20 +48,11 @@ def is_pc_sampling_not_supported(output):
     return "Given PC sampling configuration is not supported" in output
 
 
-def skip_unsupported_pc_sampling_soc(is_stochastic=False):
-    unsupported_socs = {"MI100", "RDNA35_HALO"}
-    if is_stochastic:
-        unsupported_socs.add("MI200")
-
-    if soc in unsupported_socs:
-        pytest.skip(f"PC sampling is not supported on {soc}")
-
-
 def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
     """
     Test that PC sampling works with --block 21 and --pc-sampling-method host_trap.
     """
-    skip_unsupported_pc_sampling_soc()
+    common.skip_unsupported_pc_sampling_soc()
 
     options = [
         "--block",
@@ -93,7 +84,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
     """
     Test that PC sampling works with --block 21 and --pc-sampling-method stochastic.
     """
-    skip_unsupported_pc_sampling_soc(is_stochastic=True)
+    common.skip_unsupported_pc_sampling_soc(is_stochastic=True)
 
     options = [
         "--block",
@@ -135,7 +126,7 @@ def test_multi_rank_pc_sampling_only(
     Test that no multi-rank warning is printed when running with only
     --block 21 (PC sampling only mode requires a single pass) with multi-rank.
     """
-    skip_unsupported_pc_sampling_soc()
+    common.skip_unsupported_pc_sampling_soc()
 
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
     monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "2")
@@ -174,7 +165,7 @@ def test_multi_rank_warning_pc_sampling_with_counters(
     and another block (PC sampling with counters mode requires multiple passes)
     with multi-rank.
     """
-    skip_unsupported_pc_sampling_soc()
+    common.skip_unsupported_pc_sampling_soc()
 
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
     monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "2")
@@ -219,7 +210,7 @@ def test_pc_sampling_profile_then_analyze(
     End-to-end: profile with PC sampling (host_trap), then
     run analysis on the profiling output.
     """
-    skip_unsupported_pc_sampling_soc()
+    common.skip_unsupported_pc_sampling_soc()
 
     options = [
         "--block",
@@ -301,7 +292,7 @@ def test_pc_sampling_with_sol_block(binary_handler_profile_rocprof_compute):
     Test that PC sampling works with --block 21 and --block 2
     (PC sampling with counter collection)
     """
-    skip_unsupported_pc_sampling_soc()
+    common.skip_unsupported_pc_sampling_soc()
 
     options = [
         "--block",

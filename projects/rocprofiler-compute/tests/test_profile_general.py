@@ -1137,6 +1137,42 @@ def test_analyze_rocpd(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.misc
+def test_save_csv(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
+    workload_dir = common.get_output_dir(param_id="profile")
+    analysis_workload_dir = common.get_output_dir(param_id="analysis")
+    options = ["--format-rocprof-output", "rocpd"]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--output-format",
+        "csv",
+        "--output-name",
+        analysis_workload_dir,
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+
+    csv_dir = Path(analysis_workload_dir)
+    assert csv_dir.is_dir()
+
+    expected_view_csvs = ["kernel.csv", "kernel_metric.csv", "workload_metric.csv"]
+    for csv_name in expected_view_csvs:
+        csv_path = csv_dir / csv_name
+        assert csv_path.is_file(), f"Missing per-view CSV: {csv_path}"
+        df = pd.read_csv(csv_path)
+        assert len(df.index) >= 1, f"Per-view CSV is empty: {csv_path}"
+
+    assert not Path(f"{analysis_workload_dir}.db").exists()
+
+    common.clean_output_dir(config["cleanup"], analysis_workload_dir)
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
 @pytest.mark.roofline_1
 def test_roofline_workload_dir_not_set_error():
     """
@@ -2000,7 +2036,6 @@ def test_list_available_metrics_with_block(
 def test_comprehensive_error_paths():
     """Simplified test for error path coverage"""
 
-    from utils.metrics.expression import build_eval_string
     from utils.parser import build_comparable_columns
     from utils.utils_common import calc_builtin_var
 
@@ -2022,16 +2057,20 @@ def test_comprehensive_error_paths():
     result = calc_builtin_var("$total_l2_chan", sys_info)
     assert result == 16
 
-    try:
-        build_eval_string("test", None, config={})
-        assert False, "Should raise exception for None coll_level"
-    except Exception as e:
-        assert "coll_level can not be None" in str(e)
-
 
 @pytest.mark.live_attach_detach
-def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
-    options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
+@pytest.mark.parametrize("profile_format", ["rocpd", "csv"])
+def test_live_attach_detach_block(
+    binary_handler_profile_rocprof_compute, profile_format
+):
+    options = [
+        "--block",
+        "3.1.1",
+        "4.1.1",
+        "5.1.1",
+        "--format-rocprof-output",
+        profile_format,
+    ]
     workload_dir = common.get_output_dir()
 
     # TODO: temp fix for sdk defautly disable attach/detach,
@@ -2223,6 +2262,8 @@ def test_live_attach_detach_singlepass_launch_stats(
 def test_live_attach_detach_pc_sampling(
     binary_handler_profile_rocprof_compute,
 ):
+    common.skip_unsupported_pc_sampling_soc(is_stochastic=True)
+
     options = ["-b", "21"]
     workload_dir = common.get_output_dir()
 

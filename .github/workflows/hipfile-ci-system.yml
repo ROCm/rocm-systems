@@ -12,7 +12,7 @@ env:
   AIS_PKG_INSTALL_CMD: >-
     ${{
       case(
-        inputs.platform == 'rocky', 'dnf install -y',
+        startsWith(inputs.platform, 'rocky'), 'dnf install -y',
         inputs.platform == 'suse', 'zypper install -y --allow-unsigned-rpm',
         inputs.platform == 'ubuntu', 'apt update; apt install -y',
         ''
@@ -20,7 +20,7 @@ env:
     }}
   AIS_PKG_MGR: >-
     ${{
-      inputs.platform == 'rocky' && 'dnf' ||
+      startsWith(inputs.platform, 'rocky') && 'dnf' ||
       inputs.platform == 'suse' && 'zypper' ||
       inputs.platform == 'ubuntu' && 'apt'
     }}
@@ -225,7 +225,7 @@ jobs:
 #      FIO_RUNTIME_PKG_FILENAME: >-
 #        ${{
 #          case(
-#            inputs.platform == 'rocky', needs.build_FIO.outputs.fio_pkg_fedora_filename,
+#            startsWith(inputs.platform, 'rocky'), needs.build_FIO.outputs.fio_pkg_fedora_filename,
 #            inputs.platform == 'suse', needs.build_FIO.outputs.fio_pkg_suse_filename,
 #            inputs.platform == 'ubuntu', needs.build_FIO.outputs.fio_pkg_debian_filename,
 #            ''
@@ -234,7 +234,7 @@ jobs:
 #      FIO_HIPFILE_ENGINE_PKG_FILENAME: >-
 #        ${{
 #          case(
-#            inputs.platform == 'rocky', needs.build_FIO.outputs.fio_pkg_fedora_hipfile_engine_filename,
+#            startsWith(inputs.platform, 'rocky'), needs.build_FIO.outputs.fio_pkg_fedora_hipfile_engine_filename,
 #            ''
 #          )
 #        }}
@@ -269,7 +269,7 @@ jobs:
 #          artifact-ids: >-
 #            ${{
 #              case(
-#                inputs.platform == 'rocky',
+#                startsWith(inputs.platform, 'rocky'),
 #                format(
 #                  '{0},{1}',
 #                  needs.build_FIO.outputs.fio_pkg_fedora_artifact_id,
@@ -339,7 +339,7 @@ jobs:
 #            "${AIS_CONTAINER_NAME}:/root"
 #          ${{
 #            case(
-#              inputs.platform == 'rocky',
+#              startsWith(inputs.platform, 'rocky'),
 #                'docker cp \
 #                  "${GITHUB_WORKSPACE}/${FIO_HIPFILE_ENGINE_PKG_FILENAME}" \
 #                  "${AIS_CONTAINER_NAME}:/root"
@@ -359,7 +359,7 @@ jobs:
 #                  '{0} {1}',
 #                  env.AIS_PKG_INSTALL_CMD,
 #                  case(
-#                    inputs.platform == 'rocky',
+#                    startsWith(inputs.platform, 'rocky'),
 #                      format('./{0} ./{1}', env.FIO_RUNTIME_PKG_FILENAME, env.FIO_HIPFILE_ENGINE_PKG_FILENAME),
 #                    format('./{0}', env.FIO_RUNTIME_PKG_FILENAME)
 #                  )

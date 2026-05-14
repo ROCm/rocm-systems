@@ -22,10 +22,11 @@ set_target_properties(aqlprofile-core-tests PROPERTIES C_STANDARD 11 C_STANDARD_
 
 target_link_libraries(
     aqlprofile-core-tests
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library
+    PRIVATE -Wl,--start-group
+            rocprofiler-sdk::rocprofiler-sdk-static-library
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-aqlprofile
-            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+            -Wl,--end-group
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-drm
             aqlprofile-core-tests-flags

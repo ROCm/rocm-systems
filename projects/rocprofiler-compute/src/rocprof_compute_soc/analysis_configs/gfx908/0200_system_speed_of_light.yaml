@@ -89,11 +89,10 @@ Panel Config:
           peak: 5
           pop: 100 * SUM(SQ_INSTS) / SUM(SQ_BUSY_CU_CYCLES) / 5
         Wavefront Occupancy:
-          value: SUM(SQ_ACCUM_PREV_HIRES) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          value: SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
           unit: Wavefronts
           peak: ($max_waves_per_cu * $cu_per_gpu)
-          pop: (100 * SUM(SQ_ACCUM_PREV_HIRES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $max_waves_per_cu * $cu_per_gpu))
-          coll_level: SQ_LEVEL_WAVES
+          pop: (100 * SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $max_waves_per_cu * $cu_per_gpu))
         Theoretical LDS Bandwidth:
           value: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
@@ -168,11 +167,10 @@ Panel Config:
           peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu)
           pop: 100 * SUM(64 * SQC_ICACHE_REQ) / SUM(End_Timestamp - Start_Timestamp) / (($max_sclk / 1000) * 64 * $sqc_per_gpu)
         L1I Fetch Latency:
-          value: SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQ_IFETCH)
+          value: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH)
           unit: Cycles
           peak: None
           pop: None
-          coll_level: SQ_IFETCH_LEVEL
         CU Utilization:
           value: SUM(100 * SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
