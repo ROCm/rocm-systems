@@ -14,16 +14,16 @@ shipped gfx1151 analysis configuration.
 metrics for how your workload is performing on the target GPU, so you can spot
 bottlenecks before diving into block-specific panels.
 
-VALU FLOPs rows use aggregate VALU instruction counters (they do not split FP16,
-FP32, and FP64). WMMA follows a separate ISA path and is not broken out in this panel.
+VALU FLOPs rows use aggregate VALU instruction counters (they include FP16, FP32,
+and FP64). WMMA follows a separate ISA path and is not broken out in this panel.
 
 Wavefronts and FLOPs accounting
 --------------------------------
 
 RDNA 3.5 supports both Wave32 (typical primary mode) and Wave64 wavefronts;
-wavefront size is fixed per kernel at compile time. The profiler’s ``$wave_size``
-comes from hardware discovery (for example ``rocminfo``), while the executing kernel
-may use a different size—treat peaks as approximate when those differ. VALU FLOPs
+wavefront size is fixed per kernel at compile time. The profiler's ``$wave_size``
+depends on the hardware architecture (i.e., ``rocminfo``), while the executing kernel
+may use a different size—treat peaks as an approximation when those differ. VALU FLOPs
 in this panel scale roughly as ``wave_size * SQ_INSTS_VALU_sum / time``.
 
 Peak theoretical VALU rates (per CU, before multiplying by CU count and clock)
