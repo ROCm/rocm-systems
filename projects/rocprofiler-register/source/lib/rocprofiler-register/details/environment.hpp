@@ -129,8 +129,8 @@ get_env_impl(std::string_view env_id, bool _default)
             return static_cast<bool>(std::stoi(env_var));
         }
 
-        for(size_t i = 0; i < env_var.size(); ++i)
-            env_var[i] = static_cast<char>(tolower(static_cast<unsigned char>(env_var[i])));
+        for(char& c : env_var)
+            c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
         for(const auto& itr : { "off", "false", "no", "n", "f", "0" })
             if(env_var == itr) return false;
 
