@@ -74,6 +74,7 @@ add_subdirectory(roctx)
 add_subdirectory(rccl)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
+add_subdirectory(rocshmem)
 add_subdirectory(rocprofiler)
 
 #
