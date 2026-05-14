@@ -87,6 +87,35 @@ class TestValuDualIssueDetector:
         msg = console_warning_mock.call_args.args[0]
         assert "SQ_ACTIVE_INST_VALU2" not in msg
 
+    def test_check_emits_counter_issue_warning_above_2x_peak(self):
+        """VALU Utilization above 2x peak emits the counter-issue warning."""
+        detector = ValuDualIssueDetector(gpu_arch="gfx942")
+        with patch("utils.metrics.common.console_warning") as console_warning_mock:
+            detector.check("VALU Utilization", value=250.0, peak=100.0)
+        msg = console_warning_mock.call_args.args[0]
+        assert "exceeds twice the theoretical peak" in msg
+        assert "raw performance counters" in msg
+        assert "can go up to 200%" not in msg
+        assert ValuDualIssueDetector.faq_url not in msg
+
+    def test_check_emits_dual_issue_warning_at_exactly_2x_peak(self):
+        """value == 2 * peak stays in the dual-issue tier (not counter-issue)."""
+        detector = ValuDualIssueDetector(gpu_arch="gfx942")
+        with patch("utils.metrics.common.console_warning") as console_warning_mock:
+            detector.check("VALU Utilization", value=200.0, peak=100.0)
+        msg = console_warning_mock.call_args.args[0]
+        assert "VALU Utilization can go up to 200%" in msg
+        assert "exceeds twice" not in msg
+
+    def test_check_counter_issue_warning_for_valu_flops(self):
+        """VALU FLOPs above 2x peak emits the FLOPs-flavored counter-issue warning."""
+        detector = ValuDualIssueDetector(gpu_arch="gfx942")
+        with patch("utils.metrics.common.console_warning") as console_warning_mock:
+            detector.check("VALU FLOPs (F64)", value=1000.0, peak=400.0)
+        msg = console_warning_mock.call_args.args[0]
+        assert "VALU FLOPs exceeds twice the theoretical peak" in msg
+        assert "raw performance counters" in msg
+
     def test_check_ignores_valu2_on_non_gfx950(self):
         """Non-gfx950 archs never append the SQ_ACTIVE_INST_VALU2 suffix."""
         detector = ValuDualIssueDetector(

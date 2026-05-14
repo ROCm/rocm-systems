@@ -39,12 +39,15 @@ class ValuDualIssueDetector:
         self._dual_issue_confirmed = self._compute_dual_issue_confirmed(valu2_series)
 
     def check(self, metric_name: str, value: float, peak: float) -> None:
-        """Emit a dual-issue warning if metric is a candidate and value > peak."""
+        """Emit dual-issue warning above peak; counter-issue warning above 2x peak."""
         if metric_name not in self.metrics:
             return
         if not (peak > 0 and value > peak):
             return
-        console_warning(self._build_warning(metric_name))
+        if value > 2 * peak:
+            console_warning(self._build_counter_issue_warning(metric_name))
+        else:
+            console_warning(self._build_warning(metric_name))
 
     def _compute_dual_issue_confirmed(
         self,
@@ -55,6 +58,17 @@ class ValuDualIssueDetector:
         if valu2_series is None:
             return False
         return float(valu2_series.sum()) > 0
+
+    def _build_counter_issue_warning(self, metric_name: str) -> str:
+        if metric_name in self.valu_utilization_metrics:
+            return (
+                "VALU Utilization exceeds twice the theoretical peak, "
+                "indicating an issue in raw performance counters."
+            )
+        return (
+            "VALU FLOPs exceeds twice the theoretical peak, "
+            "indicating an issue in raw performance counters."
+        )
 
     def _build_warning(self, metric_name: str) -> str:
         if metric_name in self.valu_utilization_metrics:
