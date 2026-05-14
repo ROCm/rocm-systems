@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/common_types.hpp"
+#include "core/demangler.hpp"
 #include "function_signature.hpp"
 #include "fwd.hpp"
 #include "info.hpp"
@@ -12,10 +14,13 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
+#include <cstdint>
 #include <dlfcn.h>
 #include <string>
 #include <sys/stat.h>
+#include <type_traits>
 #include <unistd.h>
+#include <utility>
 
 //======================================================================================//
 
@@ -30,6 +35,113 @@ to_lower(string_t s)
     for(auto& itr : s)
         itr = tolower(itr);
     return s;
+}
+//
+//======================================================================================//
+//
+template <typename Tp>
+inline string_view_t
+rocprofsys_arg_name_view(Tp&& name)
+{
+    using raw_type   = std::remove_reference_t<Tp>;
+    using value_type = std::decay_t<Tp>;
+    static_assert(std::is_convertible<value_type, string_view_t>::value,
+                  "serialized argument names must be string-like");
+    if constexpr(std::is_pointer<raw_type>::value &&
+                 (std::is_same<value_type, const char*>::value ||
+                  std::is_same<value_type, char*>::value))
+    {
+        return (name) ? string_view_t{ name } : string_view_t{};
+    }
+    else
+    {
+        return string_view_t{ std::forward<Tp>(name) };
+    }
+}
+
+template <typename Tp>
+inline string_t
+rocprofsys_get_serialized_arg_type()
+{
+    using value_type = std::decay_t<Tp>;
+    if constexpr(std::is_same<value_type, string_t>::value ||
+                 std::is_same<value_type, string_view_t>::value ||
+                 std::is_same<value_type, const char*>::value ||
+                 std::is_same<value_type, char*>::value)
+    {
+        return "string";
+    }
+    else
+    {
+        return rocprofsys::utility::demangle<value_type>();
+    }
+}
+
+template <typename Tp>
+inline string_t
+rocprofsys_get_serialized_arg_value(Tp&& value)
+{
+    using raw_type   = std::remove_reference_t<Tp>;
+    using value_type = std::decay_t<Tp>;
+    if constexpr(std::is_pointer<raw_type>::value &&
+                 (std::is_same<value_type, const char*>::value ||
+                  std::is_same<value_type, char*>::value))
+    {
+        return (value) ? string_t{ value } : string_t{};
+    }
+
+    stringstream_t ss;
+    ss << std::forward<Tp>(value);
+    return ss.str();
+}
+
+template <typename NameT, typename ValueT, typename EnabledT, typename... TailT>
+inline size_t
+rocprofsys_append_serialized_args(string_t& out, size_t idx, NameT&& name, ValueT&& value,
+                                  EnabledT&& enabled, TailT&&... tail)
+{
+    static_assert(std::is_convertible<std::decay_t<EnabledT>, bool>::value,
+                  "serialized argument enable values must be bool-like");
+
+    auto next_idx = idx;
+    if(static_cast<bool>(enabled))
+    {
+        auto name_view = rocprofsys_arg_name_view(std::forward<NameT>(name));
+        if(!name_view.empty())
+        {
+            out += rocprofsys::get_args_string(
+                rocprofsys::function_args_t{ rocprofsys::argument_info{
+                    static_cast<std::uint32_t>(idx),
+                    rocprofsys_get_serialized_arg_type<ValueT>(), string_t{ name_view },
+                    rocprofsys_get_serialized_arg_value(std::forward<ValueT>(value)) } });
+            ++next_idx;
+        }
+    }
+
+    if constexpr(sizeof...(TailT) > 0)
+    {
+        return rocprofsys_append_serialized_args(out, next_idx,
+                                                 std::forward<TailT>(tail)...);
+    }
+    else
+    {
+        return next_idx;
+    }
+}
+
+// Builds a serialized string of arguments passed to rocprofsys_push_trace_with_args
+// Arguments are passed as name/value/enabled triples with the output format being:
+// <arg_number>;;<arg_type>;;<arg_name>;;<arg_value>;;
+template <typename... Args>
+inline string_t
+rocprofsys_get_serialized_args(Args&&... args)
+{
+    static_assert(sizeof...(Args) % 3 == 0,
+                  "serialized args must be passed as name/value/enabled triples");
+    string_t out;
+    if constexpr(sizeof...(Args) > 0)
+        rocprofsys_append_serialized_args(out, 0, std::forward<Args>(args)...);
+    return out;
 }
 //
 //======================================================================================//

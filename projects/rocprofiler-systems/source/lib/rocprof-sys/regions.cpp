@@ -100,6 +100,15 @@ rocprofsys_push_trace_hidden(const char* name)
 }
 
 extern "C" void
+rocprofsys_push_trace_with_args_hidden(const char* name, const char* serialized_args)
+{
+    rocprofsys::component::category_region<rocprofsys::category::host>::start(name);
+    if(!serialized_args) return;
+    rocprofsys::component::category_region<rocprofsys::category::host>::set_cache_args(
+        name, serialized_args);
+}
+
+extern "C" void
 rocprofsys_pop_trace_hidden(const char* name)
 {
     rocprofsys::component::category_region<rocprofsys::category::host>::stop(name);

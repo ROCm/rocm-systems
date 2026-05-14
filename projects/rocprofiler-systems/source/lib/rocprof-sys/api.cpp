@@ -14,6 +14,12 @@ rocprofsys_push_trace(const char* _name)
 }
 
 extern "C" void
+rocprofsys_push_trace_with_args(const char* _name, const char* _serialized_args)
+{
+    rocprofsys_push_trace_with_args_hidden(_name, _serialized_args);
+}
+
+extern "C" void
 rocprofsys_pop_trace(const char* _name)
 {
     rocprofsys_pop_trace_hidden(_name);

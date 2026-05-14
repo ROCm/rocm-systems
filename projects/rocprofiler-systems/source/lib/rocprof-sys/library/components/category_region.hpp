@@ -30,7 +30,10 @@
 
 #include <spdlog/fmt/ranges.h>
 
+#include <sstream>
+#include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace
@@ -38,15 +41,15 @@ namespace
 
 void
 cache_region(std::uint64_t thread_id, const std::string& name, std::uint64_t start_ts,
-             std::uint64_t end_ts, const std::string& category)
+             std::uint64_t end_ts, const std::string& category,
+             const std::string& args_str = {})
 {
     constexpr size_t      NO_CORRELATION_ID = 0;
     constexpr const char* CALLSTACK         = "{}";
-    constexpr const char* ARGUMENTS         = "";
     rocprofsys::trace_cache::get_buffer_storage().store(
         rocprofsys::trace_cache::region_sample{
             thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
-            end_ts, CALLSTACK, ARGUMENTS, category.c_str() });
+            end_ts, CALLSTACK, args_str.c_str(), category.c_str() });
 }
 
 struct entry_key
@@ -67,15 +70,121 @@ struct entry_key
 
 using timestamp_t = std::uint64_t;
 
-thread_local std::map<entry_key, timestamp_t> map_name_to_args;
+struct pending_cache_entry
+{
+    timestamp_t start_ts = 0;
+    std::string args     = {};
+};
 
-template <typename CategoryT, typename... Args>
+thread_local std::map<entry_key, pending_cache_entry> map_name_to_cache_entry;
+
+template <typename Tp>
+struct is_trace_cache_arg_name : std::is_convertible<std::decay_t<Tp>, std::string_view>
+{};
+
+template <typename TupleT, size_t... Idx>
+constexpr bool
+has_trace_cache_args(std::index_sequence<Idx...>)
+{
+    // Cannot be empty and must be grouped by "name", arg
+    if constexpr(sizeof...(Idx) == 0 || sizeof...(Idx) % 2 != 0)
+    {
+        return false;
+    }
+    else
+    {
+        // TODO: perfetto annotations can also be passed, we cannot handle those here as
+        // of yet
+        return ((Idx % 2 != 0 ||
+                 is_trace_cache_arg_name<std::tuple_element_t<Idx, TupleT>>::value) &&
+                ...);
+    }
+}
+
+template <typename Tp>
+std::string
+get_trace_cache_arg_type()
+{
+    using value_type = std::decay_t<Tp>;
+    if constexpr(std::is_convertible<value_type, std::string_view>::value)
+    {
+        return "string";
+    }
+    else
+    {
+        return rocprofsys::utility::demangle<value_type>();
+    }
+}
+
+template <typename Tp>
+std::string
+get_trace_cache_arg_value(Tp&& value)
+{
+    std::stringstream ss;
+    ss << std::forward<Tp>(value);
+    return ss.str();
+}
+
+template <typename KeyT, typename ValueT>
 void
-cache_start(const char* name)
+append_trace_cache_arg(std::string& args_str, std::uint32_t idx, KeyT&& key,
+                       ValueT&& value)
+{
+    const auto* delimiter = ";;";
+    args_str += fmt::format(
+        "{}{}{}{}{}{}{}{}", idx, delimiter, get_trace_cache_arg_type<ValueT>(), delimiter,
+        std::string_view{ std::forward<KeyT>(key) }, delimiter,
+        get_trace_cache_arg_value(std::forward<ValueT>(value)), delimiter);
+}
+
+template <size_t Idx = 0, typename TupleT>
+void
+append_trace_cache_args(std::string& args_str, TupleT&& args)
+{
+    if constexpr(Idx < std::tuple_size<std::remove_reference_t<TupleT>>::value)
+    {
+        append_trace_cache_arg(args_str, Idx / 2, std::get<Idx>(args),
+                               std::get<Idx + 1>(args));
+        append_trace_cache_args<Idx + 2>(args_str, std::forward<TupleT>(args));
+    }
+}
+
+template <typename... Args>
+std::string
+get_trace_cache_args_string(Args&&... args)
+{
+    using tuple_type = std::tuple<Args...>;
+    if constexpr(has_trace_cache_args<tuple_type>(
+                     std::make_index_sequence<sizeof...(Args)>{}))
+    {
+        auto        args_tuple = std::forward_as_tuple(args...);
+        std::string args_str;
+        append_trace_cache_args(args_str, args_tuple);
+        return args_str;
+    }
+    else
+    {
+        return {};
+    }
+}
+
+template <typename CategoryT>
+void
+cache_start(const char* name, std::string args_str = {})
 {
     const auto start_ts =
         static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    map_name_to_args[{ name, rocprofsys::trait::name<CategoryT>::value }] = start_ts;
+    entry_key key{ name, rocprofsys::trait::name<CategoryT>::value };
+    map_name_to_cache_entry[key] = pending_cache_entry{ start_ts, std::move(args_str) };
+}
+
+template <typename CategoryT>
+void
+cache_args(const char* name, std::string args_str)
+{
+    auto key = entry_key{ name, rocprofsys::trait::name<CategoryT>::value };
+    auto itr = map_name_to_cache_entry.find(key);
+    if(itr != map_name_to_cache_entry.end()) itr->second.args = std::move(args_str);
 }
 
 template <typename CategoryT>
@@ -83,11 +192,12 @@ void
 cache_stop(const char* name)
 {
     entry_key key{ name, rocprofsys::trait::name<CategoryT>::value };
-    auto      x = map_name_to_args.find(key);
-    if(x != map_name_to_args.end())
+    auto      itr = map_name_to_cache_entry.find(key);
+    if(itr != map_name_to_cache_entry.end())
     {
-        auto timestamp = x->second;
-        map_name_to_args.erase(x);
+        auto timestamp = itr->second.start_ts;
+        auto args_str  = std::move(itr->second.args);
+        map_name_to_cache_entry.erase(itr);
 
         const auto end_ts =
             static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
@@ -104,7 +214,7 @@ cache_stop(const char* name)
         }
 
         cache_region(thread_id, name, timestamp, end_ts,
-                     rocprofsys::trait::name<CategoryT>::value);
+                     rocprofsys::trait::name<CategoryT>::value, args_str);
     }
 }
 
@@ -126,11 +236,12 @@ flush_pending_cached_entries()
             { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
     }
 
-    for(const auto& [key, start_ts] : map_name_to_args)
+    for(const auto& [key, entry] : map_name_to_cache_entry)
     {
-        cache_region(thread_id, key.name, start_ts, end_ts, key.category);
+        cache_region(thread_id, key.name, entry.start_ts, end_ts, key.category,
+                     entry.args);
     }
-    map_name_to_args.clear();
+    map_name_to_cache_entry.clear();
 }
 }  // namespace
 
@@ -196,6 +307,8 @@ struct category_region : comp::base<category_region<CategoryT>, void>
     {
         return fmt::format("rocprofsys_{}_region", category_name);
     }
+
+    static void set_cache_args(std::string_view name, std::string serialized_args);
 
     template <typename... OptsT, typename... Args>
     static void start(std::string_view name, Args&&...);
@@ -266,6 +379,17 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
         ++tracing::push_count();
     }
 
+    // Allow cache_start to process arguments passed through args
+    // excluding perfetto annotations
+    constexpr bool _has_cache_args = has_trace_cache_args<std::tuple<Args...>>(
+        std::make_index_sequence<sizeof...(Args)>{});
+
+    std::string _cache_args = {};
+    if constexpr(_has_cache_args)
+    {
+        _cache_args = get_trace_cache_args_string(args...);
+    }
+
     auto _hash = tim::add_hash_id(name);
     name       = tim::get_hash_identifier_fast(_hash);
 
@@ -293,7 +417,26 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
         }
     }
 
-    cache_start<CategoryT>(name.data());
+    if constexpr(_has_cache_args)
+    {
+        cache_start<CategoryT>(name.data(), std::move(_cache_args));
+    }
+    else
+    {
+        cache_start<CategoryT>(name.data());
+    }
+}
+
+template <typename CategoryT>
+void
+category_region<CategoryT>::set_cache_args(std::string_view name,
+                                           std::string      serialized_args)
+{
+    if(name.empty() || serialized_args.empty()) return;
+
+    auto _hash = tim::add_hash_id(name);
+    name       = tim::get_hash_identifier_fast(_hash);
+    cache_args<CategoryT>(name.data(), std::move(serialized_args));
 }
 
 template <typename CategoryT>
