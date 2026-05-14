@@ -102,7 +102,7 @@ from amdisa.codegen.execute.matrix import (
 class _SemanticEmitter:
     """Entry point for execute() body generation.
 
-    Phase 0 introduces this class as a named abstraction; Phase B.9 completes
+    This class provides a named abstraction;
     the full method extraction (one ``emit_<cls>`` method per semantic class,
     replacing the ~600-line ``if cls == ...`` chain in ``_gen_execute_body``).
 
@@ -653,7 +653,57 @@ class CodeGenerator:
         has_abs = profile.has_abs_modifier(inst.enc_name)
         self._enc_name = enc_name
 
-        # Try the registry first (covers all extracted gen_ functions).
+        # Try SemaAST pipeline for validated classes.
+        from amdisa.sema_derive import derive_sema_block
+        from amdisa.codegen.execute.sema_lower import (
+            lower_sema_block, LoweringContext, OperandMap,
+        )
+        _SEMA_CLASSES = frozenset({
+            'scalar_mov', 'scalar_cmov', 'scalar_cselect',
+            'scalar_cmp',
+            'scalar_unary',
+            'scalar_binop',
+            'scalar_bitcmp',
+            'scalar_saveexec',
+            'scalar_bfe',
+            'vector_cmp_class',
+            'vector_swap',
+            'vector_mov',
+            'vector_binop',
+            'vector_ternary',
+            'vector_unary',
+            'vector_cmp',
+            'vector_cndmask',
+            'vector_add_co',
+        })
+        if cls in _SEMA_CLASSES:
+            sema_block = derive_sema_block(sem)
+            if sema_block is not None and not sema_block.is_empty:
+                is_float_op = dtype in ('f16', 'f32', 'f64', 'bf16') or cls == 'vector_mov'
+                if is_vop3 and is_float_op:
+                    from amdisa.sema_enrich import enrich_block
+                    ef = {'neg'}
+                    if has_abs:
+                        ef.add('abs')
+                    inst_fields = getattr(self, '_current_inst_fields', set())
+                    if 'clamp' in inst_fields:
+                        ef.add('clamp')
+                    if 'omod' in inst_fields:
+                        ef.add('omod')
+                    sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
+                omap = OperandMap.from_operand_names(
+                    src_ops, dst_ops, sema_block.pragma, dtype)
+                lctx = LoweringContext(
+                    exec_model=sema_block.pragma, operand_map=omap)
+                if cls == 'vector_cndmask' and is_vop3 and len(src_ops) >= 3:
+                    lctx.vcc_read = f'{src_ops[2]}.read_scalar64(wf)'
+                if cls == 'vector_add_co':
+                    if is_vop3 and len(src_ops) >= 3:
+                        lctx.vcc_read = f'{src_ops[2]}.read_scalar64(wf)'
+                    lctx.vcc_dst = dst_ops[1] if len(dst_ops) > 1 else '__vcc__'
+                return lower_sema_block(sema_block, lctx)
+
+        # Try the registry (covers all extracted gen_ functions).
         from amdisa.codegen.execute import ExecuteContext, DISPATCH
         ctx = ExecuteContext(
             inst=inst, sem=sem, dst_ops=dst_ops, src_ops=src_ops,
@@ -2717,7 +2767,7 @@ class CodeGenerator:
         ISA.  This is correct for compilation because all universal
         instructions have identical encoding layouts, and the per-ISA header
         that includes the shared header provides the correct ISA context.
-        Phase F.5 will introduce shared encoding bases to eliminate this
+        A future refactor could introduce shared encoding bases to eliminate this
         dependency.
         """
         import os

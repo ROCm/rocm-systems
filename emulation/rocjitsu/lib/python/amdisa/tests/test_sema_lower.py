@@ -140,7 +140,7 @@ class TestLowerControlFlow:
         ))
         block = SemaBlock('TEST', ExecModel.SCALAR, body)
         result = lower_sema_block(block)
-        assert 'if (wf.scc())' in result
+        assert 'if (wf.read_scc())' in result
 
     def test_if_else(self):
         body = SemaNode(SemaNodeKind.IF, children=(
@@ -198,7 +198,7 @@ class TestLowerContextIds:
         ))
         block = SemaBlock('TEST', ExecModel.SCALAR, body)
         result = lower_sema_block(block)
-        assert 'wf.scc()' in result
+        assert 'wf.read_scc()' in result
 
 
 class TestLowerCall:
@@ -239,7 +239,7 @@ class TestLowerTernary:
         block = SemaBlock('TEST', ExecModel.SCALAR, body)
         result = lower_sema_block(block)
         assert '?' in result
-        assert 'wf.scc()' in result
+        assert 'wf.read_scc()' in result
 
 
 class TestLowerMemory:

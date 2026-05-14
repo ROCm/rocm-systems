@@ -435,8 +435,8 @@ SSextI32I8Sop1::SSextI32I8Sop1(const MachineInst *inst)
 }
 
 void SSextI32I8Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t val = ssrc0.read_scalar(wf);
-  uint32_t result = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(val & 0xFF)));
+  int32_t result = static_cast<int32_t>(
+      static_cast<int32_t>(static_cast<int32_t>(ssrc0.read_scalar(wf)) << 24) >> 24);
   sdst.write_scalar(wf, result);
 }
 
@@ -476,8 +476,7 @@ SBitset0B32Sop1::SBitset0B32Sop1(const MachineInst *inst)
 }
 
 void SBitset0B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t bit = ssrc0.read_scalar(wf);
-  uint32_t result = sdst.read_scalar(wf) & ~(1u << (bit & 31));
+  uint32_t result = (ssrc0.read_scalar(wf) & ~(1u << (ssrc0.read_scalar(wf) & 31u)));
   sdst.write_scalar(wf, result);
 }
 
@@ -498,8 +497,8 @@ SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
 }
 
 void SBitset0B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t bit = ssrc0.read_scalar(wf);
-  uint64_t result = sdst.read_scalar64(wf) & ~(1ULL << (bit & 63));
+  uint64_t result = (static_cast<uint64_t>(ssrc0.read_scalar64(wf)) &
+                     ~(1u << (static_cast<uint64_t>(ssrc0.read_scalar64(wf)) & 31u)));
   sdst.write_scalar64(wf, result);
 }
 
@@ -520,8 +519,7 @@ SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
 }
 
 void SBitset1B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t bit = ssrc0.read_scalar(wf);
-  uint32_t result = sdst.read_scalar(wf) | (1u << (bit & 31));
+  uint32_t result = (ssrc0.read_scalar(wf) | (1u << (ssrc0.read_scalar(wf) & 31u)));
   sdst.write_scalar(wf, result);
 }
 
@@ -542,8 +540,8 @@ SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
 }
 
 void SBitset1B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t bit = ssrc0.read_scalar(wf);
-  uint64_t result = sdst.read_scalar64(wf) | (1ULL << (bit & 63));
+  uint64_t result = (static_cast<uint64_t>(ssrc0.read_scalar64(wf)) |
+                     (1u << (static_cast<uint64_t>(ssrc0.read_scalar64(wf)) & 31u)));
   sdst.write_scalar64(wf, result);
 }
 

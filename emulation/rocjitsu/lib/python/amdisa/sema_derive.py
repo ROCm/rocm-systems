@@ -107,6 +107,7 @@ _OP_TO_KIND: dict[str, SemaNodeKind] = {
 
 _CMP_OP_TO_KIND: dict[str, SemaNodeKind] = {
     'eq': SemaNodeKind.EQ, 'ne': SemaNodeKind.NE,
+    'lg': SemaNodeKind.NE,
     'lt': SemaNodeKind.LT, 'gt': SemaNodeKind.GT,
     'le': SemaNodeKind.LE, 'ge': SemaNodeKind.GE,
 }
@@ -144,7 +145,7 @@ class _ScalarMov(_ScalarDeriver):
     @staticmethod
     def derive(sem: InstructionSemantics) -> SemaBlock:
         ty = _dtype_to_sema(sem.data_type)
-        body = _assign(_cast(_dst(0), ty), _cast(_src(0), ty))
+        body = _assign(_cast(_dst(0, ty), ty), _cast(_src(0, ty), ty))
         return SemaBlock(sem.name, ExecModel.SCALAR, body)
 
 
@@ -155,7 +156,7 @@ class _ScalarCmov(_ScalarDeriver):
         ty = _dtype_to_sema(sem.data_type)
         body = SemaNode(SemaNodeKind.IF, children=(
             _id('SCC', SemaType.U1),
-            _assign(_cast(_dst(0), ty), _cast(_src(0), ty)),
+            _assign(_cast(_dst(0, ty), ty), _cast(_src(0, ty), ty)),
         ))
         return SemaBlock(sem.name, ExecModel.SCALAR, body)
 
@@ -224,7 +225,18 @@ class _ScalarBinop(_ScalarDeriver):
 
         kind = _OP_TO_KIND.get(op or '', SemaNodeKind.CALL)
 
-        if op in ('nand', 'nor', 'xnor'):
+        if op in ('shl', 'shr'):
+            mask_val = '63u' if ty.size == 64 else '31u'
+            masked = SemaNode(SemaNodeKind.AND, ty=SemaType.U32,
+                              children=(src1, _lit(mask_val)))
+            shift_kind = SemaNodeKind.SHL if op == 'shl' else SemaNodeKind.SHR
+            result = SemaNode(shift_kind, ty=ty, children=(src0, masked))
+        elif op == 'ashr':
+            call_name = 'ashr_i64' if ty.size == 64 else 'util::arithmetic_shr'
+            result = SemaNode(SemaNodeKind.CALL, ty=ty,
+                              call_name=call_name,
+                              children=(_id(call_name), src0, src1))
+        elif op in ('nand', 'nor', 'xnor'):
             inner = SemaNode(kind, ty=ty, children=(src0, src1))
             result = SemaNode(SemaNodeKind.BITNEG, ty=ty, children=(inner,))
         elif op == 'andn2':
@@ -250,31 +262,50 @@ class _ScalarBinop(_ScalarDeriver):
         else:
             result = SemaNode(kind, ty=ty, children=(src0, src1))
 
+        scc_handled_by_template = op in (
+            'addc', 'subb',
+            'lshl1_add', 'lshl2_add', 'lshl3_add', 'lshl4_add',
+        )
+
+        needs_cached_ops = (sem.sets_scc and sem.sets_scc != 'none'
+                            and not scc_handled_by_template
+                            and sem.sets_scc in ('carry', 'borrow', 'overflow',
+                                                 'compare'))
+        if needs_cached_ops:
+            stmts.append(_assign(_id('s0', ty), src0))
+            stmts.append(_assign(_id('s1', ty), src1))
+            src0_scc = _id('s0', ty)
+            src1_scc = _id('s1', ty)
+        else:
+            src0_scc = src0
+            src1_scc = src1
+
         stmts.append(_assign(_id('result', ty), result))
         stmts.append(_assign(_cast(_dst(0), ty), _id('result', ty)))
 
-        if sem.sets_scc and sem.sets_scc != 'none':
+        if sem.sets_scc and sem.sets_scc != 'none' and not scc_handled_by_template:
             if sem.sets_scc == 'carry':
                 wide = SemaNode(SemaNodeKind.ADD, ty=SemaType.U64, children=(
-                    _cast(src0, SemaType.U64), _cast(src1, SemaType.U64),
+                    _cast(src0_scc, SemaType.U64), _cast(src1_scc, SemaType.U64),
                 ))
                 scc_expr = SemaNode(SemaNodeKind.GT, ty=SemaType.U1, children=(
                     wide, _lit('4294967295', SemaType.U64),
                 ))
             elif sem.sets_scc == 'borrow':
                 scc_expr = SemaNode(SemaNodeKind.LT, ty=SemaType.U1, children=(
-                    src0, src1,
+                    src0_scc, src1_scc,
                 ))
             elif sem.sets_scc == 'overflow':
-                wide = SemaNode(SemaNodeKind.ADD, ty=SemaType.I64, children=(
-                    _cast(src0, SemaType.I64), _cast(src1, SemaType.I64),
+                overflow_kind = SemaNodeKind.SUB if op == 'sub' else SemaNodeKind.ADD
+                wide = SemaNode(overflow_kind, ty=SemaType.I64, children=(
+                    _cast(src0_scc, SemaType.I64), _cast(src1_scc, SemaType.I64),
                 ))
                 scc_expr = SemaNode(SemaNodeKind.NE, ty=SemaType.U1, children=(
                     wide, _cast(_id('result', ty), SemaType.I64),
                 ))
             elif sem.sets_scc == 'compare':
-                scc_expr = SemaNode(SemaNodeKind.NE, ty=SemaType.U1, children=(
-                    src0, src1,
+                scc_expr = SemaNode(SemaNodeKind.LT, ty=SemaType.U1, children=(
+                    src0_scc, src1_scc,
                 ))
             else:
                 scc_expr = SemaNode(SemaNodeKind.NE, ty=SemaType.U1, children=(
@@ -468,18 +499,35 @@ def _vec_binop_expr(
 ) -> SemaNode:
     if op is None:
         return SemaNode(SemaNodeKind.ADD, ty=ty, children=(src0, src1))
-    if op == 'subrev':
+    if op in ('subrev', 'rsub'):
         return SemaNode(SemaNodeKind.SUB, ty=ty, children=(src1, src0))
-    if op in ('lshlrev', 'lshrrev'):
-        base = {'lshlrev': SemaNodeKind.SHL, 'lshrrev': SemaNodeKind.SHR}
-        return SemaNode(base[op], ty=ty, children=(src1, src0))
-    if op == 'ashrrev':
+    if op in ('lshlrev', 'lshrrev', 'shl', 'shr'):
+        base = {'lshlrev': SemaNodeKind.SHL, 'lshrrev': SemaNodeKind.SHR,
+                'shl': SemaNodeKind.SHL, 'shr': SemaNodeKind.SHR}
+        mask_val = '63u' if ty.size == 64 else ('15u' if ty.size == 16 else '31u')
+        masked_amt = SemaNode(SemaNodeKind.AND, ty=SemaType.U32,
+                              children=(src0, _lit(mask_val)))
+        return SemaNode(base[op], ty=ty, children=(src1, masked_amt))
+    if op == 'fmac':
+        return SemaNode(SemaNodeKind.FMA, ty=ty,
+                        children=(src0, src1, _cast(_dst(0, ty), ty)))
+    if op == 'xnor':
+        return SemaNode(SemaNodeKind.BITNEG, ty=ty, children=(
+            SemaNode(SemaNodeKind.XOR, ty=ty, children=(src0, src1)),))
+    if op == 'mul_legacy':
+        return SemaNode(SemaNodeKind.CALL, ty=ty, call_name='mul_legacy',
+                        children=(_id('mul_legacy'), src0, src1))
+    if op in ('ashr', 'ashrrev'):
+        call_name = 'ashr_i64' if ty.size == 64 else 'util::arithmetic_shr'
         return SemaNode(SemaNodeKind.CALL, ty=ty,
-                        call_name='util::arithmetic_shr',
-                        children=(_id('util::arithmetic_shr'), src1, src0))
+                        call_name=call_name,
+                        children=(_id(call_name), src1, src0))
     kind = _BINOP_KIND_MAP.get(op, SemaNodeKind.CALL)
     if kind == SemaNodeKind.CALL:
-        fn = f'std::{op}' if op in ('min', 'max') else op
+        if op in ('min', 'max'):
+            fn = f'std::f{op}' if ty.base in ('F', 'BF') else f'std::{op}'
+        else:
+            fn = op
         return SemaNode(SemaNodeKind.CALL, ty=ty, call_name=fn,
                         children=(_id(fn), src0, src1))
     return SemaNode(kind, ty=ty, children=(src0, src1))
@@ -499,9 +547,40 @@ class _VectorUnary(_ScalarDeriver):
     @staticmethod
     def derive(sem: InstructionSemantics) -> SemaBlock:
         ty = _dtype_to_sema(sem.data_type)
-        src0 = _cast(_src(0), ty)
-        result = _vec_unary_expr(sem.operation, src0, ty)
-        body = _assign(_cast(_dst(0), ty), result)
+        op = sem.operation
+        dtype = sem.data_type
+
+        if op == 'frexp_exp_f32' and dtype == 'f64':
+            src0 = _cast(_src(0, SemaType.F64), SemaType.F64)
+            result = SemaNode(SemaNodeKind.CALL, ty=SemaType.U32,
+                              call_name='frexp_exp_f64',
+                              children=(_id('frexp_exp_f64'), src0))
+            body = _assign(_cast(_dst(0), SemaType.U32), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+        if op == 'frexp_mant_f32' and dtype == 'f64':
+            src0 = _cast(_src(0, SemaType.F64), SemaType.F64)
+            result = SemaNode(SemaNodeKind.CALL, ty=SemaType.F64,
+                              call_name='frexp_mant_f64',
+                              children=(_id('frexp_mant_f64'), src0))
+            body = _assign(_cast(_dst(0, SemaType.F64), SemaType.F64), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+        if op == 'cvt' and dtype:
+            call_name = f'cvt_{dtype}'
+            src0 = _src(0)
+            body = _assign(_cast(_dst(0), SemaType.B32),
+                           SemaNode(SemaNodeKind.CALL, ty=SemaType.B32,
+                                    call_name=call_name,
+                                    children=(_id(call_name), src0)))
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+        if op and op.startswith('cvt_'):
+            src0 = _src(0)
+        else:
+            src0 = _cast(_src(0, ty), ty)
+        result = _vec_unary_expr(op, src0, ty)
+        body = _assign(_cast(_dst(0, ty), ty), result)
         return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
 
@@ -510,9 +589,66 @@ class _VectorBinop(_ScalarDeriver):
     @staticmethod
     def derive(sem: InstructionSemantics) -> SemaBlock:
         ty = _dtype_to_sema(sem.data_type)
+        op = sem.operation
+        name_lower = sem.name.lower()
+
+        if op == 'ldexp':
+            src0 = _cast(_src(0), ty)
+            if ty.size == 16:
+                src1 = _cast(_cast(_src(1, SemaType('B', 16)),
+                                   SemaType('I', 16)), SemaType.I32)
+            else:
+                src1 = _cast(_src(1), SemaType.I32)
+            result = SemaNode(SemaNodeKind.LDEXP, ty=ty,
+                              children=(src0, src1))
+            body = _assign(_cast(_dst(0), ty), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+        if op in ('mul_hi', 'mulhi'):
+            if 'u24' in name_lower or 'u32_u24' in name_lower:
+                call_name = 'mul_hi_u24'
+            elif 'i24' in name_lower or 'i32_i24' in name_lower:
+                call_name = 'mul_hi_i24'
+            else:
+                call_name = 'mul_hi'
+            src0 = _cast(_src(0), ty)
+            src1 = _cast(_src(1), ty)
+            result = SemaNode(SemaNodeKind.CALL, ty=ty,
+                              call_name=call_name,
+                              children=(_id(call_name), src0, src1))
+            body = _assign(_cast(_dst(0), ty), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+        if op in ('mul', 'mul_lo'):
+            if 'u24' in name_lower or 'u32_u24' in name_lower:
+                src0 = _cast(_src(0), ty)
+                src1 = _cast(_src(1), ty)
+                result = SemaNode(SemaNodeKind.CALL, ty=ty,
+                                  call_name='mul_u24',
+                                  children=(_id('mul_u24'), src0, src1))
+                body = _assign(_cast(_dst(0), ty), result)
+                return SemaBlock(sem.name, ExecModel.VECTOR, body)
+            if 'i24' in name_lower or 'i32_i24' in name_lower:
+                src0 = _cast(_src(0), ty)
+                src1 = _cast(_src(1), ty)
+                result = SemaNode(SemaNodeKind.CALL, ty=ty,
+                                  call_name='mul_i24',
+                                  children=(_id('mul_i24'), src0, src1))
+                body = _assign(_cast(_dst(0), ty), result)
+                return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+        if op == 'mul_lo' and 'u16' in name_lower:
+            src0 = _cast(_src(0), ty)
+            src1 = _cast(_src(1), ty)
+            result = SemaNode(SemaNodeKind.CALL, ty=ty,
+                              call_name='mul_lo_u16',
+                              children=(_id('mul_lo_u16'), src0, src1))
+            body = _assign(_cast(_dst(0), ty), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
         src0 = _cast(_src(0), ty)
         src1 = _cast(_src(1), ty)
-        result = _vec_binop_expr(sem.operation, src0, src1, ty)
+        result = _vec_binop_expr(op, src0, src1, ty)
         body = _assign(_cast(_dst(0), ty), result)
         return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
@@ -522,11 +658,27 @@ class _VectorTernary(_ScalarDeriver):
     @staticmethod
     def derive(sem: InstructionSemantics) -> SemaBlock:
         ty = _dtype_to_sema(sem.data_type)
+        op = sem.operation or 'fma'
+        dtype = sem.data_type
+
+        if op in ('fma', 'mad', 'fmac') and dtype in ('i24', 'u24'):
+            call_name = 'mad_i24' if dtype == 'i24' else 'mad_u24'
+            result = SemaNode(SemaNodeKind.CALL, ty=ty,
+                              call_name=call_name,
+                              children=(_id(call_name),
+                                        _cast(_src(0), ty),
+                                        _cast(_src(1), ty),
+                                        _cast(_src(2), ty)))
+            body = _assign(_cast(_dst(0), ty), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
         src0 = _cast(_src(0), ty)
         src1 = _cast(_src(1), ty)
         src2 = _cast(_src(2), ty)
-        op = sem.operation or 'fma'
-        if op in ('fma', 'mad'):
+        if op == 'mad':
+            mul = SemaNode(SemaNodeKind.MUL, ty=ty, children=(src0, src1))
+            result = SemaNode(SemaNodeKind.ADD, ty=ty, children=(mul, src2))
+        elif op in ('fma', 'fmac'):
             result = SemaNode(SemaNodeKind.FMA, ty=ty,
                               children=(src0, src1, src2))
         else:
@@ -615,23 +767,46 @@ class _VectorAddCo(_ScalarDeriver):
     @staticmethod
     def derive(sem: InstructionSemantics) -> SemaBlock:
         ty = _dtype_to_sema(sem.data_type)
+        op = sem.operation or 'add'
         src0 = _cast(_src(0), ty)
         src1 = _cast(_src(1), ty)
-        wide_ty = SemaType('U', 64)
-        wide_add = SemaNode(SemaNodeKind.ADD, ty=wide_ty, children=(
-            _cast(src0, wide_ty), _cast(src1, wide_ty),
-        ))
+
+        if op == 'sub':
+            result = SemaNode(SemaNodeKind.CALL, ty=ty,
+                              call_name='sub_co',
+                              children=(_id('sub_co'), src0, src1))
+        elif op == 'rsub':
+            result = SemaNode(SemaNodeKind.CALL, ty=ty,
+                              call_name='sub_co',
+                              children=(_id('sub_co'), src1, src0))
+        elif op == 'addc':
+            cin = SemaNode(SemaNodeKind.ARRAYDEREF, ty=SemaType.U1,
+                           children=(_id('VCC', SemaType.U64),
+                                     _id('laneId', SemaType.U32)))
+            result = SemaNode(SemaNodeKind.CALL, ty=ty,
+                              call_name='addc_co',
+                              children=(_id('addc_co'), src0, src1, cin))
+        elif op == 'subbc':
+            cin = SemaNode(SemaNodeKind.ARRAYDEREF, ty=SemaType.U1,
+                           children=(_id('VCC', SemaType.U64),
+                                     _id('laneId', SemaType.U32)))
+            result = SemaNode(SemaNodeKind.CALL, ty=ty,
+                              call_name='subbc_co',
+                              children=(_id('subbc_co'), src0, src1, cin))
+        elif op == 'subbrevco':
+            cin = SemaNode(SemaNodeKind.ARRAYDEREF, ty=SemaType.U1,
+                           children=(_id('VCC', SemaType.U64),
+                                     _id('laneId', SemaType.U32)))
+            result = SemaNode(SemaNodeKind.CALL, ty=ty,
+                              call_name='subbc_co',
+                              children=(_id('subbc_co'), src1, src0, cin))
+        else:
+            result = SemaNode(SemaNodeKind.CALL, ty=ty,
+                              call_name='add_co',
+                              children=(_id('add_co'), src0, src1))
+
         stmts = [
-            _assign(_id('wide', wide_ty), wide_add),
-            _assign(_cast(_dst(0), ty), _cast(_id('wide', wide_ty), ty)),
-            _assign(
-                SemaNode(SemaNodeKind.ARRAYDEREF, ty=SemaType.U1, children=(
-                    _id('VCC', SemaType.U64), _id('laneId', SemaType.U32),
-                )),
-                SemaNode(SemaNodeKind.GT, ty=SemaType.U1, children=(
-                    _id('wide', wide_ty), _lit('4294967295', wide_ty),
-                )),
-            ),
+            _assign(_cast(_dst(0), ty), result),
         ]
         body = SemaNode(SemaNodeKind.SEQ, children=tuple(stmts))
         return SemaBlock(sem.name, ExecModel.VECTOR, body)
@@ -1434,8 +1609,8 @@ class _ScalarCselect(_ScalarDeriver):
     def derive(sem: InstructionSemantics) -> SemaBlock:
         ty = _dtype_to_sema(sem.data_type)
         result = SemaNode(SemaNodeKind.TERNARY, ty=ty, children=(
-            _id('SCC', SemaType.U1), _cast(_src(0), ty), _cast(_src(1), ty)))
-        body = _assign(_cast(_dst(0), ty), result)
+            _id('SCC', SemaType.U1), _cast(_src(0, ty), ty), _cast(_src(1, ty), ty)))
+        body = _assign(_cast(_dst(0, ty), ty), result)
         return SemaBlock(sem.name, ExecModel.SCALAR, body)
 
 
