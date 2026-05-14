@@ -797,10 +797,14 @@ ncclResult_t IbCastGinIbProxyIFlush(void *ginCtx, int context, void* mhandle, ui
   struct ibv_send_wr wr;
   memset(&wr, 0, sizeof(wr));
   wr.wr_id = req - comm->base.reqs;
-
-  void *flushPtr = (void *)(ginMrHandle->base_vas[rank]);
+ 
+  // The flush QP is a loopback (self-connected on the local recv comm), so the
+  // RDMA READ target must be locally-registered memory. Use localRank, not rank
+  // (the remote peer): rkeys[rank] is the remote's rkey, invalid in the local PD.
+  int localRank = ginProxyCtx->rank;
+  void *flushPtr = (void *)(ginMrHandle->base_vas[localRank]);
   wr.wr.rdma.remote_addr = (uint64_t)flushPtr;
-  wr.wr.rdma.rkey = ginMrHandle->rkeys[rank];
+  wr.wr.rdma.rkey = ginMrHandle->rkeys[localRank];
   wr.sg_list = &comm->devs[qp->devIndex].gpuFlush.sge;
   wr.num_sge = 1;
   wr.opcode = IBV_WR_RDMA_READ;
