@@ -477,6 +477,22 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_rccl_api_data_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_rocshmem_api_retval_t /*data*/)
+{
+    // every traced rocSHMEM API returns void; nothing to record
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_callback_tracing_rocshmem_api_data_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    // ROCP_SDK_SAVE_DATA_FIELD(args);
+    ROCP_SDK_SAVE_DATA_FIELD(retval);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_rocdecode_api_retval_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(uint64_t_retval);
