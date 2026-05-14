@@ -433,7 +433,7 @@ int tryAsanProbe(pthread_attr_t* attr, size_t requestSize) {
 // pthread_create rejects undersized stacks with EINVAL before allocation, so
 // we bracket the threshold directly via exponential search + binary search
 // (~log2 probes each, ~27 worst case at a 4 KiB page).
-size_t measureAsanThreadOverhead() {
+size_t findTlsSize() {
   pthread_attr_t attr;
   if (::pthread_attr_init(&attr) != 0) {
     fatal("pthread_attr_init() failed during ASan thread-overhead measurement");
@@ -465,7 +465,7 @@ size_t measureAsanThreadOverhead() {
   }
 
   ::pthread_attr_destroy(&attr);
-  return baseStack + high;
+  tlsSize = baseStack + high;
 }
 }  // namespace
 #endif  // __has_feature(address_sanitizer)
@@ -474,7 +474,7 @@ size_t measureAsanThreadOverhead() {
 static void initTlsSize(void) {
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
-  tlsSize = measureAsanThreadOverhead();
+  findTlsSize();
   return;
 #endif
 #endif
