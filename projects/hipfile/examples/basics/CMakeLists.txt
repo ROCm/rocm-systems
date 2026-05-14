@@ -22,7 +22,7 @@ set(BASICS_EXAMPLES
 # the per-example sources to remove verbatim duplication; each example still
 # drives the hipFile API directly in main() so the example flow stays readable.
 add_library(basics_common STATIC basics_common.cpp)
-target_compile_features(basics_common PRIVATE cxx_std_17)
+target_compile_features(basics_common PRIVATE cxx_std_${AIS_CXX_STANDARD})
 set_target_properties(basics_common PROPERTIES CXX_EXTENSIONS OFF)
 target_compile_options(basics_common PRIVATE -Wall -Wextra -fno-sanitize=all)
 target_include_directories(basics_common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

@@ -5,6 +5,8 @@
 
 #include "basics_common.h"
 
+#include <hipfile.h>
+
 #include <cerrno>
 #include <fcntl.h>
 #include <cstdio>

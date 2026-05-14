@@ -10,11 +10,13 @@
 
 #pragma once
 
-#include <hipfile.h>
-
 #include <cstddef>
 #include <cstdint>
 #include <sys/types.h>
+
+/* Forward-declared from <hipfile.h> to keep this header free of the hipFile
+ * include. Must stay in sync with the typedef in hipfile.h. */
+typedef void *hipFileHandle_t;
 
 /// @brief Round value up to the next multiple of align. Align _must_ be a power of 2.
 /// @param value [in] The value to round up.
@@ -29,7 +31,7 @@ align_up(size_t value, size_t align)
 /// @brief Determines if value is a power of two.
 /// @param value [in] The value to inspect.
 /// @return True if value is a power of two, false otherwise.
-inline bool
+constexpr bool
 is_power_of_two(size_t value)
 {
     return (value > 0) && ((value & (value - 1)) == 0);
