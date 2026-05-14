@@ -571,10 +571,11 @@ format is ``stdout``.
    * NOTE: This option will disable output of analysis report to terminal.
 
 * ``csv`` format:
+   * NOTE: This only works when provided workload paths are created using ``--format-rocprof-output rocpd`` profile mode option.
    * Generate a folder named ``rocprof_compute_<uuid>`` in the current working directory.
-   * This folder contains multiple csv files representing the data in each metric table in the analysis report.
+   * This folder contains one CSV file per view defined in the :ref:`analysis database schema <analysis-database>`.
    * This is useful for further programmatic analysis of analysis reports.
-   * NOTE: This will print the analysis report to the terminal as well.
+   * NOTE: This option will disable output of analysis report to terminal.
 
 * ``db`` format:
    * NOTE: This only works when provided workload paths are created using ``--format-rocprof-output rocpd`` profile mode option.
@@ -583,7 +584,7 @@ format is ``stdout``.
    * This is useful for further programmatic analysis of analysis reports.
    * NOTE: This option will disable output of analysis report to terminal.
 
-Default file/folder name ``rocprofiler_compute_<uuid>`` can be overriden using ``--output-name <name>`` analyze mode option.
+Default file/folder name ``rocprof_compute_<uuid>`` can be overridden using ``--output-name <name>`` analyze mode option. For ``csv`` format the name is used as the output folder; for ``db`` format the name is used with a ``.db`` suffix.
 
 .. _analysis-database:
 

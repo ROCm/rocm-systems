@@ -9,16 +9,22 @@ _, soc = common.gpu_soc()
 
 
 def get_hbm_data_transfer(analysis_workload_dir, data):
-    bw = pd.read_csv(f"{analysis_workload_dir}/{data['bw_csv']}")[
-        data["bw_column"]
-    ].values[0]
+    bw_df = pd.read_csv(f"{analysis_workload_dir}/{data['bw_csv']}")
+    bw_rows = bw_df[
+        (bw_df["metric_id"] == data["bw_metric_id"])
+        & (bw_df["value_name"] == data["bw_value_name"])
+    ]
+    bw = bw_rows["value"].values[0]
     duration_ns = pd.read_csv(f"{analysis_workload_dir}/{data['duration_csv']}")[
         data["duration_column"]
     ].values[0]
     return bw * duration_ns / 1e9
 
 
-# workload -> gfx -> metric definition
+# workload -> gfx -> metric definition. CSV references point at the per-view
+# CSVs produced by analyze: workload/kernel-level metric values live in
+# workload_metric.csv / kernel_metric.csv (filter by metric_id + value_name),
+# kernel-level dispatch durations live in kernel.csv.
 VALIDATE_METRICS = {
     "memcopy": {
         "command": ["tests/memcopy"],
@@ -31,10 +37,11 @@ VALIDATE_METRICS = {
                 "tolerance": 0.10,
                 "get_actual_data": {
                     "soc": "MI200",
-                    "bw_csv": "4.1_Roofline_Performance_Rates.csv",
-                    "bw_column": "Value",
-                    "duration_csv": "0.1_Top_Kernels.csv",
-                    "duration_column": "Sum(ns)",
+                    "bw_csv": "workload_metric.csv",
+                    "bw_metric_id": "4.1.8",
+                    "bw_value_name": "Value",
+                    "duration_csv": "kernel.csv",
+                    "duration_column": "duration_ns_sum",
                 },
             },
         ],
@@ -45,10 +52,11 @@ VALIDATE_METRICS = {
                 "tolerance": 0.10,
                 "get_actual_data": {
                     "soc": "MI300",
-                    "bw_csv": "4.1_Roofline_Performance_Rates.csv",
-                    "bw_column": "Value",
-                    "duration_csv": "0.1_Top_Kernels.csv",
-                    "duration_column": "Sum(ns)",
+                    "bw_csv": "workload_metric.csv",
+                    "bw_metric_id": "4.1.9",
+                    "bw_value_name": "Value",
+                    "duration_csv": "kernel.csv",
+                    "duration_column": "duration_ns_sum",
                 },
             },
         ],
@@ -59,10 +67,11 @@ VALIDATE_METRICS = {
                 "tolerance": 0.10,
                 "get_actual_data": {
                     "soc": "MI350",
-                    "bw_csv": "4.1_Roofline_Performance_Rates.csv",
-                    "bw_column": "Value",
-                    "duration_csv": "0.1_Top_Kernels.csv",
-                    "duration_column": "Sum(ns)",
+                    "bw_csv": "workload_metric.csv",
+                    "bw_metric_id": "4.1.10",
+                    "bw_value_name": "Value",
+                    "duration_csv": "kernel.csv",
+                    "duration_column": "duration_ns_sum",
                 },
             },
         ],

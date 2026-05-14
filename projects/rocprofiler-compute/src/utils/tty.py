@@ -6,7 +6,6 @@ import copy
 import math
 import shutil
 import textwrap
-from pathlib import Path
 from typing import Any, Optional, TextIO
 
 import pandas as pd
@@ -29,7 +28,6 @@ from utils.utils_common import (
     METRIC_ID_RE,
     convert_metric_id_to_panel_info,
     get_panel_alias,
-    get_uuid,
 )
 
 
@@ -763,7 +761,6 @@ def format_table_output(
     df: pd.DataFrame,
     table_type: str,
     runs: dict[str, Any],
-    csv_dir: Optional[Path] = None,
     gpu_arch: Optional[str] = None,
     mem_data_override: Optional[dict[str, Any]] = None,
 ) -> str:
@@ -791,14 +788,6 @@ def format_table_output(
     ) == "mem_chart" and not _tty_view_is_table(args)
     if "title" in table_config and table_config["title"] and not skip_mem_chart_title:
         content += f"{table_id_str} {table_config['title']}\n"
-
-    if args.output_format == "csv" and csv_dir and csv_dir.is_dir():
-        if "title" in table_config and table_config["title"]:
-            table_id_str += f"_{table_config['title']}"
-
-        csv_filename = csv_dir / f"{table_id_str.replace(' ', '_')}.csv"
-        df.to_csv(csv_filename, index=False)
-        console_warning(f"Created file: {csv_filename}")
 
     # Only show top N kernels (as specified in --max-kernel-num)
     # in "Top Stats" section
@@ -879,7 +868,6 @@ def show_all(
     """
     comparable_columns = parser.build_comparable_columns(args.time_unit)
     raw_filter_panel_ids = profiling_config.get("filter_blocks", [])
-    csv_dir = None
 
     # Get gpu_arch from the first run's sys_info
     first_run = next(iter(runs.values()))
@@ -918,14 +906,6 @@ def show_all(
         hidden_cols = list(set(config.HIDDEN_COLUMNS_CLI) - set(args.include_cols))
     else:
         hidden_cols = config.HIDDEN_COLUMNS_CLI
-
-    if args.output_format == "csv":
-        if args.output_name:
-            csv_dir = Path(f"{args.output_name}")
-        else:
-            csv_dir = Path(f"rocprof_compute_{get_uuid()}")
-        if not csv_dir.exists():
-            csv_dir.mkdir()
 
     # Check for valid roofline data once (used to skip roofline tables in the loop)
     has_valid_roofline = any(
@@ -1060,7 +1040,6 @@ def show_all(
                     processed_df,
                     table_type,
                     runs,
-                    csv_dir,
                     gpu_arch,
                 )
 
