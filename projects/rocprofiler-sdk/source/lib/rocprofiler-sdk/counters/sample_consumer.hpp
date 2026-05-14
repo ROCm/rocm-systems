@@ -79,10 +79,10 @@ public:
             if(valid && read_ptr + buffer.size() > write_ptr)
             {
                 buffer.at(write_ptr.fetch_add(1) % buffer.size()) = std::move(params);
-                selfconsume = false;
+                selfconsume                                       = false;
             }
         }
-        if (selfconsume)
+        if(selfconsume)
             consume_fn(std::move(params));
         else
             cv.notify_all();
@@ -98,7 +98,7 @@ protected:
                 cv.wait(lk, [&] { return read_ptr != write_ptr || !valid; });
                 if(read_ptr == write_ptr)
                 {
-                    if (valid) continue;
+                    if(valid) continue;
 
                     exited.store(true);
                     cv.notify_all();
