@@ -68,7 +68,7 @@ struct Regfields
 {
     uint32_t regdata;
     uint16_t regaddr;
-    int8_t pipe, me, disable, type, priv;
+    int8_t pipe, me, disable, type;
 };
 
 struct Reg : public Regfields
@@ -81,7 +81,6 @@ struct Reg : public Regfields
         regdata = get_bits(32, 63);
         disable = !(get_bits(15, 15));
         type = get_bits(10, 12);
-        priv = get_bits(14, 14);
     }
 
     static constexpr int8_t REG_TYPE_USERDATA = 3;
@@ -231,8 +230,6 @@ public:
             fields.issue = Issue(val);
         else if (type == TOKEN_PERF)
             fields.perf = MsgPerf(val);
-
-        if (type == TOKEN_REG_CS_PRIV) fields.regcs.priv = 1;
 
         if (type == 0)
             delta = get_bits(4, 11);

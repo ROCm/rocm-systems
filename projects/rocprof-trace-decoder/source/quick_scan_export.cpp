@@ -31,6 +31,7 @@
 #include "rocprof_trace_decoder/trace_decoder_instrument.h"
 
 #include "gfx9/build_standalone.h"
+#include "gfx9/gfx9token.h" // gfx9::Reg, gfx9::RegCs
 #include "gfx9/quick_scan.h"
 #include "handle.hpp"
 #include "trace_parser.hpp" // CSRegisterHandler, sqtt_token_reg_t, sqtt_event_type_t
@@ -39,52 +40,6 @@
 
 namespace
 {
-
-// gfx9 sqtt_token_type_t nibbles for the rare cluster captured by the scanner.
-constexpr uint32_t TOKEN_REG = 2;
-constexpr uint32_t TOKEN_REG_CS = 5;
-constexpr uint32_t TOKEN_REG_CS_PRIV = 15;
-
-// Duck-typed payload matching the interface CSRegisterHandler::UpdateRegCS /
-// UpdateRegNoCS expect (.me, .pipe, .regaddr, .regdata, .disable). Lets us
-// reuse the same register-tracking logic as gfx9wave.cpp without pulling in
-// the full gfx9 token parser.
-struct QuickReg
-{
-    int8_t me;
-    int8_t pipe;
-    uint32_t regaddr;
-    uint32_t regdata;
-    int8_t disable;
-};
-
-// Decode a TOKEN_REG_CS / TOKEN_REG_CS_PRIV (see gfx9::RegCs in
-// source/gfx9/gfx9token.h:85): pipe at bits 5-6, me at bits 7-8 (post-fixup
-// +1 mod 2), regaddr at bits 9-15, regdata at bits 16-47.
-inline QuickReg decode_regcs(uint64_t val)
-{
-    QuickReg r{};
-    r.pipe = static_cast<int8_t>((val >> 5) & 0x3);
-    r.me = static_cast<int8_t>(((val >> 7) & 0x3) + 1) & 0x1;
-    r.regaddr = static_cast<uint32_t>((val >> 9) & 0x7F);
-    r.regdata = static_cast<uint32_t>((val >> 16) & 0xFFFFFFFFu);
-    r.disable = 0;
-    return r;
-}
-
-// Decode a TOKEN_REG (see gfx9::Reg in source/gfx9/gfx9token.h:73): pipe at
-// bits 5-6, me at bits 7-8 (post-fixup +1 mod 2), regaddr at bits 16-31,
-// regdata at bits 32-63, disable = !bit15.
-inline QuickReg decode_reg(uint64_t val)
-{
-    QuickReg r{};
-    r.pipe = static_cast<int8_t>((val >> 5) & 0x3);
-    r.me = static_cast<int8_t>(((val >> 7) & 0x3) + 1) & 0x1;
-    r.regaddr = static_cast<uint32_t>((val >> 16) & 0xFFFF);
-    r.regdata = static_cast<uint32_t>((val >> 32) & 0xFFFFFFFFu);
-    r.disable = static_cast<int8_t>(!((val >> 15) & 1));
-    return r;
-}
 
 // Status-token reconstruction (build_standalone) — see
 // source/gfx9/build_standalone.{h,cpp}. Per-arch builders live next to
@@ -125,9 +80,9 @@ template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t quick_scan_
     {
         const auto& tok = raw[i];
 
-        if (tok.type == TOKEN_REG_CS || tok.type == TOKEN_REG_CS_PRIV)
+        if (tok.type == gfx9::TOKEN_REG_CS || tok.type == gfx9::TOKEN_REG_CS_PRIV)
         {
-            QuickReg r = decode_regcs(tok.contents);
+            gfx9::RegCs r{tok.contents};
             csregister.UpdateRegCS(r);
 
             if constexpr (EmitEvents)
@@ -159,9 +114,9 @@ template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t quick_scan_
                 }
             }
         }
-        else if (tok.type == TOKEN_REG)
+        else if (tok.type == gfx9::TOKEN_REG)
         {
-            QuickReg r = decode_reg(tok.contents);
+            gfx9::Reg r{tok.contents};
             if (r.disable) continue;
             // Only userdata2 writes update register state we care about for
             // dispatch attribution (codeobj load/unload markers); other REG
