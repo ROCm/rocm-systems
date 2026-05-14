@@ -3679,6 +3679,46 @@ ProfilingSignal* GraphSignalPool::AllocateOneSignal(bool interrupt, bool system_
   return ps;
 }
 
+bool GraphSignalPool::GrowContBuffer(size_t new_cap) {
+  if (alloc_pool_.handle == 0 || new_cap == 0) return false;
+
+  void* raw = nullptr;
+  hsa_status_t st = Hsa::memory_pool_allocate(alloc_pool_,
+                        new_cap * sizeof(uint64_t), /*flags=*/0, &raw);
+  if (st != HSA_STATUS_SUCCESS || raw == nullptr) return false;
+
+  // Grant both GPU (read during reset kernel) and CPU (write during pool
+  // init/growth) access to this coarse-grained VRAM allocation — mirrors the
+  // hsa_amd_agents_allow_access pattern from the contiguous-signal POC.
+  if (gpu_agent_.handle != 0 && cpu_agent_.handle != 0) {
+    hsa_agent_t agents[2] = {gpu_agent_, cpu_agent_};
+    st = Hsa::agents_allow_access(2, agents, nullptr, raw);
+    if (st != HSA_STATUS_SUCCESS) {
+      Hsa::memory_pool_free(raw);
+      return false;
+    }
+  }
+
+  auto* new_buf = reinterpret_cast<uint64_t*>(raw);
+
+  // Copy existing valid entries before releasing the old buffer.
+  if (cont_buffer_ != nullptr && cont_buffer_cap_ > 0) {
+    memcpy(new_buf, cont_buffer_, cont_buffer_cap_ * sizeof(uint64_t));
+    Hsa::memory_pool_free(cont_buffer_);
+  }
+
+  cont_buffer_ = new_buf;
+  cont_buffer_cap_ = new_cap;
+  return true;
+}
+
+void GraphSignalPool::PatchContBufferEntry(size_t idx) {
+  if (cont_buffer_ == nullptr || idx >= cont_buffer_cap_) return;
+  auto* amd_sig = reinterpret_cast<amd_signal_t*>(signals_[idx]->signal_.handle);
+  cont_buffer_[idx] = reinterpret_cast<uint64_t>(
+      const_cast<int64_t*>(&amd_sig->value));
+}
+
 bool GraphSignalPool::Allocate(size_t count) {
   signals_.reserve(count);
   for (size_t i = signals_.size(); i < count; ++i) {
@@ -3688,6 +3728,16 @@ bool GraphSignalPool::Allocate(size_t count) {
   }
   capacity_.store(signals_.size(), std::memory_order_release);
   next_idx_.store(0);
+
+  // Build the contiguous device-accessible value-pointer buffer.
+  // One-time cost: populated here and updated lazily in GrowAndAcquire.
+  // Falls back to CollectValuePtrs() if allocation fails or pool unavailable.
+  if (alloc_pool_.handle != 0 && GrowContBuffer(signals_.size())) {
+    for (size_t i = 0; i < signals_.size(); ++i) {
+      PatchContBufferEntry(i);
+    }
+  }
+
   return true;
 }
 
@@ -3700,6 +3750,18 @@ ProfilingSignal* GraphSignalPool::GrowAndAcquire(size_t idx) {
     signals_.push_back(ps);
   }
   capacity_.store(signals_.size(), std::memory_order_release);
+
+  // Extend the contiguous VA buffer to cover the newly added signals.
+  // GrowContBuffer copies existing entries, so only new slots need patching.
+  if (alloc_pool_.handle != 0 && signals_.size() > cont_buffer_cap_) {
+    size_t old_cap = cont_buffer_cap_;
+    if (GrowContBuffer(signals_.size())) {
+      for (size_t i = old_cap; i < signals_.size(); ++i) {
+        PatchContBufferEntry(i);
+      }
+    }
+  }
+
   return signals_[idx];
 }
 
@@ -3798,6 +3860,12 @@ GraphSignalPool::~GraphSignalPool() {
   // ~GraphExec finished every parallel stream, which guarantees all async
   // handlers attached to IRQ signals have already fired.
   for (auto* ps : irq_signals_) { ps->release(); }
+
+  // Release the contiguous VA buffer if it was allocated.
+  if (cont_buffer_ != nullptr) {
+    Hsa::memory_pool_free(cont_buffer_);
+    cont_buffer_ = nullptr;
+  }
 }
 
 // ================================================================================================
@@ -3823,6 +3891,19 @@ GraphSignalPool* Device::CreateGraphSignalPool(
   hw_events.clear();
 
   auto* pool = new GraphSignalPool();
+
+  // Wire up the coarse-grained VRAM pool for the contiguous VA buffer.
+  // We use gpuvm_segment_ (GPU coarse VRAM) — same pool the POC uses as
+  // g_gpu_coarse.  We then call hsa_amd_agents_allow_access(CPU+GPU) inside
+  // GrowContBuffer so the CPU can write pointer values at init time and the
+  // GPU reset kernel can read them.  Fine-grained segment is NOT used here:
+  // fine-grained memory can be slower for GPU reads on some topologies.
+  // If gpuvm_segment_ is unavailable the cont_buffer_ path is skipped and
+  // the caller falls back to CollectValuePtrs().
+  if (gpuvm_segment_.handle != 0) {
+    pool->SetAllocPool(gpuvm_segment_);
+    pool->SetAgents(bkendDevice_, cpu_agent_info_->agent);
+  }
 
   if (gpu_count > 0 && !pool->Allocate(gpu_count)) {
     delete pool;
@@ -3861,10 +3942,17 @@ void Device::DestroyGraphSignalPool(GraphSignalPool* pool) const {
 //   1. Try CPU-side reset — succeeds when every signal is already at 0
 //      (previous launch fully drained). This is the common steady-state
 //      case and avoids any GPU work at all.
-//   2. Otherwise dispatch the __amd_rocclr_resetGraphSignals kernel on
-//      vdev's queue. The kernel is naturally serialized behind any prior
-//      dispatches via AQL packet ordering, so the reset completes before
-//      the next graph segment is enqueued.
+//   2. Otherwise dispatch a GPU-side reset kernel on vdev's queue.
+//      Two dispatch paths are available:
+//      a) __amd_rocclr_resetContSignalBuffer  — preferred when the pool has
+//         a persistent contiguous VA buffer (cont_buffer_).  Passes the
+//         stable device pointer directly; avoids the per-launch
+//         CollectValuePtrs() scan and memcpy into a transient kernarg slot.
+//      b) __amd_rocclr_resetGraphSignals  — fallback when cont_buffer_ is
+//         unavailable (fine-grained segment absent or allocation failed).
+//      Both kernels are naturally serialized behind prior dispatches via AQL
+//      packet ordering, so the reset completes before the next graph segment
+//      is enqueued.
 bool Device::ResetGraphSignalPool(device::VirtualDevice* vdev, GraphSignalPool* pool,
                                   bool prev_done, bool* out_did_gpu_reset) const {
   if (out_did_gpu_reset != nullptr) *out_did_gpu_reset = false;
@@ -3889,6 +3977,25 @@ bool Device::ResetGraphSignalPool(device::VirtualDevice* vdev, GraphSignalPool* 
   // level-0 wait markers on parallel internal streams.
   if (vdev == nullptr) return false;
 
+  auto& blit = static_cast<KernelBlitManager&>(vdev->blitMgr());
+
+  // Preferred path: persistent contiguous VA buffer — no per-launch memcpy.
+  // Controlled by GPU_GRAPH_CONT_SIGNAL_RESET (default true). Set to 0 to
+  // force the legacy CollectValuePtrs + resetGraphSignals path instead.
+  uint64_t* cont_buf = pool->ContBuffer();
+  uint32_t  cont_cnt = pool->ContBufferCount();
+  if (GPU_GRAPH_CONT_SIGNAL_RESET && cont_buf != nullptr && cont_cnt > 0) {
+    if (!blit.resetContSignalBuffer(cont_buf, cont_cnt,
+                                    /*resetValue=*/kInitSignalValueOne)) {
+      return false;
+    }
+    if (out_did_gpu_reset != nullptr) *out_did_gpu_reset = true;
+    pool->ResetCountersForReuse();
+    return true;
+  }
+
+  // Legacy path (or forced via GPU_GRAPH_CONT_SIGNAL_RESET=0): assemble the
+  // value-pointer list on the CPU and copy to a transient kernarg slot.
   std::vector<uint64_t*> value_ptrs;
   pool->CollectValuePtrs(value_ptrs);
   if (value_ptrs.empty()) {
@@ -3896,7 +4003,6 @@ bool Device::ResetGraphSignalPool(device::VirtualDevice* vdev, GraphSignalPool* 
     return true;
   }
 
-  auto& blit = static_cast<KernelBlitManager&>(vdev->blitMgr());
   if (!blit.resetGraphSignals(value_ptrs, /*resetValue=*/kInitSignalValueOne)) {
     return false;
   }

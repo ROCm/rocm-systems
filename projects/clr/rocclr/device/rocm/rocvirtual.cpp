@@ -1210,12 +1210,6 @@ void VirtualGPU::AcquireQueueWithPreference() {
 }
 
 // ================================================================================================
-void VirtualGPU::AcquireQueueWithPreference() {
-  std::scoped_lock lock(execution());
-  AcquireQueueWithPreferenceLocked();
-}
-
-// ================================================================================================
 bool VirtualGPU::ReacquireQueueExcluding(const std::unordered_set<uint64_t>& excluded_ids) {
   std::scoped_lock lock(execution());
   if (gpu_queue_ != nullptr) {

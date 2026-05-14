@@ -309,6 +309,7 @@ class KernelBlitManager : public DmaBlitManager {
     StreamOpsIncrement,
     StreamOpsDecrement,
     ResetGraphSignals,
+    ResetContSignalBuffer,
     BlitLinearTotal,
     FillImage = BlitLinearTotal,
     BlitCopyImage,
@@ -549,6 +550,18 @@ class KernelBlitManager : public DmaBlitManager {
   bool resetGraphSignals(const std::vector<uint64_t*>& valuePtrs,
                          uint64_t resetValue = 1) const;
 
+  //! Faster variant of resetGraphSignals for pools that carry a persistent
+  //! contiguous device-accessible VA buffer (GraphSignalPool::ContBuffer()).
+  //! deviceVaBuf must be a GPU-readable array of exactly `count` uint64_t
+  //! entries, where entry i holds the device VA of amd_signal_t.value for
+  //! signal i in the pool.  Passing the pre-built device buffer avoids the
+  //! per-launch CollectValuePtrs() CPU scan and memcpy into a transient
+  //! kernarg slot that resetGraphSignals() requires.
+  //! Like resetGraphSignals(), dispatches with attach_signal=true so the
+  //! caller can read back the completion signal via GetLastSignal().
+  bool resetContSignalBuffer(uint64_t* deviceVaBuf, uint32_t count,
+                             uint64_t resetValue = 1) const;
+
   virtual std::recursive_mutex* lockXfer() const { return &lockXferOps_; }
 
   virtual bool initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
@@ -639,7 +652,7 @@ static const char* BlitName[KernelBlitManager::BlitTotal] = {
     "__amd_rocclr_scheduler",          "__amd_rocclr_gwsInit",
     "__amd_rocclr_initHeap",           "__amd_rocclr_batchMemOp",
     "__amd_rocclr_streamOpsIncrement", "__amd_rocclr_streamOpsDecrement",
-    "__amd_rocclr_resetGraphSignals",
+    "__amd_rocclr_resetGraphSignals",  "__amd_rocclr_resetContSignalBuffer",
     "__amd_rocclr_fillImage",          "__amd_rocclr_copyImage",
     "__amd_rocclr_copyImage1DA",       "__amd_rocclr_copyImageToBuffer",
     "__amd_rocclr_copyBufferToImage"};

@@ -197,6 +197,31 @@ struct GraphSignalPool {
   //! re-arm-on-acquire and would race with the async-handler thread otherwise.
   void CollectValuePtrs(std::vector<uint64_t*>& out) const;
 
+  //! Set the HSA memory pool used to allocate the contiguous VA buffer.
+  //! Must be called once (with a valid coarse-grained VRAM pool handle)
+  //! before Allocate(). If never called, or if allocation fails,
+  //! ContBuffer() returns nullptr and the caller falls back to
+  //! CollectValuePtrs().
+  void SetAllocPool(hsa_amd_memory_pool_t pool) { alloc_pool_ = pool; }
+
+  //! Set the GPU and CPU HSA agents needed by GrowContBuffer() to grant
+  //! both GPU (read/write) and CPU (write-for-init) access to the
+  //! coarse-grained VRAM allocation via hsa_amd_agents_allow_access.
+  //! Must be called before Allocate().
+  void SetAgents(hsa_agent_t gpu_agent, hsa_agent_t cpu_agent) {
+    gpu_agent_ = gpu_agent;
+    cpu_agent_ = cpu_agent;
+  }
+
+  //! Returns the persistent device-accessible buffer that holds the device VA
+  //! of amd_signal_t.value for every GPU-only signal, laid out contiguously.
+  //! Populated once at Allocate()/GrowAndAcquire() time; valid until
+  //! ~GraphSignalPool. Returns nullptr when unavailable.
+  uint64_t* ContBuffer() const { return cont_buffer_; }
+
+  //! Number of valid entries in ContBuffer() — equals signals_.size().
+  uint32_t ContBufferCount() const { return static_cast<uint32_t>(signals_.size()); }
+
   ~GraphSignalPool();
 
  private:
@@ -207,8 +232,30 @@ struct GraphSignalPool {
   ProfilingSignal* last_acquired_ = nullptr;    //!< Most recently acquired signal
   mutable amd::Monitor lock_;                   //!< Protects growth of signals_ and IRQ scan/grow
 
+  //! Persistent contiguous device-accessible buffer.
+  //! Each entry i holds the device VA of amd_signal_t.value for signals_[i].
+  //! Allocated from GPU coarse-grained VRAM (gpuvm_segment_) with CPU+GPU
+  //! access granted via hsa_amd_agents_allow_access so that:
+  //!   - CPU can populate entries at pool creation / growth time
+  //!   - GPU reset kernel can read the pointer values and write to them
+  //! Null when alloc_pool_ is unavailable or allocation failed.
+  hsa_amd_memory_pool_t alloc_pool_{};          //!< GPU coarse-grained pool for cont_buffer_
+  hsa_agent_t           gpu_agent_{};           //!< GPU HSA agent — needed for allow_access
+  hsa_agent_t           cpu_agent_{};           //!< CPU HSA agent — needed for allow_access
+  uint64_t*             cont_buffer_ = nullptr; //!< Contiguous device VA array of signal value ptrs
+  size_t                cont_buffer_cap_ = 0;   //!< Allocated capacity of cont_buffer_ in entries
+
   static ProfilingSignal* AllocateOneSignal(bool interrupt, bool system_scope);
   ProfilingSignal* GrowAndAcquire(size_t idx);
+
+  //! (Re-)allocate cont_buffer_ to hold at least new_cap entries.
+  //! Copies existing entries [0, old_cap) before freeing the old buffer.
+  //! Returns true on success; leaves cont_buffer_ unchanged on failure.
+  bool GrowContBuffer(size_t new_cap);
+
+  //! Write the device VA of signals_[idx].value into cont_buffer_[idx].
+  //! No-op when cont_buffer_ is null.
+  void PatchContBufferEntry(size_t idx);
 };
 
 class Sampler : public device::Sampler {
