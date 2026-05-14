@@ -321,9 +321,7 @@ def test_calc_expressions_noise_clamp():
     """
     workload_path = "/fake/workload"
     noise_clamp_expression = (
-        "to_noise_clamp("
-        "to_min(raw_pmc_df['pmc_perf']['DIFF']), "
-        "to_max(raw_pmc_df['pmc_perf']['REF']))"
+        "to_noise_clamp(to_min(raw_pmc_df['DIFF']), to_max(raw_pmc_df['REF']))"
     )
     # Two distinct kernels so groupby yields two kernel-level evaluate calls
     # in addition to one workload-level call. Without the kwarg gate the

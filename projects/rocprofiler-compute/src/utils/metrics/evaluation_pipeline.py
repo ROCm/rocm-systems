@@ -237,19 +237,12 @@ def validate_dual_issue_metrics(
     sys_info: pd.Series,
     raw_pmc_df: pd.DataFrame,
 ) -> None:
-    """
-    Check if VALU Utilization or VALU FLOPs metrics exceed theoretical peak.
-    Warns about dual-issue behavior.
-    For MI350 (gfx950), additionally verify SQ_ACTIVE_INST_VALU2 counter.
-    """
-    valu2_series = None
-    if isinstance(raw_pmc_df, dict):
-        pmc_perf = raw_pmc_df.get("pmc_perf")
-        if (
-            pmc_perf is not None
-            and ValuDualIssueDetector.valu2_counter in pmc_perf.columns
-        ):
-            valu2_series = pmc_perf[ValuDualIssueDetector.valu2_counter]
+    """Warn when VALU metrics exceed peak in the eval_metric results."""
+    valu2_series = (
+        raw_pmc_df[ValuDualIssueDetector.valu2_counter]
+        if ValuDualIssueDetector.valu2_counter in raw_pmc_df.columns
+        else None
+    )
     detector = ValuDualIssueDetector(
         gpu_arch=sys_info.get("gpu_arch", ""),
         valu2_series=valu2_series,

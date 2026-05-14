@@ -408,18 +408,16 @@ class TestEvaluationPipeline:
             metric_fields={
                 "Value": (
                     "to_noise_clamp("
-                    "to_min(raw_pmc_df['pmc_perf']['DIFF']), "
-                    "to_max(raw_pmc_df['pmc_perf']['REF']))"
+                    "to_min(raw_pmc_df['DIFF']), "
+                    "to_max(raw_pmc_df['REF']))"
                 ),
             }
         )
-        raw_pmc_df = {
-            "pmc_perf": pd.DataFrame({
-                "GRBM_GUI_ACTIVE": [1000],
-                "DIFF": [-100.0],
-                "REF": [1000.0],
-            })
-        }
+        raw_pmc_df = pd.DataFrame({
+            "GRBM_GUI_ACTIVE": [1000],
+            "DIFF": [-100.0],
+            "REF": [1000.0],
+        })
 
         clear_noise_clamp_warnings()
         with (
@@ -438,7 +436,6 @@ class TestEvaluationPipeline:
                 pd.DataFrame(),
                 raw_pmc_df,
                 debug=False,
-                config={},
             )
 
         assert get_noise_clamp_warnings()["count"] >= 1
@@ -470,7 +467,9 @@ class TestEvaluationPipeline:
         sys_info = pd.Series({"gpu_arch": "gfx942"})
 
         with patch("utils.metrics.common.console_warning") as mock_warning:
-            validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df={})
+            validate_dual_issue_metrics(
+                dfs, dfs_type, sys_info, raw_pmc_df=pd.DataFrame()
+            )
 
         mock_warning.assert_called_once()
         msg = mock_warning.call_args.args[0]
@@ -485,7 +484,9 @@ class TestEvaluationPipeline:
         sys_info = pd.Series({"gpu_arch": "gfx942"})
 
         with patch("utils.metrics.common.console_warning") as mock_warning:
-            validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df={})
+            validate_dual_issue_metrics(
+                dfs, dfs_type, sys_info, raw_pmc_df=pd.DataFrame()
+            )
 
         msg = mock_warning.call_args.args[0]
         assert "VALU FLOPs can exceed the peak value" in msg
@@ -498,7 +499,9 @@ class TestEvaluationPipeline:
         sys_info = pd.Series({"gpu_arch": "gfx942"})
 
         with patch("utils.metrics.common.console_warning") as mock_warning:
-            validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df={})
+            validate_dual_issue_metrics(
+                dfs, dfs_type, sys_info, raw_pmc_df=pd.DataFrame()
+            )
 
         mock_warning.assert_not_called()
 
@@ -508,9 +511,7 @@ class TestEvaluationPipeline:
             "VALU Utilization", value=150.0, peak=100.0
         )
         sys_info = pd.Series({"gpu_arch": "gfx950"})
-        raw_pmc_df = {
-            "pmc_perf": pd.DataFrame({"SQ_ACTIVE_INST_VALU2": [1, 2, 3]}),
-        }
+        raw_pmc_df = pd.DataFrame({"SQ_ACTIVE_INST_VALU2": [1, 2, 3]})
 
         with patch("utils.metrics.common.console_warning") as mock_warning:
             validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
@@ -529,7 +530,9 @@ class TestEvaluationPipeline:
         sys_info = pd.Series({"gpu_arch": "gfx942"})
 
         with patch("utils.metrics.common.console_warning") as mock_warning:
-            validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df={})
+            validate_dual_issue_metrics(
+                dfs, dfs_type, sys_info, raw_pmc_df=pd.DataFrame()
+            )
 
         mock_warning.assert_called_once()
         msg = mock_warning.call_args.args[0]
