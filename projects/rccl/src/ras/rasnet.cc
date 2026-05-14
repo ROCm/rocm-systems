@@ -8,6 +8,8 @@
 #include "ras_internal.h"
 #include "os.h"
 
+#include <algorithm>
+
 // Links forming the backbone of the RAS network (currently a ring).
 struct rasLink rasNextLink = {1}, rasPrevLink = {-1};
 

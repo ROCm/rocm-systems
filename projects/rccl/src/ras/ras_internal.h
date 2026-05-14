@@ -191,7 +191,7 @@ static inline size_t rasMsgLength(rasMsgType type, rasCollectiveType collType = 
 #define RAS_INCREMENT 4
 
 // Our clock has nanosecond resolution.
-#define CLOCK_UNITS_PER_SEC (1000000000LL)
+#define CLOCK_UNITS_PER_SEC ((int64_t)1000000000LL)
 
 // Keep-alive messages are sent no sooner than a second after the last message was sent down a particular connection.
 #define RAS_KEEPALIVE_INTERVAL (1*CLOCK_UNITS_PER_SEC*ncclParamRasTimeoutFactor())

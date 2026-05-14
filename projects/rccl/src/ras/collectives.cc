@@ -7,6 +7,8 @@
 
 #include <mutex>
 
+#include <algorithm>
+
 #include "alloc.h"
 #include "checks.h"
 #include "comm.h"
