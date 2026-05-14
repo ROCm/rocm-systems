@@ -19,6 +19,20 @@
 
 #include "ErrCode.hpp"
 
+// LLVM source-based code coverage profile writer.
+// When the binary is built with -fprofile-instr-generate, libclang_rt.profile
+// provides this symbol and a default atexit() handler that writes the
+// per-process .profraw file. Because we terminate child test processes with
+// _exit() (to skip atexit handlers that would otherwise tear down GPU runtime
+// state), that handler never fires and coverage data is lost. When coverage
+// is enabled at build time (RCCL_TEST_CODE_COVERAGE), declare the writer so
+// we can flush coverage explicitly before _exit().
+#if defined(RCCL_TEST_CODE_COVERAGE)
+#include <dlfcn.h>
+extern "C" int  __llvm_profile_write_file(void);
+extern "C" void __llvm_profile_set_filename(const char* name);
+#endif
+
 namespace RcclUnitTesting
 {
 
@@ -410,7 +424,82 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
         if(pid == 0)
         {
             redirectOutputToPipes(stdout_fd, stderr_fd);
+#if defined(RCCL_TEST_CODE_COVERAGE)
+            // The LLVM profile runtime resolves LLVM_PROFILE_FILE (including
+            // any %p / %m patterns) once in the parent, before fork(), and
+            // caches the resolved path. Without intervention every child
+            // would inherit the parent's PID-substituted path and overwrite
+            // the same .profraw. Re-call __llvm_profile_set_filename() in
+            // the child with the original pattern so %p is re-resolved
+            // against the child PID. Force a %p into the pattern if the
+            // user didn't supply one, so children don't collide.
+            //
+            // librccl.so is statically linked against its own copy of the
+            // LLVM profile runtime (separate counters, separate writer,
+            // separate filename buffer). librccl exports
+            // rcclCoverageSetFilename / rcclCoverageWriteFile (built only
+            // when ENABLE_CODE_COVERAGE is on) which forward to its private
+            // runtime instance. Resolve them dynamically so the test binary
+            // doesn't need to declare them at link time. %m in the pattern
+            // (binary signature) keeps the two runtimes' files distinct.
+            using WriteFn = int (*)(void);
+            using SetFn   = void (*)(const char*);
+            auto libWrite = reinterpret_cast<WriteFn>(
+                dlsym(RTLD_DEFAULT, "rcclCoverageWriteFile"));
+            auto libSet = reinterpret_cast<SetFn>(
+                dlsym(RTLD_DEFAULT, "rcclCoverageSetFilename"));
+
+            const char* envPattern = std::getenv("LLVM_PROFILE_FILE");
+            std::string pattern    = (envPattern && *envPattern)
+                                         ? envPattern
+                                         : "default_%m.profraw";
+            // Ensure %p is present so each child gets its own file.
+            if(pattern.find("%p") == std::string::npos)
+            {
+                auto dot = pattern.rfind('.');
+                if(dot == std::string::npos)
+                    pattern += "_%p";
+                else
+                    pattern.insert(dot, "_%p");
+            }
+            // The LLVM profile runtime caches getpid() at first init in the
+            // parent, so its own %p expansion would yield the parent PID in
+            // every child. Substitute %p ourselves with the child's real
+            // pid, leaving %m (binary signature) for the runtime to expand.
+            {
+                char            pidbuf[32];
+                std::snprintf(pidbuf, sizeof(pidbuf), "%d",
+                              static_cast<int>(getpid()));
+                std::string out;
+                out.reserve(pattern.size() + 16);
+                for(size_t i = 0; i < pattern.size();)
+                {
+                    if(i + 1 < pattern.size() && pattern[i] == '%'
+                       && pattern[i + 1] == 'p')
+                    {
+                        out.append(pidbuf);
+                        i += 2;
+                    }
+                    else
+                    {
+                        out.push_back(pattern[i++]);
+                    }
+                }
+                pattern.swap(out);
+            }
+            __llvm_profile_set_filename(pattern.c_str());
+            if(libSet) libSet(pattern.c_str());
+#endif
             int result = runTestInProcess(testConfig);
+            // Flush LLVM source-based coverage data before _exit().
+            // _exit() skips atexit handlers (intentionally, to avoid GPU
+            // runtime teardown issues), but that also skips the profile
+            // writer registered by libclang_rt.profile, so without an
+            // explicit flush no .profraw file is produced for this child.
+#if defined(RCCL_TEST_CODE_COVERAGE)
+            __llvm_profile_write_file();
+            if(libWrite) libWrite();
+#endif
             // Use _exit() instead of exit() to avoid atexit handlers
             // This prevents GPU runtime cleanup issues after fork
             _exit(result);
