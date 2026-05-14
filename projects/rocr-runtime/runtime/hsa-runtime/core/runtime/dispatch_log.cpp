@@ -743,13 +743,23 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
         // Quarantine update: same coordinate as last stall? If yes,
         // check timeout; if no, snapshot now and arm.
         const auto now = std::chrono::steady_clock::now();
-        if (qs.pending_zero_stall.load(std::memory_order_acquire) &&
+        // force_emit (disable-edge final drain) treats every zero as
+        // immediately stale: we will never get another pass to wait
+        // out the quarantine timer, so any parked OR first-time-seen
+        // zero must be accounted for in this final pass. Without this,
+        // the disable can leak a [start, parked_zero) window into the
+        // diag accounting gap (sig_span > emitted+swept+overrun),
+        // verified by test_hsa_dispatch_log_accounting.sh.
+        const bool armed_here =
+            qs.pending_zero_stall.load(std::memory_order_acquire) &&
             qs.stall_observed == observed &&
-            qs.stall_idx      == i) {
-          const auto stalled_for_ms =
-              std::chrono::duration_cast<std::chrono::milliseconds>(
-                  now - qs.stall_first_seen).count();
-          if (stalled_for_ms >= kStaleZeroQuarantineMs) {
+            qs.stall_idx      == i;
+        const auto stalled_for_ms = armed_here
+            ? std::chrono::duration_cast<std::chrono::milliseconds>(
+                  now - qs.stall_first_seen).count()
+            : 0;
+        if (armed_here || force_emit) {
+          if (stalled_for_ms >= kStaleZeroQuarantineMs || force_emit) {
             // Slot declared stale (case a). Sweep forward across the
             // contiguous stale-zero prefix in this same pass, emit ONE
             // aggregate kernel_dispatch_drop event covering all swept
@@ -809,7 +819,20 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
               // Do not advance i; the for-loop's ++i would skip the
               // freshly-published slot. Step back one so ++i lands on
               // i again.
-              --i;
+              //
+              // Exception: under force_emit (disable final drain), the
+              // retry-then-rt-zero loop would spin forever if FW does
+              // not actually publish (which is the common case at
+              // disable — no more dispatches are coming). In that
+              // case, advance past the slot, accounting for the 1
+              // skipped slot in drop_overrun (no consumer-visible
+              // drop event since stale_count=0 is invalid bytes_lost).
+              if (force_emit) {
+                qs.diag_drop_overrun_records += 1;
+                // Don't --i; let ++i advance past slot i.
+              } else {
+                --i;
+              }
             } else {
               // force_emit propagated for the same reason as the overrun
               // path above: the stale-zero-prefix sweep can fire from
