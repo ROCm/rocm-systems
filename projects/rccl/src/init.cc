@@ -40,12 +40,14 @@
 #include <sys/resource.h>
 #include <unistd.h>
 #include "graph/topo.h"
+#include "graph/rome_topo_consensus.h"
 #include "graph/xml.h"
 #include "archinfo.h"
 #include "param.h"
 #include "nvtx_payload_schemas.h"
 #include "utils.h"
 #include <mutex>
+#include <unordered_map>
 #include "ce_coll.h"
 #include "nvtx.h"
 
@@ -426,6 +428,7 @@ void ncclCommPushFree(struct ncclComm* comm, void* obj) {
   struct ncclDestructor* dtor = ncclMemoryStackAlloc<struct ncclDestructor>(&comm->memPermanent);
   dtor->fn = ncclDestructorFnFree;
   dtor->obj = obj;
+  dtor->comm = comm;
   dtor->next = comm->destructorHead;
   comm->destructorHead = dtor;
 }
@@ -438,6 +441,7 @@ void ncclCommPushCudaFree(struct ncclComm* comm, void* obj) {
   struct ncclDestructor* dtor = ncclMemoryStackAlloc<struct ncclDestructor>(&comm->memPermanent);
   dtor->fn = ncclDestructorFnCudaFree;
   dtor->obj = obj;
+  dtor->comm = comm;
   dtor->next = comm->destructorHead;
   comm->destructorHead = dtor;
 }
@@ -450,6 +454,7 @@ void ncclCommPushCudaHostFree(struct ncclComm* comm, void* obj) {
   struct ncclDestructor* dtor = ncclMemoryStackAlloc<struct ncclDestructor>(&comm->memPermanent);
   dtor->fn = ncclDestructorFnCudaHostFree;
   dtor->obj = obj;
+  dtor->comm = comm;
   dtor->next = comm->destructorHead;
   comm->destructorHead = dtor;
 }
@@ -462,6 +467,7 @@ void ncclCommPushCudaGdrFree(struct ncclComm* comm, void* handle) {
   struct ncclDestructor* dtor = ncclMemoryStackAlloc<struct ncclDestructor>(&comm->memPermanent);
   dtor->fn = ncclDestructorFnCudaGdrFree;
   dtor->obj = handle;
+  dtor->comm = comm;
   dtor->next = comm->destructorHead;
   comm->destructorHead = dtor;
 }
@@ -512,6 +518,9 @@ static ncclResult_t commFree(ncclComm_t comm) {
       PTHREADCHECK(pthread_join(comm->proxyState->threadUDS, nullptr), "pthread_join");
     }
   }
+
+  // Destroy dynamic memory manager only after all proxy threads have been joined
+  NCCLCHECK(ncclMemManagerDestroy(comm));
 
   if (comm->memPool) CUDACHECK(cudaMemPoolDestroy(comm->memPool));
 
@@ -739,6 +748,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   comm->doneEvent = doneEvent;
   comm->lastStream = nullptr;
+  comm->lastStreamValid = false;
   CUDACHECK(cudaGetDevice(&comm->cudaDev));
 
   // RCCL: create persistent stream for calloc
@@ -765,6 +775,18 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   comm->checkPointers = ncclParamCheckPointers() == 1 ? true : false;
   comm->dmaBufSupport = (dmaBufSupported(comm) == ncclSuccess) ? true : false;
+
+  // Initialize memory manager
+  if (parent && parent->shareResources && parent->memManager) {
+    // Share parent's memory manager
+    comm->memManager = parent->memManager;
+    ncclAtomicRefCountIncrement(&comm->memManager->refCount);
+    INFO(NCCL_INIT, "MemManager: Shared from parent, refCount=%d",
+         comm->memManager->refCount);
+  } else {
+    // Create new memory manager
+    NCCLCHECK(ncclMemManagerInit(comm));
+  }
 
 #ifdef ENABLE_COLLTRACE
   NCCLCHECK(ncclCudaHostCalloc(&comm->collTraceTail, MAXCHANNELS));
@@ -1245,6 +1267,28 @@ static ncclResult_t initNvlDomainInfo(struct ncclComm* comm) {
   return ncclSuccess;
 }
 
+// True when every host has the same number of ranks and those partitions sum to nranks.
+static bool uniformRanksPerHost(const struct ncclComm* comm, int nranks) {
+  int ranksPerHost = -1;
+  int total = 0;
+  for (int i = 0; i < nranks; i++) {
+    uint64_t h = comm->peerInfo[i].hostHash;
+    bool lowestRankOnHost = true;
+    for (int j = 0; j < i; j++) {
+      if (comm->peerInfo[j].hostHash == h) { lowestRankOnHost = false; break; }
+    }
+    if (!lowestRankOnHost) continue;
+    int cnt = 0;
+    for (int j = 0; j < nranks; j++) {
+      if (comm->peerInfo[j].hostHash == h) cnt++;
+    }
+    total += cnt;
+    if (ranksPerHost < 0) ranksPerHost = cnt;
+    else if (cnt != ranksPerHost) return false;
+  }
+  return total == nranks && ranksPerHost > 0;
+}
+
 static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* parent, uint64_t timers[TIMERS_INIT_COUNT]) {
   // We use 2 AllGathers
   // 1. { peerInfo, comm, compCap}
@@ -1279,8 +1323,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     int cpuVendor;
     int localRanks;
     int nc;
+    int romeTopoModelIdx;
     bool pivotA2AEnabled;
     bool ll128Enabled;
+    char hostname[128];
   };
 
   int nChannelsOrig;
@@ -1462,6 +1508,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       }
     }
   }
+
+  comm->topo->skipPresetTopoMatching = !uniformRanksPerHost(comm, nranks);
 
   timers[TIMER_INIT_GRAPHS] = clockNano();
   // Get rings and trees
@@ -1656,6 +1704,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   allGather3Data[rank].cpuArch = comm->cpuArch;
   allGather3Data[rank].cpuVendor = comm->cpuVendor;
+  allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
+  (void) getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
 
   comm->nChannels = std::min(treeGraph->nChannels, ringGraph->nChannels);
 
@@ -1666,6 +1716,15 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclTopoPreset(comm, graphs, &allGather3Data[rank].topoRanks), ret, fail);
 
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allGather3Data, sizeof(*allGather3Data)), ret, fail);
+
+  if (uniformRanksPerHost(comm, nranks)) {
+    NCCLCHECKGOTO(rcclCheckRomeTopoModelIdxConsensus(
+        nranks,
+        [&](int r) { return allGather3Data[r].romeTopoModelIdx; },
+        [&](int r) { return allGather3Data[r].hostname; },
+        [&](int r) { return comm->peerInfo[r].hostHash; }),
+      ret, fail);
+  }
 
   // Determine nNodes, firstRanks, ...
   NCCLCHECKGOTO(ncclCalloc(&nodesFirstRank, nranks), ret, fail);
@@ -2270,6 +2329,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   comm->cudaArch = cudaArch;
   comm->archName = archName;
   comm->cuCount = cuCount;
+  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
+  comm->ll128LineElems = rcclLL128LineElemsFromArch(comm->archName);
+  comm->ll128DataElems = rcclLL128DataElemsFromArch(comm->archName);
 
   NCCLCHECKGOTO(initTransportsRank(comm, job->parent, timers), res, fail);
 
@@ -2406,7 +2468,13 @@ exit:
   free(parentRanks);
   return res;
 fail:
-  // archName was allocated but won't be assigned to comm on failure, so free it
+  // archName is assigned to comm->archName before initTransportsRank is called.
+  // If failure occurs after that assignment, commFree() will free comm->archName,
+  // so freeing archName here as well would be a double free. Null it out so that
+  // commFree handles cleanup exclusively.
+  if (archName == comm->archName) {
+    archName = NULL;
+  }
   free(archName);
   comm->initState = res;
   goto exit;

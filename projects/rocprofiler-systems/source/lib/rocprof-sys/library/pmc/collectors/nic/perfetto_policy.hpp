@@ -32,10 +32,10 @@ struct nic_track_description
 // Helper function to create enabled_metrics value from bit positions
 // See enabled_metrics definition in pmc/collectors/nic/types.hpp for bit position
 // documentation
-inline constexpr uint32_t
-make_nic_metric_value(std::initializer_list<uint8_t> bit_positions)
+inline constexpr std::uint32_t
+make_nic_metric_value(std::initializer_list<std::uint8_t> bit_positions)
 {
-    uint32_t value = 0;
+    std::uint32_t value = 0;
     for(auto bit : bit_positions)
     {
         value |= (1u << bit);
@@ -71,7 +71,8 @@ struct perfetto_policy
     using counter_track = perfetto_counter_track<metrics>;
 
     // Static storage for Perfetto tracks and sample buffering (C++17 inline static)
-    static inline std::map<size_t, std::map<uint32_t, nic_track_description>> tracks{};
+    static inline std::map<size_t, std::map<std::uint32_t, nic_track_description>>
+        tracks{};
     static inline std::map<size_t, std::unique_ptr<std::vector<nic_perfetto_sample>>>
         bundle{};
 
@@ -172,7 +173,7 @@ struct perfetto_policy
      * @param timestamp Sample timestamp in nanoseconds
      */
     static void store_sample(size_t device_index, const metrics& metric_values,
-                             uint64_t timestamp)
+                             std::uint64_t timestamp)
     {
         auto it = perfetto_policy::bundle.find(device_index);
         if(it != perfetto_policy::bundle.end())
@@ -224,7 +225,7 @@ struct perfetto_policy
 
         ::rocprofsys::pmc::collectors::nic::enabled_metrics effective_metrics{};
         effective_metrics.value =
-            static_cast<uint32_t>(enabled_metrics.value & supported_metrics.value);
+            static_cast<std::uint32_t>(enabled_metrics.value & supported_metrics.value);
 
         if(effective_metrics.value == 0)
         {

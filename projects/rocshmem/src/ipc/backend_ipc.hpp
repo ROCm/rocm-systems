@@ -238,7 +238,7 @@ class IPCBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  IPCDefaultContextProxyT default_context_proxy_;  // init handled in constructor
+  IPCDefaultContextProxy default_context_proxy_;  // init handled in constructor
 
   /**
    * @brief An array of @ref ROContexts that backs the context FreeList.

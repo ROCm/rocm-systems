@@ -10,10 +10,10 @@ Behavior:
 * Pre-build (``build_py``), pre-editable-install (``develop`` /
   ``editable_wheel``): invoke the build script if the bundled binary
   is missing OR older than the patch series.
-* If ``bun`` is not on PATH: bootstrap bun into the user's home directory
-  and add it to PATH for this build. If the OS-level prerequisites needed
-  for that bootstrap are missing, fail with distro-specific package-manager
-  guidance instead of silently producing a broken ``perfxpert-code``.
+* If ``bun`` is not on PATH: fail with distro-specific package-manager
+  guidance by default. Set ``PERFXPERT_AUTO_INSTALL_BUN=1`` only when you
+  explicitly want setup.py to bootstrap bun into the user's home directory
+  for this build.
 * Opt-out via ``PERFXPERT_SKIP_BUNDLED_BUILD=1`` — useful in
   tightly-sandboxed CI where network isn't available and the interactive
   ``perfxpert-code`` TUI is intentionally not being built.
@@ -88,6 +88,8 @@ _PATCHES_DIR = _HERE / ".patches"
 _OPENCODE_DIR = _HERE / "opencode"
 _SKIP_ENV = "PERFXPERT_SKIP_BUNDLED_BUILD"
 _SKIP_OPENCODE_FETCH_ENV = "PERFXPERT_SKIP_OPENCODE_FETCH"
+_AUTO_INSTALL_BUN_ENV = "PERFXPERT_AUTO_INSTALL_BUN"
+_DEFAULT_BUN_VERSION = "1.2.23"
 _DEFAULT_BUN_INSTALL_URL = "https://bun.sh/install"
 
 
@@ -102,7 +104,7 @@ def _package_manager_prereq_hint() -> str:
         "  RHEL 10:\n"
         "    command -v curl >/dev/null || dnf install -y curl\n"
         "    dnf install -y git unzip python3 python3-pip\n"
-        "  SLES 15:\n"
+        "  SLES 15.6:\n"
         "    zypper install -y curl git unzip python311 python311-pip\n"
     )
 
@@ -123,8 +125,8 @@ def _missing_bun_bootstrap_prereqs() -> list[str]:
     return _missing_tools(("bash", "curl", "unzip"))
 
 
-def _missing_os_prereqs() -> list[str]:
-    return _missing_tools(("bash", "curl", "git", "unzip"))
+def _env_truthy(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _fail_build(message: str) -> None:
@@ -136,6 +138,8 @@ def _fail_build(message: str) -> None:
 
 
 def _run_bun_install_script(env: dict[str, str]) -> int:
+    # Internal mirrors may override the installer URL, but only after the
+    # caller has explicitly opted into automatic bun bootstrap.
     url = os.environ.get("PERFXPERT_BUN_INSTALL_URL", _DEFAULT_BUN_INSTALL_URL)
     missing = _missing_bun_bootstrap_prereqs()
     if missing:
@@ -149,37 +153,46 @@ def _run_bun_install_script(env: dict[str, str]) -> int:
     assert curl is not None
     assert bash is not None
 
-    curl_proc = subprocess.Popen(
+    curl_result = subprocess.run(
         [curl, "-fsSL", url],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-        text=False,
-    )
-    assert curl_proc.stdout is not None
-    bash_proc = subprocess.run(
-        [bash],
-        stdin=curl_proc.stdout,
+        capture_output=True,
         env=env,
         check=False,
     )
-    curl_proc.stdout.close()
-    _, curl_stderr = curl_proc.communicate()
-    if curl_proc.returncode != 0:
-        sys.stderr.write(curl_stderr.decode("utf-8", errors="replace"))
-        return curl_proc.returncode
-    return bash_proc.returncode
+    if curl_result.returncode != 0:
+        sys.stderr.write(curl_result.stderr.decode("utf-8", errors="replace"))
+        return curl_result.returncode
+
+    bash_result = subprocess.run(
+        [bash],
+        input=curl_result.stdout,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        check=False,
+    )
+    if bash_result.returncode != 0:
+        sys.stderr.write(bash_result.stdout.decode("utf-8", errors="replace"))
+        sys.stderr.write(bash_result.stderr.decode("utf-8", errors="replace"))
+    return bash_result.returncode
 
 
 def _ensure_bun_on_path() -> str | None:
     """Return a PATH env string that includes an available bun binary.
 
-    Bootstraps bun into ``$BUN_INSTALL`` when needed so ``pip install`` can
-    produce the bundled patched ``perfxpert-code`` binary end to end.
+    Automatic bootstrap is opt-in because it downloads and executes an
+    external installer. Default installs fail closed with an actionable hint.
     """
     existing = shutil.which("bun")
     if existing:
         return os.environ.get("PATH", "")
+    if not _env_truthy(_AUTO_INSTALL_BUN_ENV):
+        _fail_build(
+            "bun is not on PATH. Install bun from an approved package source, "
+            f"or set {_AUTO_INSTALL_BUN_ENV}=1 to explicitly allow setup.py "
+            f"to bootstrap bun {_DEFAULT_BUN_VERSION} into $BUN_INSTALL "
+            "(defaults to ~/.bun) for this build."
+        )
     missing = _missing_bun_bootstrap_prereqs()
     if missing:
         _fail_build(
@@ -191,10 +204,12 @@ def _ensure_bun_on_path() -> str | None:
     bun_install = os.environ.get("BUN_INSTALL") or str(Path.home() / ".bun")
     env = os.environ.copy()
     env["BUN_INSTALL"] = bun_install
+    env.setdefault("BUN_VERSION", _DEFAULT_BUN_VERSION)
 
     print(
-        "[perfxpert/setup.py] bun not on PATH — bootstrapping bun so the "
-        "bundled patched opencode binary is built during pip install.",
+        f"[perfxpert/setup.py] {_AUTO_INSTALL_BUN_ENV}=1 — bootstrapping "
+        f"bun {env['BUN_VERSION']} so the bundled patched opencode binary is "
+        "built during pip install.",
         file=sys.stderr,
     )
     rc = _run_bun_install_script(env)

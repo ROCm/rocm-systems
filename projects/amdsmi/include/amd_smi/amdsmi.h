@@ -356,8 +356,19 @@ typedef enum {
   AMDSMI_PROCESSOR_TYPE_AMD_APU,   //!< AMD Accelerated processor type, GPU and CPU on a single die
   AMDSMI_PROCESSOR_TYPE_AMD_NIC,   //!< AMD Network Interface Card processor type
   AMDSMI_PROCESSOR_TYPE_BRCM_NIC,  //!< Broadcom Network Interface Card type
-  AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH  //!< Broadcomm Switch type
-} processor_type_t;
+  AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH  //!< Broadcom Switch type
+} amdsmi_processor_type_t;
+
+/**
+ * @brief Backward-compatibility alias for ::amdsmi_processor_type_t.
+ *
+ * The unprefixed ::processor_type_t name is preserved for source-compatibility
+ * with callers written before the type was renamed. New code should use
+ * ::amdsmi_processor_type_t, which follows the ``amdsmi_`` typedef prefix
+ * convention used throughout this header and is less likely to collide with
+ * identifiers defined by other system-management libraries.
+ */
+typedef amdsmi_processor_type_t processor_type_t;
 
 /**
  * @brief Error codes returned by amdsmi functions
@@ -3235,14 +3246,14 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
  *
  *  @param[in] processor_handle a processor handle
  *
- *  @param[out] processor_type a pointer to ::processor_type_t to which the processor type
+ *  @param[out] processor_type a pointer to ::amdsmi_processor_type_t to which the processor type
  *  will be written. If this parameter is nullptr, this function will return
  *  ::AMDSMI_STATUS_INVAL.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_handle,
-                                          processor_type_t* processor_type);
+                                          amdsmi_processor_type_t* processor_type);
 
 /**
  *  @brief Get information about the given processor
@@ -3314,7 +3325,7 @@ amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle*
  *
  *  @param[in] socket_handle The socket to query.
  *
- *  @param[in] processor_type The type of processor to query (see ::processor_type_t).
+ *  @param[in] processor_type The type of processor to query (see ::amdsmi_processor_type_t).
  *
  *  @param[out] processor_handles Reference to list of processor handles returned by
  *  the library. Buffer must be allocated by user.
@@ -3326,7 +3337,7 @@ amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle*
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket_handle,
-                                                     processor_type_t processor_type,
+                                                     amdsmi_processor_type_t processor_type,
                                                      amdsmi_processor_handle* processor_handles,
                                                      uint32_t* processor_count);
 
@@ -8926,7 +8937,36 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
  *
  *  @note These features use kernel UAPI interfaces (sysfs/modprobe.d), not libdrm.
  *  UMA carveout is exposed via /sys/class/drm/<device>/device/uma/ and TTM via
- *  /etc/modprobe.d/ttm.conf. No libdrm dependency is required for these APIs.
+ *  /etc/modprobe.d/<module>.conf (module name is ttm, amdttm or amd-ttm
+ *  depending on the driver package). No libdrm dependency is required for
+ *  these APIs.
+ *
+ *  @par Supported ASICs (UMA carveout)
+ *  UMA carveout is only available on APU parts whose VBIOS exposes the
+ *  ATCS function code 0xA ("Set UMA Allocation Size") together with an
+ *  integrated_system_info table of at least v2.3. Currently this means
+ *  Strix and later APUs (gfx1150, gfx1151, gfx1152). Dedicated GPUs and
+ *  Instinct MI-series accelerators do NOT expose this interface, and
+ *  amdsmi_get_gpu_uma_carveout_info() returns AMDSMI_STATUS_NOT_SUPPORTED
+ *  on those devices. On the CLI this surfaces as "MEM_CARVEOUT: N/A".
+ *
+ *  @par Prerequisites (UMA carveout)
+ *    - Linux kernel >= 7.0 (upstream commit 685b711, drm/amdgpu UMA
+ *      carveout tuning series); some distros may backport it earlier
+ *    - APU VBIOS advertising ATCS 0xA + IGP info table v2.3
+ *    - Write access to /sys/class/drm/<card>/device/uma/carveout (root)
+ *    - A system reboot for any change to take effect
+ *
+ *  @par Supported ASICs (GTT / TTM pages_limit)
+ *  TTM pages_limit tuning is available on every system running the
+ *  amdgpu stack (both the in-kernel driver and amdgpu-dkms), including
+ *  MI300A. The module name seen in sysfs/modprobe is ttm (upstream),
+ *  amdttm (older amdgpu-dkms), or amd-ttm (newer amdgpu-dkms).
+ *
+ *  @par Prerequisites (GTT / TTM pages_limit)
+ *    - Write access to /etc/modprobe.d/ (root)
+ *    - dracut (optional, used to rebuild the initramfs automatically)
+ *    - A system reboot for any change to take effect
  *  @{
  */
 

@@ -3,6 +3,7 @@
 
 #include "library/pmc/collectors/cpu/device.hpp"
 #include "library/pmc/device_providers/procfs/drivers/tests/mock_driver.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -34,7 +35,7 @@ protected:
         all_enabled.value = ALL_CPU_METRICS;
     }
 
-    std::map<size_t, cpu_jiffies> make_jiffies(uint64_t user, uint64_t idle)
+    std::map<size_t, cpu_jiffies> make_jiffies(std::uint64_t user, std::uint64_t idle)
     {
         std::map<size_t, cpu_jiffies> result;
         for(size_t i = 0; i < 4; ++i)
@@ -60,8 +61,8 @@ protected:
         return result;
     }
 
-    rusage_snapshot make_rusage(int64_t rss  = 50 * 1024 * 1024,
-                                int64_t virt = 200 * 1024 * 1024)
+    rusage_snapshot make_rusage(std::int64_t rss  = 50 * 1024 * 1024,
+                                std::int64_t virt = 200 * 1024 * 1024)
     {
         rusage_snapshot snap;
         snap.page_rss         = rss;

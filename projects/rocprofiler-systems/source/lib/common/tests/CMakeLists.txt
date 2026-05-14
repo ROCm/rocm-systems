@@ -6,7 +6,6 @@ add_library(
     OBJECT
     test_discover_llvm_libdir.cpp
     test_environment.cpp
-    test_output.cpp
     test_path.cpp
     test_remove_env.cpp
     test_update_env.cpp

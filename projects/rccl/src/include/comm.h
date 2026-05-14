@@ -27,6 +27,7 @@
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
+#include "mem_manager.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -116,6 +117,7 @@ struct cliqueInfo {
 struct ncclDestructor {
   struct ncclDestructor* next;
   void* obj;
+  struct ncclComm* comm;
   ncclResult_t(*fn)(struct ncclDestructor* me);
 };
 
@@ -706,6 +708,10 @@ struct ncclComm {
 
   hipEvent_t doneEvent;
   hipStream_t lastStream;
+  // False until the first kernel launch on this comm. Distinguishes "no prior launch"
+  // from "prior launch on the default stream (lastStream==nullptr)" so ncclLaunchPrepare
+  // can correctly detect a stream change in either case.
+  bool lastStreamValid;
   latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_COLLTRACE
@@ -770,6 +776,9 @@ struct ncclComm {
   char* archName;
   // multiProcessorCount from hipDeviceProp_t [RCCL]
   int cuCount;
+  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
+  int ll128LineElems;
+  int ll128DataElems;
 
 #ifdef ENABLE_ROCSHMEM
   // circular ring buffer in rocshmem symmetric heap
@@ -788,6 +797,8 @@ struct ncclComm {
   bool enableDirectReduceScatter;
   // Temporary Buffer [RCCL]
   void* tempBuff;
+
+  struct ncclMemManager* memManager;  // Memory manager
 
   uint64_t endMagic;
 };

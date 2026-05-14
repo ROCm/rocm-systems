@@ -285,6 +285,49 @@
         }
       ]
     },
+    "net_ib_multirecv": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiRecv",
+          "description": "irecv(n=8) batching over host memory, sequential tag order, 255 batches",
+          "test_filter": "NetIbMPITest.MultiRecv"
+        },
+        {
+          "name": "NetIB_MultiRecvShuffled",
+          "description": "irecv(n=8) batching over host memory, shuffled recv-slot and send-issue order, 255 batches",
+          "test_filter": "NetIbMPITest.MultiRecvShuffled"
+        },
+        {
+          "name": "NetIB_MultiRecvGPUShuffled",
+          "description": "irecv(n=8) batching over GPU memory (GDR path), shuffled order, 255 batches; skipped if GDR unavailable",
+          "test_filter": "NetIbMPITest.MultiRecvGPUShuffled"
+        }
+      ]
+    },
+    "net_ib_cts_stress": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_IB_P2P_DISABLE_CTS": "1",
+        "CTS_NUM_CONNS":  "16",
+        "CTS_QP_DEPTH":   "256",
+        "CTS_SNAP_EVERY": "4"
+      },
+      "tests": [
+        {
+          "name": "NetIB_CtsDepthStress",
+          "description": "Stress CTS match-table depth (16 P2P conns x 256 outstanding recvs) and sample hw_counters; with RCCL_IB_P2P_DISABLE_CTS=1 the workaround should keep retx/ack_timeout at 0",
+          "test_filter": "NetIbMPITest.CtsDepthStress"
+        }
+      ]
+    },
     "unit_tests_fixtures": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsFixtures",
@@ -302,9 +345,9 @@
           "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"
         },
         {
-          "name": "CommTests",
-          "description": "Communicator unit tests",
-          "test_filter": "CommTests.*"
+          "name": "MiscTests",
+          "description": "Miscellaneous header-level unit tests (e.g. task coll sorter)",
+          "test_filter": "MiscTests.*"
         },
         {
           "name": "EnqueueCountTests",
@@ -547,6 +590,26 @@
         }
       ]
     },
+    "comm_mpi_tests": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "CommMPITests_TrafficClass",
+          "description": "CommMPITests traffic class (ncclCommInitRankConfig)",
+          "test_filter": "TrafficClassMPITest.*"
+        }
+      ]
+    },
     "ubr_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -597,19 +660,19 @@
           "name": "UBR_AllToAllStress_InterleavedMultiSize",
           "description": "Stress test with interleaved AllToAll/AllToAllv across small/medium/large sizes",
           "test_filter": "UBR_AllToAllStress.InterleavedMultiSize_MultiNode",
-          "timeout": 120
+          "timeout": 300
         },
         {
           "name": "UBR_AllToAllStress_SplitComm",
           "description": "Stress test with interleaved AllToAll/AllToAllv using split communicators",
           "test_filter": "UBR_AllToAllStress.InterleavedWithSplitComm_MultiNode",
-          "timeout": 120
+          "timeout": 300
         },
         {
           "name": "UBR_AllToAllStress_ConcurrentMultiComm",
           "description": "Concurrent AllToAll on multiple communicators with separate streams",
           "test_filter": "UBR_AllToAllStress.ConcurrentMultiComm_MultiNode",
-          "timeout": 120
+          "timeout": 300
         },
         {
           "name": "UBR_ConcurrentRegHang_ContiguousBuffer_Grouped",
@@ -694,6 +757,207 @@
         }
       ]
     },
+    "cast_base": {
+      "extends": "net_ib_base",
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "env_variables": {
+        "RCCL_IB_QP_SCHED_ENABLE":          "1",
+        "RCCL_IB_QP_SCHED_WRR_ENABLE":      "1",
+        "RCCL_IB_QP_SCHED_WEIGHT":          "0",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "50",
+        "RCCL_IB_QP_SCHED_RESET_INTERVAL":  "60000",
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN":  "65536"
+      }
+    },
+
+    "cast_wrr_split": {
+      "extends": "cast_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS":  "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_EqualWeightsTwoQPsTokenCounts",
+          "description": "WRR token table with equal weights: verify initTotTokens=100 and per-QP token floor",
+          "test_filter": "NetIbMPITest.CastEqualWeightsTwoQPsTokenCounts"
+        },
+        {
+          "name": "Cast_TokenSumInvariantAfterConsumption",
+          "description": "After 10 mid-round sends: initTokens immutable, sum(activeQpTokens)==activeTotTokens",
+          "test_filter": "NetIbMPITest.CastTokenSumInvariantAfterConsumption"
+        },
+        {
+          "name": "Cast_SplitDataThresholdBoundary",
+          "description": "Exact threshold boundary: size>=splitDataMin*nqps → split path (0 tokens); size<threshold → WRR path (1 token)",
+          "test_filter": "NetIbMPITest.CastSplitDataThresholdBoundary"
+        },
+        {
+          "name": "Cast_EnableDisableSched",
+          "description": "Toggle schedEnable mid-connection: enabled=1 token, disabled=0 tokens, re-enabled=1 token",
+          "test_filter": "NetIbMPITest.CastEnableDisableSched"
+        },
+        {
+          "name": "Cast_SendRecvMultipleSizes",
+          "description": "Sizes across split/WRR threshold: below threshold→1 token each; at/above threshold→0 tokens; data integrity verified",
+          "test_filter": "NetIbMPITest.CastSendRecvMultipleSizes"
+        },
+        {
+          "name": "Cast_LargeTransfer",
+          "description": "16 MB send with splitData=true: split path taken, 0 WRR tokens consumed, data integrity verified",
+          "test_filter": "NetIbMPITest.CastLargeTransfer"
+        },
+        {
+          "name": "Cast_SendRecvZeroSize",
+          "description": "Zero-byte send: WRR oneQp path taken (dataPerQp=0 < splitDataMin), 1 token consumed, received size==0",
+          "test_filter": "NetIbMPITest.CastSendRecvZeroSize"
+        }
+      ]
+    },
+
+    "cast_wrr_no_split": {
+      "extends": "cast_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS":  "0"
+      },
+      "tests": [
+        {
+          "name": "Cast_WeightsDistributionOneRound",
+          "description": "Two-phase WRR distribution: equal then triangular weights — both exhaust all active tokens after one full round",
+          "test_filter": "NetIbMPITest.CastWeightsDistributionOneRound"
+        },
+        {
+          "name": "Cast_SchedParmsReflectEnvVars",
+          "description": "schedParms inside sendComm matches env: schedEnable=true, doWrr=true, splitDataMin=65536",
+          "test_filter": "NetIbMPITest.CastSchedParmsReflectEnvVars"
+        },
+        {
+          "name": "Cast_AlternatingWrrNonWrr",
+          "description": "Toggle doWrr mid-connection (3×10 sends): WRR consumes tokens in phases 1&3, zero in phase 2",
+          "test_filter": "NetIbMPITest.CastAlternatingWrrNonWrr"
+        },
+        {
+          "name": "Cast_EnableDisableSplitData",
+          "description": "Toggle splitData mid-connection at threshold boundary: WRR/split path alternates, 1/0/1 tokens consumed",
+          "test_filter": "NetIbMPITest.CastEnableDisableSplitData"
+        }
+      ]
+    },
+
+    "cast_single_qp": {
+      "extends": "cast_base",
+      "timeout": 60,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "1",
+        "NCCL_IB_SPLIT_DATA_ON_QPS":  "0"
+      },
+      "tests": [
+        {
+          "name": "Cast_SingleQPBypassesWrr",
+          "description": "nqps=1: IbCastQpSchedGetEffectiveTxNqps bypasses WRR, schedInit stays false",
+          "test_filter": "NetIbMPITest.CastSingleQPBypassesWrr"
+        }
+      ]
+    },
+
+    "cast_four_qp": {
+      "extends": "cast_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS":  "0"
+      },
+      "tests": [
+        {
+          "name": "Cast_CursorWrapsAtNqpsBoundary",
+          "description": "tokens={0,...,0,1}: WRR loop skips all QPs to last, cursor wraps to 0 after selection",
+          "test_filter": "NetIbMPITest.CastCursorWrapsAtNqpsBoundary"
+        },
+        {
+          "name": "Cast_FourQPsMonotonicOrder",
+          "description": "Triangular token weights (strictly decreasing), 100 sends: initQpTokens monotone, all active tokens exhausted",
+          "test_filter": "NetIbMPITest.CastFourQPsMonotonicOrder"
+        }
+      ]
+    },
+
+    "cast_max_qp": {
+      "extends": "cast_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "128",
+        "NCCL_IB_SPLIT_DATA_ON_QPS":  "0"
+      },
+      "tests": [
+        {
+          "name": "Cast_MaxQPCount128",
+          "description": "1 token per QP, nqps sends: every QP selected exactly once, cursor back to 0 after full round-robin",
+          "test_filter": "NetIbMPITest.CastMaxQPCount128"
+        }
+      ]
+    },
+
+    "cast_stress": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS":  "0"
+      },
+      "tests": [
+        {
+          "name": "Cast_StressMultiRoundTwoConns",
+          "description": "500 sends on 2 concurrent connections: timer fires mid-run, data integrity and WRR consistency invariants verified",
+          "test_filter": "NetIbMPITest.CastStressMultiRoundTwoConns"
+        }
+      ]
+    },
+
+    "fault_inject_cast": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_SPLIT_DATA_ON_QPS":          "1",
+        "NCCL_IB_QPS_PER_CONNECTION":         "4",
+        "RCCL_IB_QP_SCHED_WRR_ENABLE":       "1",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL":   "100",
+        "RCCL_IB_QP_SCHED_RESET_INTERVAL":    "1000",
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN":    "2000",
+        "NCCL_IB_RETURN_ASYNC_EVENTS":         "1"
+      },
+      "tests": [
+        {
+          "name": "FaultInj_Cast_QpErrorIsFatal",
+          "description": "CAST path: error injected on QP 0 increments fatalErrorCount",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorIsFatal"
+        },
+        {
+          "name": "FaultInj_Cast_SlowQpRebalances",
+          "description": "CAST WRR: 10 ms delay on QP 0 causes RTT timer to reduce QP 0 active tokens below equal share after 500 sends",
+          "test_filter": "NetIbMPITest.FaultInjCastSlowQpRebalances"
+        },
+        {
+          "name": "FaultInj_Cast_DelayDataIntegrity",
+          "description": "CAST path: 2 ms per-QP delay preserves full data integrity across 50 sends",
+          "test_filter": "NetIbMPITest.FaultInjCastDelayDataIntegrity"
+        },
+        {
+          "name": "FaultInj_Cast_SingleQpErrorIsFatal",
+          "description": "CAST WRR: error on one QP (tokens steered to QP 0 via SetTokens) triggers fatalErrorCount > 0 or isend failure",
+          "test_filter": "NetIbMPITest.FaultInjCastSingleQpErrorIsFatal"
+        },
+        {
+          "name": "FaultInj_Cast_QpErrorClearRecovers",
+          "description": "CAST path: after FaultClear on a faulted connection, a fresh connection completes 20 sends with no corruption and fatalCount==0",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorClearRecovers"
+        }
+      ]
+    },
+
     "graph_capture_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -774,6 +1038,18 @@
       "enabled": true
     },
     {
+      "name": "NET IB - MultiRecv",
+      "description": "irecv(n>1) multi-slot batching tests",
+      "config": "net_ib_multirecv",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CTS Depth Stress",
+      "description": "CTS match-table depth stress / overflow reproducer (AINIC); fully under RCCL_IB_P2P_DISABLE_CTS=1 workaround so passes cleanly on healthy stacks",
+      "config": "net_ib_cts_stress",
+      "enabled": true
+    },
+    {
       "name": "Unit Tests - Fixtures (Release)",
       "description": "Non-MPI unit tests using header-only fixtures (Release and Debug)",
       "config": "unit_tests_fixtures",
@@ -810,6 +1086,12 @@
       "enabled": true
     },
     {
+      "name": "Comm MPI Tests",
+      "description": "MPI unit tests from CommMPITests.cpp",
+      "config": "comm_mpi_tests",
+      "enabled": true
+    },
+    {
       "name": "UBR Tests - Multi Node",
       "description": "User Buffer Registration tests on multi-node (requires 2+ nodes)",
       "config": "ubr_multi_node",
@@ -825,6 +1107,48 @@
       "name": "Graph Capture Tests - Multi Node",
       "description": "Graph capture with buffer registration on multi-node (requires 2+ nodes)",
       "config": "graph_capture_multi_node",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST WRR+Split (QPS=2, splitData=1)",
+      "description": "White-box WRR scheduler tests with split-data path enabled: token counts, threshold boundary, split/WRR token accounting, sched enable/disable",
+      "config": "cast_wrr_split",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST WRR only (QPS=2, splitData=0)",
+      "description": "White-box WRR scheduler tests without split-data: weights distribution, doWrr toggle, splitData toggle, sched parms reflection",
+      "config": "cast_wrr_no_split",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Single QP (QPS=1)",
+      "description": "WRR bypass path: single-QP connection must skip scheduler initialisation",
+      "config": "cast_single_qp",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Four QPs (QPS=4)",
+      "description": "Cursor wrap and monotonic token order with up to 4 QPs",
+      "config": "cast_four_qp",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Max QPs (QPS=128)",
+      "description": "Full round-robin with 1 token per QP at maximum QP count (hardware-capped)",
+      "config": "cast_max_qp",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Stress (QPS=2)",
+      "description": "500 sends on 2 concurrent connections: RTT timer fires mid-run, consistency invariants verified",
+      "config": "cast_stress",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Injection (CAST path, QPS=4, splitData=1)",
+      "description": "Per-QP fault injection on CAST multi-QP path: error propagation, RTT rebalancing, data integrity under delay",
+      "config": "fault_inject_cast",
       "enabled": true
     }
   ]

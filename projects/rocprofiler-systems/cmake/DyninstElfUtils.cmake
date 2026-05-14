@@ -180,18 +180,21 @@ else()
     # Backport elfutils commit 7508696d (released in 0.192) to fix GCC 15
     # -Werror=unterminated-string-initialization in the i386/x86_64 register
     # tables. Only applied to versions older than 0.192 where the upstream
-    # fix is missing.
+    # fix is missing. The patch invocation is wrapped in
+    # apply_patch_idempotent.cmake because CMake regenerates
+    # *-patch-info.txt on every reconfigure, retriggering the patch step
+    # against already-patched source - vanilla `patch` aborts in that case.
     set(_eu_patch_args)
     if(ELFUTILS_DOWNLOAD_VERSION VERSION_LESS 0.192)
         find_program(PATCH_EXECUTABLE NAMES patch REQUIRED)
         set(_eu_patch_args
             PATCH_COMMAND
-            ${PATCH_EXECUTABLE}
-            -p1
-            -d
-            <SOURCE_DIR>
-            -i
-            ${CMAKE_CURRENT_LIST_DIR}/elfutils-0.188-gcc15-regs.patch
+            ${CMAKE_COMMAND}
+            -DSRC=<SOURCE_DIR>
+            -DPATCH=${CMAKE_CURRENT_LIST_DIR}/elfutils-0.188-gcc15-regs.patch
+            -DPATCH_EXE=${PATCH_EXECUTABLE}
+            -P
+            ${CMAKE_CURRENT_LIST_DIR}/apply_patch_idempotent.cmake
         )
     endif()
 

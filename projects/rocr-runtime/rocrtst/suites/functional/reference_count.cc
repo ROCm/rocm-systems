@@ -68,6 +68,7 @@
 #include "common/common.h"
 #include "common/helper_funcs.h"
 #include "common/hsatimer.h"
+#include "common/platform_filter.h"
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
@@ -105,6 +106,8 @@ ReferenceCountTest::~ReferenceCountTest(void) {
 // Compare required profile for this test case with what we're actually
 // running on
 void ReferenceCountTest::SetUp(void) {
+  if (!checkPlatformFiltering()) return;
+
   return;  // hsa runtime initalized in ReferenceCountTest::TestReferenceCount()
 }
 

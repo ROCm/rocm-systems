@@ -67,7 +67,7 @@ kernel_simple_coarse_copy_warp(IpcImpl *ipc_impl, int *src, int *dest, size_t by
 }
 
 class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int, int>> {
-    using HEAP_T = HeapMemoryType<HIPAllocator>;
+    using HEAP_T = HeapMemoryType;
     using MPI_T = RemoteHeapInfo<CommunicatorMPI>;
     using FN_T = void (*)(IpcImpl*, int*, int*, size_t);
 
@@ -188,13 +188,12 @@ class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int,
   protected:
     std::vector<int> golden_;
 
-    HEAP_T heap_mem_ {};
+    HIPAllocator hip_allocator_ {};
+    HEAP_T heap_mem_ {hip_allocator_};
     MPI_T *mpi_{nullptr};
 
     IpcImpl ipc_impl_ {};
     IpcImpl *ipc_impl_dptr_ {nullptr};
-
-    HIPAllocator hip_allocator_ {};
 };
 
 class DegenerateSimpleCoarse : public IPCImplSimpleCoarse {

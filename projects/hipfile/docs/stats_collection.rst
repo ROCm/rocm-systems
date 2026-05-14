@@ -4,10 +4,8 @@ Stats Collection Tool
 Command-line Tool
 -----------------
 ``ais-stats`` can be run two ways:
-* ``$ ais-stats -p <PID> [-i]`` will collect stats from a running process.
-  ``-i`` will report immediately rather than wait for the process to exit.
-* ``$ ais-stats <program> [args...]`` will launch ``<program>`` with the
-  provided arguments and report the collected stats when it exits.
+* ``$ ais-stats -p <PID> [-i]`` will collect stats from a running process. ``-i`` will report immediately rather than wait for the process to exit.
+* ``$ ais-stats <program> [args...]`` will launch ``<program>`` with the provided arguments and report the collected stats when it exits.
 
 Configuration
 -------------

@@ -8,6 +8,7 @@
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
 #include "logger/debug.hpp"
+#include <cstdint>
 
 #include <algorithm>
 #include <regex>
@@ -43,9 +44,10 @@ using ::rocprofsys::pmc::device_selection_mode;
 using ::rocprofsys::pmc::collectors::cpu::enabled_metrics;
 }  // namespace cpu
 
-// GPU metric bitfield: 0x7FFF sets bits 0-14 (all 15 GPU metrics enabled)
-inline constexpr uint32_t ENABLE_ALL_METRICS  = 0x7FFF;
-inline constexpr uint32_t DISABLE_ALL_METRICS = 0x0000;
+// GPU metric bitfield helpers: ENABLE_ALL_METRICS sets bits 0..NUM_GPU_METRIC_BITS-1
+inline constexpr std::uint32_t NUM_GPU_METRIC_BITS = 17;
+inline constexpr std::uint32_t ENABLE_ALL_METRICS  = (1U << NUM_GPU_METRIC_BITS) - 1U;
+inline constexpr std::uint32_t DISABLE_ALL_METRICS = 0x0000;
 
 struct settings_policy
 {
@@ -179,14 +181,15 @@ private:
             return result;
         }
 
-        auto make_bits = [](std::initializer_list<uint8_t> positions) -> uint32_t {
-            uint32_t v = 0;
+        auto make_bits =
+            [](std::initializer_list<std::uint8_t> positions) -> std::uint32_t {
+            std::uint32_t v = 0;
             for(auto b : positions)
                 v |= (1u << b);
             return v;
         };
 
-        const std::unordered_map<std::string, uint32_t> mapper{
+        const std::unordered_map<std::string, std::uint32_t> mapper{
             { "frequency", make_bits({ 0 }) },    { "load", make_bits({ 1 }) },
             { "memory", make_bits({ 2, 3, 4 }) }, { "page_rss", make_bits({ 2 }) },
             { "virt_mem", make_bits({ 3 }) },     { "peak_rss", make_bits({ 4 }) },
@@ -243,8 +246,8 @@ private:
         }
 
         std::regex validator{
-            R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage)"
-            R"()(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage))*$)"
+            R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock)"
+            R"()(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage|gfx_clock|mem_clock))*$)"
         };
 
         if(!std::regex_match(settings_trimmed, validator))
@@ -255,8 +258,8 @@ private:
             return result;
         }
 
-        auto make_metric = [](std::initializer_list<uint8_t> bit_positions) {
-            uint32_t value = 0;
+        auto make_metric = [](std::initializer_list<std::uint8_t> bit_positions) {
+            std::uint32_t value = 0;
             for(auto bit : bit_positions)
             {
                 value |= (1u << bit);
@@ -267,7 +270,7 @@ private:
         };
 
         // See enabled_metrics definition in common.hpp for bit position documentation
-        const std::unordered_map<std::string, uint16_t> mapper{
+        const std::unordered_map<std::string, std::uint32_t> mapper{
             { "power", make_metric({ 0, 1 }) },           // current, average
             { "mem_usage", make_metric({ 2 }) },          // memory_usage
             { "temp", make_metric({ 3, 4 }) },            // hotspot, edge
@@ -277,6 +280,8 @@ private:
             { "xgmi", make_metric({ 12 }) },              // xgmi
             { "pcie", make_metric({ 13 }) },              // pcie
             { "sdma_usage", make_metric({ 14 }) },        // sdma_usage
+            { "gfx_clock", make_metric({ 15 }) },         // gfx_clock
+            { "mem_clock", make_metric({ 16 }) },         // mem_clock
         };
 
         gpu::enabled_metrics metrics;

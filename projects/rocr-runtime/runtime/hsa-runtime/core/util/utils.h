@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -60,6 +60,13 @@
 #include <thread>
 #include <locale>
 
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#include <x86intrin.h>
+#endif
+#if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
+#include "intrin.h"
+#endif
+
 namespace rocr {
 extern FILE* log_file;
 extern uint8_t log_flags[8];
@@ -76,9 +83,6 @@ typedef uint64_t uint64;
 void log_printf(const char* file, int line, const char* format, ...);
 
 #if defined(__GNUC__)
-#if defined(__i386__) || defined(__x86_64__)
-#include <x86intrin.h>
-#endif
 
 #define __forceinline __inline__ __attribute__((always_inline))
 #define __declspec(x) __attribute__((x))
@@ -97,7 +101,6 @@ static __forceinline void* _aligned_malloc(size_t size, size_t alignment) {
 }
 static __forceinline void _aligned_free(void* ptr) { return free(ptr); }
 #elif defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
-#include "intrin.h"
 #define __ALIGNED__(x) __declspec(align(x))
 #if (_MSC_VER < 1800)  // < VS 2013
 static __forceinline unsigned long long int strtoull(const char* str,
@@ -138,8 +141,8 @@ static __forceinline unsigned long long int strtoull(const char* str,
   do {                                                                                             \
     static std::atomic<int> count(0);                                                              \
     if (!(exp) && (limit == 0 || count < limit)) {                                                 \
-      fprintf(stderr, "Warning: " STRING(exp) " in %s, " __FILE__ ":" STRING(__LINE__) "\n"        \
-              );                                                                \
+      fprintf(stderr, "Warning: " STRING(exp) " in %s, " __FILE__ ":" STRING(__LINE__) "\n",       \
+              __FUNCSIG__);                                                                        \
       count++;                                                                                     \
     }                                                                                              \
   } while (false)
@@ -480,10 +483,11 @@ inline uint32_t LowPart(uint64_t value) { return (value & 0x00000000FFFFFFFF); }
 /// @param: lo(Input), To be placed in the lower bits of the output
 /// @return: OutType, Concatenation of hi and lo
 template <typename OutType, typename InType>
-typename std::enable_if<std::is_integral<OutType>::value && std::is_integral<InType>::value &&
-                            sizeof(OutType) >= 2 * sizeof(InType),
-                        OutType>::type
-Concat(InType hi, InType lo) {
+constexpr
+    typename std::enable_if<std::is_integral<OutType>::value && std::is_integral<InType>::value &&
+                                sizeof(OutType) >= 2 * sizeof(InType),
+                            OutType>::type
+    Concat(InType hi, InType lo) {
   OutType res = ((static_cast<OutType>(hi) << sizeof(InType) * 8) | static_cast<OutType>(lo));
   return res;
 }

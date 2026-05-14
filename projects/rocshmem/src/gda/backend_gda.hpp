@@ -514,7 +514,7 @@ class GDABackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  GDADefaultContextProxyT default_context_proxy_;  // init handled in constructor
+  GDADefaultContextProxy default_context_proxy_;  // init handled in constructor
 
   /**
    * @brief An array of @ref ROContexts that backs the context FreeList.

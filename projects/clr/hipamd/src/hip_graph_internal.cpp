@@ -435,7 +435,11 @@ void GraphExec::BuildSyncPlan() {
 
   auto* device = g_devices[instantiateDeviceId_]->devices()[0];
 
-  static const std::string kBarrierKernelName = "";
+  // Barrier packets are sentinel-marked with nullptr in dispatchKernelNames so that
+  // activity.cpp can distinguish them from kernel/blit dispatch packets (which use "" or a
+  // real name).  This avoids the empty-string ambiguity that caused the last kernel node to
+  // be dropped when a copy/blit node also contributed an empty-string entry.
+  static const std::string* const kBarrierKernelNamePtr = nullptr;
 
   for (const auto& segment : segments_) {
     auto& info = sync_plan_.segment_sync[segment.id];
@@ -499,7 +503,7 @@ void GraphExec::BuildSyncPlan() {
 
           firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), barrier_pkt);
           firstBatch.dispatchKernelNames.insert(firstBatch.dispatchKernelNames.begin(),
-                                                &kBarrierKernelName);
+                                                kBarrierKernelNamePtr);
         }
 
         // nodeRanges[i].startIndex was recorded before barrier packets were prepended.
@@ -522,15 +526,25 @@ void GraphExec::BuildSyncPlan() {
       sync_plan_.barrier_packets.push_back(completion_barrier);
 
       lastBatch.dispatchPackets.push_back(completion_barrier);
-      lastBatch.dispatchKernelNames.push_back(&kBarrierKernelName);
+      lastBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
 
       sync_plan_.patch_list.push_back(
           {completion_barrier, nullptr, segment.id,
            amd::Device::HwEventPatch::kCompletionSignal});
     } else if (!lastBatch.dispatchPackets.empty()) {
-      uint8_t* last_pkt = lastBatch.dispatchPackets.back();
+      // All nodes are capturable — append a real completion barrier packet so that
+      // ApplyHwEventPatches patches the barrier's completion signal, not the last
+      // kernel dispatch's. Patching the last kernel dispatch directly causes
+      // dispatchAqlPacketBatchFlat to see a pre-patched non-zero signal and skip
+      // profiling setup (reserved2 / isPacketDispatch_) for that kernel.
+      uint8_t* completion_barrier = device->CreateBarrierPacket();
+      sync_plan_.barrier_packets.push_back(completion_barrier);
+
+      lastBatch.dispatchPackets.push_back(completion_barrier);
+      lastBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
+
       sync_plan_.patch_list.push_back(
-          {last_pkt, nullptr, segment.id,
+          {completion_barrier, nullptr, segment.id,
            amd::Device::HwEventPatch::kCompletionSignal});
     }
 
@@ -2016,8 +2030,11 @@ bool Graph::RunOneNode(Node node) {
   for (auto depNode : node->GetDependencies()) {
     // Process only the nodes that have been submitted
     if (depNode->launch_id_ != -1) {
-      // If it's the same stream then skip the signal, since it's in order
-      if (depNode->stream_id_ != node->stream_id_) {
+      // Child graph nodes may internally dispatch work on streams other
+      // than their assigned stream_id_, so the same-stream in-order
+      // assumption does not hold.  Always treat them as cross-stream deps.
+      if (depNode->stream_id_ != node->stream_id_ ||
+          depNode->GetType() == hipGraphNodeTypeGraph) {
         // If there is no wait node on the stream, then assign one
         if ((wait_order_[depNode->stream_id_] == nullptr) ||
             // If another node executed on the same stream, then use the latest launch only,
@@ -2043,11 +2060,8 @@ bool Graph::RunOneNode(Node node) {
   // Create a wait list from the last launches of all dependencies
   for (auto dep : wait_order_) {
     if (dep != nullptr) {
-      // Add all commands in the wait list
-      if (dep->GetType() != hipGraphNodeTypeGraph) {
-        for (auto command : dep->GetCommands()) {
-          waitList.push_back(command);
-        }
+      for (auto command : dep->GetCommands()) {
+        waitList.push_back(command);
       }
     }
   }
@@ -2056,6 +2070,19 @@ bool Graph::RunOneNode(Node node) {
     auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
     if (!reinterpret_cast<hip::ChildGraphNode*>(node)->GetGraphCaptureStatus()) {
       child->RunNodes(node->stream_id_, &streams_, &waitList);
+      // Store the child graph's completion command so that downstream
+      // dependency handling can use node->GetCommands() directly,
+      // instead of querying getLastQueuedCommand at dependency time
+      // (which could return unrelated later work on the same stream).
+      auto completion = streams_[node->stream_id_]->getLastQueuedCommand(true);
+      if (completion != nullptr) {
+        // Release any previously stored completion command (from prior launches)
+        for (auto cmd : node->GetCommands()) {
+          cmd->release();
+        }
+        node->GetCommands().clear();
+        node->GetCommands().push_back(completion);
+      }
     }
   } else {
     // Assing a stream to the current node
@@ -2079,11 +2106,8 @@ bool Graph::RunOneNode(Node node) {
   // Release commands of dependency nodes that were included in the wait list after enqueue
   for (auto dep : wait_order_) {
     if (dep != nullptr) {
-      // Add all commands in the wait list
-      if (dep->GetType() != hipGraphNodeTypeGraph) {
-        for (auto command : dep->GetCommands()) {
-          command->release();
-        }
+      for (auto command : dep->GetCommands()) {
+        command->release();
       }
     }
   }
@@ -2111,10 +2135,10 @@ bool Graph::RunOneNode(Node node) {
     leafs_[node->stream_id_] = node;
     // An extra retain is needed for the leaves in order to be able to later enqueue a marker
     // on the app stream that has these commands in the waitlist.
-    if (node->GetType() != hipGraphNodeTypeGraph) {
-      for (auto command : node->GetCommands()) {
-        command->retain();
-      }
+    // Child graph nodes now have completion commands stored via GetCommands(),
+    // so they participate in the leaf retain/release cycle like regular nodes.
+    for (auto command : node->GetCommands()) {
+      command->retain();
     }
   }
 
@@ -2154,6 +2178,16 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
         start_marker->release();
       }
     }
+    // For child graphs launched on a non-zero base_stream, the root nodes
+    // are on stream 0 (roots_[0] is never set because scheduling always
+    // assigns the first root to stream 0 and skips it in root recording).
+    // Sync stream 0 with base_stream so the child's work waits for the
+    // parent's dependencies.
+    if (base_stream != 0) {
+      auto start_marker = new amd::Marker(*streams_[0], true, wait_list);
+      start_marker->enqueue();
+      start_marker->release();
+    }
     last_command->release();
   }
 
@@ -2167,8 +2201,7 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
   wait_list.clear();
   // Check if the graph has multiple leaf nodes
   for (uint32_t i = 0; i < DEBUG_HIP_FORCE_GRAPH_QUEUES; ++i) {
-    if ((leafs_[i] != nullptr) && (leafs_[i]->GetType() != hipGraphNodeTypeGraph)) {
-      // Add all commands in the wait list
+    if (leafs_[i] != nullptr) {
       for (auto command : leafs_[i]->GetCommands()) {
         if (base_stream != i) {
           wait_list.push_back(command);
