@@ -139,7 +139,8 @@
   X(LibraryInfo,               94)  \
   X(TeamCtxSharedInfra,        95)  \
   X(QuietOnStream,             96)  \
-  X(SyncAllOnStream,           97)
+  X(SyncAllOnStream,           97)  \
+  X(TeamCtxSubsetParentInfra,  98)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
