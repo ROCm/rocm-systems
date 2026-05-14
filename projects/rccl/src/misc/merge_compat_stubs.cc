@@ -20,12 +20,6 @@
 #include <cstdlib>
 #include <cstdio>
 #include <dlfcn.h>
-#include <sched.h>
-
-#define NOWARN(cmd, subsys) do { \
-  (void)(subsys); \
-  (void)(cmd); \
-} while (0) // RCCL_COMPAT_STUB
 
 ncclResult_t ncclScheduleBcastTasksToPlan(
     struct ncclComm*, struct ncclKernelPlan*, struct ncclKernelPlanBudget*
@@ -40,8 +34,6 @@ ncclResult_t ncclGetAlgoInfo(
   return ncclInternalError;
 } // RCCL_COMPAT_STUB
 
-int ncclOsCpuCount(const cpu_set_t& mask) { return CPU_COUNT(&mask); } // RCCL_COMPAT_STUB
-bool ncclOsCpuIsSet(const cpu_set_t& mask, int cpu) { return CPU_ISSET(cpu, &mask); } // RCCL_COMPAT_STUB
 const char* ncclVersionToString(int version, char* buf, size_t bufLen) {
   int major = version / 10000;
   int minor = (version / 100) % 100;
@@ -87,6 +79,7 @@ ncclResult_t ncclGinQueryLastError(struct ncclGinState*, bool* hasError) {
 // GIN GDAKI stubs - referenced by net_ib.cc functions even though we NULLed the
 // vtable entries; provide no-op stubs so the symbols resolve.
 ncclResult_t ncclGinGdakiRegMrSym(void*, void*, size_t, int, uint64_t, void**, void**) { return ncclInternalError; } // RCCL_COMPAT_STUB
+ncclResult_t ncclGinGdakiCreateContext(void*, int, int, int, int, int, void**, ncclNetDeviceHandle_v11_t**) { return ncclInternalError; } // RCCL_COMPAT_STUB
 ncclResult_t ncclGinGdakiDeregMrSym(void*, void*) { return ncclSuccess; } // RCCL_COMPAT_STUB
 ncclResult_t ncclGinGdakiDestroyContext(void*) { return ncclSuccess; } // RCCL_COMPAT_STUB
 ncclResult_t ncclGinGdakiProgress(void*) { return ncclSuccess; } // RCCL_COMPAT_STUB
@@ -105,7 +98,3 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm*, void*, size_t,
                                   void* [NCCL_GIN_MAX_CONNECTIONS],
                                   ncclGinWindow_t [NCCL_GIN_MAX_CONNECTIONS]) { return ncclInternalError; } // RCCL_COMPAT_STUB
 ncclResult_t ncclRmaProxyDeregister(struct ncclComm*, void* [NCCL_GIN_MAX_CONNECTIONS]) { return ncclSuccess; } // RCCL_COMPAT_STUB
-
-void* ncclOsDlsym(void* handle, const char* symbol) { return ::dlsym(handle, symbol); } // RCCL_COMPAT_STUB
-ncclResult_t ncclOsSetAffinity(const cpu_set_t&) { return ncclSuccess; } // RCCL_COMPAT_STUB
-ncclResult_t ncclOsSetFilesLimit() { return ncclSuccess; } // RCCL_COMPAT_STUB
