@@ -1113,9 +1113,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
     else if(record.kind == ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API)
     {
-        auto* data =
-            static_cast<rocprofiler_callback_tracing_rocshmem_api_data_t*>(record.payload);
-        auto args = callback_arg_array_t{};
+        auto* data = static_cast<rocprofiler_callback_tracing_rocshmem_api_data_t*>(record.payload);
+        auto  args = callback_arg_array_t{};
         if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
             rocprofiler_iterate_callback_tracing_kind_operation_args(
                 record, save_args, record.phase, &args);
@@ -1147,10 +1146,9 @@ auto rccl_api_bf_records      = std::deque<rocprofiler_buffer_tracing_rccl_api_r
 auto rocdecode_api_bf_records = std::deque<rocprofiler_buffer_tracing_rocdecode_api_record_t>{};
 auto rocdecode_api_ext_bf_records =
     std::deque<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>{};
-auto rocjpeg_api_bf_records = std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>{};
-auto rocshmem_api_bf_records =
-    std::deque<rocprofiler_buffer_tracing_rocshmem_api_record_t>{};
-auto ompt_bf_records        = std::deque<rocprofiler_buffer_tracing_ompt_record_t>{};
+auto rocjpeg_api_bf_records  = std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>{};
+auto rocshmem_api_bf_records = std::deque<rocprofiler_buffer_tracing_rocshmem_api_record_t>{};
+auto ompt_bf_records         = std::deque<rocprofiler_buffer_tracing_ompt_record_t>{};
 auto kfd_page_migrate_event_records =
     std::deque<rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t>{};
 auto kfd_page_fault_event_records =
@@ -1308,8 +1306,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API)
             {
                 auto* record =
-                    static_cast<rocprofiler_buffer_tracing_rocshmem_api_record_t*>(
-                        header->payload);
+                    static_cast<rocprofiler_buffer_tracing_rocshmem_api_record_t*>(header->payload);
 
                 rocshmem_api_bf_records.emplace_back(*record);
             }
