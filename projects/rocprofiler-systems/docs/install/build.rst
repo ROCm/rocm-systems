@@ -103,14 +103,24 @@ while Dyninst requires TBB), and the CMake option to build the package alongside
    "LibIberty",  "", "Dyninst", "``ROCPROFSYS_BUILD_LIBIBERTY`` (default: OFF)"
    "OpenMP", "4.x", "Dyninst", ""
 
-Optional third-party packages
------------------------------
+ROCm dependencies
+-----------------
+
+ROCm is required for GPU profiling features such as GPU hardware counter
+collection, tracing, and GPU and AI NIC monitoring.
 
 * :doc:`ROCm <rocm:install/rocm>`
 
-  * :doc:`AMD SMI Lib <amdsmi:index>` for GPU and AI NIC monitoring
+  * :doc:`AMD SMI library <amdsmi:index>` for GPU and AI NIC monitoring
+
   * :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` for GPU hardware counters
     and ROCm tracing
+
+Optional third-party packages
+-----------------------------
+
+The following packages are optional and can be enabled via the corresponding
+CMake options.
 
 * Python
 
