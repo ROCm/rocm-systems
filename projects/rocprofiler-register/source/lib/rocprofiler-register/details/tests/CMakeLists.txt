@@ -22,7 +22,11 @@ add_executable(rocprofiler-register-details-tests)
 set(rocprofiler_register_details_test_sources environment.cpp loader.cpp
                                               logging.cpp pe_parser.cpp)
 
-set(rocprofiler_register_details_test_impls ../environment.cpp ../logging.cpp)
+# utility.cpp is required because loader_posix.cpp calls utility::delimit,
+# whose explicit template instantiations live there (extern template in
+# utility.hpp). It is platform-agnostic and harmless to compile in on Windows.
+set(rocprofiler_register_details_test_impls ../environment.cpp ../logging.cpp
+                                            ../utility.cpp)
 
 if(WIN32)
     list(APPEND rocprofiler_register_details_test_impls
