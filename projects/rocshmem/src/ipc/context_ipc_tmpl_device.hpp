@@ -692,7 +692,7 @@ __device__ inline int IPCContext::tile_put(void* dst_data, const void* src_data,
     // Optimization: Row-major with contiguous rows
     else if (src_stride_1 == 1 && dst_stride_1 == 1) {
       // Transfer row by row
-      for (int i = 0; i < tile_extent_0; i++) {
+      for (size_t i = 0; i < tile_extent_0; i++) {
         char* src_row = src_base + i * src_stride_0 * element_size;
         char* dst_row = dst_base + i * dst_stride_0 * element_size;
         size_t row_size = tile_extent_1 * element_size;
@@ -702,7 +702,7 @@ __device__ inline int IPCContext::tile_put(void* dst_data, const void* src_data,
     // Optimization: Column-major with contiguous columns
     else if (src_stride_0 == 1 && dst_stride_0 == 1) {
       // Transfer column by column
-      for (int j = 0; j < tile_extent_1; j++) {
+      for (size_t j = 0; j < tile_extent_1; j++) {
         char* src_col = src_base + j * src_stride_1 * element_size;
         char* dst_col = dst_base + j * dst_stride_1 * element_size;
         size_t col_size = tile_extent_0 * element_size;
@@ -711,8 +711,8 @@ __device__ inline int IPCContext::tile_put(void* dst_data, const void* src_data,
     }
     // Fallback: Element-by-element transfer
     else {
-      for (int i = 0; i < tile_extent_0; i++) {
-        for (int j = 0; j < tile_extent_1; j++) {
+      for (size_t i = 0; i < tile_extent_0; i++) {
+        for (size_t j = 0; j < tile_extent_1; j++) {
           char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
           char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
           memcpy_lane<MemcpyKind::Put>(dst_elem, src_elem, element_size);
@@ -731,7 +731,7 @@ __device__ inline int IPCContext::tile_put(void* dst_data, const void* src_data,
       memcpy_lane<MemcpyKind::Put>(dst_ptr, src_ptr, tile_extent * element_size);
     } else {
       // Strided transfer
-      for (int i = 0; i < tile_extent; i++) {
+      for (size_t i = 0; i < tile_extent; i++) {
         memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst_strides[0] * element_size,
                                       src_ptr + i * src_strides[0] * element_size,
                                       element_size);
@@ -775,7 +775,7 @@ __device__ inline int IPCContext::tile_put_wave(void* dst_data, const void* src_
     }
     // Row-major with contiguous rows - distribute rows among wave
     else if (src_stride_1 == 1 && dst_stride_1 == 1) {
-      for (int i = wave_tid; i < tile_extent_0; i += WF_SIZE) {
+      for (size_t i = wave_tid; i < tile_extent_0; i += WF_SIZE) {
         char* src_row = src_base + i * src_stride_0 * element_size;
         char* dst_row = dst_base + i * dst_stride_0 * element_size;
         size_t row_size = tile_extent_1 * element_size;
@@ -784,7 +784,7 @@ __device__ inline int IPCContext::tile_put_wave(void* dst_data, const void* src_
     }
     // Column-major with contiguous columns - distribute columns among wave
     else if (src_stride_0 == 1 && dst_stride_0 == 1) {
-      for (int j = wave_tid; j < tile_extent_1; j += WF_SIZE) {
+      for (size_t j = wave_tid; j < tile_extent_1; j += WF_SIZE) {
         char* src_col = src_base + j * src_stride_1 * element_size;
         char* dst_col = dst_base + j * dst_stride_1 * element_size;
         size_t col_size = tile_extent_0 * element_size;
@@ -814,7 +814,7 @@ __device__ inline int IPCContext::tile_put_wave(void* dst_data, const void* src_
       size_t total_size = tile_extent * element_size;
       memcpy_wave<MemcpyKind::Put>(dst_ptr, src_ptr, total_size);
     } else {
-      for (int i = wave_tid; i < tile_extent; i += WF_SIZE) {
+      for (size_t i = wave_tid; i < tile_extent; i += WF_SIZE) {
         memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst_strides[0] * element_size,
                                       src_ptr + i * src_strides[0] * element_size,
                                       element_size);
@@ -861,7 +861,7 @@ __device__ inline int IPCContext::tile_put_wg(void* dst_data, const void* src_da
     }
     // Row-major with contiguous rows - distribute rows among workgroup
     else if (src_stride_1 == 1 && dst_stride_1 == 1) {
-      for (int i = thread_id; i < tile_extent_0; i += block_size) {
+      for (size_t i = thread_id; i < tile_extent_0; i += block_size) {
         char* src_row = src_base + i * src_stride_0 * element_size;
         char* dst_row = dst_base + i * dst_stride_0 * element_size;
         size_t row_size = tile_extent_1 * element_size;
@@ -870,7 +870,7 @@ __device__ inline int IPCContext::tile_put_wg(void* dst_data, const void* src_da
     }
     // Column-major with contiguous columns - distribute columns among workgroup
     else if (src_stride_0 == 1 && dst_stride_0 == 1) {
-      for (int j = thread_id; j < tile_extent_1; j += block_size) {
+      for (size_t j = thread_id; j < tile_extent_1; j += block_size) {
         char* src_col = src_base + j * src_stride_1 * element_size;
         char* dst_col = dst_base + j * dst_stride_1 * element_size;
         size_t col_size = tile_extent_0 * element_size;
@@ -903,7 +903,7 @@ __device__ inline int IPCContext::tile_put_wg(void* dst_data, const void* src_da
         memcpy_lane<MemcpyKind::Put>(dst_ptr, src_ptr, total_size);
       }
     } else {
-      for (int i = thread_id; i < tile_extent; i += block_size) {
+      for (size_t i = thread_id; i < tile_extent; i += block_size) {
         memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst_strides[0] * element_size,
                                       src_ptr + i * src_strides[0] * element_size,
                                       element_size);
@@ -944,7 +944,7 @@ __device__ inline int IPCContext::tile_get(void* dst_data, const void* src_data,
     }
     // Row-major with contiguous rows
     else if (src_stride_1 == 1 && dst_stride_1 == 1) {
-      for (int i = 0; i < tile_extent_0; i++) {
+      for (size_t i = 0; i < tile_extent_0; i++) {
         char* src_row = src_base + i * src_stride_0 * element_size;
         char* dst_row = dst_base + i * dst_stride_0 * element_size;
         size_t row_size = tile_extent_1 * element_size;
@@ -953,7 +953,7 @@ __device__ inline int IPCContext::tile_get(void* dst_data, const void* src_data,
     }
     // Column-major with contiguous columns
     else if (src_stride_0 == 1 && dst_stride_0 == 1) {
-      for (int j = 0; j < tile_extent_1; j++) {
+      for (size_t j = 0; j < tile_extent_1; j++) {
         char* src_col = src_base + j * src_stride_1 * element_size;
         char* dst_col = dst_base + j * dst_stride_1 * element_size;
         size_t col_size = tile_extent_0 * element_size;
@@ -962,8 +962,8 @@ __device__ inline int IPCContext::tile_get(void* dst_data, const void* src_data,
     }
     // Fallback: Element-by-element
     else {
-      for (int i = 0; i < tile_extent_0; i++) {
-        for (int j = 0; j < tile_extent_1; j++) {
+      for (size_t i = 0; i < tile_extent_0; i++) {
+        for (size_t j = 0; j < tile_extent_1; j++) {
           char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
           char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
           memcpy_lane<MemcpyKind::Get>(dst_elem, src_elem, element_size);
@@ -979,7 +979,7 @@ __device__ inline int IPCContext::tile_get(void* dst_data, const void* src_data,
     if (src_strides[0] == 1 && dst_strides[0] == 1) {
       memcpy_lane<MemcpyKind::Get>(dst_ptr, src_ptr, tile_extent * element_size);
     } else {
-      for (int i = 0; i < tile_extent; i++) {
+      for (size_t i = 0; i < tile_extent; i++) {
         memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst_strides[0] * element_size,
                                       src_ptr + i * src_strides[0] * element_size,
                                       element_size);
@@ -1023,7 +1023,7 @@ __device__ inline int IPCContext::tile_get_wave(void* dst_data, const void* src_
     }
     // Row-major with contiguous rows - distribute rows among wave
     else if (src_stride_1 == 1 && dst_stride_1 == 1) {
-      for (int i = wave_tid; i < tile_extent_0; i += WF_SIZE) {
+      for (size_t i = wave_tid; i < tile_extent_0; i += WF_SIZE) {
         char* src_row = src_base + i * src_stride_0 * element_size;
         char* dst_row = dst_base + i * dst_stride_0 * element_size;
         size_t row_size = tile_extent_1 * element_size;
@@ -1032,7 +1032,7 @@ __device__ inline int IPCContext::tile_get_wave(void* dst_data, const void* src_
     }
     // Column-major with contiguous columns - distribute columns among wave
     else if (src_stride_0 == 1 && dst_stride_0 == 1) {
-      for (int j = wave_tid; j < tile_extent_1; j += WF_SIZE) {
+      for (size_t j = wave_tid; j < tile_extent_1; j += WF_SIZE) {
         char* src_col = src_base + j * src_stride_1 * element_size;
         char* dst_col = dst_base + j * dst_stride_1 * element_size;
         size_t col_size = tile_extent_0 * element_size;
@@ -1062,7 +1062,7 @@ __device__ inline int IPCContext::tile_get_wave(void* dst_data, const void* src_
       size_t total_size = tile_extent * element_size;
       memcpy_wave<MemcpyKind::Get>(dst_ptr, src_ptr, total_size);
     } else {
-      for (int i = wave_tid; i < tile_extent; i += WF_SIZE) {
+      for (size_t i = wave_tid; i < tile_extent; i += WF_SIZE) {
         memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst_strides[0] * element_size,
                                       src_ptr + i * src_strides[0] * element_size,
                                       element_size);
@@ -1108,7 +1108,7 @@ __device__ inline int IPCContext::tile_get_wg(void* dst_data, const void* src_da
     }
     // Row-major with contiguous rows - distribute among workgroup
     else if (src_stride_1 == 1 && dst_stride_1 == 1) {
-      for (int i = thread_id; i < tile_extent_0; i += block_size) {
+      for (size_t i = thread_id; i < tile_extent_0; i += block_size) {
         char* src_row = src_base + i * src_stride_0 * element_size;
         char* dst_row = dst_base + i * dst_stride_0 * element_size;
         size_t row_size = tile_extent_1 * element_size;
@@ -1117,7 +1117,7 @@ __device__ inline int IPCContext::tile_get_wg(void* dst_data, const void* src_da
     }
     // Column-major with contiguous columns - distribute among workgroup
     else if (src_stride_0 == 1 && dst_stride_0 == 1) {
-      for (int j = thread_id; j < tile_extent_1; j += block_size) {
+      for (size_t j = thread_id; j < tile_extent_1; j += block_size) {
         char* src_col = src_base + j * src_stride_1 * element_size;
         char* dst_col = dst_base + j * dst_stride_1 * element_size;
         size_t col_size = tile_extent_0 * element_size;
@@ -1150,7 +1150,7 @@ __device__ inline int IPCContext::tile_get_wg(void* dst_data, const void* src_da
         memcpy_lane<MemcpyKind::Get>(dst_ptr, src_ptr, total_size);
       }
     } else {
-      for (int i = thread_id; i < tile_extent; i += block_size) {
+      for (size_t i = thread_id; i < tile_extent; i += block_size) {
         memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst_strides[0] * element_size,
                                       src_ptr + i * src_strides[0] * element_size,
                                       element_size);
