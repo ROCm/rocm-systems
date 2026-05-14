@@ -6,7 +6,7 @@ rocprofiler_deactivate_clang_tidy()
 
 add_executable(codeobj-library-tests)
 
-set(CODEOBJ_LIB_TEST_SOURCES "codeobj_library_test.cpp")
+set(CODEOBJ_LIB_TEST_SOURCES "codeobj_library_test.cpp" "funcmap_test.cpp")
 
 target_sources(codeobj-library-tests PRIVATE ${CODEOBJ_LIB_TEST_SOURCES})
 
