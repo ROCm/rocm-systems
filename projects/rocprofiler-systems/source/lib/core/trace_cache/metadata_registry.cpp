@@ -734,15 +734,13 @@ metadata_registry::overwrite_callback_names(
             modified_ops[i] = extract_operations(i);
         }
 
-        if(get_is_continuous_integration() &&
-           modified_ops.find(callback_kind) != modified_ops.end())
+        if(modified_ops.find(callback_kind) != modified_ops.end())
         {
             throw std::runtime_error(
                 "Overwriting a previously overwritten entry is forbidden");
         }
 
-        if(get_is_continuous_integration() && !modified_ops.empty() &&
-           callback_kind >= modified_ops.begin()->first)
+        if(!modified_ops.empty() && callback_kind >= modified_ops.begin()->first)
         {
             throw std::runtime_error(
                 "Category must have a larger enum value than all previously "
@@ -753,8 +751,7 @@ metadata_registry::overwrite_callback_names(
         auto operation_names = extract_operations(callback_kind);
         for(const auto& [index, new_value] : category_info.second)
         {
-            if(get_is_continuous_integration() &&
-               (index < 0 || static_cast<size_t>(index) >= operation_names.size()))
+            if((index < 0 || static_cast<size_t>(index) >= operation_names.size()))
             {
                 throw std::runtime_error("Index is invalid");
             }
@@ -771,7 +768,7 @@ metadata_registry::overwrite_callback_names(
     {
         auto renaming_entry = modified_ops.find(i);
 
-        if(get_is_continuous_integration() && renaming_entry == modified_ops.end())
+        if(renaming_entry == modified_ops.end())
         {
             throw std::runtime_error("A category that needs to be emplaced is missing");
         }

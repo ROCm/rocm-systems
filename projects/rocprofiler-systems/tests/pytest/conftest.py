@@ -319,7 +319,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "group_by_stream",
         "openmp",
         "openmp_target",
-        "ompvv",
+        "fortran",
         "sampling_duration",
         "no_tmp_files",
         "rccl",
