@@ -6,6 +6,9 @@
 
 import subprocess
 import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 EXPECTED_LINES = (
     "Copyright (c) Advanced Micro Devices, Inc.",
@@ -32,7 +35,7 @@ def _check_header(filepath, prefix):
         f"{prefix} {EXPECTED_LINES[1]}",
     ]
     try:
-        with open(filepath, encoding="utf-8", errors="replace") as f:
+        with open(REPO_ROOT / filepath, encoding="utf-8", errors="replace") as f:
             lines = [f.readline().rstrip("\n\r") for _ in range(3)]
     except OSError:
         return "  could not read file"
