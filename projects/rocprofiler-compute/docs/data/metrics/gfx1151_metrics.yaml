@@ -9,7 +9,7 @@ System Speed-of-Light:
     rst: 'Instructions executed per cycle, measuring overall instruction throughput efficiency. Higher IPC indicates better utilization of the shader pipeline. Low IPC may indicate stalls due to memory latency, register dependencies, or insufficient wavefront occupancy to hide latencies.'
     unit: Instr/cycle
   Wavefront Occupancy:
-    rst: 'Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal-excessive register or LDS usage per wavefront may limit occupancy.'
+    rst: 'Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal; excessive register or LDS usage per wavefront may limit occupancy.'
     unit: Wavefronts
   GL2 Cache Hit Rate:
     rst: 'Percentage of GL2 cache requests that are serviced from cache without accessing system memory. Higher hit rates reduce memory bandwidth pressure and improve performance. Low hit rates may indicate poor data locality or working sets that exceed cache capacity.'
