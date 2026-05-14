@@ -19,11 +19,6 @@ Panel Config:
           peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
           pop: ((100 * SUM((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) + SQ_INSTS_VALU_TRANS_F16) + (2 * SQ_INSTS_VALU_FMA_F16))) + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (2 * SQ_INSTS_VALU_FMA_F32)))) + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (2 * SQ_INSTS_VALU_FMA_F64))))) / SUM((End_Timestamp - Start_Timestamp)))
             / (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000))
-        VALU IOPs:
-          value: SUM(64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GIOP/s
-          peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
-          pop: 100 * SUM(64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk * $cu_per_gpu * 64 * 2 / 1000)
         MFMA FLOPs (F8):
           value: SUM(SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
@@ -192,11 +187,6 @@ Panel Config:
       This is also presented as a percent of the peak theoretical FLOPs achievable
       on the specific accelerator. Note: this does not include any floating-point
       operations from MFMA instructions.
-    VALU IOPs: >-
-      The total integer operations executed per second on the VALU. This is
-      also presented as a percent of the peak theoretical IOPs achievable on the
-      specific accelerator. Note: this does not include any integer operations from
-      MFMA instructions.
     MFMA FLOPs (F8): The total number of 8-bit brain floating point MFMA operations
       executed per second. This does not include any 16-bit brain floating point operations
       from VALU instructions. This is also presented as a percent of the peak theoretical
