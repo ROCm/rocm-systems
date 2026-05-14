@@ -1418,6 +1418,70 @@ __CG_QUALIFIER__ unsigned long long groupMask(const TyGroup& group)
   return mask;
 }
 
+// essentially "primitive type" in this context refers to the types supported
+// by the OCKL scan intrinsics
+template <class T>
+__CG_QUALIFIER__ constexpr bool isPrimitiveType() {
+  // TODO g-h-c this line is for __half. Replace with something else
+  return sizeof(T) == 2 ||
+         __hip_internal::is_same<T, int>::value ||
+         __hip_internal::is_same<T, unsigned int>::value ||
+         __hip_internal::is_same<T, long long>::value ||
+         __hip_internal::is_same<T, unsigned long long>::value ||
+         __hip_internal::is_same<T, float>::value ||
+         __hip_internal::is_same<T, double>::value;
+}
+
+// backward permute implementation for cooperative group operations, i.e.
+// for up to 32 bytes (__hip_ds_bpermute() can only do 4 bytes at a time,
+// this function calls it (or the floating point version) multiple times to
+// implement it for bigger sizes
+template <class T, size_t NumPermutes, typename __hip_internal::enable_if<NumPermutes == 0, int>::type = 0>
+__CG_QUALIFIER__ void bPermute(T&, T, int from)
+{
+}
+
+// trivial case: the type fits within the permute size
+template <class T, size_t NumPermutes, typename __hip_internal::enable_if<NumPermutes == 1, int>::type = 0>
+__CG_QUALIFIER__ void bPermute(T& permuteResult, T result, int from)
+{
+  auto backwardPermute = [](int index, T arg) {
+      if constexpr (__hip_internal::is_floating_point<T>::value &&
+                    sizeof(T) <= 4) {
+        return __hip_ds_bpermutef(index, arg);
+      } else {
+        return __hip_ds_bpermute(index, arg);
+      }
+    };
+
+  if constexpr (sizeof(T) == 2) {
+    union {
+      int i;
+      T f;
+    } tmp;
+
+    tmp.f = result;
+    tmp.i = __hip_ds_bpermute(from << 2, tmp.i);
+    permuteResult = tmp.f;
+  } else if constexpr (sizeof(T) == 4) {
+    auto bPermuteResult = backwardPermute(from << 2, result);
+    __builtin_memcpy(&permuteResult, &bPermuteResult, sizeof(result));
+  } else {
+    static_assert(__hip_internal::is_void<T>::value, "Unexpected type");
+  }
+}
+
+// Overload when we need multiple ds_permute, because one is not enough
+template <class T, size_t NumPermutes, typename __hip_internal::enable_if<(NumPermutes > 1), int>::type = 0>
+__CG_QUALIFIER__ void bPermute(T permuteResult[NumPermutes], T result[NumPermutes], int from)
+{
+  // ds_bpermute only deals with 32-bit sizes, so for other sizes
+  // we need to call the permute multiple times
+  for (int i = 0; i < NumPermutes; i++) {
+    permuteResult[i] = __hip_ds_bpermute(from << 2, result[i]);
+  }
+}
+
 }  // namespace impl
 #endif
 
