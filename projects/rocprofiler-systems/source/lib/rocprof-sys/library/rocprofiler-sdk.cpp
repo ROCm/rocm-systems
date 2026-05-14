@@ -90,6 +90,19 @@ using tool_agent_vec_t                         = std::vector<tool_agent>;
 client_data*                    tool_data      = new client_data{};
 std::shared_ptr<roctx_client<>> g_roctx_client = {};
 
+// Session is owned at this layer rather than inside roctx_client so it stays
+// available even when no marker_api domain or trace_region is configured.
+// All trigger types (roctx, time_window, ...) attach to the same session;
+// roctx_client is just one consumer.
+std::shared_ptr<control::session> g_session = {};
+
+std::shared_ptr<control::session>
+get_or_create_session()
+{
+    if(!g_session) g_session = std::make_shared<control::session>();
+    return g_session;
+}
+
 std::shared_ptr<roctx_client<>>
 get_roctx_client()
 {
@@ -119,7 +132,8 @@ get_roctx_client()
             config::get_perfetto_annotations(),
             roctx_traced_regions,
         };
-        g_roctx_client = std::make_shared<roctx_client<>>(roctx_config);
+        g_roctx_client =
+            std::make_shared<roctx_client<>>(roctx_config, get_or_create_session());
     }
 
     return g_roctx_client;
@@ -2716,28 +2730,37 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         pmc::set_state(State::Active);
     }
 
-    // Setup roctx client (must happen within tool_init for rocprofiler-sdk context
-    // creation). Roctx client configures MARKER_CORE_API and MARKER_CONTROL_API
-    // on control_ctx. The control session's pause/resume callbacks are routed
-    // through roctx_client (registered later in library.cpp).
+    // Setup roctx client if marker domains or trace regions are configured.
+    // Roctx client configures MARKER_CORE_API and MARKER_CONTROL_API on
+    // control_ctx. The control session is owned at this layer and is always
+    // available regardless of whether roctx_client exists.
     auto roctx_client = get_roctx_client();
-    if(roctx_client)
-    {
-        roctx_client->configure_services(_data->get_control_context());
+    if(roctx_client) roctx_client->configure_services(_data->get_control_context());
 
-        const auto filtering_active = roctx_client->get_trigger().filter_active();
-        if(!filtering_active)
-        {
-            start();
-        }
-        else
-        {
-            if(_data != nullptr)
-            {
-                start_context(_data->get_code_obj_context());
-                start_context(_data->get_control_context());
-            }
-        }
+    const auto filtering_active =
+        roctx_client && roctx_client->get_trigger().filter_active();
+
+    // tool_init is dispatched asynchronously by rocprofiler-sdk and can run
+    // before the _dtor lambda in library.cpp has had a chance to attach the
+    // TRACE_DELAY/DURATION time_window trigger. Consulting session.is_active()
+    // alone would race with that attach. Probe the config directly for a
+    // configured delay — it is set at config load (well before tool_init) and
+    // is the reliable signal for "the session will be paused at startup". The
+    // is_active probe is kept as a backstop for non-time-window pausing paths.
+    const auto trace_delay =
+        config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0);
+    const auto session_active = get_session()->is_active(control::scope::global);
+    const auto delay_pending  = trace_delay > 0.0;
+
+    if(filtering_active || delay_pending || !session_active)
+    {
+        // Either the roctx region filter is gating tracing, or a TRACE_DELAY
+        // is configured, or the control session is otherwise paused. Start
+        // only the always-on contexts; the main contexts are started later
+        // by rocprofiler_sdk::resume() (the rocm subscriber's on_resume
+        // callback) when the session resumes.
+        start_context(_data->get_code_obj_context());
+        start_context(_data->get_control_context());
     }
     else
     {
@@ -2826,9 +2849,10 @@ flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
 std::shared_ptr<control::session>
 get_session()
 {
-    const auto roctx_client = get_roctx_client();
-    if(!roctx_client) return nullptr;
-    return roctx_client->get_session();
+    // Always returns a non-null session. roctx_client is constructed lazily
+    // and only when marker domains or trace regions need it; the control
+    // session is independent.
+    return get_or_create_session();
 }
 
 void

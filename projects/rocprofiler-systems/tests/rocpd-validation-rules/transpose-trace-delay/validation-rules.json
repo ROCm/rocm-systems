@@ -1,0 +1,27 @@
+{
+    "_comment": "Used by test_time_window.TestTraceDelayHip. Asserts that no GPU kernel records reach the cached output when ROCPROFSYS_TRACE_DELAY exceeds the workload runtime \u2014 proves tool_init no longer starts the SDK contexts when the control session is paused at startup.",
+    "required_tables": [
+        {
+            "min_rows": 0,
+            "name": "kernels",
+            "required_columns": [
+                "id",
+                "category",
+                "name",
+                "start",
+                "end",
+                "queue",
+                "stream"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "No kernel_dispatch records should reach the cached output during a TRACE_DELAY window that exceeds the workload runtime",
+                    "error_message": "Kernel dispatch records leaked into the cached trace despite TRACE_DELAY",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM kernels"
+                }
+            ]
+        }
+    ]
+}

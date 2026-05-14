@@ -60,8 +60,22 @@ session::attach(trigger& trig)
 void
 session::force_initial_pause()
 {
-    for(std::size_t s = 0; s < scope_count; ++s)
-        dispatch_for_scope(static_cast<scope>(s));
+    // Explicit broadcast of the current paused state to all subscribers whose
+    // net resolved state is paused, regardless of any per-subscriber paused
+    // tracking. Production callers run this after attach(...) has already
+    // computed the initial scope state but before subscribers have had a
+    // chance to observe it (or after subscribe-after-attach has seeded the
+    // tracking field). dispatch_for_scope's transition-only firing is correct
+    // for runtime publish() but would silently skip subscribers whose seeded
+    // state already matches the resolved state — we always want them to
+    // observe the initial pause once.
+    std::scoped_lock const lk{ m_subscribers_mutex };
+    for(const auto& sub : m_subscribers)
+    {
+        if(!subscriber_should_be_paused(sub)) continue;
+        sub.paused = true;
+        if(sub.on_pause) sub.on_pause();
+    }
 }
 
 void

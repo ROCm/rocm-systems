@@ -34,7 +34,8 @@ template <typename MarkerWriterPolicy = default_marker_policy>
 class roctx_client
 {
 public:
-    explicit roctx_client(const roctx_client_config& roctx_cfg);
+    roctx_client(const roctx_client_config&        roctx_cfg,
+                 std::shared_ptr<control::session> session);
 
     ~roctx_client()                              = default;
     roctx_client(const roctx_client&)            = delete;
@@ -91,11 +92,12 @@ thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
     roctx_client<MarkerWriterPolicy>::m_started_ranges{};
 
 template <typename MarkerWriterPolicy>
-roctx_client<MarkerWriterPolicy>::roctx_client(const roctx_client_config& roctx_cfg)
+roctx_client<MarkerWriterPolicy>::roctx_client(const roctx_client_config& roctx_cfg,
+                                               std::shared_ptr<control::session> session)
 : m_config{ roctx_cfg }
 , m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory,
             roctx_cfg.perfetto_annotations }
-, m_session{ std::make_shared<control::session>() }
+, m_session{ std::move(session) }
 , m_trigger{ std::make_unique<control::triggers::roctx>(
       *m_session, roctx_cfg.selected_trace_regions) }
 {

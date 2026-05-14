@@ -145,25 +145,21 @@ TEST_F(session_test, multi_scope_subscriber_does_not_resume_while_other_scope_pa
     EXPECT_TRUE(s.is_active(scope::global));
 }
 
-TEST_F(session_test, force_initial_pause_and_publish_equivalence)
+TEST_F(session_test, force_initial_pause_broadcasts_after_subscribe_after_attach)
 {
-    // Path A: attach paused triggers, then force_initial_pause.
-    call_log     log_a{};
-    session      sess_a{};
-    mock_trigger tag{ "trig", scope::global, vote::paused };
-    sess_a.subscribe(make_logged_subscriber(log_a, "sub"));
-    sess_a.attach(tag);
-    sess_a.force_initial_pause();
+    // Production parallel: roctx_client attaches its trigger before the
+    // library's _dtor lambda subscribes the rocm/sampling/process_sampler/etc.
+    // subscribers. force_initial_pause must still deliver on_pause to those
+    // subscribers even though their seeded sub.paused already matches the
+    // resolved state (otherwise PMC samples leak across the paused window).
+    mock_trigger t{ "global_paused", scope::global, vote::paused };
+    s.attach(t);
+    s.subscribe(make_logged_subscriber(log, "sub"));
+    s.force_initial_pause();
 
-    // Path B: attach active triggers, then publish paused via publish().
-    call_log     log_b{};
-    session      sess_b{};
-    mock_trigger tbg{ "trig", scope::global, vote::active };
-    sess_b.subscribe(make_logged_subscriber(log_b, "sub"));
-    sess_b.attach(tbg);
-    sess_b.publish(tbg, vote::paused);
-
-    EXPECT_EQ(log_a.snapshot(), log_b.snapshot());
+    const auto events = log.snapshot();
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0], "sub:pause");
 }
 
 TEST_F(session_test, registration_order_preserved_on_pause)

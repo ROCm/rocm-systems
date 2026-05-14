@@ -6,6 +6,7 @@ Tests for the trace time window example.
 """
 
 from __future__ import annotations
+from pathlib import Path
 import pytest
 from conftest import RocprofsysTest
 
@@ -114,4 +115,55 @@ class TestTraceTimeWindow(RocprofsysTest):
             labels=["outer_c", "outer_d"],
             counts=[1, 1],
             depths=[0, 0],
+        )
+
+
+# ============================================================================
+# Test Class: TRACE_DELAY with HIP workload (regression for tool_init source gate)
+# ============================================================================
+
+
+@pytest.mark.transpose
+@pytest.mark.gpu
+class TestTraceDelayHip(RocprofsysTest):
+    """Regression coverage: ROCPROFSYS_TRACE_DELAY must halt GPU producers at
+    source so the cached Perfetto/RocPD output has zero kernel_dispatch
+    records during the delay window. Pre-fix, tool_init unconditionally
+    started the SDK contexts during init, so the cached path captured every
+    kernel_dispatch even though the direct push was suppressed by the
+    trace_categories trait flip.
+
+    Workload: transpose (~3s on a typical run). DELAY=4.0 just exceeds the
+    workload runtime, so a passing fix produces zero kernel records and a
+    regression produces the full set."""
+
+    REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
+    RUNTIME_ARGS = ["-e", "-v", "1", "-E", "uniform_int_distribution"]
+
+    @pytest.mark.parametrize("mode", ["binary_rewrite", "runtime_instrument"])
+    def test_delay_with_hip(self, mode, validation_rules_dir):
+        env = {
+            "ROCPROFSYS_TRACE_DELAY": "4.0",
+            "ROCPROFSYS_ROCM_DOMAINS": (
+                "hip_runtime_api,kernel_dispatch,memory_copy,"
+                "memory_allocation,hsa_api"
+            ),
+        }
+        result = self.run_test(
+            mode,
+            "transpose",
+            env=env,
+            rewrite_args=self.REWRITE_ARGS,
+            runtime_args=self.RUNTIME_ARGS,
+            rewrite_timeout=120,
+            runtime_timeout=300,
+        )
+        self.assert_regex(result)
+        self.assert_rocpd(
+            result,
+            rules_files=[
+                validation_rules_dir
+                / "transpose-trace-delay"
+                / "validation-rules.json",
+            ],
         )

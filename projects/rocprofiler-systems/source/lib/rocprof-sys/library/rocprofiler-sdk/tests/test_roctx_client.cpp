@@ -103,7 +103,8 @@ TEST_F(roctx_client_test, constructor_creates_controller)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config        config{ true, true, true, false, "TestRegion" };
-    roctx_client<mock_marker_policy> client(config);
+    roctx_client<mock_marker_policy> client(
+        config, std::make_shared<rocprofsys::control::session>());
     EXPECT_NE(client.get_session(), nullptr);
 }
 
@@ -112,7 +113,8 @@ TEST_F(roctx_client_test, constructor_without_region_filter)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config        config{ true, true, true, false, "" };
-    roctx_client<mock_marker_policy> client(config);
+    roctx_client<mock_marker_policy> client(
+        config, std::make_shared<rocprofsys::control::session>());
     EXPECT_NE(client.get_session(), nullptr);
     EXPECT_FALSE(client.get_trigger().filter_active());
 }
@@ -122,7 +124,8 @@ TEST_F(roctx_client_test, constructor_with_region_filter)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config        config{ true, true, true, false, "Region 1" };
-    roctx_client<mock_marker_policy> client(config);
+    roctx_client<mock_marker_policy> client(
+        config, std::make_shared<rocprofsys::control::session>());
     EXPECT_TRUE(client.get_trigger().filter_active());
 }
 
@@ -131,7 +134,8 @@ TEST_F(roctx_client_test, should_write_no_filter)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config        config{ true, true, true, false, "" };
-    roctx_client<mock_marker_policy> client(config);
+    roctx_client<mock_marker_policy> client(
+        config, std::make_shared<rocprofsys::control::session>());
     EXPECT_TRUE(client.get_trigger().should_write_markers());
 }
 
@@ -140,7 +144,8 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
     using namespace rocprofsys::rocprofiler_sdk;
 
     const roctx_client_config        config{ true, true, true, false, "Region 1" };
-    roctx_client<mock_marker_policy> client(config);
+    roctx_client<mock_marker_policy> client(
+        config, std::make_shared<rocprofsys::control::session>());
     EXPECT_FALSE(client.get_trigger().should_write_markers());
 }
 
@@ -169,7 +174,8 @@ protected:
     std::unique_ptr<roctx_client_t> make_client(const std::string& regions)
     {
         const roctx_config_t config{ true, false, false, false, regions };
-        auto                 client = std::make_unique<roctx_client_t>(config);
+        auto                 client = std::make_unique<roctx_client_t>(
+            config, std::make_shared<rocprofsys::control::session>());
 
         auto ctrl = client->get_session();
         ctrl->subscribe(
