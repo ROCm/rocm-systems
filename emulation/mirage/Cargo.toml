@@ -1,0 +1,9 @@
+[package]
+name = "mirage"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+[workspace]
+members = ["dashboard","rocjitsu"]
