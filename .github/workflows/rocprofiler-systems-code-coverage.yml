@@ -59,7 +59,7 @@ jobs:
         rocm-version: ['7.2']
 
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-rocm-${{ matrix.rocm-version }}-ubuntu-24.04
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-${{ matrix.rocm-version }}-ubuntu-22.04
       options: --cap-add CAP_SYS_ADMIN
 
     env:
