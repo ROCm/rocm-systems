@@ -782,7 +782,7 @@ namespace RcclUnitTesting
         if (!hasSymmetricSupport)
         {
           this->DestroyComms();
-          if (useSymmetric) unsetenv("NCCL_CUMEM_ENABLE");
+          unsetenv("NCCL_CUMEM_ENABLE");
           GTEST_SKIP() << "Skipping... symmetric memory not supported on this configuration "
                        << "(numGpus=" << numGpus << ", ranksPerGpu=" << ranksPerGpu
                        << ", isMultiProcess=" << isMultiProcess
