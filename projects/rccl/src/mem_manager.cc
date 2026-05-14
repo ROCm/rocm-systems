@@ -652,7 +652,7 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
 #endif
     prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     prop.location.id = entry->cudaDev;
-    prop.requestedHandleTypes = entry->handleType;
+    prop.requestedHandleType = entry->handleType;
 #if defined(__HIP_PLATFORM_AMD__)
     prop.allocFlags.gpuDirectRDMACapable = 1;
 #endif
