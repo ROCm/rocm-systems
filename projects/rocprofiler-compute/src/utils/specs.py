@@ -291,7 +291,7 @@ def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
             result["memory_partition"] = "N/A"
 
         result["num_compute_units"] = amdsmi_interface.get_gpu_num_compute_units()
-        result["gpu_cache_info"] = amdsmi_interface.get_gpu_cache_info()
+        result["gpu_cache_info"] = amdsmi_interface.get_gpu_cache_info() or {}
 
     # Apply defaults and warnings
     if is_partition_supported:

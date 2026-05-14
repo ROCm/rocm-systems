@@ -182,7 +182,9 @@ def get_gpu_vram_size(device: Any, amdsmi: Any) -> str:  # noqa: ANN401
     return vram_size
 
 
-@functools.partial(_per_device_query, default_return={}, warning_label="GPU cache info")
+@functools.partial(
+    _per_device_query, default_return=None, warning_label="GPU cache info"
+)
 def get_gpu_cache_info(device: Any, amdsmi: Any) -> dict[str, Any]:  # noqa: ANN401
     """Get the GPU cache level information."""
     cache_info = amdsmi.amdsmi_get_gpu_cache_info(device)
