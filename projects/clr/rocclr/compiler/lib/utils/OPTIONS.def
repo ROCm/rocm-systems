@@ -617,7 +617,7 @@ OPTION(OT_UINT32, \
 
 // -fsanitze=tool
 NOPTION(OT_CSTRING, \
-       OA_CLC|OVA_REQUIRED|OA_SEPARATOR_EQUAL|OFA_PREFIX_F, \
+       OA_RUNTIME|OA_CLC|OVA_REQUIRED|OA_SEPARATOR_EQUAL|OFA_PREFIX_F, \
        "sanitize", NULL, \
        FSanitize, \
        0, 0, 0, "address", \
