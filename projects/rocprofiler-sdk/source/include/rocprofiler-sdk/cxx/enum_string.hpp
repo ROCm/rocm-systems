@@ -160,6 +160,11 @@ ROCPROFILER_ENUM_INFO(rocprofiler_rocjpeg_table_id_t,
                       ROCPROFILER_ROCJPEG_TABLE_ID_LAST,
                       false,
                       not_operation)
+ROCPROFILER_ENUM_INFO(rocprofiler_rocshmem_table_id_t,
+                      0,
+                      ROCPROFILER_ROCSHMEM_TABLE_ID_LAST,
+                      false,
+                      not_operation)
 
 // table enums
 // rocprofiler_hsa_core_api_id_t
@@ -1696,6 +1701,10 @@ static_assert(ROCPROFILER_ROCDECODE_TABLE_ID_LAST == 1);
 // rocprofiler_rocjpeg_table_id_t
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCJPEG_TABLE_ID_CORE);
 static_assert(ROCPROFILER_ROCJPEG_TABLE_ID_LAST == 1);
+
+// rocprofiler_rocshmem_table_id_t
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCSHMEM_TABLE_ID);
+static_assert(ROCPROFILER_ROCSHMEM_TABLE_ID_LAST == 1);
 
 // rocprofiler_status_t
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_SUCCESS);
