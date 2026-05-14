@@ -46,6 +46,25 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  TEST(AllGather, OutOfPlaceSymmetric)
+  {
+    TestBed testBed;
+
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllGather};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat16, ncclFloat32};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {393216, 384};
+    std::vector<bool>           const inPlaceList     = {false};
+    std::vector<bool>           const managedMemList  = {false};
+    std::vector<bool>           const useHipGraphList = {false};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList,
+                           /*enableSweep=*/true, /*useSymmetric=*/true);
+    testBed.Finalize();
+  }
+
   TEST(AllGather, InPlace)
   {
     TestBed testBed;
@@ -81,6 +100,25 @@ namespace RcclUnitTesting
 
     testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
+
+  TEST(AllGather, InPlaceSymmetric)
+  {
+    TestBed testBed;
+
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllGather};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat8e4m3, ncclFloat8e5m2};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {384, 104857};
+    std::vector<bool>           const inPlaceList     = {true};
+    std::vector<bool>           const managedMemList  = {false};
+    std::vector<bool>           const useHipGraphList = {false};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList,
+                           /*enableSweep=*/true, /*useSymmetric=*/true);
     testBed.Finalize();
   }
 

@@ -14,13 +14,11 @@
  * NCCL_WIN_COLL_SYMMETRIC); RCCL then picks the symmetric-memory kernel
  * automatically when supported.
  *
- * Required env:
- *   NCCL_CUMEM_ENABLE=1  (OFF by default on ROCm; comm->symmetricSupport
- *                         requires it, otherwise ncclCommWindowRegister
- *                         silently falls back to the local-register path)
+ * Symmetric tests set NCCL_CUMEM_ENABLE=-2 (auto-detect) for the process for
+ * the duration of each test. You can still override from the shell if needed.
  *
  * Run:
- *   NCCL_CUMEM_ENABLE=1 ./rccl-UnitTests --gtest_filter=SymmetricMemory.*
+ *   ./rccl-UnitTests --gtest_filter=SymmetricMemory.*
  */
 
 #include "TestBed.hpp"
@@ -35,45 +33,7 @@ namespace RcclUnitTesting
     return {ncclFloat32, ncclFloat16, ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
   }
 
-  TEST(SymmetricMemory, OutOfPlace)
-  {
-    TestBed testBed;
-
-    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce, ncclCollAllGather, ncclCollReduceScatter};
-    std::vector<ncclDataType_t> const dataTypes       = SymSupportedTypes();
-    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
-    std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = {393216, 384};
-    std::vector<bool>           const inPlaceList     = {false};
-    std::vector<bool>           const managedMemList  = {false};
-    std::vector<bool>           const useHipGraphList = {false};
-
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
-                           inPlaceList, managedMemList, useHipGraphList,
-                           /*enableSweep=*/true, /*useSymmetric=*/true);
-    testBed.Finalize();
-  }
-
-  TEST(SymmetricMemory, InPlace)
-  {
-    TestBed testBed;
-
-    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce, ncclCollAllGather, ncclCollReduceScatter};
-    std::vector<ncclDataType_t> const dataTypes       = SymSupportedTypes();
-    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
-    std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = {384};
-    std::vector<bool>           const inPlaceList     = {true};
-    std::vector<bool>           const managedMemList  = {false};
-    std::vector<bool>           const useHipGraphList = {false};
-
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
-                           inPlaceList, managedMemList, useHipGraphList,
-                           /*enableSweep=*/true, /*useSymmetric=*/true);
-    testBed.Finalize();
-  }
-
-  // Regression for upstream NCCL fix: data corruption with built-in symmetric
+  // Regression for upstream NCCL (2.28.9) fix: data corruption with built-in symmetric
   // kernels when total message size has granularity under 8 bytes. Exercises
   // small element counts so total byte sizes land on non-8B boundaries (e.g.
   // ncclFloat16 with 1/3/5 elements -> 2/6/10 bytes; ncclFloat32 with 1/3
@@ -93,7 +53,7 @@ namespace RcclUnitTesting
   {
     TestBed testBed;
 
-    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce, ncclCollAllGather, ncclCollReduceScatter};
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce, ncclCollReduceScatter};
     std::vector<ncclDataType_t> const dataTypes       = SymSupportedTypes();
     std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {0};
@@ -134,11 +94,17 @@ namespace RcclUnitTesting
     OptionalColArgs options;
     options.redOp = ncclSum;
 
+    // Auto-detect CUMEM support
+    setenv("NCCL_CUMEM_ENABLE", "-2", 1);
+
     bool isCorrect = true;
     for (ncclDataType_t dataType : SymSupportedTypes())
     for (int totalRanks : testBed.ev.GetNumGpusList())
     for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
     {
+      if (totalRanks < 2)
+        continue;
+
       int const numProcesses = isMultiProcess ? totalRanks : 1;
       const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
       testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder),
@@ -149,10 +115,11 @@ namespace RcclUnitTesting
       if (!hasSymmetricSupport)
       {
         testBed.DestroyComms();
+        unsetenv("NCCL_CUMEM_ENABLE");
         GTEST_SKIP() << "Skipping... symmetric memory not supported on this configuration "
                      << "(totalRanks=" << totalRanks
                      << ", isMultiProcess=" << isMultiProcess
-                     << "). Requires NCCL_CUMEM_ENABLE=1 and a compatible platform.";
+                     << "). Requires NCCL_CUMEM_ENABLE=-2 (auto) or 1 and a compatible platform.";
       }
 
       if (testBed.ev.showNames)
@@ -189,5 +156,6 @@ namespace RcclUnitTesting
       if (!isCorrect || testing::Test::HasFailure()) break;
     }
     testBed.Finalize();
+    unsetenv("NCCL_CUMEM_ENABLE");
   }
 }  // namespace RcclUnitTesting

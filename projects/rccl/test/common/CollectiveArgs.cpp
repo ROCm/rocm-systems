@@ -73,36 +73,32 @@ namespace RcclUnitTesting
     this->inputWindow                = nullptr;
     this->outputWindow               = nullptr;
 
-    // Symmetric windows need ncclMemAlloc-backed (cumem, 4KB-aligned)
-    // buffers, which is exactly what the userRegistered path uses.
-    bool const effectiveUserRegistered = userRegistered || useSymmetric;
-
     CHECK_HIP(hipSetDevice(this->deviceId));
 
     if (inPlace)
     {
       if (this->funcType == ncclCollScatter)
       {
-        CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, effectiveUserRegistered));
+        CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, this->EffectiveUserRegistered()));
         this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank  * this->numOutputBytesAllocated));
       }
       else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
       {
-        CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, effectiveUserRegistered));
+        CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, this->EffectiveUserRegistered()));
         this->inputGpu.Attach(this->outputGpu.U1 + (this->globalRank * this->numInputBytesAllocated));
       }
       else
       {
         size_t const numBytes = std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated);
-        CHECK_CALL(this->inputGpu.AllocateGpuMem(numBytes, useManagedMem, effectiveUserRegistered));
+        CHECK_CALL(this->inputGpu.AllocateGpuMem(numBytes, useManagedMem, this->EffectiveUserRegistered()));
         this->outputGpu.Attach(this->inputGpu.ptr);
       }
       CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
     }
     else
     {
-      CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, effectiveUserRegistered));
-      CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, effectiveUserRegistered));
+      CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, this->EffectiveUserRegistered()));
+      CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, this->EffectiveUserRegistered()));
       CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
     }
     CHECK_CALL(this->outputCpu.AllocateCpuMem(this->numOutputBytesAllocated));
@@ -112,7 +108,7 @@ namespace RcclUnitTesting
     {
       this->numBiasElements = this->options.biasNumElements;
       this->numBiasBytesAllocated = this->numBiasElements * DataTypeToBytes(this->dataType);
-      CHECK_CALL(this->biasGpu.AllocateGpuMem(this->numBiasBytesAllocated, useManagedMem, effectiveUserRegistered));
+      CHECK_CALL(this->biasGpu.AllocateGpuMem(this->numBiasBytesAllocated, useManagedMem, this->EffectiveUserRegistered()));
       CHECK_CALL(this->biasCpu.AllocateCpuMem(this->numBiasBytesAllocated));
       this->biasRegHandle = nullptr;
     }
@@ -149,20 +145,18 @@ namespace RcclUnitTesting
   {
     // Mirror the AllocateMem allocator choice so the matching ncclMemFree
     // fires for useSymmetric buffers.
-    bool const effectiveUserRegistered = this->userRegistered || this->useSymmetric;
-
     // If in-place, either only inputGpu or outputGpu was allocated
     if (this->inPlace)
     {
       if (this->funcType == ncclCollGather)
         this->outputGpu.FreeGpuMem();
       else
-        this->inputGpu.FreeGpuMem(effectiveUserRegistered);
+        this->inputGpu.FreeGpuMem(this->EffectiveUserRegistered());
     }
     else
     {
-      this->inputGpu.FreeGpuMem(effectiveUserRegistered);
-      this->outputGpu.FreeGpuMem(effectiveUserRegistered);
+      this->inputGpu.FreeGpuMem(this->EffectiveUserRegistered());
+      this->outputGpu.FreeGpuMem(this->EffectiveUserRegistered());
     }
 
     this->outputCpu.FreeCpuMem();
@@ -178,7 +172,7 @@ namespace RcclUnitTesting
     // Deallocate bias buffers if they were allocated
     if (this->options.useBias && this->numBiasBytesAllocated > 0)
     {
-      this->biasGpu.FreeGpuMem(effectiveUserRegistered);
+      this->biasGpu.FreeGpuMem(this->EffectiveUserRegistered());
       this->biasCpu.FreeCpuMem();
       this->biasRegHandle = nullptr;
     }

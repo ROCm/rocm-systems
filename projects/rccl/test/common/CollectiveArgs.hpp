@@ -184,5 +184,9 @@ namespace RcclUnitTesting
 
     // Returns true if collective function utilizes a root rank
     static bool UsesRoot(ncclFunc_t const funcType);
+
+    // Symmetric windows need ncclMemAlloc-backed (cumem, 4KB-aligned) buffers,
+    // which is exactly what the userRegistered allocation path uses.
+    bool EffectiveUserRegistered() const { return userRegistered || useSymmetric; }
   };
 }

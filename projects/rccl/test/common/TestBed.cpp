@@ -744,6 +744,11 @@ namespace RcclUnitTesting
       GTEST_SKIP() << "Skipping... test reduction operations excluded by UT_REDOPS.";
     }
 
+    if (useSymmetric) {
+      // Auto-detect CUMEM support
+      setenv("NCCL_CUMEM_ENABLE", "-2", 1);
+    }
+
     bool isCorrect = true;
 
     // Sweep over the number of ranks
@@ -757,6 +762,9 @@ namespace RcclUnitTesting
       if(enableSweep == false && (numGpus < 8 || numRanks < 8)) {
         continue;
       }
+      // Symmetric-window path requires multiple GPUs.
+      if (useSymmetric && numGpus < 2)
+        continue;
       const std::vector<int>& gpuPriorityOrder = ev.GetGpuPriorityOrder();
       this->InitComms(this->GetDeviceIdsList(numChildren, numGpus, ranksPerGpu, gpuPriorityOrder));
       if (testing::Test::HasFailure())
@@ -774,10 +782,11 @@ namespace RcclUnitTesting
         if (!hasSymmetricSupport)
         {
           this->DestroyComms();
+          if (useSymmetric) unsetenv("NCCL_CUMEM_ENABLE");
           GTEST_SKIP() << "Skipping... symmetric memory not supported on this configuration "
                        << "(numGpus=" << numGpus << ", ranksPerGpu=" << ranksPerGpu
                        << ", isMultiProcess=" << isMultiProcess
-                       << "). Requires NCCL_CUMEM_ENABLE=1 and a compatible platform.";
+                       << "). Requires NCCL_CUMEM_ENABLE=-2 (auto) or 1 and a compatible platform.";
         }
       }
 
@@ -885,6 +894,9 @@ namespace RcclUnitTesting
       }
     }
       this->DestroyComms();
+    }
+    if (useSymmetric) {
+      unsetenv("NCCL_CUMEM_ENABLE");
     }
   }
 
