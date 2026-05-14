@@ -22,7 +22,7 @@
                      },
                     "pmc_group_interval": {
                          "type" : "integer",
-                          "description": "Number of kernel launches between selecting the next group of counters to collect"
+                         "description": "Number of kernel launches between selecting the next group of counters to collect"
                      },
                      
                      "kernel_include_regex":{
@@ -193,6 +193,22 @@
                     "pc-sampling-beta-enabled": {
                          "type": "boolean",
                          "description": "enable pc sampling support; beta version"
+                    },
+                    "spm_beta_enabled": {
+                         "type": "boolean",
+                         "description": "enable streaming performance monitors; beta version"
+                    },
+                    "spm_sample_interval": {
+                         "type" : "integer",
+                         "description": "Specifies the sampling interval"
+                    },
+                    "spm_sample_interval_unit": {
+                         "type" : "string",
+                         "description": "Unit of the sample interval."
+                    },
+                    "spm": {
+                         "type" : "array",
+                         "description": "list of SPM counters to collect"
                     }
                  }
               }

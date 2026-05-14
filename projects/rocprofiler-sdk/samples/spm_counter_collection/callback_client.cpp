@@ -1,0 +1,197 @@
+// MIT License
+//
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#include "common.hpp"
+
+#include <rocprofiler-sdk/registration.h>
+
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <mutex>
+#include <shared_mutex>
+#include <sstream>
+#include <unordered_map>
+#include <vector>
+
+namespace
+{
+struct tool_data_t
+{
+    std::mutex    mut{};
+    std::ostream* output_stream{nullptr};
+};
+
+void
+record_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
+                const rocprofiler_spm_counter_record_t**                records,
+                size_t                                                  record_count,
+                rocprofiler_spm_record_flag_t /* flags*/,
+                rocprofiler_user_data_t /* user_data*/,
+                void* callback_data_args)
+{
+    std::stringstream ss;
+    ss << "Dispatch_Id=" << dispatch_data->dispatch_info.dispatch_id
+       << ", Kernel_id=" << dispatch_data->dispatch_info.kernel_id
+       << ", Corr_Id=" << dispatch_data->correlation_id.internal << ": ";
+    for(size_t i = 0; i < record_count; ++i)
+        ss << "(Id: " << records[i]->id << " Value [D]: " << records[i]->value << "),";
+
+    auto* tool = static_cast<tool_data_t*>(callback_data_args);
+    if(!tool || !tool->output_stream) throw std::runtime_error{"nullptr to output stream"};
+
+    auto _lk = std::unique_lock{tool->mut};
+    *tool->output_stream << "[" << __FUNCTION__ << "] " << ss.str() << "\n";
+}
+
+/**
+ * Callback from rocprofiler when an kernel dispatch is enqueued into the HSA queue.
+ * rocprofiler_counter_spm_config_id_t* is a return to specify what counters to collect
+ * for this dispatch (dispatch_packet). This example function creates a profile
+ * to collect the counter SQ_WAVES for all kernel dispatch packets.
+ */
+void
+dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
+                  rocprofiler_counter_config_id_t*                        config,
+                  rocprofiler_user_data_t* /*   user_data*/,
+                  void* /*callback_data_args*/)
+{
+    /**
+     * This simple example uses the same profile counter set for all agents.
+     * We store this in a cache to prevent constructing many identical profile counter
+     * sets. We first check the cache to see if we have already constructed a counter"
+     * set for the agent. If we have, return it. Otherwise, construct a new profile counter
+     * set.
+     */
+    static std::shared_mutex                                             m_mutex       = {};
+    static std::unordered_map<uint64_t, rocprofiler_counter_config_id_t> profile_cache = {};
+
+    auto search_cache = [&]() {
+        if(auto pos = profile_cache.find(dispatch_data->dispatch_info.agent_id.handle);
+           pos != profile_cache.end())
+        {
+            *config = pos->second;
+            return true;
+        }
+        return false;
+    };
+
+    {
+        auto rlock = std::shared_lock{m_mutex};
+        if(search_cache()) return;
+    }
+
+    auto wlock = std::unique_lock{m_mutex};
+    if(search_cache()) return;
+
+    auto collect_counters =
+        get_matched_spm_counters(dispatch_data->dispatch_info.agent_id, {"SQ_WAVES"});
+
+    std::vector<rocprofiler_spm_parameters_t> input_params{};
+    input_params.push_back(rocprofiler_spm_parameters_t{
+        .size  = sizeof(rocprofiler_spm_parameters_t),
+        .type  = ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
+        .value = 1200});
+
+    auto profile = create_spm_counter_config(
+        dispatch_data->dispatch_info.agent_id, collect_counters, input_params);
+
+    profile_cache.emplace(dispatch_data->dispatch_info.agent_id.handle, profile);
+    *config = profile;
+}
+
+int
+tool_init(rocprofiler_client_finalize_t, void* user_data)
+{
+    ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
+
+    ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(
+                         get_client_ctx(), dispatch_callback, nullptr, record_callback, user_data),
+                     "Could not setup counting service");
+    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
+
+    // no errors
+    return 0;
+}
+
+void
+tool_fini(void* user_data)
+{
+    assert(user_data);
+    std::clog << "In tool fini\n";
+    rocprofiler_stop_context(get_client_ctx());
+    auto* tool_data = static_cast<tool_data_t*>(user_data);
+
+    {
+        auto  _lk           = std::unique_lock{tool_data->mut};
+        auto* output_stream = tool_data->output_stream;
+
+        *output_stream << std::flush;
+        if(output_stream != &std::cout && output_stream != &std::cerr) delete output_stream;
+    }
+
+    delete tool_data;
+}
+}  // namespace
+
+extern "C" rocprofiler_tool_configure_result_t*
+rocprofiler_configure(uint32_t                 version,
+                      const char*              runtime_version,
+                      uint32_t                 priority,
+                      rocprofiler_client_id_t* id)
+{
+    // set the client name
+    id->name = "SPMCounterClientSample";
+
+    // compute major/minor/patch version info
+    uint32_t major = version / 10000;
+    uint32_t minor = (version % 10000) / 100;
+    uint32_t patch = version % 100;
+
+    // generate info string
+    auto info = std::stringstream{};
+    info << id->name << " (priority=" << priority << ") is using rocprofiler-sdk v" << major << "."
+         << minor << "." << patch << " (" << runtime_version << ")";
+
+    std::clog << info.str() << std::endl;
+
+    auto* tool_data = new tool_data_t{};
+
+    std::string filename = "spm_callback_dispatch_counter_collection.log";
+    if(auto* outfile = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE"); outfile) filename = outfile;
+    if(filename == "stdout")
+        tool_data->output_stream = &std::cout;
+    else if(filename == "stderr")
+        tool_data->output_stream = &std::cerr;
+    else
+        tool_data->output_stream = new std::ofstream{filename};
+
+    // create configure data
+    static auto cfg =
+        rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
+                                            &tool_init,
+                                            &tool_fini,
+                                            static_cast<void*>(tool_data)};
+
+    // return pointer to configure data
+    return &cfg;
+}

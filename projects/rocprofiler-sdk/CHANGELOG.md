@@ -9,6 +9,33 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Reduced ROCprofiler-sdk profiling overhead: Improved profiling stability for vLLM workloads traced with PyTorch torch.profiler using the rocprofiler-sdk backend.
 
 
+## ROCprofiler-SDK 1.3.1 for ROCm release 7.14
+
+### Added
+
+**API:**
+
+  - System Performance Monitor (SPM) counter collection support (beta):
+    - New experimental API in `rocprofiler-sdk/experimental/spm.h`:
+    - GPU-timestamped counter values alongside kernel dispatch information.
+  - Added `spm_support` along with reserved padding to `rocprofiler_counter_info_v1_t`
+
+
+**rocprofv3 (CLI):**
+
+  - SPM counter collection support in `rocprofv3` (beta):
+    - `--spm <counter>` flag to specify counters for SPM collection.
+    - `--spm-sample-interval` and `--spm-sample-interval-unit` parameters to configure sampling rate.
+    - `--spm-beta-enabled` flag to opt in to the beta SPM feature.
+    - `--spm-config` option added to `rocprofv3-avail` to list available SPM configurations.
+  - JSON and rocpd output format support for SPM.
+
+**Documentation:**
+
+  - Added SPM API reference guide (`api-reference/spm.rst`).
+  - Added SPM usage guide for `rocprofv3` (`how-to/using-spm.rst`).
+  - Added `--spm-config` documentation to `rocprofv3-avail` usage guide.
+
 ## ROCprofiler-SDK 1.3.0 for ROCm release 7.13
 
 ### Added
