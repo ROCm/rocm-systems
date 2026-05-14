@@ -270,6 +270,7 @@ set(SRC_FILES
   include/plugin/tuner/tuner_v3.h
   include/plugin/tuner/tuner_v4.h
   include/plugin/tuner/tuner_v5.h
+  include/plugin/tuner/tuner_v6.h
   include/plugin/nccl_gin.h
   include/plugin/gin/gin_v11.h
   include/plugin/gin/gin_v12.h
@@ -334,6 +335,7 @@ set(SRC_FILES
   plugin/tuner/tuner_v3.cc
   plugin/tuner/tuner_v4.cc
   plugin/tuner/tuner_v5.cc
+  plugin/tuner/tuner_v6.cc
   plugin/tuner/csv_tuner.cc
   plugin/gin.cc
   plugin/gin/gin_v11.cc
@@ -989,6 +991,13 @@ if(RCCL_ROCPROFILER_REGISTER)
   target_compile_definitions(rccl PRIVATE RCCL_ROCPROFILER_REGISTER=1)
   target_link_libraries(
       rccl PRIVATE rocprofiler-register::rocprofiler-register)
+endif()
+
+# DeviceLinker.cmake reads GPU_TARGETS from the src/ directory scope.
+# After the squash merge, the cache entry can remain set while this local
+# variable is empty, which strips all offload targets from the custom pipeline.
+if(ENABLE_DEVICE_LINKER AND (NOT GPU_TARGETS) AND DEFINED CACHE{GPU_TARGETS})
+  set(GPU_TARGETS "$CACHE{GPU_TARGETS}")
 endif()
 
 # Device Linker: include pipeline and wire up dependencies
