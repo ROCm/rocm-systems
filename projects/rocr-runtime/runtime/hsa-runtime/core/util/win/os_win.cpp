@@ -76,8 +76,19 @@ static_assert(sizeof(EventHandle) == sizeof(::HANDLE),
               "OS abstraction size mismatch");
 
 LibHandle LoadLib(std::string filename) {
+  // Pin the library to prevent unloading, equivalent to RTLD_NODELETE on Linux.
+  // This prevents crashes when the library has circular dependencies back to ROCR.
   HMODULE ret = LoadLibrary(filename.c_str());
-  return *(LibHandle*)&ret;
+  if (ret != NULL) {
+    // Pin by address rather than filename to avoid path resolution issues.
+    HMODULE pinned;
+    if (!GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+            reinterpret_cast<LPCSTR>(ret), &pinned)) {
+      debug_print("LoadLib(%s) pinning failed: error %lu\n", filename.c_str(), GetLastError());
+    }
+  }
+  return reinterpret_cast<LibHandle>(ret);
 }
 
 void* GetExportAddress(LibHandle lib, std::string export_name) {
@@ -495,6 +506,8 @@ int Ctz(uint64_t i) {
     return sizeof(i) * 8;
   }
 }
+
+int Popcount(uint32_t i) { return __popcnt(i); }
 
 char* DlError() { return nullptr; }
 

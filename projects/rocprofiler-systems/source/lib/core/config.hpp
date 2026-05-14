@@ -151,9 +151,6 @@ bool&
 is_binary_rewrite();
 
 bool
-get_is_continuous_integration() ROCPROFSYS_HOT;
-
-bool
 get_debug_env() ROCPROFSYS_HOT;
 
 bool
@@ -224,6 +221,9 @@ get_use_vaapi_tracing();
 
 bool
 get_use_ompt();
+
+bool
+get_group_by_queue();
 
 bool
 get_use_code_coverage();

@@ -97,6 +97,12 @@ public:
   /// @returns Workgroup ID.
   uint32_t wg_id() const { return wg_id_; }
 
+  /// @brief Return the dispatch ID assigned at dispatch.
+  uint32_t dispatch_id() const { return dispatch_id_; }
+
+  /// @brief Set the dispatch ID (called by DispatchController).
+  void set_dispatch_id(uint32_t id) { dispatch_id_ = id; }
+
   /// @brief Return the per-WG LDS base offset assigned at dispatch.
   uint32_t lds_base() const { return lds_base_; }
 
@@ -288,8 +294,12 @@ public:
   /// @retval false Slot is active (running, waiting, or at a barrier).
   bool is_halted() const { return state_ == WfState::HALTED; }
 
-  /// @brief Halt this wavefront (immediate — all memory ops must be drained).
-  void halt() { state_ = WfState::HALTED; }
+  /// @brief Halt this wavefront and notify the CU for WG completion tracking.
+  /// @details Transitions to HALTED and decrements the CU's per-WG refcount.
+  /// When the refcount reaches zero (all WFs in the WG halted), the CU fires
+  /// notify_wg_complete to the CP. This is the sole completion detection path —
+  /// driven entirely by s_endpgm → end() → halt().
+  void halt();
 
   /// @brief End program execution. If all memory ops are drained, halts
   /// immediately. Otherwise, transitions to ENDING and lets the memory
@@ -312,6 +322,7 @@ public:
   void reset() {
     pc = 0;
     wg_id_ = 0;
+    dispatch_id_ = 0;
     num_sgprs_ = 0;
     num_vgprs_ = 0;
     sgpr_alloc_ = {};
@@ -336,10 +347,11 @@ protected:
             uint32_t max_vgprs)
       : cu_(cu), wf_id_(wf_id), wf_size_(wf_size), max_sgprs_(max_sgprs), max_vgprs_(max_vgprs) {}
 
-  ComputeUnitCore &cu_;   ///< Parent CU (permanent, set at construction).
-  uint32_t wf_id_ = 0;    ///< Slot index within the CU (permanent).
-  uint32_t wg_id_ = 0;    ///< Workgroup ID (set per dispatch).
-  uint32_t lds_base_ = 0; ///< Per-WG LDS base offset (set per dispatch).
+  ComputeUnitCore &cu_;      ///< Parent CU (permanent, set at construction).
+  uint32_t wf_id_ = 0;       ///< Slot index within the CU (permanent).
+  uint32_t wg_id_ = 0;       ///< Workgroup ID (set per dispatch).
+  uint32_t dispatch_id_ = 0; ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t lds_base_ = 0;    ///< Per-WG LDS base offset (set per dispatch).
 
   uint32_t wf_size_ = 0;   ///< Lanes per wavefront (ISA-fixed).
   uint32_t num_sgprs_ = 0; ///< Allocated scalar registers (set at dispatch).
