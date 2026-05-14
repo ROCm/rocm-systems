@@ -200,14 +200,13 @@ ensure_finalization(bool _static_init = false)
     const auto& _tid  = _info->index_data;
     if(_tid)
     {
-        if(get_is_continuous_integration() && _tid->sequent_value != threading::get_id())
+        if(_tid->sequent_value != threading::get_id())
         {
             throw std::runtime_error(fmt::format("Error! internal tid != {} :: {}",
                                                  threading::get_id(),
                                                  _tid->sequent_value));
         }
-        if(get_is_continuous_integration() &&
-           _tid->system_value != threading::get_sys_tid())
+        if(_tid->system_value != threading::get_sys_tid())
         {
             throw std::runtime_error(fmt::format("Error! system tid != {} :: {}",
                                                  threading::get_sys_tid(),
@@ -507,7 +506,7 @@ rocprofsys_init_library_hidden()
         LOG_DEBUG("State is {}...", std::to_string(get_state()));
     }
 
-    if(get_is_continuous_integration() && get_state() != State::PreInit)
+    if(get_state() != State::PreInit)
     {
         throw std::runtime_error(
             fmt::format("State is not PreInit :: {}", std::to_string(get_state())));
@@ -534,7 +533,7 @@ rocprofsys_init_library_hidden()
 
     set_state(State::Init);
 
-    if(get_is_continuous_integration() && get_state() != State::Init)
+    if(get_state() != State::Init)
     {
         throw std::runtime_error(fmt::format("set_state(State::Init) failed. state is {}",
                                              std::to_string(get_state())));
@@ -826,7 +825,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
     }
 
     tracing::get_finalization_functions().emplace_back([_argv0_c]() {
-        if(get_is_continuous_integration() && get_state() != State::Active)
+        if(get_state() != State::Active)
         {
             throw std::runtime_error(
                 fmt::format("Finalizer function for popping main invoked in non-active "
@@ -1264,7 +1263,7 @@ rocprofsys_finalize_hidden(void)
                                              get_perfetto_output_filename()));
     }
 
-    if(get_is_continuous_integration() && _push_count > _pop_count &&
+    if(_push_count > _pop_count &&
        !get_env<bool>("ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK", false, false))
     {
         throw std::runtime_error(fmt::format(
