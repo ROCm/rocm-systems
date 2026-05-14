@@ -1,4 +1,12 @@
-#pragma once
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
+#ifndef INSPECTOR_JSON_H_
+#define INSPECTOR_JSON_H_
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -81,3 +89,5 @@ jsonResult_t jsonSize_t(jsonFileOutput *jfo, const size_t val);
 
 // Write a double value
 jsonResult_t jsonDouble(jsonFileOutput *jfo, const double val);
+
+#endif  // INSPECTOR_JSON_H_

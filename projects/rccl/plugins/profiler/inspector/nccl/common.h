@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef COMMON_H_
 #define COMMON_H_
@@ -64,7 +65,6 @@ typedef enum {
   NCCL_REG = 0x2000,
   NCCL_PROFILE = 0x4000,
   NCCL_RAS = 0x8000,
-  NCCL_INSPECTOR = 0x100000, // big number to avoid short-term conflicts
   NCCL_ALL = ~0
 } ncclDebugLogSubSys;
 

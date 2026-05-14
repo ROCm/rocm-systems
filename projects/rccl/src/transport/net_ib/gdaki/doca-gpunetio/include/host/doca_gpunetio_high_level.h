@@ -54,6 +54,7 @@ struct doca_gpu_verbs_qp_init_attr_hl {
     struct doca_gpu *gpu_dev;
     struct ibv_pd *ibpd;
     uint16_t sq_nwqe;
+    uint8_t reserved1[2];
     enum doca_gpu_dev_verbs_nic_handler nic_handler;
     enum doca_gpu_verbs_mem_reg_type mreg_type;
     enum doca_gpu_verbs_send_dbr_mode_ext send_dbr_mode_ext;

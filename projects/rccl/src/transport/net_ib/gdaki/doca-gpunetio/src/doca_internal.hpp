@@ -42,6 +42,7 @@
 #include <unistd.h>
 #include <syslog.h>
 #include <linux/types.h>
+#include <cuda_runtime.h>
 
 #include "host/doca_error.h"
 #include "doca_gpunetio_config.h"
@@ -61,6 +62,13 @@
 #define DOCA_VERBS_CACHELINE_SIZE (64)
 
 #define DOCA_VERBS_DB_UAR_SIZE 8
+
+static inline cudaError_t doca_verbs_cuda_clear_error(cudaError_t cuda_result) {
+    if (cuda_result != cudaSuccess) cudaGetLastError();
+    return cuda_result;
+}
+
+#define DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cmd) doca_verbs_cuda_clear_error(cmd)
 
 /**
  * @brief This method checks if a number is a power of 2

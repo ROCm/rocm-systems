@@ -11,7 +11,7 @@
 #include "impl/lsa_barrier__types.h"
 #include "impl/gin_barrier__types.h"
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 struct ncclBarrierSession_internal;
 
@@ -42,6 +42,7 @@ struct ncclBarrierSession: ncclBarrierSession_internal<Coop> {
   NCCL_DEVICE_INLINE ncclGinBarrierSession<Coop>& ginBarrier();
 
   NCCL_DEVICE_INLINE void sync(Coop, cuda::memory_order, ncclGinFenceLevel);
+  NCCL_DEVICE_INLINE ncclResult_t sync(Coop, cuda::memory_order, ncclGinFenceLevel, uint64_t timeoutCycles);
 };
 #endif
 

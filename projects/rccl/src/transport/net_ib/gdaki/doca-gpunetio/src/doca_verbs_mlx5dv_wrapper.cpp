@@ -36,14 +36,14 @@
  * using dynamic loading with dlopen when DOCA_VERBS_USE_MLX5DV_WRAPPER is defined.
  */
 
-#include "doca_verbs_net_wrapper.h"
-
 #include <dlfcn.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <endian.h>
 #include <mutex>
 
+#include "doca_verbs_net_wrapper.h"
+#include "doca_gpunetio_log.hpp"
 #include "host/doca_error.h"
 
 /* *********** dlopen Function Pointers *********** */
@@ -94,9 +94,13 @@ static mlx5dv_query_device_func_t mlx5dv_query_device_func = NULL;
 /* *********** dlopen Initialization *********** */
 
 static void doca_verbs_wrapper_init_once(int *ret) {
-    mlx5dv_handle = dlopen("libmlx5.so", RTLD_LAZY);
+    mlx5dv_handle = dlopen("libmlx5.so.1", RTLD_NOW);
     if (!mlx5dv_handle) {
-        *ret = -1; /* Failed to load library */
+        mlx5dv_handle = dlopen("libmlx5.so", RTLD_NOW);
+    }
+    if (!mlx5dv_handle) {
+        DOCA_LOG(LOG_ERR, "Failed to load libmlx5: %s\n", dlerror());
+        *ret = -1;
         return;
     }
 
@@ -144,7 +148,7 @@ static void doca_verbs_wrapper_init_once(int *ret) {
 }
 
 static int doca_verbs_wrapper_init_dlopen(void) {
-    int ret = 0;
+    static int ret = 0;
     static std::once_flag once;
     std::call_once(once, doca_verbs_wrapper_init_once, &ret);
     return ret;
