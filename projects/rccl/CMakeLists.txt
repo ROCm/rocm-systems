@@ -354,6 +354,27 @@ if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
     endif()
     message(STATUS "Found amd_smi at ${SMI_INCLUDE_DIR}")
     set(SMI_LIBRARIES amd_smi)
+
+    ### Check whether the installed amdsmi headers expose the UALoE fabric struct
+    ### (amdsmi_fabric_info_t). The probe compiles against the struct only — no
+    ### link-time dependency on amdsmi_get_gpu_fabric_info — because amdsmi is
+    ### loaded lazily at runtime via dlopen. If the struct is absent, the compat
+    ### types in amdsmi_wrap.h must be compiled in.
+    set(CMAKE_REQUIRED_INCLUDES "${SMI_INCLUDE_DIR}")
+    check_cxx_source_compiles("
+      #include <amd_smi/amdsmi.h>
+      int main() {
+        amdsmi_fabric_info_t info{};
+        (void)info;
+        return 0;
+      }
+    " AMDSMI_FABRIC_API)
+    unset(CMAKE_REQUIRED_INCLUDES)
+    if(AMDSMI_FABRIC_API)
+      message(STATUS "amdsmi UALoE fabric API found - enabling AMDSMI_FABRIC_DIRECT")
+    else()
+      message(STATUS "amdsmi UALoE fabric API not found - using compat types")
+    endif()
   endif()
 endif()
 

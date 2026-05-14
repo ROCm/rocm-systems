@@ -13,28 +13,30 @@
  *
  * The following types and functions provide support for AMD's UALoE
  * scale-up fabric technology.
- * When the full amdsmi fabric API is available in the system headers,
- * define AMDSMI_FABRIC_DIRECT=1 to use the header types/functions directly.
- * Otherwise, the compatibility types below will be used.
+ *
+ * AMDSMI_DIRECT is set when <amd_smi/amdsmi.h> is present (pre-UALoE compat
+ * types are skipped to avoid duplicate symbols).
+ *
+ * AMDSMI_FABRIC_DIRECT is set by CMake when the installed amdsmi headers
+ * expose amdsmi_get_gpu_fabric_info (UALoE API present).
+ * When 0, the compat types below are compiled.
  ************************************************************************/
- // Set AMDSMI_DIRECT to 1 at build time if the required amdsmi headers (even before UALoE support) are available,
- // otherwise 0 to use compatibility types defined below
 
 #if __has_include(<amd_smi/amdsmi.h>)
   #define AMDSMI_DIRECT 1
   #include <amd_smi/amdsmi.h>
 #else
   #define AMDSMI_DIRECT 0
+  // amdsmi.h not in include path: fabric API cannot be used directly either,
+  // regardless of what the CMake probe detected.
+  #undef AMDSMI_FABRIC_DIRECT
+  #define AMDSMI_FABRIC_DIRECT 0
 #endif
 
-// Define when amdsmi fabric API is available in amdsmi headers, otherwise use compatibility types defined below
 #ifndef AMDSMI_FABRIC_DIRECT
-#define AMDSMI_FABRIC_DIRECT 0
+  #define AMDSMI_FABRIC_DIRECT 0
 #endif
 
-
-// Added to facilitate builds when amdsmi headers are not available
-// In these cases, the rsmi wrapper will be used by default
 #if !AMDSMI_DIRECT
 /*************************************************************************
  * Pre-UALoE AMDSMI Definitions
@@ -248,8 +250,9 @@ typedef enum {
     AMDSMI_INIT_AMD_GPUS       = (1 << 1),    //!< Initialize AMD GPUS
     AMDSMI_INIT_NON_AMD_CPUS   = (1 << 2),    //!< Initialize Non-AMD CPUS
     AMDSMI_INIT_NON_AMD_GPUS   = (1 << 3),    //!< Initialize Non-AMD GPUS
-    AMDSMI_INIT_AMD_APUS       = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS) /**< Initialize AMD CPUS and GPUS
-                                                                                    (Default option) */
+    AMDSMI_INIT_AMD_APUS       = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS),
+                                              //!< Initialize AMD CPUS and GPUS (Default option)
+    AMDSMI_INIT_AMD_NICS       = (1 << 4)     //!< Initialize NICs
 } amdsmi_init_flags_t;
 
 amdsmi_status_t
@@ -289,7 +292,6 @@ amdsmi_get_minmax_bandwidth_between_processors(amdsmi_processor_handle processor
 
 #endif // !AMDSMI_DIRECT
 
-
 #if !AMDSMI_FABRIC_DIRECT
 /*****************************************************************************/
 /** @defgroup rcclFabricCompat Fabric Compatibility Types
@@ -302,7 +304,7 @@ amdsmi_get_minmax_bandwidth_between_processors(amdsmi_processor_handle processor
  * @brief Fabric telemetry categories
  */
 typedef enum {
-    AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN         = -1,
+    AMDSMI_FABRIC_TELEMETRY_CATEGORY_UNKNOWN         = 0xFFFFFFFF,
     AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE           = 0, //!< UALOE telemetry
     AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH          = 1, //!< Switch telemetry
     AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO          = 2, //!< Crypto telemetry
@@ -340,7 +342,7 @@ typedef struct {
     amdsmi_fabric_label_t name;               //!< Name for this instance
     unsigned logical_idx;                     //!< Logical index for this instance
     unsigned item_count;                      //!< Number of telemetry items in the set
-    amdsmi_fabric_telemetry_item_t items[];   //!< Pointer to array of telemetry items
+    amdsmi_fabric_telemetry_item_t *items;    //!< Pointer to array of telemetry items
 } amdsmi_fabric_telemetry_instance_t;
 
 /**
@@ -351,7 +353,7 @@ typedef struct {
     uint64_t generation_count;                    //!< Sequence number incremented each time telemetry is written
     struct timespec timestamp;                    //!< UTC timestamp seconds since epoch
     unsigned instance_count;                      //!< Number of instances for this category
-    amdsmi_fabric_telemetry_instance_t *instances[]; //!< Array of pointers to instances
+    amdsmi_fabric_telemetry_instance_t *instances;   //!< Pointer to array of telemetry instances
 } amdsmi_fabric_telemetry_dataset_t;
 
 /**
@@ -369,16 +371,18 @@ typedef struct {
  */
 typedef enum {
     AMDSMI_FABRIC_TYPE_UALOE,
-    AMDSMI_FABRIC_TYPE_UALLINK
+    AMDSMI_FABRIC_TYPE_UALLINK,
+    AMDSMI_FABRIC_TYPE_UNKNOWN
 } amdsmi_fabric_type_t;
 
 /**
- * @brief Fabric NHT address mode
+ * @brief Fabric NPA address mode
  */
 typedef enum {
-    AMDSMI_FABRIC_NHT_ADDRESS_MODE_SOURCE_ALIASING,
-    AMDSMI_FABRIC_NHT_ADDRESS_MODE_SOURCE_IDENTIFICATION
-} amdsmi_fabric_nht_address_mode_t;
+    AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING,
+    AMDSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION,
+    AMDSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN
+} amdsmi_fabric_npa_address_mode_t;
 
 /**
  * @brief Fabric accelerator vPoD state
@@ -388,7 +392,8 @@ typedef enum {
     AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED,
     AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY,
     AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE,
-    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR
+    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR,
+    AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN
 } amdsmi_fabric_accelerator_vpod_state_t;
 
 /**
@@ -405,15 +410,15 @@ typedef struct {
     uint32_t vpod_size; //!< Virtual PoD size
     uint32_t vpod_active_accelerators[AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];
     uint32_t local_accelerators[AMDSMI_FABRIC_MAX_LOCAL_GPUS]; //!< Local Accelerator IDs
-    amdsmi_fabric_nht_address_mode_t addr_mode; //!< Source aliasing or identification mode
+    amdsmi_fabric_npa_address_mode_t addr_mode; //!< Source aliasing or identification mode
     amdsmi_fabric_accelerator_vpod_state_t accel_state; //!< Accelerator vPoD State
 } amdsmi_fabric_info_v1_t;
 
 typedef struct {
     uint32_t version;
-    union {
+    union fabric_info_ {
         amdsmi_fabric_info_v1_t v1;
-    };
+    } fabric_version;
 } amdsmi_fabric_info_ver_t;
 
 /**
@@ -421,8 +426,8 @@ typedef struct {
  */
 typedef struct {
     amdsmi_bdf_t bdf;      //!< BDF of the Fabric device
-    amdsmi_fabric_info_ver_t info;
-    uint32_t reserved[14];
+    amdsmi_fabric_info_ver_t fabric_info;
+    uint32_t reserved[15];
 } amdsmi_fabric_info_t;
 
 /*************************************************************************
@@ -470,8 +475,7 @@ amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_han
 const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id);
 
 /** @} End rcclFabricCompat */
-#endif // AMDSMI_FABRIC_DIRECT
-
+#endif // !AMDSMI_FABRIC_DIRECT
 
 /*************************************************************************
  * AMD SMI Fabric Info Cache
