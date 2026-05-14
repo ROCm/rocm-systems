@@ -4,9 +4,11 @@ Scripts for building, running, and comparing rocSHMEM performance across configu
 
 ## Quick-start: compare current branch vs develop
 
+The baseline is automatically set to the **merge-base** of your current branch with `origin/develop` (i.e. the common ancestor, not develop HEAD), so results reflect only the changes on your branch.
+
 ```bash
 # From the rocm-systems/projects/rocshmem directory:
-./scripts/run_perf_compare.sh --suite heatmap --iterations 5
+./scripts/functional_tests/run_perf_compare.sh --suite heatmap --iterations 5
 
 # Output:
 #   plots-heatmap-<branch>/heatmap_summary.png   summary heatmap (green = faster)
@@ -17,7 +19,7 @@ Scripts for building, running, and comparing rocSHMEM performance across configu
 Run `--suite all` for the full functional test suite (slower):
 
 ```bash
-./scripts/run_perf_compare.sh --suite all --iterations 5
+./scripts/functional_tests/run_perf_compare.sh --suite all --iterations 5
 ```
 
 ## Skip rebuild on second run
@@ -25,13 +27,13 @@ Run `--suite all` for the full functional test suite (slower):
 After the first full run, use `--skip-build` and `--skip-baseline` to re-run just the tests (e.g. more iterations) without rebuilding:
 
 ```bash
-./scripts/run_perf_compare.sh --suite heatmap --iterations 20 --skip-build
+./scripts/functional_tests/run_perf_compare.sh --suite heatmap --iterations 20 --skip-build
 ```
 
 Or skip only the baseline rebuild (keep your branch build fresh):
 
 ```bash
-./scripts/run_perf_compare.sh --suite heatmap --skip-baseline
+./scripts/functional_tests/run_perf_compare.sh --suite heatmap --skip-baseline
 ```
 
 ## Multiple named variants (e.g. feature flag comparison)
@@ -40,7 +42,7 @@ Use `--variant-args NAME:ENV=VAL,...:extra-cmake-args` to compare multiple confi
 
 ```bash
 # Example: compare SDMA off/disabled/enabled against develop baseline
-./scripts/run_perf_compare.sh \
+./scripts/functional_tests/run_perf_compare.sh \
   --branch-args "-DUSE_SDMA=ON" \
   --variant-args "sdma-off::-DUSE_SDMA=OFF" \
   --variant-args "sdma-disabled:ROCSHMEM_SDMA_ENABLED=0:" \
@@ -55,7 +57,7 @@ Fields in each spec (separated by `:`):
 ## Compare a GitHub PR
 
 ```bash
-./scripts/run_perf_compare.sh --pr 4574 --suite heatmap --iterations 5
+./scripts/functional_tests/run_perf_compare.sh --pr 4574 --suite heatmap --iterations 5
 # Fetches PR #4574, builds it vs origin/develop, outputs plots-heatmap-pr4574/
 ```
 
@@ -162,7 +164,7 @@ PERF_BRANCH_DIR=$BRANCH_BUILD_DIR \
 Alternatively, call `run_perf_compare.sh` directly which handles the full build+run+compare pipeline:
 
 ```bash
-$ROCSHMEM_DIR/scripts/run_perf_compare.sh \
+$ROCSHMEM_DIR/scripts/functional_tests/run_perf_compare.sh \
   --suite heatmap \
   --iterations 3 \
   --outdir $CI_ARTIFACTS_DIR

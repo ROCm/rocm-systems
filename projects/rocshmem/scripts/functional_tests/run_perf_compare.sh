@@ -6,7 +6,7 @@
 # the current branch against its merge-base with origin/develop.
 #
 # Usage:
-#   ./scripts/run_perf_compare.sh [OPTIONS]
+#   ./scripts/functional_tests/run_perf_compare.sh [OPTIONS]
 #
 # Options:
 #   --iterations N        Number of test iterations per config (default: 10)
