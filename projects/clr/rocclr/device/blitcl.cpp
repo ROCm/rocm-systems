@@ -197,6 +197,22 @@ const char* HipExtraSourceCode = BLIT_KERNELS(
       }
     }
 
+    // Faster variant for pools that carry a persistent contiguous VA buffer
+    // (GraphSignalPool::ContBuffer()).  The caller passes the stable device
+    // pointer populated once at pool-creation time; no per-launch host-to-
+    // device copy of the address array is needed.  The kernel body is
+    // identical to __amd_rocclr_resetGraphSignals — the performance benefit
+    // comes entirely from eliminating the CPU-side CollectValuePtrs() scan
+    // and the memcpy into a transient kernarg slot on the dispatch path.
+    __kernel void __amd_rocclr_resetContSignalBuffer(__global ulong* valueAddrs, uint count,
+                                                     ulong resetValue) {
+      uint i = (uint)get_global_id(0);
+      if (i < count) {
+        __global ulong* p = (__global ulong*)(valueAddrs[i]);
+        *p = resetValue;
+      }
+    }
+
     __kernel void __amd_rocclr_gwsInit(uint value) { __builtin_amdgcn_ds_gws_init(value, 0); });
 
 const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
@@ -229,6 +245,16 @@ const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
     // no-GWS variant for parity.
     __kernel void __amd_rocclr_resetGraphSignals(__global ulong* valueAddrs, uint count,
                                                  ulong resetValue) {
+      uint i = (uint)get_global_id(0);
+      if (i < count) {
+        __global ulong* p = (__global ulong*)(valueAddrs[i]);
+        *p = resetValue;
+      }
+    }
+
+    // See HipExtraSourceCode for the rationale; no-GWS parity copy.
+    __kernel void __amd_rocclr_resetContSignalBuffer(__global ulong* valueAddrs, uint count,
+                                                     ulong resetValue) {
       uint i = (uint)get_global_id(0);
       if (i < count) {
         __global ulong* p = (__global ulong*)(valueAddrs[i]);

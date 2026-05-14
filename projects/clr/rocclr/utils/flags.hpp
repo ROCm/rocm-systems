@@ -271,7 +271,12 @@ release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                                 \
 release(bool, DEBUG_CLR_ENABLE_PREFETCH_METADATA, true,                       \
         "Enable metadata prefetch for some Aql packets")                      \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
-        "Number of consecutive dispatches that may skip the doorbell flush.")
+        "Number of consecutive dispatches that may skip the doorbell flush.")  \
+release(bool, GPU_GRAPH_CONT_SIGNAL_RESET, true,                               \
+        "Use the persistent contiguous VA buffer for graph GPU-side signal "   \
+        "reset (true = __amd_rocclr_resetContSignalBuffer, skips per-launch "  \
+        "CollectValuePtrs + memcpy; false = legacy __amd_rocclr_resetGraph"    \
+        "Signals with a freshly assembled pointer list each launch)")
  
 
 namespace amd {

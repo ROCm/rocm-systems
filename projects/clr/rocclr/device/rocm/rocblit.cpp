@@ -3180,6 +3180,82 @@ bool KernelBlitManager::resetGraphSignals(const std::vector<uint64_t*>& valuePtr
 }
 
 // ================================================================================================
+// Dispatches __amd_rocclr_resetContSignalBuffer to write resetValue into
+// every amd_signal_t.value field referenced by the pool's contiguous VA
+// buffer.  Unlike resetGraphSignals(), this path skips the per-launch
+// CollectValuePtrs() CPU scan and the memcpy of the pointer array into a
+// transient kernarg slot — the caller passes the stable device VA that was
+// populated once at pool-creation / pool-growth time.
+//
+// deviceVaBuf must be a GPU-readable array of `count` uint64_t entries where
+// entry i holds the device VA of amd_signal_t.value for pool signal i.
+//
+// The function is called from the user thread inside hipGraphLaunch (same
+// threading context as resetGraphSignals); see that function's header comment
+// for the rationale behind holding execution() + lockXferOps_ together and
+// using AcquireQueueWithPreferenceLocked().
+bool KernelBlitManager::resetContSignalBuffer(uint64_t* deviceVaBuf, uint32_t count,
+                                              uint64_t resetValue) const {
+  if (deviceVaBuf == nullptr || count == 0) return true;
+
+  // Mirror the lock order of resetGraphSignals: execution() → lockXferOps_.
+  std::scoped_lock execLock(gpu().execution());
+  std::scoped_lock k(lockXferOps_);
+
+  if (gpu().gpu_queue() == nullptr) {
+    gpu().AcquireQueueWithPreferenceLocked();
+    if (gpu().gpu_queue() == nullptr) {
+      return false;
+    }
+  }
+
+  uint blitType = ResetContSignalBuffer;
+
+  // Pass the stable device VA directly as an immediate pointer argument —
+  // no per-launch kernarg allocation or memcpy required.
+  //
+  // IMPORTANT: must cast deviceVaBuf to void* (not &deviceVaBuf).
+  // setArgument with kDirectVa=true does:
+  //   LP64_SWITCH(u32,u64) = reinterpret_cast<uintptr_t>(value)
+  // so it stores the numeric VALUE of the pointer as the kernel arg VA.
+  // Passing &deviceVaBuf (a pointer-to-pointer, i.e. a stack address) would
+  // make the GPU read from the stack — causing error 700.
+  // This matches how resetGraphSignals passes `constBuf` (already a void*).
+  constexpr bool kDirectVa = true;
+  setArgument(kernels_[blitType], 0, sizeof(cl_mem),
+              reinterpret_cast<void*>(deviceVaBuf), 0, nullptr, kDirectVa);
+  setArgument(kernels_[blitType], 1, sizeof(uint32_t), &count);
+  setArgument(kernels_[blitType], 2, sizeof(uint64_t), &resetValue);
+
+  size_t globalWorkOffset[1] = {0};
+  size_t localWorkSize[1] = {std::min<size_t>(64, static_cast<size_t>(count))};
+  const size_t global =
+      ((static_cast<size_t>(count) + localWorkSize[0] - 1) / localWorkSize[0]) * localWorkSize[0];
+  size_t globalWorkSize[1] = {global};
+
+  amd::NDRangeContainer ndrange(1, globalWorkOffset, globalWorkSize, localWorkSize);
+
+  address parameters = captureArguments(kernels_[blitType]);
+
+  // Clear command_ to force the runtime-pool signal path inside
+  // submitKernelInternal — same reasoning as resetGraphSignals.
+  amd::Command* saved_cmd = gpu().command();
+  gpu().SetCommand(nullptr);
+
+  constexpr bool kAttachSignal = true;
+  bool result = gpu().submitKernelInternal(ndrange, *kernels_[blitType], parameters,
+                                           /*event_handle=*/nullptr,
+                                           /*sharedMemBytes=*/0,
+                                           /*vcmd=*/nullptr,
+                                           /*aql_packet=*/nullptr,
+                                           kAttachSignal);
+
+  gpu().SetCommand(saved_cmd);
+  releaseArguments(parameters);
+  return result;
+}
+
+// ================================================================================================
 bool KernelBlitManager::initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
                                  uint heap_size, uint number_of_initial_blocks) const {
   bool result;
