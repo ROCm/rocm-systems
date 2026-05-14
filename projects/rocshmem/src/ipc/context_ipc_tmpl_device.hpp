@@ -927,7 +927,7 @@ __device__ inline int IPCContext::tile_put_wg(dst_tensor_t dst, const src_tensor
   return ROCSHMEM_SUCCESS;
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int IPCContext::tile_get(dst_tensor_t dst, src_tensor_t src,
                                     tuple_t start_coord, tuple_t boundary,
                                     int pe, [[maybe_unused]] uint64_t flags) {
@@ -1007,7 +1007,7 @@ __device__ inline int IPCContext::tile_get(dst_tensor_t dst, src_tensor_t src,
   return ROCSHMEM_SUCCESS;
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int IPCContext::tile_get_wave(dst_tensor_t dst, src_tensor_t src,
                                          tuple_t start_coord, tuple_t boundary,
                                          int pe, [[maybe_unused]] uint64_t flags) {
@@ -1094,7 +1094,7 @@ __device__ inline int IPCContext::tile_get_wave(dst_tensor_t dst, src_tensor_t s
   return ROCSHMEM_SUCCESS;
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src,
                                        tuple_t start_coord, tuple_t boundary,
                                        int pe, [[maybe_unused]] uint64_t flags) {
@@ -1187,48 +1187,48 @@ __device__ inline int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src
 }
 
 // Collective Allgather
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_allgather([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                          [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                          [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int IPCContext::tile_allgather([[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] dst_tensor_t dst,
+                                          [[maybe_unused]] src_tensor_t src, [[maybe_unused]] tuple_t start_coord,
+                                          [[maybe_unused]] tuple_t boundary, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_allgather_wave([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                               [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                               [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int IPCContext::tile_allgather_wave([[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] dst_tensor_t dst,
+                                               [[maybe_unused]] src_tensor_t src, [[maybe_unused]] tuple_t start_coord,
+                                               [[maybe_unused]] tuple_t boundary, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_allgather_wg([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                             [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                             [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int IPCContext::tile_allgather_wg([[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] dst_tensor_t dst,
+                                             [[maybe_unused]] src_tensor_t src, [[maybe_unused]] tuple_t start_coord,
+                                             [[maybe_unused]] tuple_t boundary, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 // Collective Broadcast
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_broadcast([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                          [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                          [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int IPCContext::tile_broadcast([[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] dst_tensor_t dst,
+                                          [[maybe_unused]] src_tensor_t src, [[maybe_unused]] tuple_t start_coord,
+                                          [[maybe_unused]] tuple_t boundary, [[maybe_unused]] int pe_root,
                                           [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_broadcast_wave([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                               [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                               [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int IPCContext::tile_broadcast_wave([[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] dst_tensor_t dst,
+                                               [[maybe_unused]] src_tensor_t src, [[maybe_unused]] tuple_t start_coord,
+                                               [[maybe_unused]] tuple_t boundary, [[maybe_unused]] int pe_root,
                                                [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_broadcast_wg([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                             [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                             [[maybe_unused]] int pe_root, [[maybe_unused]] rocshmem_team_t team,
+template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+__device__ inline int IPCContext::tile_broadcast_wg([[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] dst_tensor_t dst,
+                                             [[maybe_unused]] src_tensor_t src, [[maybe_unused]] tuple_t start_coord,
+                                             [[maybe_unused]] tuple_t boundary, [[maybe_unused]] int pe_root,
                                              [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }

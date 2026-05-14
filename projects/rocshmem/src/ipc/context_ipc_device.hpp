@@ -248,45 +248,45 @@ class IPCContext : public Context {
   __device__ int tile_put_wg(dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord,
                              tuple_t boundary, int pe, uint64_t flags);
 
-  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
   __device__ int tile_get(dst_tensor_t dst, src_tensor_t src, tuple_t start_coord,
                           tuple_t boundary, int pe, uint64_t flags);
 
-  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
   __device__ int tile_get_wave(dst_tensor_t dst, src_tensor_t src, tuple_t start_coord,
                                tuple_t boundary, int pe, uint64_t flags);
 
-  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+  template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
   __device__ int tile_get_wg(dst_tensor_t dst, src_tensor_t src, tuple_t start_coord,
                              tuple_t boundary, int pe, uint64_t flags);
 
   // Collective Allgather
-  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-  __device__ int tile_allgather(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
-                                tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+  template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+  __device__ int tile_allgather(rocshmem_team_t team, dst_tensor_t dst, src_tensor_t src,
+                                tuple_t start_coord, tuple_t boundary, uint64_t flags);
 
-  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-  __device__ int tile_allgather_wave(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
-                                     tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+  template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+  __device__ int tile_allgather_wave(rocshmem_team_t team, dst_tensor_t dst, src_tensor_t src,
+                                     tuple_t start_coord, tuple_t boundary, uint64_t flags);
 
-  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-  __device__ int tile_allgather_wg(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
-                                   tuple_t boundary, rocshmem_team_t team, uint64_t flags);
+  template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+  __device__ int tile_allgather_wg(rocshmem_team_t team, dst_tensor_t dst, src_tensor_t src,
+                                   tuple_t start_coord, tuple_t boundary, uint64_t flags);
 
   // Collective Broadcast
-  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-  __device__ int tile_broadcast(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
-                                tuple_t boundary, int pe_root, rocshmem_team_t team,
+  template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+  __device__ int tile_broadcast(rocshmem_team_t team, dst_tensor_t dst, src_tensor_t src,
+                                tuple_t start_coord, tuple_t boundary, int pe_root,
                                 uint64_t flags);
 
-  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-  __device__ int tile_broadcast_wave(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
-                                     tuple_t boundary, int pe_root, rocshmem_team_t team,
+  template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+  __device__ int tile_broadcast_wave(rocshmem_team_t team, dst_tensor_t dst, src_tensor_t src,
+                                     tuple_t start_coord, tuple_t boundary, int pe_root,
                                      uint64_t flags);
 
-  template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-  __device__ int tile_broadcast_wg(src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,
-                                   tuple_t boundary, int pe_root, rocshmem_team_t team,
+  template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+  __device__ int tile_broadcast_wg(rocshmem_team_t team, dst_tensor_t dst, src_tensor_t src,
+                                   tuple_t start_coord, tuple_t boundary, int pe_root,
                                    uint64_t flags);
 
   // Collective Wait
