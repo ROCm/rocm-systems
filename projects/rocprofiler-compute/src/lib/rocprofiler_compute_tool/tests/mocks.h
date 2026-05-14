@@ -5,6 +5,7 @@
 #include "input_parameters.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
+#include "tool_setup.h"
 
 #include <gmock/gmock.h>
 
@@ -116,4 +117,38 @@ public:
 
 private:
     std::vector<write_counters_info> m_write_counters_args;
+};
+
+class MockToolSetUp : public rocprofiler_compute_tool::ToolSetUp
+{
+public:
+    void set_up() override;
+    int  get_setup_call_count() const;
+
+private:
+    int m_setup_call_count = 0;
+};
+
+class MockEnvironmentSetUp : public rocprofiler_compute_tool::EnvironmentSetUp
+{
+public:
+    struct set_env_call
+    {
+        std::string key;
+        std::string value;
+    };
+
+    void set_test_env(const std::vector<std::string>& entries);
+
+    const std::vector<set_env_call>& get_set_env_calls() const;
+    int                              get_build_env_cache_call_count() const;
+
+protected:
+    std::vector<std::string> get_env_entries() const override;
+    void set_env_var(const std::string& key, const std::string& value) const override;
+
+private:
+    std::vector<std::string>          m_test_env;
+    mutable std::vector<set_env_call> m_set_env_calls;
+    mutable int                       m_build_env_cache_calls = 0;
 };

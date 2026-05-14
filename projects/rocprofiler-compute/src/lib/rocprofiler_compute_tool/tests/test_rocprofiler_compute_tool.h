@@ -21,4 +21,5 @@ protected:
     std::shared_ptr<MockInputParameters> m_input_parameters;
     std::shared_ptr<MockSdkWrapper>      m_sdk_wrapper;
     std::shared_ptr<MockCountersWriter>  m_counters_writer;
+    std::shared_ptr<MockToolSetUp>       m_tool_setup;
 };
