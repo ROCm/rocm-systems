@@ -2066,8 +2066,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         setFlag(HSA_EXTENSION_AMD_PC_SAMPLING);
       }
 
-      if (os::LibHandle lib = os::LoadLib(kAqlProfileLib)) {
-        os::CloseLib(lib);
+      if (core::Runtime::runtime_singleton_->AqlProfileAvailable()) {
         setFlag(HSA_EXTENSION_AMD_AQLPROFILE);
       }
 
