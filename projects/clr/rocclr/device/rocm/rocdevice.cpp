@@ -226,10 +226,15 @@ Device::~Device() {
     for (auto qIter = it.begin(); qIter != it.end();) {
       hsa_queue_t* queue = qIter->first;
       auto& qInfo = qIter->second;
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Releasing hardware queue %p with refCount 0",
               queue->base_address);
+      bool isCountedQueue = qInfo.isCountedQueue;
       qIter = it.erase(qIter);
-      Hsa::queue_destroy(queue);
+      if (isCountedQueue) {
+        Hsa::counted_queue_release(queue);
+      } else {
+        Hsa::queue_destroy(queue);
+      }
     }
   }
   queuePool_.clear();
@@ -3131,61 +3136,79 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     }
   } // Lock release
 
+  // Use counted_queue_acquire for non-cooperative, non-CU-mask queues.
+  // Counted queues don't support hsa_amd_queue_cu_set_mask.
+  const bool useCountedQueue = !coop_queue && cuMask.empty() && info_.globalCUMask_.empty();
+
   // Create a new queue.
-  uint32_t queue_max_packets = 0;
-  if (HSA_STATUS_SUCCESS !=
-      Hsa::agent_get_info(bkendDevice_, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max_packets)) {
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Cannot get hsa agent info");
-    return nullptr;
-  }
-  auto queue_size = (queue_max_packets < queue_size_hint) ? queue_max_packets : queue_size_hint;
-
   hsa_queue_t* queue;
-  auto queue_type = HSA_QUEUE_TYPE_MULTI;
 
-  // Enable cooperative queue for the device queue
-  if (coop_queue) {
-    queue_type = HSA_QUEUE_TYPE_COOPERATIVE;
-  }
-
-  while (Hsa::queue_create(bkendDevice_, queue_size, queue_type, callbackQueue, this,
-                           std::numeric_limits<uint>::max(), std::numeric_limits<uint>::max(),
-                           &queue) != HSA_STATUS_SUCCESS) {
-    queue_size >>= 1;
-    if (queue_size < 64) {
-      LogError("Device::acquireQueue: hsa_queue_create failed!");
-      // If we can't create even a small queue, try to reuse any existing queue
-      if (!coop_queue && (cuMask.size() == 0)) {
-        amd::ScopedLock l(active_queue_access_);
-        if (queuePool_[qIndex].size() > 0) {
-          bool kForceReuse = true;
-          return getQueueFromPool(qIndex, kForceReuse, nullptr, nullptr,
-                                  metadata_ring_buffer);
-        }
-      }
+  if (useCountedQueue) {
+    hsa_status_t status = Hsa::counted_queue_acquire(bkendDevice_, HSA_QUEUE_TYPE_MULTI,
+                                                     queue_priority, callbackQueue, this, 0,
+                                                     &queue);
+    if (status != HSA_STATUS_SUCCESS) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
-              "Device::acquireQueue: hsa_queue_create failed!");
+              "Device::acquireQueue: hsa_amd_counted_queue_acquire failed!");
       return nullptr;
     }
-  }
-
-  // default priority is normal so no need to set it again
-  if (queue_priority != HSA_AMD_QUEUE_PRIORITY_NORMAL) {
-    hsa_status_t st = Hsa::queue_set_priority(queue, queue_priority);
-    if (st != HSA_STATUS_SUCCESS) {
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
-              "Device::acquireQueue: hsa_amd_queue_set_priority failed!");
-      Hsa::queue_destroy(queue);
+  } else {
+    uint32_t queue_max_packets = 0;
+    if (HSA_STATUS_SUCCESS !=
+        Hsa::agent_get_info(bkendDevice_, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max_packets)) {
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Cannot get hsa agent info");
       return nullptr;
+    }
+    auto queue_size = (queue_max_packets < queue_size_hint) ? queue_max_packets : queue_size_hint;
+
+    auto queue_type = HSA_QUEUE_TYPE_MULTI;
+
+    // Enable cooperative queue for the device queue
+    if (coop_queue) {
+      queue_type = HSA_QUEUE_TYPE_COOPERATIVE;
+    }
+
+    while (Hsa::queue_create(bkendDevice_, queue_size, queue_type, callbackQueue, this,
+                             std::numeric_limits<uint>::max(), std::numeric_limits<uint>::max(),
+                             &queue) != HSA_STATUS_SUCCESS) {
+      queue_size >>= 1;
+      if (queue_size < 64) {
+        LogError("Device::acquireQueue: hsa_queue_create failed!");
+        // If we can't create even a small queue, try to reuse any existing queue
+        if (!coop_queue && (cuMask.size() == 0)) {
+          amd::ScopedLock l(active_queue_access_);
+          if (queuePool_[qIndex].size() > 0) {
+            bool kForceReuse = true;
+            return getQueueFromPool(qIndex, kForceReuse);
+          }
+        }
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
+                "Device::acquireQueue: hsa_queue_create failed!");
+        return nullptr;
+      }
+    }
+
+    // default priority is normal so no need to set it again
+    if (queue_priority != HSA_AMD_QUEUE_PRIORITY_NORMAL) {
+      hsa_status_t st = Hsa::queue_set_priority(queue, queue_priority);
+      if (st != HSA_STATUS_SUCCESS) {
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
+                "Device::acquireQueue: hsa_amd_queue_set_priority failed!");
+        Hsa::queue_destroy(queue);
+        return nullptr;
+      }
     }
   }
 
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
-          "Created SWq=%p to map on HWq=%p with "
-          "size %d with priority %d, cooperative: %i",
-          queue, queue->base_address, queue_size, queue_priority, coop_queue);
+          "Created %sSWq=%p to map on HWq=%p with priority %d, cooperative: %i",
+          useCountedQueue ? "counted " : "",
+          queue, queue->base_address, queue_priority, coop_queue);
 
-  Hsa::profiling_set_profiler_enabled(queue, 1);
+  // The counted queue API handles profiling enablement internally.
+  if (!useCountedQueue) {
+    Hsa::profiling_set_profiler_enabled(queue, 1);
+  }
 
   // Query metadata prefetch version once from the first queue created on this device.
   // The version is identical for all queues.
@@ -3294,7 +3317,10 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   assert(result.second && "QueueInfo already exists");
   auto& qInfo = result.first->second;
   qInfo.refCount = 1;
+
   qInfo.hasDedicatedQueue_ = dedicated_queue;
+  qInfo.isCountedQueue = useCountedQueue;
+
   hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
                          &qInfo.metadataRingBuffer_);
   if (metadata_ring_buffer) {
@@ -3302,6 +3328,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   }
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "acquireQueue refCount: %p (%d) %s",
           result.first->first->base_address, result.first->second.refCount,
+          useCountedQueue ? "(counted) " : "",
           dedicated_queue ? "(dedicated)" : "");
   if (!managed && (cuMask.size() == 0)) {
     num_queues_[qIndex]++;
@@ -3337,7 +3364,9 @@ bool Device::ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority 
 // ================================================================================================
 void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMask, bool coop_queue,
                           bool managed) {
-  // Defer cleanup operations outside the lock
+  bool shouldDestroyQueue = false;
+  bool shouldCountedRelease = false;
+
   {  // Lock
     amd::ScopedLock l(active_queue_access_);
     for (uint qIndex = 0; qIndex < queuePool_.size(); ++qIndex) {
@@ -3352,15 +3381,26 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
         qInfo.refCount--;
         ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "releaseQueue refCount:%p (%d)",
                 qIter->first->base_address, qIter->second.refCount);
+        if (qInfo.isCountedQueue && qInfo.refCount == 0) {
+          shouldCountedRelease = true;
+          ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+                  "Releasing counted hardware queue %p with refCount 0", queue->base_address);
+          it.erase(qIter);
+        }
         break;  // Found and processed the queue
       }
     }
   }  // Lock release
 
+  if (shouldCountedRelease) {
+    Hsa::counted_queue_release(queue);
+    return;
+  }
+
   // hsa queues with cumask set and coop queues are not being reused. Hence, if the app uses such
   // queues, we need to destroy them when the queue is released.
   if (!cuMask.empty() || coop_queue) {
-    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting CG enabled hardware queue %p ",
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Releasing hardware queue %p",
             queue->base_address);
     Hsa::queue_destroy(queue);
   }

@@ -683,10 +683,15 @@ class Device : public NullDevice {
   struct QueueInfo {
     int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
-    void* metadataRingBuffer_; //! Metadata prefetch ring buffer base
 
+    void* metadataRingBuffer_; //! Metadata prefetch ring buffer base
+    bool isCountedQueue;
     // Constructor
-    QueueInfo() : refCount(0), hasDedicatedQueue_(false), metadataRingBuffer_(nullptr) {}
+    QueueInfo()
+        : refCount(0),
+          hasDedicatedQueue_(false),
+          metadataRingBuffer_(nullptr),
+          isCountedQueue(false) {}
 
     //! Get the current hardware queue depth (wptr - rptr)
     static uint64_t GetHwQueueDepth(hsa_queue_t* queue) {

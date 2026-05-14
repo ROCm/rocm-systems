@@ -127,6 +127,8 @@ struct RocrEntryPoints {
   decltype(hsa_amd_memory_get_preferred_copy_engine)* hsa_amd_memory_get_preferred_copy_engine_;
   decltype(hsa_amd_ais_file_read)* hsa_amd_ais_file_read_;
   decltype(hsa_amd_ais_file_write)* hsa_amd_ais_file_write_;
+  decltype(hsa_amd_counted_queue_acquire)* hsa_amd_counted_queue_acquire_;
+  decltype(hsa_amd_counted_queue_release)* hsa_amd_counted_queue_release_;
   // Image extensions
   decltype(hsa_ext_image_data_get_info_v2)* hsa_ext_image_data_get_info_v2_;
   decltype(hsa_ext_image_create_v2)* hsa_ext_image_create_v2_;
@@ -526,6 +528,17 @@ class Hsa : public amd::AllStatic {
                                      int32_t* status) {
     return ROCR_DYN(hsa_amd_ais_file_write)(handle, devicePtr, size, file_offset, size_copied,
                                             status);
+  }
+  static hsa_status_t counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t type,
+                                            hsa_amd_queue_priority_t priority,
+                                            void (*callback)(hsa_status_t status,
+                                                             hsa_queue_t* source, void* data),
+                                            void* data, uint64_t flags, hsa_queue_t** queue) {
+    return ROCR_DYN(hsa_amd_counted_queue_acquire)(agent, type, priority, callback, data, flags,
+                                                   queue);
+  }
+  static hsa_status_t counted_queue_release(hsa_queue_t* queue) {
+    return ROCR_DYN(hsa_amd_counted_queue_release)(queue);
   }
 
   // Image extensions

@@ -118,6 +118,8 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_memory_get_preferred_copy_engine)
   GET_ROCR_SYMBOL(hsa_amd_ais_file_read)
   GET_ROCR_SYMBOL(hsa_amd_ais_file_write)
+  GET_ROCR_SYMBOL(hsa_amd_counted_queue_acquire)
+  GET_ROCR_SYMBOL(hsa_amd_counted_queue_release)
 
   // Image extensions
   GET_ROCR_SYMBOL(hsa_ext_image_data_get_info_v2)
