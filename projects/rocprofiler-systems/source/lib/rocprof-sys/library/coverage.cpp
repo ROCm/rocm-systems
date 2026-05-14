@@ -196,7 +196,7 @@ post_process()
 
     auto _get_setting = [](const std::string& _v) {
         auto&& _b = config::get_setting_value<bool>(_v);
-        if(!_b && get_is_continuous_integration())
+        if(!_b)
         {
             throw std::runtime_error(
                 fmt::format("Error! No configuration setting named '{}'", _v));
