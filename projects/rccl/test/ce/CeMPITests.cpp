@@ -10,6 +10,7 @@
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
+#include "ResourceGuards.hpp"
 #include "SymmetricBufferHelpers.hpp"
 #include "TestChecks.hpp"
 #include "rccl/rccl.h"
@@ -438,6 +439,7 @@ class CeMPI_Fallback : public CeMPITest
 // Plain hipMalloc avoids the symmetric-SM kernel path (absent with GENERATE_SYM_KERNELS=OFF).
 TEST_F(CeMPI_Fallback, AllReduceNeverUsesCE)
 {
+    using namespace RCCLTestGuards;
     if(!validateTestPrerequisites(kMinRanks2))
         GTEST_SKIP() << "Need >= 2 MPI ranks";
 
@@ -450,10 +452,15 @@ TEST_F(CeMPI_Fallback, AllReduceNeverUsesCE)
     const size_t count = kSmallCount;
     const size_t bytes = count * sizeof(float);
 
+    // Plain hipMalloc (not symmetric) is intentional: avoids the sym-SM kernel path.
+    // DeviceBufferAutoGuard ensures hipFree on all exit paths including early ASSERTs.
     void* sendBuf = nullptr;
-    void* recvBuf = nullptr;
     ASSERT_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
+    DeviceBufferAutoGuard sendGuard(sendBuf);
+
+    void* recvBuf = nullptr;
     ASSERT_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
+    DeviceBufferAutoGuard recvGuard(recvBuf);
 
     fillRankScalar(sendBuf, count, rank);
 
@@ -467,9 +474,6 @@ TEST_F(CeMPI_Fallback, AllReduceNeverUsesCE)
                                         [expected](size_t) { return expected; }))
         << "Rank " << rank << ": AllReduce data verification failed";
 
-    hipFree(sendBuf);
-    hipFree(recvBuf);
-
     assertCEPathNotTaken("CeMPI_Fallback/AllReduceNeverUsesCE");
 }
 
@@ -477,6 +481,7 @@ TEST_F(CeMPI_Fallback, AllReduceNeverUsesCE)
 // NCCL_CTA_POLICY is process-cached; bypassing CE via unregistered buffers is the correct approach.
 TEST_F(CeMPI_Fallback, AllGatherFallbackToSMWhenCEDisabled)
 {
+    using namespace RCCLTestGuards;
     if(!validateTestPrerequisites(kMinRanks2))
         GTEST_SKIP() << "Need >= 2 MPI ranks";
 
@@ -489,11 +494,15 @@ TEST_F(CeMPI_Fallback, AllGatherFallbackToSMWhenCEDisabled)
     const size_t count = kSmallCount;
     const size_t bytes = count * sizeof(float);
 
-    // Plain hipMalloc: ncclDevrFindWindow returns NULL → CE dispatch condition false.
+    // Plain hipMalloc (not symmetric) is intentional: ncclDevrFindWindow returns NULL
+    // → CE dispatch condition false.  Guards ensure cleanup on all exit paths.
     void* sendBuf = nullptr;
-    void* recvBuf = nullptr;
     ASSERT_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
+    DeviceBufferAutoGuard sendGuard(sendBuf);
+
+    void* recvBuf = nullptr;
     ASSERT_EQ(hipSuccess, hipMalloc(&recvBuf, bytes * static_cast<size_t>(nRanks)));
+    DeviceBufferAutoGuard recvGuard(recvBuf);
 
     fillRankScalar(sendBuf, count, rank);
 
@@ -505,15 +514,13 @@ TEST_F(CeMPI_Fallback, AllGatherFallbackToSMWhenCEDisabled)
     ASSERT_TRUE(verifyBlockPattern(recvBuf, count * static_cast<size_t>(nRanks), count))
         << "Rank " << rank << ": AllGather (SM path) data verification failed";
 
-    hipFree(sendBuf);
-    hipFree(recvBuf);
-
     assertCEPathNotTaken("CeMPI_Fallback/AllGatherFallbackToSMWhenCEDisabled");
 }
 
 // CE-MPI-FALLBACK-03: Only send registered; recvWin == NULL → CE dispatch skipped, SM ring used.
 TEST_F(CeMPI_Fallback, AllGatherRecvNotRegisteredFallsBackToSM)
 {
+    using namespace RCCLTestGuards;
     if(!validateTestPrerequisites(kMinRanks2))
         GTEST_SKIP() << "Need >= 2 MPI ranks";
 
@@ -526,12 +533,13 @@ TEST_F(CeMPI_Fallback, AllGatherRecvNotRegisteredFallsBackToSM)
     const size_t count = kSmallCount;
     const size_t bytes = count * sizeof(float);
 
-    // Send is a symmetric window; recv is plain hipMalloc → CE condition fails.
+    // Send is a symmetric window; recv is plain hipMalloc (intentional) → CE condition fails.
     SymBuf sendSym;
     ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, sendSym));
 
     void* recvBuf = nullptr;
     ASSERT_EQ(hipSuccess, hipMalloc(&recvBuf, bytes * static_cast<size_t>(nRanks)));
+    DeviceBufferAutoGuard recvGuard(recvBuf);
 
     fillRankScalar(sendSym.ptr, count, rank);
 
@@ -542,8 +550,6 @@ TEST_F(CeMPI_Fallback, AllGatherRecvNotRegisteredFallsBackToSM)
 
     ASSERT_TRUE(verifyBlockPattern(recvBuf, count * static_cast<size_t>(nRanks), count))
         << "Rank " << rank << ": AllGather (partial-reg SM fallback) data verification failed";
-
-    hipFree(recvBuf);
 
     assertCEPathNotTaken("CeMPI_Fallback/AllGatherRecvNotRegisteredFallsBackToSM");
 }
@@ -615,12 +621,16 @@ TEST_F(CeMPI_Stress, InterleavedCEAllGatherAndSMAllReduce)
     void* agSend = agSendSym.ptr;
     void* agRecv = agRecvSym.ptr;
 
-    // AllReduce uses plain hipMalloc; symmetric buffers would route to a sym-SM kernel
-    // absent with GENERATE_SYM_KERNELS=OFF → ncclUnhandledCudaError.
+    // AllReduce uses plain hipMalloc (intentional): symmetric buffers would route to a
+    // sym-SM kernel absent with GENERATE_SYM_KERNELS=OFF → ncclUnhandledCudaError.
+    // DeviceBufferAutoGuard ensures cleanup on all exit paths.
     void* arSend = nullptr;
-    void* arRecv = nullptr;
     ASSERT_EQ(hipSuccess, hipMalloc(&arSend, count * sizeof(float)));
+    RCCLTestGuards::DeviceBufferAutoGuard arSendGuard(arSend);
+
+    void* arRecv = nullptr;
     ASSERT_EQ(hipSuccess, hipMalloc(&arRecv, count * sizeof(float)));
+    RCCLTestGuards::DeviceBufferAutoGuard arRecvGuard(arRecv);
 
     fillRankScalar(agSend, count, rank);
     fillRankScalar(arSend, count, rank);
@@ -646,9 +656,6 @@ TEST_F(CeMPI_Stress, InterleavedCEAllGatherAndSMAllReduce)
                                             [arExpected](size_t) { return arExpected; }))
             << "AllReduce data wrong at iter " << iter;
     }
-
-    hipFree(arSend);
-    hipFree(arRecv);
 
     assertCEPathTaken("CeMPI_Stress/InterleavedCEAllGatherAndSMAllReduce");
 }

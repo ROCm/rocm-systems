@@ -10,6 +10,7 @@
 #include "CeTestHelpers.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include "MPITestBase.hpp"
+#include "ResourceGuards.hpp"
 #include "SymmetricBufferHelpers.hpp"
 #include "rccl/rccl.h"
 
@@ -158,6 +159,7 @@ TEST_F(CeInternalMPITest, IndependentCeStatePerComm)
     ncclComm_t comm2 = nullptr;
     ASSERT_EQ(ncclSuccess,
               ncclCommInitRank(&comm2, nRanks, uid, ceComm->rank));
+    RCCLTestGuards::NcclCommAutoGuard comm2Guard(comm2);
 
     auto* ceComm2 = static_cast<ncclComm*>(comm2);
 
@@ -172,13 +174,15 @@ TEST_F(CeInternalMPITest, IndependentCeStatePerComm)
     ASSERT_EQ(ncclSuccess,
               ncclAllGather(s2.ptr, r2.ptr, kElem, ncclFloat32, comm2,
                             getActiveStream()));
+    // hipStreamSynchronize has no timeout; a CE hang here means CE dispatch failed.
+    // The test runner's --timeout option provides the external deadline.
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
+    // White-box check: baseUCSymReadyPtr is set by ncclCeInit and is the most direct
+    // indicator that CE initialized on comm2.  Log-based detection would require
+    // capturing per-rank stderr across MPI processes, which is unavailable here.
     if(ceComm2->ceColl.baseUCSymReadyPtr == nullptr)
-    {
-        ncclCommDestroy(comm2);
         GTEST_SKIP() << "CE not available on comm2";
-    }
 
     EXPECT_NE(ceComm->ceColl.baseUCSymReadyPtr,
               ceComm2->ceColl.baseUCSymReadyPtr)
@@ -188,7 +192,10 @@ TEST_F(CeInternalMPITest, IndependentCeStatePerComm)
 
     const uint32_t seqBefore = ceComm->ceColl.ceSeqNum;
 
-    for(int i = 0; i < 3; ++i)
+    // Run 3 collectives on comm2 to advance its CE sequence number by several steps;
+    // any count > 1 is sufficient to detect a ceSeqNum cross-contamination into comm1.
+    constexpr int kAdvanceIters = 3;
+    for(int i = 0; i < kAdvanceIters; ++i)
     {
         ASSERT_EQ(ncclSuccess,
                   ncclAllGather(s2.ptr, r2.ptr, kElem, ncclFloat32, comm2,
@@ -223,8 +230,7 @@ TEST_F(CeInternalMPITest, IndependentCeStatePerComm)
                     0, 1e-5, &errIdx, &errExp, &errAct))
         << "Data corruption in comm1 AllGather after comm2 state was advanced"
         << " at idx=" << errIdx << " expected=" << errExp << " got=" << errAct;
-
-    ncclCommDestroy(comm2);
+    // comm2Guard auto-destroys comm2 on scope exit.
 }
 
 // INIT-05: ncclCeFinalize with no further collectives after SetUp warmup must succeed and zero pointers.
@@ -365,27 +371,35 @@ TEST_F(CeInternalMPITest, LaunchEmptyBatchSucceeds)
 //            succeeds and the data is correctly transferred.
 TEST_F(CeInternalMPITest, LaunchFourOpsSucceeds)
 {
+    using namespace RCCLTestGuards;
     constexpr int    kOps   = 4;
     constexpr size_t kBytes = kOps * sizeof(float); // allocation size per src/dst buffer
 
-    std::vector<float*> src(kOps, nullptr), dst(kOps, nullptr);
+    // DeviceBufferAutoGuard ensures hipFree is called on all paths, including early ASSERT exits.
+    std::vector<DeviceBufferAutoGuard> srcGuards(kOps), dstGuards(kOps);
     for(int i = 0; i < kOps; ++i)
     {
-        ASSERT_EQ(hipMalloc(&src[i], kBytes), hipSuccess);
-        ASSERT_EQ(hipMalloc(&dst[i], kBytes), hipSuccess);
+        void* p = nullptr;
+        ASSERT_EQ(hipMalloc(&p, kBytes), hipSuccess);
+        srcGuards[i].set(p);
+        p = nullptr;
+        ASSERT_EQ(hipMalloc(&p, kBytes), hipSuccess);
+        dstGuards[i].set(p);
+
         float pattern = static_cast<float>(i + 1);
-        ASSERT_EQ(hipMemset(src[i], 0, kBytes), hipSuccess);
-        ASSERT_EQ(hipMemcpy(src[i], &pattern, sizeof(float), hipMemcpyHostToDevice),
+        ASSERT_EQ(hipMemset(srcGuards[i].get(), 0, kBytes), hipSuccess);
+        ASSERT_EQ(hipMemcpy(srcGuards[i].get(), &pattern, sizeof(float), hipMemcpyHostToDevice),
                   hipSuccess);
     }
 
     ncclCeBatchOpsParams params{};
     ASSERT_EQ(ncclCeInitBatchOpsParams(&params, kOps), ncclSuccess);
+    SCOPE_EXIT(ncclCeFreeBatchOpsParams(&params));
 
     for(int i = 0; i < kOps; ++i)
     {
-        params.srcs[i] = src[i];
-        params.dsts[i] = dst[i];
+        params.srcs[i]  = static_cast<float*>(srcGuards[i].get());
+        params.dsts[i]  = static_cast<float*>(dstGuards[i].get());
         params.sizes[i] = sizeof(float);
     }
     params.numOps = kOps;
@@ -396,16 +410,11 @@ TEST_F(CeInternalMPITest, LaunchFourOpsSucceeds)
     for(int i = 0; i < kOps; ++i)
     {
         float result = 0.0f;
-        ASSERT_EQ(hipMemcpy(&result, dst[i], sizeof(float), hipMemcpyDeviceToHost), hipSuccess);
+        ASSERT_EQ(hipMemcpy(&result, dstGuards[i].get(), sizeof(float), hipMemcpyDeviceToHost),
+                  hipSuccess);
         EXPECT_FLOAT_EQ(result, static_cast<float>(i + 1)) << "op " << i;
     }
-
-    ncclCeFreeBatchOpsParams(&params);
-    for(int i = 0; i < kOps; ++i)
-    {
-        hipFree(src[i]);
-        hipFree(dst[i]);
-    }
+    // srcGuards, dstGuards, and params freed automatically on scope exit.
 }
 
 // ===========================================================================
@@ -477,20 +486,27 @@ TEST_F(CeFaultInjTest, SyncPrepErrorPropagates)
 //           After clearing, the same call must succeed.
 TEST_F(CeFaultInjTest, LaunchBatchOpsErrorPropagates)
 {
-    constexpr int   kOps  = 2;
+    using namespace RCCLTestGuards;
+    constexpr int    kOps  = 2;
     constexpr size_t kBytes = sizeof(float);
 
-    float* src = nullptr;
-    float* dst = nullptr;
-    ASSERT_EQ(hipMalloc(&src, kBytes), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dst, kBytes), hipSuccess);
+    // DeviceBufferAutoGuard ensures hipFree is called on all paths, including early ASSERT exits.
+    void* srcPtr = nullptr;
+    ASSERT_EQ(hipMalloc(&srcPtr, kBytes), hipSuccess);
+    DeviceBufferAutoGuard srcGuard(srcPtr);
+
+    void* dstPtr = nullptr;
+    ASSERT_EQ(hipMalloc(&dstPtr, kBytes), hipSuccess);
+    DeviceBufferAutoGuard dstGuard(dstPtr);
 
     ncclCeBatchOpsParams params{};
     ASSERT_EQ(ncclCeInitBatchOpsParams(&params, kOps), ncclSuccess);
+    SCOPE_EXIT(ncclCeFreeBatchOpsParams(&params));
+
     for(int i = 0; i < kOps; ++i)
     {
-        params.srcs[i]  = src;
-        params.dsts[i]  = dst;
+        params.srcs[i]  = static_cast<float*>(srcPtr);
+        params.dsts[i]  = static_cast<float*>(dstPtr);
         params.sizes[i] = kBytes;
     }
     params.numOps = kOps;
@@ -505,10 +521,7 @@ TEST_F(CeFaultInjTest, LaunchBatchOpsErrorPropagates)
               ncclSuccess)
         << "Expected ncclSuccess after fault cleared";
     EXPECT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
-
-    ncclCeFreeBatchOpsParams(&params);
-    hipFree(src);
-    hipFree(dst);
+    // srcGuard, dstGuard, and params freed automatically on scope exit.
 }
 
 // FAULT-03: CE_FAULT_INIT makes ncclCeInit return ncclSystemError and leaves
