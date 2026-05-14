@@ -49,6 +49,7 @@ def test_perfetto_data(
         "memory_allocation": ("memory_allocation", "memory_allocation"),
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
+        "rocshmem_api": ("rocshmem_api", "rocshmem_api"),
         "counter_collection": ("counter_collection", "counter_collection"),
         "scratch_memory": ("scratch_memory", "scratch_memory"),
         "ompt": ("openmp", "ompt"),
@@ -121,6 +122,7 @@ def test_otf2_data(
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
         "ompt": ("openmp", "ompt"),
+        "rocshmem_api": ("rocshmem_api", "rocshmem_api"),
     }
 
     # make sure they specified valid categories
