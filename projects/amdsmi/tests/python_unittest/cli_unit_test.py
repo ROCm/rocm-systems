@@ -1438,8 +1438,9 @@ if __name__ == "__main__":
     if verbose > common.VERBOSITY_QUIET:
         print("AMD SMI CLI Tests")
 
-    runner = unittest.TextTestRunner(
+    runner = common.GTestSummaryRunner(
         stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose)
     )
+
     unittest.main(testRunner=runner)
     sys.exit(0)

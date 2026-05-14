@@ -261,6 +261,97 @@ def expand_glob_k_arg(caller_globals):
         break
 
 
+class GTestSummaryRunner(unittest.TextTestRunner):
+    """TextTestRunner that appends a GTest-style pass/skip/fail summary.
+
+    After the standard unittest output, prints a colored block like::
+
+        [----------] 40 tests ran.
+        [  PASSED  ] 39 tests.
+        [  SKIPPED ] 1 test, listed below:
+        [  SKIPPED ] TestClass.test_method_name
+
+    Colors mirror GTest: green = PASSED, yellow = SKIPPED, red = FAILED,
+    cyan = separator.  Colors are suppressed when the stream is not a TTY.
+    """
+
+    # ANSI color codes match GTest's scheme:
+    #   cyan   = separator line ([----------])
+    #   green  = PASSED
+    #   yellow = SKIPPED
+    #   red    = FAILED
+    # Colors are automatically suppressed when the output stream is not a TTY
+    # (e.g. when piped to a file or CI log capture), so file-based runners such
+    # as those in perf_tests.py will never receive ANSI escape codes in their logs.
+    _CYAN = "\033[36m"
+    _GREEN = "\033[32m"
+    _YELLOW = "\033[33m"
+    _RED = "\033[31m"
+    _RESET = "\033[0m"
+
+    def _color(self, code, text):
+        """Wrap *text* in *code* only when the output stream is a real TTY."""
+        underlying = getattr(self.stream, "stream", self.stream)
+        if hasattr(underlying, "isatty") and underlying.isatty():
+            return f"{code}{text}{self._RESET}"
+        return text
+
+    def run(self, test):
+        result = super().run(test)
+        self._print_gtest_summary(result)
+        return result
+
+    def _print_gtest_summary(self, result):
+        stream = self.stream  # unittest._WritelnDecorator, supports .writeln()
+        skipped = len(result.skipped)
+        failures = len(result.failures) + len(result.errors)
+        passed = result.testsRun - skipped - failures
+
+        stream.writeln()
+        stream.writeln(
+            self._color(
+                self._CYAN,
+                f"[----------] {result.testsRun} test{'s' if result.testsRun != 1 else ''} ran.",
+            )
+        )
+        stream.writeln(
+            self._color(self._GREEN, f"[  PASSED  ] {passed} test{'s' if passed != 1 else ''}.")
+        )
+        if failures:
+            stream.writeln(
+                self._color(
+                    self._RED,
+                    f"[  FAILED  ] {failures} test{'s' if failures != 1 else ''}, listed below:",
+                )
+            )
+            for t, _ in result.failures:
+                stream.writeln(
+                    self._color(
+                        self._RED, f"[  FAILED  ] {t.__class__.__name__}.{t._testMethodName}"
+                    )
+                )
+            for t, _ in result.errors:
+                stream.writeln(
+                    self._color(
+                        self._RED, f"[  FAILED  ] {t.__class__.__name__}.{t._testMethodName}"
+                    )
+                )
+        if skipped:
+            stream.writeln(
+                self._color(
+                    self._YELLOW,
+                    f"[  SKIPPED ] {skipped} test{'s' if skipped != 1 else ''}, listed below:",
+                )
+            )
+            for t, _ in result.skipped:
+                stream.writeln(
+                    self._color(
+                        self._YELLOW, f"[  SKIPPED ] {t.__class__.__name__}.{t._testMethodName}"
+                    )
+                )
+        stream.writeln()
+
+
 def has_gpu_od_interface(bdf):
     """Check if a GPU has the gpu_od sysfs interface.
 
