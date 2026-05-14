@@ -8,14 +8,15 @@ Build ROCm Systems Profiler from source
 
 To build ROCm Systems Profiler as part of the ROCm Core SDK, see `TheRock build
 instructions
-<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+<https://github.com/ROCm/TheRock/blob/main/README.md#build-configuration>`__.
 TheRock is the recommended way to build ROCm components from source.
 
-Alternatively, you can build ROCm Systems Profiler standalone using the following
-instructions.
+To build ROCm Systems Profiler standalone instead, use the instructions on this page.
 
-If you have problems using ROCm Systems Profiler after installation,
-consult the :ref:`post-installation-troubleshooting` section.
+.. seealso::
+
+   If you encounter problems after installation, consult the
+   :ref:`post-installation-troubleshooting` section.
 
 Operating system support
 ========================
