@@ -39,7 +39,8 @@ enum ncclSocketState {
   ncclSocketStateTerminating = 8,
   ncclSocketStateClosed = 9,
   ncclSocketStateError = 10,
-  ncclSocketStateNum = 11
+  ncclSocketStateBadMagic = 11,
+  ncclSocketStateNum = 12
 };
 
 enum ncclSocketType {
@@ -66,13 +67,15 @@ struct ncclSocket {
   int finalizeCounter; // Used to keep track of initial handshake for async sockets.
   char finalizeBuffer[sizeof(uint64_t)]; // Used to keep track of initial handshake for async sockets.
 };
+
 struct ncclSocketOp {
-  int op;                    // NCCL_SOCKET_SEND or NCCL_SOCKET_RECV
-  struct ncclSocket* sock;   // Socket to operate on
-  void* ptr;                 // Data pointer
-  int size;                  // Size of data
-  int offset;                // Current progress offset
+  int op;                  // NCCL_SOCKET_SEND or NCCL_SOCKET_RECV
+  struct ncclSocket* sock; // Socket to operate on
+  void* ptr;               // Data pointer
+  int size;                // Size of data
+  int offset;              // Current progress offset
 };
+
 const char *ncclSocketToString(const union ncclSocketAddress *addr, char *buf, const int numericHostForm = 1);
 ncclResult_t ncclSocketGetAddrFromString(union ncclSocketAddress* ua, const char* ip_port_pair);
 ncclResult_t ncclFindInterfaceMatchSubnet(char* ifName, union ncclSocketAddress* localAddr,
@@ -90,7 +93,7 @@ ncclResult_t ncclSocketConnect(struct ncclSocket* sock);
 // Return socket connection state.
 ncclResult_t ncclSocketReady(struct ncclSocket* sock, int *running);
 // Accept an incoming connection from listenSock->fd and keep the file descriptor in sock->fd, with the remote side IP/port in sock->addr.
-ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* ulistenSock);
+ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* ulistenSock, bool retryOnBadMagic = true);
 ncclResult_t ncclSocketGetFd(struct ncclSocket* sock, int* fd);
 ncclResult_t ncclSocketSetFd(int fd, struct ncclSocket* sock);
 
