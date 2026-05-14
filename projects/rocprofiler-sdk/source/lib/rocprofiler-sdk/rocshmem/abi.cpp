@@ -42,7 +42,16 @@ ROCP_SDK_ENFORCE_ABI(::rocshmemApiFuncTable, putmem_on_stream_fn, 6)
 ROCP_SDK_ENFORCE_ABI(::rocshmemApiFuncTable, putmem_signal_on_stream_fn, 7)
 ROCP_SDK_ENFORCE_ABI(::rocshmemApiFuncTable, signal_wait_until_on_stream_fn, 8)
 
+// As rocSHMEM grows new dispatch table entries, ROCSHMEM_API_TRACE_VERSION_PATCH will be
+// incremented and the matching arm here must be added (mirrors the RCCL pattern in
+// rccl/abi.cpp). Until that history exists, we pin the expected size to the current
+// patch level (7) and force a build break on any newer/unknown patch via
+// INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING (active under ROCPROFILER_CI=1).
+#if ROCSHMEM_API_TRACE_VERSION_PATCH == 7
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::rocshmemApiFuncTable, 9)
+#else
+INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::rocshmemApiFuncTable, 0)
+#endif
 
 }  // namespace rocshmem
 }  // namespace rocprofiler
