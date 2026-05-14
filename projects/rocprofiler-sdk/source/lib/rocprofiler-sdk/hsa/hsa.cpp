@@ -568,7 +568,6 @@ hsa_shut_down_refcnt_impl()
 {
     if(hsa_reference_count_value > 0)
     {
-        if(hsa_reference_count_value == 1) async_copy_fini();
         --hsa_reference_count_value;
         if(hsa_reference_count_value == 0)
         {
