@@ -14,6 +14,7 @@ This document outlines coding conventions and best practices for Python developm
 - [Levels of Abstraction](#levels-of-abstraction)
 - [Avoiding Deep Nesting](#avoiding-deep-nesting)
 - [Code Organization](#code-organization)
+- [Test Organization](#test-organization)
 - [Key Principles Summary](#key-principles-summary)
 
 ## Function Length
@@ -631,7 +632,7 @@ def create_filtered_stats(df_in, filter_nodes, ...) -> None:
 
 - Module structure order: docstring → imports (stdlib → third-party → local, sorted within each group) → constants → public functions → private helpers → classes.
 - Public functions appear **before** private helpers in every file.
-- The `_` prefix marks privacy for module-level helpers and class members only — do not use it for helpers in test files (`test_*.py`). Test modules are imported only by pytest for collection and should not import each other (use `conftest.py` for shared fixtures), so there is no internal API to mark private.
+- The `_` prefix marks privacy for module-level helpers and class members only — do not use it for **module-level** helpers in test files (`test_*.py`). Test modules are imported only by pytest for collection and should not import each other (use `conftest.py` for shared fixtures), so there is no internal API to mark private. Class-level helper methods inside a test class (`def _helper(self): ...`) may still use `_` to signal they are internal to that class.
 - Use `is None` / `is not None` — never `== None` or `!= None`.
 
 ### None Comparisons
@@ -753,6 +754,74 @@ def _other_helper():
     pass
 ```
 
+## Test Organization
+
+Test files are the primary entry point for understanding what a module does.
+Consistent naming and class-based grouping make it easy to locate the tests for
+any source file and to understand which behaviour each test class covers.
+
+### Rules
+
+- **File naming:** Name every test file after the source file it exercises.
+  Derive the test file name by stripping the `src/` prefix, replacing every `/`
+  with `_`, and prepending `test_`.
+  `src/<a>/<b>.py` → `tests/test_<a>_<b>.py`.
+  Example: `src/utils/tty.py` → `tests/test_utils_tty.py`.
+- **One source file per test file:** Do not mix tests for unrelated source files
+  in a single test file.
+- **Class grouping:** Put all test functions that cover the same function, class,
+  or behaviour into a `class Test<Topic>:` body. A single test file may contain
+  multiple test classes.
+- **Class naming:** Use `UpperCamelCase` with a `Test` prefix
+  (e.g. `TestAggregation`, `TestEvaluationPipeline`, `TestCalcAIAnalyze`).
+- **Private helpers:** Define helper methods used only within one test class as
+  instance methods with a leading underscore: `def _helper(self): ...`.
+  Module-level helpers shared across multiple classes use no leading underscore
+  (see [Code Organization](#code-organization) for the `_` prefix rule in
+  test files).
+- **Exemption — integration / CLI tests:** Test files that exercise the full
+  profiling pipeline via subprocess and have no direct `src/` module mapping are
+  exempt from the file-naming rule. Mark them as a todo and revisit when the
+  scope of the tested behaviour is clear.
+
+### Example
+
+**Good:** File name mirrors `src/utils/roofline_calc.py`; every group of related
+tests lives in its own class.
+
+```python
+# tests/test_utils_roofline_calc.py
+
+from utils.roofline_calc import calc_ai_analyze, sanitize_ai_value
+
+
+class TestCalcAIAnalyze:
+    """Tests for calc_ai_analyze — verifies edge-value handling."""
+
+    def test_replaces_inf_with_zero(self, monkeypatch): ...
+    def test_replaces_none_with_zero(self, monkeypatch): ...
+    def test_valid_values_pass_through(self, monkeypatch): ...
+
+
+class TestSanitizeAIValue:
+    """Tests for sanitize_ai_value."""
+
+    def test_replaces_invalid_values_with_zero(self): ...
+```
+
+**Bad:** Generic filename unrelated to any source module; bare functions with no
+grouping make it impossible to tell what is being tested or where to find more
+tests for the same module.
+
+```python
+# tests/test_utils.py  ← ambiguous — which source file?
+
+def test_replaces_inf_with_zero(monkeypatch): ...  # ← no class, hard to scan
+def test_replaces_none_with_zero(monkeypatch): ...
+def test_valid_values_pass_through(monkeypatch): ...
+def test_replaces_invalid_values_with_zero(): ...
+```
+
 ## Key Principles Summary
 
 | Principle | Guideline |
@@ -763,3 +832,4 @@ def _other_helper():
 | **Shallow nesting** | Use guard clauses and early returns to keep nesting to 2-3 levels |
 | **Meaningful extraction** | Extract helpers when they improve clarity, reusability, or testability |
 | **Appropriate naming** | Prefer descriptive names; readability matters more than brevity |
+| **Test organisation** | Mirror `src/` paths in test file names; group related tests in a `class Test*:` |

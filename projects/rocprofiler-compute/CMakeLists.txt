@@ -422,11 +422,11 @@ endif()
 # )
 
 add_test(
-    NAME test_native_tool_finder
+    NAME test_utils_native_tool_finder
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_native_tool_finder.xml ${COV_OPTION}
-        tests/test_native_tool_finder.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_utils_native_tool_finder.xml ${COV_OPTION}
+        tests/test_utils_native_tool_finder.py ${WORKING_DIR_OPTION}
 )
 
 set_tests_properties(
@@ -456,6 +456,14 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -n
         ${PYTEST_NUMPROCS_ANALYSIS} --verbose --junitxml=tests/test_analyze_commands.xml
         ${COV_OPTION} tests/test_analyze_commands.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_rocprof_compute_analyze_analysis_db
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_rocprof_compute_analyze_analysis_db.xml ${COV_OPTION}
+        tests/test_rocprof_compute_analyze_analysis_db.py ${WORKING_DIR_OPTION}
 )
 
 # ---------------------------
@@ -508,52 +516,68 @@ add_test(
 # ---------------------------
 
 add_test(
-    NAME test_utils
+    NAME test_utils_utils_common
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_utils.xml ${COV_OPTION} tests/test_utils.py
+        --junitxml=tests/test_utils_utils_common.xml ${COV_OPTION}
+        tests/test_utils_utils_common.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_utils_utils_profile
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils_utils_profile.xml ${COV_OPTION}
+        tests/test_utils_utils_profile.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_utils_utils_analysis
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils_utils_analysis.xml ${COV_OPTION}
+        tests/test_utils_utils_analysis.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_utils_tty
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils_tty.xml ${COV_OPTION} tests/test_utils_tty.py
         ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_utils_utils_profile_csv
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils_utils_profile_csv.xml ${COV_OPTION}
+        tests/test_utils_utils_profile_csv.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_utils_roofline_calc
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils_roofline_calc.xml ${COV_OPTION}
+        tests/test_utils_roofline_calc.py ${WORKING_DIR_OPTION}
 )
 
 # Memory chart CLI renderers (gfx9 plotille + gfx11 Rich) — no GPU required
 add_test(
-    NAME test_mem_chart
+    NAME test_utils_mem_chart_gfx9
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_mem_chart.xml ${COV_OPTION} tests/test_mem_chart.py
-        ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_utils_mem_chart_gfx9.xml ${COV_OPTION}
+        tests/test_utils_mem_chart_gfx9.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_roofline_calc_ai_analyze
+    NAME test_utils_mem_chart_gfx11
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_roofline_calc_ai_analyze.xml ${COV_OPTION}
-        tests/test_roofline_calc_ai_analyze.py ${WORKING_DIR_OPTION}
-)
-
-# -----------------------------------
-# Data imputation tests
-# -----------------------------------
-
-add_test(
-    NAME test_data_imputation
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_data_imputation.xml ${COV_OPTION}
-        tests/test_data_imputation.py ${WORKING_DIR_OPTION}
-)
-
-# -----------------------------------
-# Analysis database tests
-# -----------------------------------
-
-add_test(
-    NAME test_analysis_db
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_analysis_db.xml ${COV_OPTION} tests/test_analysis_db.py
-        ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_utils_mem_chart_gfx11.xml ${COV_OPTION}
+        tests/test_utils_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -561,11 +585,35 @@ add_test(
 # -----------------------------------
 
 add_test(
-    NAME test_metric_utils
+    NAME test_utils_metrics_aggregation
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_metric_utils.xml ${COV_OPTION} tests/test_metric_utils.py
-        ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_utils_metrics_aggregation.xml ${COV_OPTION}
+        tests/test_utils_metrics_aggregation.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_utils_metrics_expression
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils_metrics_expression.xml ${COV_OPTION}
+        tests/test_utils_metrics_expression.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_utils_metrics_evaluation_pipeline
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils_metrics_evaluation_pipeline.xml ${COV_OPTION}
+        tests/test_utils_metrics_evaluation_pipeline.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_utils_metrics_metric_evaluator
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils_metrics_metric_evaluator.xml ${COV_OPTION}
+        tests/test_utils_metrics_metric_evaluator.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -593,16 +641,16 @@ add_test(
 )
 
 add_test(
-    NAME test_pc_sampling_analysis
+    NAME test_rocprof_compute_analyze_pc_sampling
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s
-        --junitxml=tests/test_pc_sampling_analysis.xml ${COV_OPTION}
-        tests/test_pc_sampling_analysis.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_rocprof_compute_analyze_pc_sampling.xml ${COV_OPTION}
+        tests/test_rocprof_compute_analyze_pc_sampling.py ${WORKING_DIR_OPTION}
 )
 
 set_tests_properties(
     test_pc_sampling
-    test_pc_sampling_analysis
+    test_rocprof_compute_analyze_pc_sampling
     PROPERTIES TIMEOUT 300 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
 
@@ -611,11 +659,11 @@ set_tests_properties(
 # -----------------------------------
 
 add_test(
-    NAME test_tui_components
+    NAME test_rocprof_compute_tui_components
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_tui_components.xml ${COV_OPTION} -m tui
-        tests/test_tui_components.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_rocprof_compute_tui_components.xml ${COV_OPTION} -m tui
+        tests/test_rocprof_compute_tui_components.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -623,11 +671,11 @@ add_test(
 # -----------------------------------
 
 add_test(
-    NAME test_torch_trace_analysis
+    NAME test_rocprof_compute_analyze_torch_trace
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_torch_trace_analysis.xml ${COV_OPTION}
-        tests/test_torch_trace_analysis.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_rocprof_compute_analyze_torch_trace.xml ${COV_OPTION}
+        tests/test_rocprof_compute_analyze_torch_trace.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -643,28 +691,16 @@ set_tests_properties(
     PROPERTIES TIMEOUT 1800 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
 
-# ---------------------------------------
-# Pure csv compatibility layer for pandas
-# ---------------------------------------
-
-add_test(
-    NAME test_utils_profile_csv
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_utils_profile_csv.xml ${COV_OPTION}
-        tests/test_utils_profile_csv.py ${WORKING_DIR_OPTION}
-)
-
 # -----------------------------------
 # Profiler base unit tests
 # -----------------------------------
 
 add_test(
-    NAME test_profiler_base
+    NAME test_rocprof_compute_profile_profiler_base
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_profiler_base.xml ${COV_OPTION} tests/test_profiler_base.py
-        ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_rocprof_compute_profile_profiler_base.xml ${COV_OPTION}
+        tests/test_rocprof_compute_profile_profiler_base.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -672,11 +708,11 @@ add_test(
 # -----------------------------------
 
 add_test(
-    NAME test_soc_base
+    NAME test_rocprof_compute_soc_soc_base
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_soc_base.xml ${COV_OPTION} tests/test_soc_base.py
-        ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_rocprof_compute_soc_soc_base.xml ${COV_OPTION}
+        tests/test_rocprof_compute_soc_soc_base.py ${WORKING_DIR_OPTION}
 )
 
 if(TARGET test-rocprofiler-compute-tool)
@@ -707,17 +743,23 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling
         test_analyze_commands
         test_analyze_workloads
-        test_metric_utils
+        test_utils_metrics_aggregation
+        test_utils_metrics_expression
+        test_utils_metrics_evaluation_pipeline
+        test_utils_metrics_metric_evaluator
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
-        test_utils
-        test_mem_chart
-        test_roofline_calc_ai_analyze
-        test_data_imputation
+        test_utils_utils_common
+        test_utils_utils_profile
+        test_utils_utils_analysis
+        test_utils_tty
+        test_utils_mem_chart_gfx9
+        test_utils_mem_chart_gfx11
+        test_utils_roofline_calc
         test_autogen_config
-        test_tui_components
-        test_torch_trace_analysis
+        test_rocprof_compute_tui_components
+        test_rocprof_compute_analyze_torch_trace
         test_torch_trace_coverage
     )
 
