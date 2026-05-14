@@ -313,11 +313,13 @@ if (NOT BUILD_TESTS_ONLY)
     ${PROJECT_NAME}
     PUBLIC
       -fgpu-rdc
-      $<$<BOOL:${ASAN}>:-fsanitize=address -g>
+      $<$<BOOL:${ASAN}>:-Xarch_device -g0>
     PRIVATE
       -Wall
       -Wextra
       -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
+      $<$<BOOL:${ASAN}>:-Xarch_host -fsanitize=address>
+      $<$<BOOL:${ASAN}>:-Xarch_host -g>
   )
 
   target_include_directories(
@@ -346,12 +348,16 @@ if (NOT BUILD_TESTS_ONLY)
   target_link_options(
     ${PROJECT_NAME}
     PUBLIC
-      $<$<BOOL:${ASAN}>:-fsanitize=address -g -shared-libsan>
+      $<$<BOOL:${ASAN}>:SHELL:-Xarch_host -fsanitize=address>
+      $<$<BOOL:${ASAN}>:SHELL:-Xarch_host -shared-libsan>
+      $<$<BOOL:${ASAN}>:SHELL:-Xarch_host -g>
+      $<$<BOOL:${ASAN}>:SHELL:-Xarch_device -g0>
   )
 
   if (ASAN)
     message(STATUS "Removing xnack- from GPU_TARGET as these are invalid with ASAN address sanitizer")
     list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
+    message(STATUS "ASAN enabled: Disabling LTO to avoid device code instrumentation issues")
   endif()
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
