@@ -2863,7 +2863,7 @@ hipError_t hipDrvGetErrorString(hipError_t hipError, const char** errorString);
 /**
  * @brief Creates an asynchronous stream.
  *
- * @param[in, out] stream  Valid pointer to hipStream_t.  This function writes the memory with the
+ * @param[out] stream  Valid pointer to hipStream_t.  This function writes the memory with the
  * newly created stream.
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
@@ -2882,7 +2882,7 @@ hipError_t hipStreamCreate(hipStream_t* stream);
 /**
  * @brief Creates an asynchronous stream with flag.
  *
- * @param[in, out] stream  Pointer to new stream
+ * @param[out] stream  Pointer to new stream
  * @param[in] flags  Parameters to control stream creation
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
@@ -2903,7 +2903,7 @@ hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags);
 /**
  * @brief Creates an asynchronous stream with the specified priority.
  *
- * @param[in, out] stream  Pointer to new stream
+ * @param[out] stream  Pointer to new stream
  * @param[in] flags  Parameters to control stream creation
  * @param[in] priority  Priority of the stream. Lower numbers represent higher priorities.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -3070,7 +3070,7 @@ hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device);
 /**
  * @brief Creates an asynchronous stream with the specified CU mask.
  *
- * @param[in, out] stream  Pointer to new stream
+ * @param[out] stream  Pointer to new stream
  * @param[in] cuMaskSize  Size of CU mask bit array passed in.
  * @param[in] cuMask Bit-vector representing the CU mask. Each active bit represents using one CU.
  * The first 32 bits represent the first 32 CUs, and so on. If its size is greater than physical
@@ -3308,7 +3308,7 @@ hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
 /**
  * @brief Creates a batch memory operation node and adds it to a graph.[BETA]
  *
- * @param [in] phGraphNode      - Returns the newly created node
+ * @param [out] phGraphNode     - Returns the newly created node
  * @param [in] hGraph           - Graph to which to add the node
  * @param [in] dependencies     -  Dependencies of the node
  * @param [in] numDependencies  - Number of dependencies
@@ -3405,7 +3405,7 @@ hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGra
 /**
  * @brief Create an event with the specified flags
  *
- * @param[in,out] event Returns the newly created event.
+ * @param[out] event    Returns the newly created event.
  * @param[in] flags     Flags to control event behavior.  Valid values are #hipEventDefault,
  #hipEventBlockingSync, #hipEventDisableTiming, #hipEventInterprocess
  * #hipEventDefault : Default flag.  The event will use active synchronization and will support
@@ -3431,7 +3431,7 @@ hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned flags);
 /**
  *  Create an event
  *
- * @param[in,out] event Returns the newly created event.
+ * @param[out] event Returns the newly created event.
  *
  * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue,
  * #hipErrorLaunchFailure, #hipErrorOutOfMemory
@@ -4745,7 +4745,7 @@ hipError_t hipHostFree(void* ptr);
  *  Calling hipMemcpy with dst and src pointers that do not match the hipMemcpyKind results in
  *  undefined behavior.
  *
- *  @param[out]  dst Data being copy to
+ *  @param[in,out]  dst Data being copy to
  *  @param[in]  src Data being copy from
  *  @param[in]  sizeBytes Data size in bytes
  *  @param[in]  kind Kind of transfer
@@ -4765,7 +4765,7 @@ hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind
  *  The operation is akin to hipMemcpyAsync + hipStreamSynchronize.
  *  Since it is a sync API, it is not allowed during graph capture.
  *
- *  @param[out]  dst Data being copy to
+ *  @param[in,out]  dst Data being copy to
  *  @param[in]  src Data being copy from
  *  @param[in]  sizeBytes Data size in bytes
  *  @param[in]  kind Kind of transfer
@@ -4781,7 +4781,7 @@ hipError_t hipMemcpyWithStream(void* dst, const void* src, size_t sizeBytes, hip
 /**
  *  @brief Copy data from Host to Device
  *
- *  @param[out]  dst Data being copy to
+ *  @param[in,out]  dst Data being copy to
  *  @param[in]   src Data being copy from
  *  @param[in]   sizeBytes Data size in bytes
  *
@@ -4799,7 +4799,7 @@ hipError_t hipMemcpyHtoD(hipDeviceptr_t dst, const void* src, size_t sizeBytes);
 /**
  *  @brief Copy data from Device to Host
  *
- *  @param[out]  dst Data being copy to
+ *  @param[in,out]  dst Data being copy to
  *  @param[in]   src Data being copy from
  *  @param[in]   sizeBytes Data size in bytes
  *
@@ -4817,7 +4817,7 @@ hipError_t hipMemcpyDtoH(void* dst, hipDeviceptr_t src, size_t sizeBytes);
 /**
  *  @brief Copy data from Device to Device
  *
- *  @param[out]  dst Data being copy to
+ *  @param[in,out]  dst Data being copy to
  *  @param[in]   src Data being copy from
  *  @param[in]   sizeBytes Data size in bytes
  *
@@ -4835,7 +4835,7 @@ hipError_t hipMemcpyDtoD(hipDeviceptr_t dst, hipDeviceptr_t src, size_t sizeByte
 /**
  *  @brief Copies from one 1D array to device memory.
  *
- *  @param[out]  dstDevice Destination device pointer
+ *  @param[in,out]  dstDevice Destination device pointer
  *  @param[in]   srcArray Source array
  *  @param[in]   srcOffset Offset in bytes of source array
  *  @param[in]   ByteCount Size of memory copy in bytes
@@ -4855,7 +4855,7 @@ hipError_t hipMemcpyAtoD(hipDeviceptr_t dstDevice, hipArray_t srcArray, size_t s
 /**
  *  @brief Copies from device memory to a 1D array.
  *
- *  @param[out]  dstArray Destination array
+ *  @param[in,out]  dstArray Destination array
  *  @param[in]   dstOffset Offset in bytes of destination array
  *  @param[in]   srcDevice Source device pointer
  *  @param[in]   ByteCount Size of memory copy in bytes
@@ -4876,7 +4876,7 @@ hipError_t hipMemcpyDtoA(hipArray_t dstArray, size_t dstOffset, hipDeviceptr_t s
 /**
  *  @brief Copies from one 1D array to another.
  *
- *  @param[out]  dstArray Destination array
+ *  @param[in,out]  dstArray Destination array
  *  @param[in]   dstOffset Offset in bytes of destination array
  *  @param[in]   srcArray Source array
  *  @param[in]   srcOffset Offset in bytes of source array
@@ -4897,7 +4897,7 @@ hipError_t hipMemcpyAtoA(hipArray_t dstArray, size_t dstOffset, hipArray_t srcAr
 /**
  *  @brief Copy data from Host to Device asynchronously
  *
- *  @param[out]  dst  Data being copy to
+ *  @param[in,out]  dst  Data being copy to
  *  @param[in]   src  Data being copy from
  *  @param[in]   sizeBytes  Data size in bytes
  *  @param[in]   stream  Stream identifier
@@ -4917,7 +4917,7 @@ hipError_t hipMemcpyHtoDAsync(hipDeviceptr_t dst, const void* src, size_t sizeBy
 /**
  *  @brief Copy data from Device to Host asynchronously
  *
- *  @param[out]  dst Data being copy to
+ *  @param[in,out]  dst Data being copy to
  *  @param[in]   src Data being copy from
  *  @param[in]   sizeBytes Data size in bytes
  *  @param[in]   stream  Stream identifier
@@ -4936,7 +4936,7 @@ hipError_t hipMemcpyDtoHAsync(void* dst, hipDeviceptr_t src, size_t sizeBytes, h
 /**
  *  @brief Copy data from Device to Device asynchronously
  *
- *  @param[out]  dst  Data being copy to
+ *  @param[in,out]  dst  Data being copy to
  *  @param[in]   src  Data being copy from
  *  @param[in]   sizeBytes  Data size in bytes
  *  @param[in]   stream  Stream identifier
@@ -4956,7 +4956,7 @@ hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dst, hipDeviceptr_t src, size_t siz
 /**
  * @brief Copies from one 1D array to host memory.
  *
- *  @param[out]  dstHost Destination pointer
+ *  @param[in,out]  dstHost Destination pointer
  *  @param[in]   srcArray Source array
  *  @param[in]   srcOffset Offset in bytes of source array
  *  @param[in]   ByteCount Size of memory copy in bytes
@@ -4977,7 +4977,7 @@ hipError_t hipMemcpyAtoHAsync(void* dstHost, hipArray_t srcArray, size_t srcOffs
 /**
  * @brief Copies from host memory to a 1D array.
  *
- *  @param[out]  dstArray Destination array
+ *  @param[in,out]  dstArray Destination array
  *  @param[in]   dstOffset Offset in bytes of destination array
  *  @param[in]   srcHost Source host pointer
  *  @param[in]   ByteCount Size of memory copy in bytes
@@ -5071,7 +5071,7 @@ hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uin
  * example</a> in the HIP Porting Guide.
  *
  *
- *  @param[out]  symbol  pointer to the device symbole
+ *  @param[in,out]  symbol  pointer to the device symbole
  *  @param[in]   src  pointer to the source address
  *  @param[in]   sizeBytes  size in bytes to copy
  *  @param[in]   offset  offset in bytes from start of symbole
@@ -5087,7 +5087,7 @@ hipError_t hipMemcpyToSymbol(const void* symbol, const void* src, size_t sizeByt
 /**
  *  @brief Copies data to the given symbol on the device asynchronously.
  *
- *  @param[out]  symbol  pointer to the device symbole
+ *  @param[in,out]  symbol  pointer to the device symbole
  *  @param[in]   src  pointer to the source address
  *  @param[in]   sizeBytes  size in bytes to copy
  *  @param[in]   offset  offset in bytes from start of symbole
@@ -5103,7 +5103,7 @@ hipError_t hipMemcpyToSymbolAsync(const void* symbol, const void* src, size_t si
 /**
  *  @brief Copies data from the given symbol on the device.
  *
- *  @param[out]  dst  Returns pointer to destinition memory address
+ *  @param[in,out]  dst  Returns pointer to destinition memory address
  *  @param[in]   symbol  Pointer to the symbole address on the device
  *  @param[in]   sizeBytes  Size in bytes to copy
  *  @param[in]   offset  Offset in bytes from the start of symbole
@@ -5119,7 +5119,7 @@ hipError_t hipMemcpyFromSymbol(void* dst, const void* symbol, size_t sizeBytes,
 /**
  *  @brief Copies data from the given symbol on the device asynchronously.
  *
- *  @param[out]  dst  Returns pointer to destinition memory address
+ *  @param[in,out]  dst  Returns pointer to destinition memory address
  *  @param[in]   symbol  pointer to the symbole address on the device
  *  @param[in]   sizeBytes  size in bytes to copy
  *  @param[in]   offset  offset in bytes from the start of symbole
@@ -5146,7 +5146,7 @@ hipError_t hipMemcpyFromSymbolAsync(void* dst, const void* symbol, size_t sizeBy
  *  @note If host or dst are not pinned, the memory copy will be performed synchronously. For
  * best performance, use hipHostMalloc to allocate host memory that is transferred asynchronously.
  *
- *  @param[out] dst Data being copy to
+ *  @param[in,out] dst Data being copy to
  *  @param[in]  src Data being copy from
  *  @param[in]  sizeBytes Data size in bytes
  *  @param[in]  kind  Type of memory transfer
@@ -5576,7 +5576,7 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
  *  @warning  Calling hipMemcpy2D with dst and src pointers that do not match the hipMemcpyKind
  * results in undefined behavior.
  *
- *  @param[in]   dst    Destination memory address
+ *  @param[in,out]  dst Destination memory address
  *  @param[in]   dpitch Pitch size in bytes of destination memory
  *  @param[in]   src    Source memory address
  *  @param[in]   spitch Pitch size in bytes of source memory
@@ -5638,7 +5638,7 @@ hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream _
  *  @note If host or dst are not pinned, the memory copy will be performed synchronously.  For
  * best performance, use hipHostMalloc to allocate host memory that is transferred asynchronously.
  *
- *  @param[in]   dst    Pointer to destination memory address
+ *  @param[in,out]  dst Pointer to destination memory address
  *  @param[in]   dpitch Pitch size in bytes of destination memory
  *  @param[in]   src    Pointer to source memory address
  *  @param[in]   spitch Pitch size in bytes of source memory
@@ -5657,7 +5657,7 @@ hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t sp
 /**
  *  @brief Copies data between host and device.
  *
- *  @param[in]   dst     Destination memory address
+ *  @param[in,out]   dst Destination memory address
  *  @param[in]   wOffset Destination starting X offset
  *  @param[in]   hOffset Destination starting Y offset
  *  @param[in]   src     Source memory address
@@ -5676,7 +5676,7 @@ hipError_t hipMemcpy2DToArray(hipArray_t dst, size_t wOffset, size_t hOffset, co
 /**
  *  @brief Copies data between host and device.
  *
- *  @param[in]   dst     Destination memory address
+ *  @param[in,out] dst   Destination memory address
  *  @param[in]   wOffset Destination starting X offset
  *  @param[in]   hOffset Destination starting Y offset
  *  @param[in]   src     Source memory address
@@ -5697,7 +5697,7 @@ hipError_t hipMemcpy2DToArrayAsync(hipArray_t dst, size_t wOffset, size_t hOffse
 /**
  *  @brief Copies data between host and device.
  *
- *  @param[in]   dst Destination memory address
+ *  @param[in,out] dst Destination memory address
  *  @param[in]   wOffsetDst Destination starting X offset
  *  @param[in]   hOffsetDst Destination starting Y offset
  *  @param[in]   src  Source memory address
@@ -5720,7 +5720,7 @@ hipError_t hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffsetDst, size_t hOf
  *
  *  @ingroup MemoryD
  *
- *  @param[in]   dst     Destination memory address
+ *  @param[in,out] dst   Destination memory address
  *  @param[in]   wOffset Destination starting X offset
  *  @param[in]   hOffset Destination starting Y offset
  *  @param[in]   src     Source memory address
@@ -5741,7 +5741,7 @@ hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset, size_t hOffset, cons
  *
  *  @ingroup MemoryD
  *
- *  @param[in]   dst       Destination memory address
+ *  @param[in,out] dst     Destination memory address
  *  @param[in]   srcArray  Source memory address
  *  @param[in]   wOffset   Source starting X offset
  *  @param[in]   hOffset   Source starting Y offset
@@ -5760,7 +5760,7 @@ hipError_t hipMemcpyFromArray(void* dst, hipArray_const_t srcArray, size_t wOffs
 /**
  *  @brief Copies data between host and device.
  *
- *  @param[in]   dst       Destination memory address
+ *  @param[in,out] dst     Destination memory address
  *  @param[in]   dpitch    Pitch of destination memory
  *  @param[in]   src       Source memory address
  *  @param[in]   wOffset   Source starting X offset
@@ -5779,7 +5779,7 @@ hipError_t hipMemcpy2DFromArray(void* dst, size_t dpitch, hipArray_const_t src, 
 /**
  *  @brief Copies data between host and device asynchronously.
  *
- *  @param[in]   dst       Destination memory address
+ *  @param[in,out] dst     Destination memory address
  *  @param[in]   dpitch    Pitch of destination memory
  *  @param[in]   src       Source memory address
  *  @param[in]   wOffset   Source starting X offset
@@ -5800,7 +5800,7 @@ hipError_t hipMemcpy2DFromArrayAsync(void* dst, size_t dpitch, hipArray_const_t 
 /**
  *  @brief Copies data between host and device.
  *
- *  @param[in]   dst       Destination memory address
+ *  @param[in,out] dst     Destination memory address
  *  @param[in]   srcArray  Source array
  *  @param[in]   srcOffset Offset in bytes of source array
  *  @param[in]   count     Size of memory copy in bytes
@@ -5814,7 +5814,7 @@ hipError_t hipMemcpyAtoH(void* dst, hipArray_t srcArray, size_t srcOffset, size_
 /**
  *  @brief Copies data between host and device.
  *
- *  @param[in]   dstArray   Destination memory address
+ *  @param[in,out] dstArray Destination memory address
  *  @param[in]   dstOffset  Offset in bytes of destination array
  *  @param[in]   srcHost    Source host pointer
  *  @param[in]   count      Size of memory copy in bytes
@@ -5888,7 +5888,7 @@ hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDevice
 /**
  * @brief Perform Batch of 1D copies
  *
- * @param [in] dsts      - Array of destination pointers
+ * @param [in,out] dsts  - Array of destination pointers
  * @param [in] srcs      - Array of source pointers.
  * @param [in] sizes     - Array of sizes for memcpy operations
  * @param [in] count     - Size of dsts, srcs and sizes arrays
@@ -6022,7 +6022,7 @@ hipError_t hipDeviceDisablePeerAccess(int peerDeviceId);
 /**
  * @brief Copies memory between two peer accessible devices.
  *
- * @param [out] dst - Destination device pointer
+ * @param [in,out] dst - Destination device pointer
  * @param [in] dstDeviceId - Destination device
  * @param [in] src - Source device pointer
  * @param [in] srcDeviceId - Source device
@@ -6035,7 +6035,7 @@ hipError_t hipMemcpyPeer(void* dst, int dstDeviceId, const void* src, int srcDev
 /**
  * @brief Copies memory between two peer accessible devices asynchronously.
  *
- * @param [out] dst - Destination device pointer
+ * @param [in,out] dst - Destination device pointer
  * @param [in] dstDeviceId - Destination device
  * @param [in] src - Source device pointer
  * @param [in] srcDevice - Source device
