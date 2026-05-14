@@ -47,11 +47,10 @@
 
 #include "host_defines.h"  // __hip_internal::
 
-// Include it explicitly for HIPRTC
+#if !defined(__HIPCC_RTC__)
 #include "amd_hip_bf16.h"
 #include "amd_hip_mx_common.h"
 
-#if !defined(__HIPCC_RTC__)
 #include <hip/amd_detail/amd_hip_common.h>
 #include <climits>
 
