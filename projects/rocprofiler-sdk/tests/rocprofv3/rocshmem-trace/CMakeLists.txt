@@ -38,9 +38,9 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 set(rocshmem-tracing-env "${PRELOAD_ENV}")
 
-# rocSHMEM real applications require MPI + multiple GPUs to be useful, so this
-# integration test is only enabled when a rocshmem-demo / rocshmem-example target
-# is available in the build (mirrors how rocjpeg-trace gates on rocjpeg-demo).
+# rocSHMEM real applications require MPI + multiple GPUs to be useful, so this integration
+# test is only enabled when a rocshmem-demo / rocshmem-example target is available in the
+# build (mirrors how rocjpeg-trace gates on rocjpeg-demo).
 if(NOT TARGET rocshmem-demo)
     set(IS_DISABLED ON)
 endif()
