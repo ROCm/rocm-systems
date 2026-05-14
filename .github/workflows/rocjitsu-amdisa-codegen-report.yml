@@ -30,6 +30,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          sparse-checkout: emulation/rocjitsu
 
       - name: Set up Python
         uses: actions/setup-python@v5
