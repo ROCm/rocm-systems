@@ -154,6 +154,11 @@ Panel Config:
           min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
           max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
           unit: (Count + $normUnit)
+        Instructions - Dual VALU (VOPD):
+          avg: SUM(SQ_INSTS_DUAL_VALU_WAVE32_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_DUAL_VALU_WAVE32_sum / $denom)
+          max: MAX(SQ_INSTS_DUAL_VALU_WAVE32_sum / $denom)
+          unit: (Count + $normUnit)
         Instructions - VMEM:
           avg: SUM(SQ_INSTS_TEX_sum) / SUM($denom)
           min: MIN(SQ_INSTS_TEX_sum / $denom)
@@ -320,6 +325,9 @@ Panel Config:
       Total number of instructions executed across all wavefronts. This provides an
       overall measure of computational work. Compare with specific instruction types
       to understand the workload characteristics.
+    Instructions - Internal: >-
+      Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit — bookkeeping
+      or non-user-visible work attributed to the scheduler.
     Instructions - VALU: >-
       Number of Vector ALU instructions executed. VALU handles arithmetic and logic
       operations across all work-items in a wavefront. High VALU counts indicate
@@ -332,6 +340,13 @@ Panel Config:
       Number of scalar memory instructions executed. SMEM loads constant and uniform
       data through the scalar cache. High counts may indicate heavy use of constant
       buffers or kernel arguments.
+    Instructions - Transcendental: >-
+      Transcendental VALU instructions (SQ_INSTS_VALU_TRANS), per normalization unit —
+      e.g. sin/cos/log approximations on the vector ALU.
+    Instructions - Dual VALU (VOPD): >-
+      Dual-issue VALU (VOPD) instructions issued in wave32 mode (SQ_INSTS_DUAL_VALU_WAVE32_sum),
+      per normalization unit. Hardware perf select SQ_PERF_SEL_INSTS_DUAL_VALU_WAVE32 (Strix2 chip
+      interface); emulated counter.
     Instructions - VMEM: >-
       Number of vector memory instructions executed, including global, buffer, and
       texture operations. High VMEM counts relative to VALU may indicate memory-bound

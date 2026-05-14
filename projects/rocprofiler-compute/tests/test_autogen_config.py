@@ -10,6 +10,7 @@ import pytest
 
 HASH_DB = Path(common.SRC) / "utils/.config_hashes.json"
 ANALYSIS_CONFIGS = Path(common.SRC) / "rocprof_compute_soc/analysis_configs"
+REPO_ROOT = Path(common.ROOT)
 
 
 def md5(path: Path) -> str:
@@ -90,3 +91,32 @@ def test_config_hashes_match_files() -> None:
 
     if failures:
         pytest.fail("Hash consistency failures:\n\n" + "\n".join(failures))
+
+
+def test_metric_description_hashes_match_files() -> None:
+    """Tracked metric-description artifacts (per-arch YAML + generated docs)."""
+    assert HASH_DB.exists(), f"Missing hash DB: {HASH_DB}"
+
+    with HASH_DB.open() as f:
+        data = json.load(f)
+
+    tracked = data.get("metric_descriptions") or {}
+    if not tracked:
+        return
+
+    failures: list[str] = []
+    for rel_path, expected_hash in tracked.items():
+        artifact_path = REPO_ROOT / rel_path
+        if not artifact_path.exists():
+            failures.append(f"Missing metric description file: {artifact_path}")
+            continue
+        actual_hash = md5(artifact_path)
+        if actual_hash != expected_hash:
+            failures.append(
+                f"Metric description hash mismatch: {artifact_path}\n"
+                f"  expected: {expected_hash}\n"
+                f"  actual:   {actual_hash}"
+            )
+
+    if failures:
+        pytest.fail("Metric description hash failures:\n\n" + "\n".join(failures))

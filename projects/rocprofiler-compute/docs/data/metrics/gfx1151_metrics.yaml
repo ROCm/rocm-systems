@@ -273,6 +273,9 @@ Wave Instruction Mix:
   Total Instructions:
     rst: 'Total number of instructions executed across all wavefronts. This provides an overall measure of computational work. Compare with specific instruction types to understand the workload characteristics.'
     unit: Count per Normalization Unit
+  Instructions - Internal:
+    rst: 'Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit — bookkeeping or non-user-visible work attributed to the scheduler.'
+    unit: Count per Normalization Unit
   Instructions - VALU:
     rst: 'Number of Vector ALU instructions executed. VALU handles arithmetic and logic operations across all work-items in a wavefront. High VALU counts indicate compute-intensive kernels.'
     unit: Count per Normalization Unit
@@ -282,17 +285,17 @@ Wave Instruction Mix:
   Instructions - SMEM:
     rst: 'Number of scalar memory instructions executed. SMEM loads constant and uniform data through the scalar cache. High counts may indicate heavy use of constant buffers or kernel arguments.'
     unit: Count per Normalization Unit
+  Instructions - Transcendental:
+    rst: 'Transcendental VALU instructions (SQ_INSTS_VALU_TRANS), per normalization unit — e.g. sin/cos/log approximations on the vector ALU.'
+    unit: Count per Normalization Unit
+  Instructions - Dual VALU (VOPD):
+    rst: 'Dual-issue VALU (VOPD) instructions issued in wave32 mode (SQ_INSTS_DUAL_VALU_WAVE32_sum), per normalization unit. Hardware perf select SQ_PERF_SEL_INSTS_DUAL_VALU_WAVE32 (Strix2 chip interface); emulated counter.'
+    unit: Count per Normalization Unit
   Instructions - VMEM:
     rst: 'Number of vector memory instructions executed, including global, buffer, and texture operations. High VMEM counts relative to VALU may indicate memory-bound workloads.'
     unit: Count per Normalization Unit
   Instructions - LDS:
     rst: 'Number of Local Data Share instructions executed. LDS provides fast shared memory within a workgroup. High counts indicate active use of shared memory for inter-work-item communication.'
-    unit: Count per Normalization Unit
-  Instructions - Internal:
-    rst: 'Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit — bookkeeping or non-user-visible work attributed to the scheduler.'
-    unit: Count per Normalization Unit
-  Instructions - Transcendental:
-    rst: 'Transcendental VALU instructions (SQ_INSTS_VALU_TRANS), per normalization unit — e.g. sin/cos/log approximations on the vector ALU.'
     unit: Count per Normalization Unit
 LDS Instruction Mix:
   LDS Direct Load Instructions:
