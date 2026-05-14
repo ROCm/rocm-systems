@@ -8,16 +8,20 @@
 
 #if defined(ROCSHMEM_ROCPROFILER_REGISTER)
 #    include <rocprofiler-register/rocprofiler-register.h>
+#    include "rocshmem/rocshmem_config.h"
 
 #    define ROCP_REG_VERSION                                                             \
-        ROCPROFILER_REGISTER_COMPUTE_VERSION_3(ROCSHMEM_VERSION)
+        ROCPROFILER_REGISTER_COMPUTE_VERSION_3(ROCSHMEM_VENDOR_MAJOR_VERSION,            \
+                                               ROCSHMEM_VENDOR_MINOR_VERSION,            \
+                                               ROCSHMEM_VENDOR_PATCH_VERSION)
 
 ROCPROFILER_REGISTER_DEFINE_IMPORT(rocshmem, ROCP_REG_VERSION)
 #endif
 
 #include <roctracer/roctx.h>
 #include "context.hpp"
-rocshmem::rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
+namespace rocshmem { extern rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT; }
+using rocshmem::ROCSHMEM_HOST_CTX_DEFAULT;
 
 __host__ void barrier_all_on_stream_impl(hipStream_t stream);
 
