@@ -22,7 +22,6 @@ public:
     EnvironmentSetUp() = default;
 
     void set_up() override;
-    bool is_shell_target() const;
     /// Republish every cached env var whose key starts with "ROCPROF".
     void republish_rocprof_env() const;
 

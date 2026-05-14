@@ -41,12 +41,6 @@ void EnvironmentSetUp::build_env_cache()
     }
 }
 
-bool EnvironmentSetUp::is_shell_target() const
-{
-    const auto it = m_env_cache.find("ROCPROF_SHELL_TARGET");
-    return it != m_env_cache.end() && it->second == "1";
-}
-
 void EnvironmentSetUp::republish_rocprof_env() const
 {
     constexpr std::string_view rocprof_prefix = "ROCPROF";
@@ -63,8 +57,5 @@ void EnvironmentSetUp::republish_rocprof_env() const
 void EnvironmentSetUp::set_up()
 {
     build_env_cache();
-    if (is_shell_target())
-    {
-        republish_rocprof_env();
-    }
+    republish_rocprof_env();
 }

@@ -11,7 +11,6 @@ from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_debug, console_error, console_log, demarcate
 from utils.utils_common import resolve_rocm_library_path
-from utils.utils_profile import is_shell_target
 
 
 class rocprofiler_sdk_profiler(RocProfCompute_Base):
@@ -59,9 +58,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             options["ROCPROF_MARKER_API_TRACE"] = "1"
         # Create folder pointed by ROCPROF_OUTPUT_PATH
         Path(options["ROCPROF_OUTPUT_PATH"]).mkdir(parents=True, exist_ok=True)
-
-        if native_tool_path and is_shell_target(args.remaining):
-            options["ROCPROF_SHELL_TARGET"] = "1"
 
         if args.iteration_multiplexing:
             options.update({
