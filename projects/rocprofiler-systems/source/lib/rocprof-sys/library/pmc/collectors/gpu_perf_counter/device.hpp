@@ -146,8 +146,7 @@ private:
     typename Driver::counter_config_id_t           m_profile_config;
     std::vector<counter_metadata>                  m_counter_meta;
     std::vector<typename Driver::counter_record_t> m_record_buffer;
-    // Reused across calls to avoid per-sample heap allocation.
-    metrics m_result_cache;
+    metrics                                        m_result_cache;
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

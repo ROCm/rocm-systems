@@ -86,17 +86,6 @@ struct cache_policy
         trace_cache::get_buffer_storage().store(trace_cache::gpu_perf_counter_sample{
             static_cast<std::uint32_t>(device_id), timestamp, metric_values });
     }
-
-private:
-    [[nodiscard]] static std::string make_qualified_name(const counter_metadata& meta)
-    {
-        if(meta.dimensions.empty())
-        {
-            return meta.name;
-        }
-
-        return fmt::format("{}[{}]", meta.name, fmt::join(meta.dimensions, ","));
-    }
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

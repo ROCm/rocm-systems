@@ -118,13 +118,6 @@ struct perfetto_policy
             }
         }
     }
-
-private:
-    [[nodiscard]] static std::string make_qualified_name(const counter_metadata& meta)
-    {
-        if(meta.dimensions.empty()) return meta.name;
-        return fmt::format("{}[{}]", meta.name, fmt::join(meta.dimensions, ","));
-    }
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

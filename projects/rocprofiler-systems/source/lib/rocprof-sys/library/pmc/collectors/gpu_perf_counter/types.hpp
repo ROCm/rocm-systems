@@ -4,6 +4,7 @@
 #pragma once
 
 #include <spdlog/fmt/fmt.h>
+#include <spdlog/fmt/ranges.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -110,6 +111,13 @@ inline enabled_metrics
 to_enabled_metrics(gpu_perf_counter_settings settings) noexcept
 {
     return enabled_metrics{ std::move(settings.explicit_counters) };
+}
+
+inline std::string
+make_qualified_name(const counter_metadata& meta)
+{
+    if(meta.dimensions.empty()) return meta.name;
+    return fmt::format("{}[{}]", meta.name, fmt::join(meta.dimensions, ","));
 }
 
 inline std::string

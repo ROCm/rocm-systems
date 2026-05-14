@@ -618,6 +618,13 @@ void
 metadata_registry::set_gpu_perf_counter_counter_names(
     std::uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries)
 {
+    auto& index = m_gpu_perf_counter_index[device_id];
+    index.clear();
+    index.reserve(entries.size());
+    for(std::size_t i = 0; i < entries.size(); ++i)
+    {
+        index.emplace(entries[i].counter_id, i);
+    }
     m_gpu_perf_counter_counter_names[device_id] = std::move(entries);
 }
 
@@ -625,14 +632,13 @@ std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
 metadata_registry::find_gpu_perf_counter_by_id(std::uint32_t device_id,
                                                std::uint64_t counter_id) const
 {
-    auto dev_it = m_gpu_perf_counter_counter_names.find(device_id);
-    if(dev_it == m_gpu_perf_counter_counter_names.end()) return std::nullopt;
+    auto idx_it = m_gpu_perf_counter_index.find(device_id);
+    if(idx_it == m_gpu_perf_counter_index.end()) return std::nullopt;
 
-    for(const auto& entry : dev_it->second)
-    {
-        if(entry.counter_id == counter_id) return std::cref(entry);
-    }
-    return std::nullopt;
+    auto entry_it = idx_it->second.find(counter_id);
+    if(entry_it == idx_it->second.end()) return std::nullopt;
+
+    return std::cref(m_gpu_perf_counter_counter_names.at(device_id)[entry_it->second]);
 }
 
 void

@@ -23,6 +23,7 @@
 #include <string.h>
 #include <string>
 #include <sys/types.h>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -255,6 +256,9 @@ private:
     // SDK PMC counter name ordering: device_id -> ordered name entries
     std::map<std::uint32_t, std::vector<info::gpu_perf_counter_name_entry>>
         m_gpu_perf_counter_counter_names{};
+    // O(1) lookup index: device_id -> counter_id -> index into the vector above
+    std::map<std::uint32_t, std::unordered_map<std::uint64_t, std::size_t>>
+        m_gpu_perf_counter_index{};
 
     using callback_rename_map_t =
         std::map<rocprofiler_tracing_operation_t, std::string_view>;

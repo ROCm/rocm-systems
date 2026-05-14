@@ -350,8 +350,10 @@ config_settings(const std::shared_ptr<settings>& _config)
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_GPU_PERF_COUNTERS",
         "GPU hardware counters to collect via device counting service (PMC polled "
-        "sampling). Comma-separated counter names or 'all'. Independent from "
-        "ROCPROFSYS_ROCM_EVENTS which controls kernel dispatch counters. "
+        "sampling). Comma-separated list of counter names (e.g. "
+        "SQ_WAVES,SQ_BUSY_CYCLES). "
+        "Independent from ROCPROFSYS_ROCM_EVENTS which controls kernel dispatch "
+        "counters. "
         "If empty, no PMC sampling is performed",
         "", "rocm", "hardware_counters", "pmc", "process_sampling");
 
@@ -665,16 +667,6 @@ get_rocm_events()
     return tim::delimit(
         get_setting_value<std::string>("ROCPROFSYS_ROCM_EVENTS").value_or(std::string{}),
         " ,;\t\n");
-}
-
-bool
-get_group_by_queue(void)
-{
-    std::optional<bool> _group_by_queue =
-        config::get_setting_value<bool>("ROCPROFSYS_ROCM_GROUP_BY_QUEUE");
-    bool _ret = _group_by_queue.value_or(true);
-
-    return _ret;
 }
 
 std::vector<std::int32_t>
