@@ -37,6 +37,7 @@
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <errno.h>
 #include <strings.h>
 #include "fmm.h"
 #include <dlfcn.h>
@@ -333,6 +334,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenSecondaryKFDCtx(HsaKFDContext **pCtx)
 	} else {
 		struct kfd_ioctl_create_process_args args = {};
 		if (hsakmt_ioctl(kfd_fd, AMDKFD_IOC_CREATE_PROCESS, &args)) {
+			if (errno == EINVAL || errno == ENOTTY)
+				result = HSAKMT_STATUS_NOT_SUPPORTED;
+			else
+				result = HSAKMT_STATUS_ERROR;
 			goto create_process_failed;
 		} else {
 			new_ctx = calloc(1, sizeof(HsaKFDContext));
