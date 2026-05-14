@@ -1210,12 +1210,17 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
   }
   if (s->GetCaptureMode() == hipStreamCaptureModeGlobal) {
     amd::ScopedLock lock(g_captureStreamsLock);
-    g_captureStreams.erase(std::find(g_captureStreams.begin(), g_captureStreams.end(), s));
+    auto git = std::find(g_captureStreams.begin(), g_captureStreams.end(), s);
+    if (git != g_captureStreams.end()) {
+      g_captureStreams.erase(git);
+    }
   }
   {
     amd::ScopedLock lock(g_streamSetLock);
-    g_allCapturingStreams.erase(
-        std::find(g_allCapturingStreams.begin(), g_allCapturingStreams.end(), s));
+    auto ait = std::find(g_allCapturingStreams.begin(), g_allCapturingStreams.end(), s);
+    if (ait != g_allCapturingStreams.end()) {
+      g_allCapturingStreams.erase(ait);
+    }
   }
   // If capture was invalidated, due to a violation of the rules of stream capture
   if (s->GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {

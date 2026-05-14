@@ -159,22 +159,27 @@ bool Stream::StreamCaptureOngoing(hipStream_t hStream) {
   }
   // Global mode — invalidate all capturing streams in any thread.
   if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {
+    bool stream_capture_invalidated = false;
     amd::ScopedLock lock(g_captureStreamsLock);
-    if (!g_captureStreams.empty()) {
-      for (auto stream : hip::g_captureStreams) {
+    for (auto stream : hip::g_captureStreams) {
+      if (stream->GetCaptureStatus() == hipStreamCaptureStatusActive) {
         stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+        stream_capture_invalidated = true;
       }
+    }
+    if (stream_capture_invalidated) {
       return true;
     }
   }
   // ThreadLocal mode — invalidate all capturing streams in current thread.
-  if (!hip::tls.capture_streams_.empty()) {
-    for (auto stream : hip::tls.capture_streams_) {
+  bool stream_capture_invalidated = false;
+  for (auto stream : hip::tls.capture_streams_) {
+    if (stream->GetCaptureStatus() == hipStreamCaptureStatusActive) {
       stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      stream_capture_invalidated = true;
     }
-    return true;
   }
-  return false;
+  return stream_capture_invalidated;
 }
 
 // ================================================================================================

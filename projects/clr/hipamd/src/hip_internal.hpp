@@ -206,30 +206,45 @@ const char* ihipGetErrorName(hipError_t hip_error);
 // During stream capture some actions, such as a call to hipMalloc, may be unsafe and prohibited
 // during capture. It is allowed only in relaxed mode.
 #define CHECK_STREAM_CAPTURE_SUPPORTED()                                                           \
-  if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeThreadLocal ||                          \
-      hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {                               \
-    if (!hip::tls.capture_streams_.empty()) {                                                      \
+  {                                                                                                \
+    bool stream_capture_invalidated = false;                                                       \
+    if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeThreadLocal ||                        \
+        hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {                             \
       for (auto stream : hip::tls.capture_streams_) {                                              \
-        stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                               \
+        if (stream->GetCaptureStatus() == hipStreamCaptureStatusActive) {                          \
+          stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                             \
+          stream_capture_invalidated = true;                                                       \
+        }                                                                                          \
       }                                                                                            \
+    }                                                                                              \
+    if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {                             \
+      amd::ScopedLock lock(g_captureStreamsLock);                                                  \
+      for (auto stream : g_captureStreams) {                                                       \
+        if (stream->GetCaptureStatus() == hipStreamCaptureStatusActive) {                          \
+          stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                             \
+          stream_capture_invalidated = true;                                                       \
+        }                                                                                          \
+      }                                                                                            \
+    }                                                                                              \
+    if (stream_capture_invalidated) {                                                              \
       HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                \
     }                                                                                              \
-  }                                                                                                \
-  if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal &&                               \
-      !g_captureStreams.empty()) {                                                                 \
-    for (auto stream : g_captureStreams) {                                                         \
-      stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                                 \
-    }                                                                                              \
-    HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                  \
   }
 
 // Helper: invalidate all capturing streams and return an error code.
 #define INVALIDATE_ALL_CAPTURING_AND_RETURN(err)                                                   \
-  if (!g_allCapturingStreams.empty()) {                                                            \
+  {                                                                                                \
+    bool stream_capture_invalidated = false;                                                       \
+    amd::ScopedLock lock(g_streamSetLock);                                                         \
     for (auto stream : g_allCapturingStreams) {                                                    \
-      stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                                 \
+      if (stream->GetCaptureStatus() == hipStreamCaptureStatusActive) {                            \
+        stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);                               \
+        stream_capture_invalidated = true;                                                         \
+      }                                                                                            \
     }                                                                                              \
-    return err;                                                                                    \
+    if (stream_capture_invalidated) {                                                              \
+      return err;                                                                                  \
+    }                                                                                              \
   }
 
 // Device sync is not supported during capture.

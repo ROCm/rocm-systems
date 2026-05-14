@@ -499,20 +499,28 @@ static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
 
   // Block in GLOBAL mode if any global captures are ongoing
   if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {
+    bool stream_capture_invalidated = false;
     amd::ScopedLock lock(g_captureStreamsLock);
-    if (!g_captureStreams.empty()) {
-      for (auto stream : g_captureStreams) {
+    for (auto stream : g_captureStreams) {
+      if (stream->GetCaptureStatus() == hipStreamCaptureStatusActive) {
         stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+        stream_capture_invalidated = true;
       }
+    }
+    if (stream_capture_invalidated) {
       return hipErrorStreamCaptureUnsupported;
     }
   }
 
   // Block if calling thread itself is capturing (both GLOBAL and THREAD_LOCAL)
-  if (!hip::tls.capture_streams_.empty()) {
-    for (auto stream : hip::tls.capture_streams_) {
+  bool stream_capture_invalidated = false;
+  for (auto stream : hip::tls.capture_streams_) {
+    if (stream->GetCaptureStatus() == hipStreamCaptureStatusActive) {
       stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      stream_capture_invalidated = true;
     }
+  }
+  if (stream_capture_invalidated) {
     return hipErrorStreamCaptureUnsupported;
   }
 
