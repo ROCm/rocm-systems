@@ -137,6 +137,7 @@ set(TEST_SRC
   hipGraphMemAllocNodeGetParams.cc
   hipGraphAddMemAllocNode.cc
   hipGraphAddMemFreeNode.cc
+  hipGraphAllocNodeMemReuse.cc
   hipDrvGraphMemcpyNodeGetParams.cc
   hipDrvGraphMemcpyNodeSetParams.cc
   hipDeviceSetGraphMemAttribute.cc
