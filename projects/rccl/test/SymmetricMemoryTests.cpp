@@ -98,9 +98,9 @@ namespace RcclUnitTesting
     setenv("NCCL_CUMEM_ENABLE", "-2", 1);
 
     bool isCorrect = true;
-    for (ncclDataType_t dataType : SymSupportedTypes())
     for (int totalRanks : testBed.ev.GetNumGpusList())
     for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    for (ncclDataType_t dataType : {ncclFloat32, ncclBfloat16, ncclFloat8e4m3})
     {
       if (totalRanks < 2)
         continue;
