@@ -564,8 +564,26 @@ void TileRMATester::verifyResults(size_t size) {
     }
 
     // Verify all tiles
-    size_t total_threads = args.num_wgs * args.num_threads;
-    for (size_t tile_id = 0; tile_id < total_threads; tile_id++) {
+    // For collective operations, the number of tiles transferred depends on the collective granularity
+    size_t num_tiles_transferred;
+    switch (_type) {
+      case TilePutWaveContiguousTestType:
+      case TileGetWaveContiguousTestType:
+        // Wave-collective: one tile per wave
+        num_tiles_transferred = (args.num_wgs * args.num_threads) / wf_size;
+        break;
+      case TilePutWGContiguousTestType:
+      case TileGetWGContiguousTestType:
+        // Workgroup-collective: one tile per workgroup
+        num_tiles_transferred = args.num_wgs;
+        break;
+      default:
+        // Thread-level: one tile per thread
+        num_tiles_transferred = args.num_wgs * args.num_threads;
+        break;
+    }
+
+    for (size_t tile_id = 0; tile_id < num_tiles_transferred; tile_id++) {
       // Calculate buffer offset for this thread
       size_t buffer_elements_per_thread;
       switch (_type) {
