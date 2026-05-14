@@ -185,3 +185,39 @@ class TestSemaXmlRuleGen:
         if vector_rules:
             from amdisa.sema_properties import InstructionProperty
             assert InstructionProperty.EXEC_MASKED in vector_rules[0].src_properties
+
+
+class TestMatrixExpandRules:
+    def test_mfma_to_wmma_16x16(self):
+        from amdisa.codegen.dbt.rule_gen import generate_matrix_expand_rules
+        rules = generate_matrix_expand_rules(
+            ['V_MFMA_F32_16X16X16_F16'],
+            ['V_WMMA_F32_16X16X16_F16'],
+        )
+        assert len(rules) == 1
+        r = rules[0]
+        assert r.xor_byte_mask == 192
+        assert r.range_start == 16
+        assert r.range_end == 48
+        assert r.dst_vgprs == 4
+
+    def test_no_match_returns_empty(self):
+        from amdisa.codegen.dbt.rule_gen import generate_matrix_expand_rules
+        rules = generate_matrix_expand_rules(
+            ['V_MFMA_F32_32X32X8_F16'],
+            ['V_WMMA_I32_16X16X32_I8'],
+        )
+        assert len(rules) == 0
+
+    def test_emit_header_compiles(self):
+        from amdisa.codegen.dbt.rule_gen import (
+            generate_matrix_expand_rules, emit_matrix_conversions_header,
+        )
+        rules = generate_matrix_expand_rules(
+            ['V_MFMA_F32_16X16X16_F16'],
+            ['V_WMMA_F32_16X16X16_F16'],
+        )
+        header = emit_matrix_conversions_header(rules)
+        assert '#pragma once' in header
+        assert 'kMatrixConversions' in header
+        assert '192u' in header
