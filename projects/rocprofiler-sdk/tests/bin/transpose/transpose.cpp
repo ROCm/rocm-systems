@@ -405,10 +405,10 @@ run_hip_memcpy_batch(int rank, int tid, hipStream_t stream)
 
     HIP_API_CALL(hipStreamSynchronize(stream));
 
-    std::size_t mismatches = 0;
-    for(std::size_t i = 0; i < kCopiesPerDirection && mismatches < 8; ++i)
+    bool mismatch = false;
+    for(std::size_t i = 0; i < kCopiesPerDirection; ++i)
     {
-        for(std::size_t j = 0; j < kElementsPerCopy && mismatches < 8; ++j)
+        for(std::size_t j = 0; j < kElementsPerCopy; ++j)
         {
             if(h_dst[i][j] != h_src[i][j])
             {
@@ -416,9 +416,12 @@ run_hip_memcpy_batch(int rank, int tid, hipStream_t stream)
                 std::cerr << "[transpose][" << rank << "][" << tid
                           << "] hipMemcpyBatchAsync mismatch at batch " << i << ", idx " << j
                           << ": got " << h_dst[i][j] << ", expected " << h_src[i][j] << "\n";
-                ++mismatches;
+                mismatch = true;
+                break;
             }
         }
+
+        if(mismatch) break;
     }
 
     for(std::size_t i = 0; i < kCopiesPerDirection; ++i)
@@ -427,6 +430,8 @@ run_hip_memcpy_batch(int rank, int tid, hipStream_t stream)
         HIP_API_CALL(hipHostFree(h_src[i]));
         HIP_API_CALL(hipHostFree(h_dst[i]));
     }
+
+    if(mismatch) throw std::runtime_error("hipMemcpyBatchAsync verification failed");
 
     {
         auto_lock_t _lk{print_lock};
