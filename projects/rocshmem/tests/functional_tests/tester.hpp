@@ -140,10 +140,11 @@
   X(TeamCtxSharedInfra,        95)  \
   X(QuietOnStream,             96)  \
   X(SyncAllOnStream,           97)  \
-  X(FenceOrderPutWaveSignal,   98)  \
-  X(FenceOrderPutLargeSmall,   99)  \
-  X(FenceOrderFanout,          100) \
-  X(FenceOrderPutWaveNbiChunks, 101)
+  X(TeamCtxSubsetParentInfra,  98)  \
+  X(FenceOrderPutWaveSignal,   99)  \
+  X(FenceOrderPutLargeSmall,   100) \
+  X(FenceOrderFanout,          101) \
+  X(FenceOrderPutWaveNbiChunks, 102)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {

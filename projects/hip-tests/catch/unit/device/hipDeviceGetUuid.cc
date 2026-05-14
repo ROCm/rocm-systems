@@ -467,7 +467,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
     }
 #endif
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);  // NOLINT
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);  // NOLINT
   }
 }
 
@@ -521,7 +521,6 @@ void setEnv() {
     setenv("HIP_VISIBLE_DEVICES", uuidEnv.c_str(), 1);
   } else {
     tState = 2;
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
   }
 }
 /**
@@ -542,6 +541,9 @@ HIP_TEST_CASE(Unit_UUID_setEnv_Thread) {
   // Create Thread one
   std::thread t1(setEnv);
   t1.join();
+  if (tState == 2) {
+    HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");
+  }
   // Create Thread two
   std::thread t2(ChkUUID);
   t2.join();
