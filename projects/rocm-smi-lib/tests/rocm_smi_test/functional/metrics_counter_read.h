@@ -49,7 +49,7 @@
 
 class TestMetricsCounterRead : public TestBase {
  public:
-    TestMetricsCounterRead();
+  TestMetricsCounterRead();
 
   // @Brief: Destructor for test case of TestVOltRead
   virtual ~TestMetricsCounterRead();
@@ -60,7 +60,7 @@ class TestMetricsCounterRead : public TestBase {
   // @Brief: Core measurement execution
   virtual void Run();
 
-  // @Brief: Clean up and retrive the resource
+  // @Brief: Clean up and retrieve the resource
   virtual void Close();
 
   // @Brief: Display  results

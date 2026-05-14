@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "elf.hpp"
 
@@ -369,36 +355,9 @@ bool Elf::setupShdr(ElfSections id, section* section, Elf64_Word shlink) const {
   return true;
 }
 
-bool Elf::getTarget(uint16_t& machine, ElfPlatform& platform) const {
-  Elf64_Half mach = _elfio.get_machine();
-  if ((mach >= CPU_FIRST) && (mach <= CPU_LAST)) {
-    platform = CPU_PLATFORM;
-    machine = mach - CPU_BASE;
-  } else if (mach == EM_386 || mach == EM_HSAIL || mach == EM_HSAIL_64 || mach == EM_AMDIL ||
-             mach == EM_AMDIL_64 || mach == EM_X86_64) {
-    platform = COMPLIB_PLATFORM;
-    machine = mach;
-  } else {
-    // Invalid machine
-    LogElfError("failed: Invalid machine=0x%04x(%d)", mach, mach);
-    return false;
-  }
-  LogElfInfo("succeeded: machine=0x%04x, platform=%d", machine, platform);
-  return true;
-}
-
-bool Elf::setTarget(uint16_t machine, ElfPlatform platform) {
-  Elf64_Half mach;
-  if (platform == CPU_PLATFORM)
-    mach = machine + CPU_BASE;
-  else if (platform == CAL_PLATFORM)
-    mach = machine + CAL_BASE;
-  else
-    mach = machine;
-
+bool Elf::setTarget(uint16_t machine) {
+  Elf64_Half mach = machine + CAL_BASE;
   _elfio.set_machine(mach);
-  LogElfInfo("succeeded: machine=0x%04x(%d), platform=%d", machine, machine, platform);
-
   return true;
 }
 

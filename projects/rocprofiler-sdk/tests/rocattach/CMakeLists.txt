@@ -1,0 +1,92 @@
+#
+# rocprofv3 tool test
+#
+cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+
+project(
+    rocprofiler-sdk-tests-rocattach
+    LANGUAGES CXX
+    VERSION 0.0.0)
+
+find_package(rocprofiler-sdk REQUIRED)
+find_package(rocprofiler-sdk-rocattach REQUIRED)
+
+# TODO: sanitizer tests do not cooperate with attachment code injection
+set(ROCPROFILER_MEMCHECK_TYPES "AddressSanitizer" "UndefinedBehaviorSanitizer"
+                               "ThreadSanitizer")
+
+if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
+    set(IS_DISABLED ON)
+else()
+    set(IS_DISABLED OFF)
+endif()
+
+if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
+    set(LOG_LEVEL "warning") # info produces memory leak
+else()
+    set(LOG_LEVEL "trace")
+endif()
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
+
+set(rocattach-test-env
+    "ROCP_TOOL_ATTACH=1"
+    "ROCPROFILER_REGISTER_LOG_LEVEL=${LOG_LEVEL}"
+    "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
+    "ROCATTACH_LOG_LEVEL=${LOG_LEVEL}"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    )
+
+add_executable(rocattach-parallel-attach-test)
+target_sources(rocattach-parallel-attach-test PRIVATE main.cpp)
+target_link_libraries(
+    rocattach-parallel-attach-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
+            rocprofiler-sdk::tests-common-library
+            rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
+
+rocprofiler_add_integration_execute_test(
+    rocattach-parallel-attach-test-execute
+    TARGET rocattach-parallel-attach-test
+    ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${rocattach-test-env}"
+    PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+rocprofiler_add_integration_execute_test(
+    rocattach-parallel-attach-test-signal-execute
+    TARGET rocattach-parallel-attach-test
+    ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>
+         --send-signal
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${rocattach-test-env}"
+    PASS_REGULAR_EXPRESSION "Attachment test process [0-9]+ received signal 28"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+add_executable(rocattach-attach-tree-test)
+target_sources(rocattach-attach-tree-test PRIVATE attach_tree.cpp)
+target_link_libraries(
+    rocattach-attach-tree-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
+            rocprofiler-sdk::tests-common-library
+            rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
+
+rocprofiler_add_integration_execute_test(
+    rocattach-attach-tree-test-execute
+    TARGET rocattach-attach-tree-test
+    ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${rocattach-test-env}"
+    PASS_REGULAR_EXPRESSION "verified: grandchild pid [0-9]+ loaded the tool library"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

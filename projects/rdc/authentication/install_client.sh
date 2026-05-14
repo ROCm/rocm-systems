@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 # Note:
 # * This script should reside in the artifacts directory
 #   when executed.
@@ -14,4 +17,3 @@ INSTALL_DIR=$1
 mkdir -p $INSTALL_DIR
 cp -R client $INSTALL_DIR
 chown -R rdc:rdc $INSTALL_DIR/client
-

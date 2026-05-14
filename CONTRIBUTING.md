@@ -51,6 +51,12 @@ Further changes to the structure may be made to improve development efficiency a
 
 ---
 
+## Ignored commits for git blame
+
+There were two major styling change commits, which impacted almost every C++ file in the repository. If you want to avoid seeing those changes in `git blame` output, you can run `git config blame.ignoreRevsFile .git-blame-ignore-revs`. This will exclude style changes from git blame.
+
+---
+
 ## Making Changes
 
 ### From a Developer's Perspective
@@ -178,7 +184,7 @@ git push
 
 In order to achieve the goal of keeping the `develop` branch healthy, a team of ROCm engineers will be dedicated towards monitoring and triaging issues that arise.
 This team will collaborate to identify offending commits to isolate what changes need to be reverted.
-There may be occassions where bulk reverts may need to occur for more complex issues.
+There may be occasions where bulk reverts may need to occur for more complex issues.
 
 See [docs/gardening.md](docs/gardening.md) for more information.
 

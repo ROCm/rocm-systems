@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip_test_common.hh>
 #include <iostream>
 #include <vector>
@@ -36,19 +24,20 @@ __global__ void nKernel(float* y) {
   size_t tid{threadIdx.x};
   y[tid] = y[tid] + 1.0f;
 }
-TEST_CASE("Unit_hipMultiStream_sameDevice") {
+HIP_TEST_CASE(Unit_hipMultiStream_sameDevice) {
   constexpr int num_streams{8};
   hipStream_t streams[num_streams];
   float *data[num_streams], *yd, *xd;
   float y{1.0f}, x{1.0f};
+  const int n = isQuickLevel() ? (1 << 12) : NN;
   HIP_CHECK(hipMalloc((void**)&yd, sizeof(float)));
   HIP_CHECK(hipMalloc((void**)&xd, sizeof(float)));
   HIP_CHECK(hipMemcpy(yd, &y, sizeof(float), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(xd, &x, sizeof(float), hipMemcpyHostToDevice));
   for (int i = 0; i < num_streams; i++) {
     HIP_CHECK(hipStreamCreate(&streams[i]));
-    HIP_CHECK(hipMalloc(&data[i], NN * sizeof(float)));
-    hipLaunchKernelGGL(kernel, dim3(1), dim3(1), 0, streams[i], data[i], xd, NN);
+    HIP_CHECK(hipMalloc(&data[i], n * sizeof(float)));
+    hipLaunchKernelGGL(kernel, dim3(1), dim3(1), 0, streams[i], data[i], xd, n);
     HIP_CHECK(hipGetLastError());
     hipLaunchKernelGGL(HIP_KERNEL_NAME(nKernel), dim3(1), dim3(1), 0, 0, yd);
     HIP_CHECK(hipGetLastError());
@@ -59,18 +48,17 @@ TEST_CASE("Unit_hipMultiStream_sameDevice") {
   HIP_CHECK(hipMemcpy(&y, yd, sizeof(float), hipMemcpyDeviceToHost));
   HIP_CHECK(hipFree(xd));
   HIP_CHECK(hipFree(yd));
-  REQUIRE(x == Approx(y));
+  REQUIRE(x == Catch::Approx(y));
 }
 
-TEST_CASE("Unit_hipMultiStream_multimeDevice") {
-  constexpr int nLoops = 50000;
+HIP_TEST_CASE(Unit_hipMultiStream_multimeDevice) {
+  const int nLoops = isQuickLevel() ? 500 : 50000;
   constexpr int nStreams = 2;
   std::vector<hipStream_t> streams(nStreams);
   int nGpu = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpu));
   if (nGpu < 1) {
-    INFO("No GPU for Testing");
-    SUCCEED(true);
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
   static int device = 0;
   HIP_CHECK(hipSetDevice(device));

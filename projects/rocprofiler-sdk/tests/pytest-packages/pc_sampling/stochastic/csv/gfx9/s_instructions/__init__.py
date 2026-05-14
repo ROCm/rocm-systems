@@ -34,7 +34,6 @@ from .jump_instructions import validate_jump_instructions
 from .message_instructions import validate_message_instructions
 from .barrier_instructions import validate_barrier_instructions
 
-
 # Using Prefix Tree to classify the instruction type
 # I did this instead of the regex becuase I wanted to try if we could
 # generalize this approach for other types of instructions.

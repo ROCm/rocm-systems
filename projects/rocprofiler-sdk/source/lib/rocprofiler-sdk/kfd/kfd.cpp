@@ -169,6 +169,9 @@ get_node_map()
         auto _v = agent_id_map_t{};
         for(const auto* agent : agent::get_agents())
             _v.emplace(agent->gpu_id, agent->id);
+
+        // KFD may report a special undefined location
+        _v.emplace(KFD_IOCTL_SVM_LOCATION_UNDEFINED, rocprofiler_agent_id_t{.handle = 0});
         return _v;
     }());
 
@@ -188,6 +191,7 @@ constexpr char FAULT_MIGRATE_CHAR = 'M';  // Fault resolved with a migration
 constexpr char FAULT_UPDATE_CHAR  = 'U';  // Fault resolved with an update
 // Queue was not restored, will be restored later
 constexpr char QUEUE_RESTORE_RESCHEDULED_CHAR = 'R';
+constexpr char QUEUE_RESTORE_CHAR             = '0';
 
 template <>
 kfd_event_record
@@ -511,14 +515,21 @@ parse_event<KFD_EVENT_QUEUE_RESTORE>(const agent_id_map_t& agents, std::string_v
 
     e.agent_id = get_node_agent_id(agents, _node_id);
 
-    if(scan_count == 5 && _rescheduled == QUEUE_RESTORE_RESCHEDULED_CHAR)
+    if(scan_count == 5)
     {
-        e.operation = ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED;
-    }
-    else if(scan_count == 5 && _rescheduled != QUEUE_RESTORE_RESCHEDULED_CHAR)
-    {
-        ROCP_CI_LOG(WARNING) << "kfd: parse_event: Expected rescheduled with 5 items parsed";
-        return {};
+        if(_rescheduled == QUEUE_RESTORE_RESCHEDULED_CHAR)
+        {
+            e.operation = ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED;
+        }
+        else if(_rescheduled == QUEUE_RESTORE_CHAR)
+        {
+            e.operation = ROCPROFILER_KFD_EVENT_QUEUE_RESTORE;
+        }
+        else
+        {
+            ROCP_CI_LOG(WARNING) << "kfd: parse_event: Unknown rescheduled with 5 items parsed";
+            return {};
+        }
     }
     else if(scan_count == 4)
     {
@@ -715,17 +726,72 @@ kfd_context_kinds(const context::context* ctx)
                                   ROCPROFILER_BUFFER_TRACING_KFD_QUEUE);
 }
 
+template <size_t EventIdx>
+struct kfd_event_range;
+
+#define SPECIALIZE_KFD_EVENT_RANGE(EventIdx, RangeIdx)                                             \
+    template <>                                                                                    \
+    struct kfd_event_range<EventIdx>                                                               \
+    {                                                                                              \
+        static constexpr auto value = RangeIdx;                                                    \
+    };
+
+SPECIALIZE_KFD_EVENT_RANGE(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
+                           ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
+SPECIALIZE_KFD_EVENT_RANGE(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+                           ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
+SPECIALIZE_KFD_EVENT_RANGE(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+                           ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
+
+#undef SPECIALIZE_KFD_EVENT_RANGE
+
+using kfd_event_domains_seq_t =
+    std::index_sequence<ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
+                        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+                        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE>;
+
+template <size_t EventIdx, size_t... EventIdxs>
 auto
-get_contexts(rocprofiler_buffer_tracing_kind_t kind, int operation)
+get_event_range_domain(rocprofiler_buffer_tracing_kind_t idx,
+                       std::index_sequence<EventIdx, EventIdxs...>)
+{
+    if(EventIdx == idx)
+    {
+        return kfd_event_range<EventIdx>::value;
+    }
+
+    if constexpr(sizeof...(EventIdxs) > 0)
+    {
+        return get_event_range_domain(idx, std::index_sequence<EventIdxs...>{});
+    }
+
+    return ROCPROFILER_BUFFER_TRACING_NONE;
+}
+
+auto
+get_contexts(rocprofiler_buffer_tracing_kind_t event_kind)
 {
     auto active_contexts = context::get_active_contexts(
         [](const auto* ctx) { return (ctx->buffered_tracer && kfd_context_kinds(ctx)); });
     auto operation_ctxs = context::context_array_t{};
 
+    // convert the event kind to its associated range kind, if it has one.
+    auto range_kind = get_event_range_domain(event_kind, kfd_event_domains_seq_t{});
+
+    ROCP_CI_LOG_IF(INFO, event_kind == range_kind) << fmt::format(
+        "KFD event kind == KFD range kind :: {} == {}. This is unexpected and may indicate a bug",
+        static_cast<int>(event_kind),
+        static_cast<int>(range_kind));
+
     for(const auto* itr : active_contexts)
     {
         // if the given domain + op is not enabled, skip this context
-        if(itr->buffered_tracer->domains(kind, operation))
+        if(itr->buffered_tracer->domains(event_kind))
+        {
+            operation_ctxs.emplace_back(itr);
+        }
+        else if(range_kind != ROCPROFILER_BUFFER_TRACING_NONE &&
+                itr->buffered_tracer->domains(range_kind))
         {
             operation_ctxs.emplace_back(itr);
         }
@@ -954,13 +1020,13 @@ public:
 namespace
 {
 rocprofiler_kfd_page_migrate_operation_t
-get_page_migrate_record_op(const page_migrate_event_record_t& start,
-                           const page_migrate_event_record_t& end)
+get_page_migrate_record_op(const page_migrate_event_record_t&                start,
+                           const std::optional<page_migrate_event_record_t>& end)
 {
-    ROCP_ERROR_IF(end.operation != ROCPROFILER_KFD_EVENT_PAGE_MIGRATE_END)
+    ROCP_ERROR_IF(end.has_value() && end->operation != ROCPROFILER_KFD_EVENT_PAGE_MIGRATE_END)
         << fmt::format("Expected end to be operation {}, got vs {}",
                        static_cast<int>(ROCPROFILER_KFD_EVENT_PAGE_MIGRATE_END),
-                       static_cast<int>(end.operation));
+                       static_cast<int>(end->operation));
 
     if(start.operation == ROCPROFILER_KFD_EVENT_PAGE_MIGRATE_PREFETCH)
     {
@@ -978,13 +1044,12 @@ get_page_migrate_record_op(const page_migrate_event_record_t& start,
     {
         return ROCPROFILER_KFD_PAGE_MIGRATE_TTM_EVICTION;
     }
-    else
-    {
-        ROCP_ERROR << fmt::format("Invalid operation for pairing page_migrate (start {}, end {})",
-                                  static_cast<int>(start.operation),
-                                  static_cast<int>(end.operation));
-        return ROCPROFILER_KFD_PAGE_MIGRATE_NONE;
-    }
+
+    ROCP_CI_LOG(WARNING) << fmt::format(
+        "Invalid operation for pairing page_migrate (start {}, end {})",
+        static_cast<int>(start.operation),
+        (end.has_value() ? static_cast<int>(end->operation) : -1));
+    return ROCPROFILER_KFD_PAGE_MIGRATE_NONE;
 }
 
 rocprofiler_kfd_page_fault_operation_t
@@ -1011,20 +1076,20 @@ get_page_fault_record_op(const page_fault_event_record_t& start,
     {
         return ROCPROFILER_KFD_PAGE_FAULT_WRITE_FAULT_UPDATED;
     }
-    else
-    {
-        ROCP_ERROR << fmt::format("Invalid operation for pairing page_fault (start {}, end {})",
-                                  static_cast<int>(start.operation),
-                                  static_cast<int>(end.operation));
-        return ROCPROFILER_KFD_PAGE_FAULT_NONE;
-    }
+
+    ROCP_CI_LOG(WARNING) << fmt::format(
+        "Invalid operation for pairing page_fault (start {}, end {})",
+        static_cast<int>(start.operation),
+        static_cast<int>(end.operation));
+    return ROCPROFILER_KFD_PAGE_FAULT_NONE;
 }
 
 rocprofiler_kfd_queue_operation_t
-get_queue_record_op(const queue_event_record_t& start, const queue_event_record_t& end)
+get_queue_record_op(const queue_event_record_t&                start,
+                    const std::optional<queue_event_record_t>& end)
 {
-    ROCP_ERROR_IF(end.operation != ROCPROFILER_KFD_EVENT_QUEUE_RESTORE &&
-                  end.operation != ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED)
+    ROCP_ERROR_IF(end.has_value() && end->operation != ROCPROFILER_KFD_EVENT_QUEUE_RESTORE &&
+                  end->operation != ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED)
         << "Expected end operation for queue end event";
 
     if(start.operation == ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SVM)
@@ -1039,13 +1104,13 @@ get_queue_record_op(const queue_event_record_t& start, const queue_event_record_
         return ROCPROFILER_KFD_QUEUE_EVICT_CRIU_CHECKPOINT;
     else if(start.operation == ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_RESTORE)
         return ROCPROFILER_KFD_QUEUE_EVICT_CRIU_RESTORE;
-    else
-    {
-        ROCP_ERROR << fmt::format("Invalid operation for pairing queue_suspend (start {}, end {})",
-                                  static_cast<int>(start.operation),
-                                  static_cast<int>(end.operation));
-        return ROCPROFILER_KFD_QUEUE_NONE;
-    }
+
+    ROCP_CI_LOG(WARNING) << fmt::format(
+        "Invalid operation for pairing queue_suspend (start {}, end {})",
+        static_cast<int>(start.operation),
+        (end.has_value() ? static_cast<int>(end->operation) : -1));
+
+    return ROCPROFILER_KFD_QUEUE_NONE;
 }
 
 template <typename T>
@@ -1136,11 +1201,22 @@ is_one_of(int op, std::index_sequence<Ops...>)
 }
 
 void
-check_paired_events(buffer::instance* buffer, const kfd_event_record& rec)
+check_paired_events(const context_t* ctx, const kfd_event_record& rec)
 {
     thread_local static events_unordered_set<page_migrate_event_record_t> page_migrate_events{};
     thread_local static events_unordered_set<page_fault_event_record_t>   page_fault_events{};
     thread_local static events_unordered_set<queue_event_record_t>        queue_events{};
+
+    auto _range_kind = get_event_range_domain(rec.kind, kfd_event_domains_seq_t{});
+
+    if(!ctx->is_tracing(_range_kind))
+    {
+        // range kind is not enabled for this context, skip any pairing or buffering for this event.
+        return;
+    }
+
+    auto* buffer =
+        CHECK_NOTNULL(buffer::get_buffer(ctx->buffered_tracer->buffer_data.at(_range_kind)));
 
     if(rec.kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE)
     {
@@ -1151,17 +1227,30 @@ check_paired_events(buffer::instance* buffer, const kfd_event_record& rec)
 
         if(is_start_event)
         {
-            // start event, insert
-            page_migrate_events.insert(rec.data.page_migrate_event);
+            // only insert start event if the corresponding operation is enabled for this context
+            if(ctx->is_tracing(
+                   _range_kind,
+                   get_page_migrate_record_op(rec.data.page_migrate_event, std::nullopt)))
+            {
+                page_migrate_events.insert(rec.data.page_migrate_event);
+            }
             return;
         }
         else if(is_end_event)
         {
             // end event: pair and emplace into buffer
-            auto ret = common::init_public_api_struct(page_migrate_record_t{});
             if(auto found = page_migrate_events.find(end); found != page_migrate_events.end())
             {
-                const auto& start   = *found;
+                const auto& start = *found;
+                // check whether this specific operation is enabled for this context
+                if(!ctx->is_tracing(_range_kind, get_page_migrate_record_op(start, end)))
+                {
+                    // if this specific operation is not enabled for this context, skip pairing and
+                    // buffering
+                    return;
+                }
+
+                auto ret            = common::init_public_api_struct(page_migrate_record_t{});
                 ret.kind            = ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE;
                 ret.operation       = get_page_migrate_record_op(start, end);
                 ret.start_timestamp = start.timestamp;
@@ -1196,17 +1285,26 @@ check_paired_events(buffer::instance* buffer, const kfd_event_record& rec)
 
         if(is_start_event)
         {
-            // start event, insert
+            // since get_page_fault_record_op needs both start and end to determine the operation,
+            // we will insert the start event regardless of the operation
             page_fault_events.insert(rec.data.page_fault_event);
             return;
         }
         else if(is_end_event)
         {
             // end event: pair and emplace into buffer
-            auto ret = common::init_public_api_struct(page_fault_record_t{});
             if(auto found = page_fault_events.find(end); found != page_fault_events.end())
             {
-                const auto& start   = *found;
+                const auto& start = *found;
+                // check whether this specific operation is enabled for this context
+                if(!ctx->is_tracing(_range_kind, get_page_fault_record_op(start, end)))
+                {
+                    // if this specific operation is not enabled for this context, skip pairing and
+                    // buffering
+                    return;
+                }
+
+                auto ret            = common::init_public_api_struct(page_fault_record_t{});
                 ret.kind            = ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT;
                 ret.operation       = get_page_fault_record_op(start, end);
                 ret.start_timestamp = start.timestamp;
@@ -1236,17 +1334,29 @@ check_paired_events(buffer::instance* buffer, const kfd_event_record& rec)
 
         if(is_start_event)
         {
-            // start event, insert
-            queue_events.insert(rec.data.queue_event);
+            // only insert start event if the corresponding operation is enabled for this context
+            if(ctx->is_tracing(_range_kind,
+                               get_queue_record_op(rec.data.queue_event, std::nullopt)))
+            {
+                queue_events.insert(rec.data.queue_event);
+            }
             return;
         }
         else if(is_end_event)
         {
             // end event: pair and emplace into buffer
-            auto ret = common::init_public_api_struct(queue_record_t{});
             if(auto found = queue_events.find(end); found != queue_events.end())
             {
-                const auto& start   = *found;
+                const auto& start = *found;
+                // check whether this specific operation is enabled for this context
+                if(!ctx->is_tracing(_range_kind, get_queue_record_op(start, end)))
+                {
+                    // if this specific operation is not enabled for this context, skip pairing and
+                    // buffering
+                    return;
+                }
+
+                auto ret            = common::init_public_api_struct(queue_record_t{});
                 ret.kind            = ROCPROFILER_BUFFER_TRACING_KFD_QUEUE;
                 ret.operation       = get_queue_record_op(start, end);
                 ret.start_timestamp = start.timestamp;
@@ -1263,7 +1373,7 @@ check_paired_events(buffer::instance* buffer, const kfd_event_record& rec)
         {
             // If event is ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED we should not attempt to
             // pair it. It is an instantaneous event.
-            // It is handled in handle_reporting -> emplace_buffer_record.
+            // It is handled in handle_reporting -> emplace_event_buffer_record.
         }
         else
         {
@@ -1275,8 +1385,13 @@ check_paired_events(buffer::instance* buffer, const kfd_event_record& rec)
 }
 
 void
-emplace_buffer_record(buffer::instance* buffer, const kfd_event_record& rec)
+emplace_event_buffer_record(const context_t* ctx, const kfd_event_record& rec)
 {
+    if(!ctx->is_tracing(rec.kind, rec.operation)) return;
+
+    auto* buffer =
+        CHECK_NOTNULL(buffer::get_buffer(ctx->buffered_tracer->buffer_data.at(rec.kind)));
+
     switch(rec.kind)
     {
         case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE:
@@ -1311,7 +1426,8 @@ emplace_buffer_record(buffer::instance* buffer, const kfd_event_record& rec)
         }
         default:
         {
-            ROCP_ERROR << fmt::format("Invalid Kind {} for record", static_cast<int>(rec.kind));
+            ROCP_CI_LOG(WARNING) << fmt::format("Invalid/Unsupported KFD event kind {}",
+                                                static_cast<int>(rec.kind));
         }
     }
 }
@@ -1324,24 +1440,35 @@ handle_reporting(std::string_view event_data)
     auto       event     = parse_event(
         kfd_event, get_node_map(), event_data, std::make_index_sequence<KFD_EVENT_LAST>{});
 
-    ROCP_ERROR_IF(event.kind < ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE ||
-                  event.kind > ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
+    ROCP_CI_LOG_IF(WARNING,
+                   event.kind < ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE ||
+                       event.kind > ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
         << fmt::format("kfd_events: Invalid record kind {}", static_cast<int>(event.kind));
 
-    ROCP_ERROR_IF(event.operation == -1)
+    ROCP_CI_LOG_IF(WARNING, event.operation == -1)
         << fmt::format("kfd_events: Invalid record operation: ({}, {})",
                        static_cast<int>(event.kind),
                        event.operation);
 
-    auto buffered_contexts = get_contexts(event.kind, event.operation);
-    if(buffered_contexts.empty()) return;
+    auto buffered_contexts = get_contexts(event.kind);
+
+    // loop will handle if array empty
+    ROCP_TRACE << fmt::format(
+        "KFD event {} (operation={}) has {} contexts based on the domain filtering",
+        static_cast<int>(event.kind),
+        event.operation,
+        buffered_contexts.size());
 
     for(const auto& itr : buffered_contexts)
     {
-        auto* buffer = buffer::get_buffer(itr->buffered_tracer->buffer_data.at(event.kind));
-
-        check_paired_events(buffer, event);
-        emplace_buffer_record(buffer, event);
+        // range handling is more complex so unconditionally call this function
+        check_paired_events(itr, event);
+        // event handling is simpler since it resembles how KFD reports events so apply operation
+        // filter before calling the implementation.
+        if(itr->is_tracing(event.kind, event.operation))
+        {
+            emplace_event_buffer_record(itr, event);
+        }
     }
 }
 

@@ -37,8 +37,6 @@
 #include <rocprofiler-sdk/ompt/api_args.h>
 #include <rocprofiler-sdk/ompt/omp-tools.h>
 
-#include <glog/logging.h>
-
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>
@@ -147,6 +145,7 @@ ompt_task_create_callback(ompt_data_t*        encountering_task_data,
                                                                  flags,
                                                                  has_dependences,
                                                                  codeptr_ra);
+    if(!corr_id) return;  // During finalization
 
     auto* state                  = new ompt_task_save_state{corr_id, flags};
     INTERNAL(new_task_data)->ptr = state;
@@ -161,13 +160,22 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
 {
     auto* corr_id = ompt_impl<ROCPROFILER_OMPT_ID_task_schedule>::event_common(
         CLIENT(prior_task_data), prior_task_status, CLIENT(next_task_data));
+    if(!corr_id) return;  // During finalization
     context::pop_latest_correlation_id(corr_id);
     corr_id->sub_ref_count();
 
+    /* Warning: some tasks like early_fulfill may be scheduled
+     * out twice. The ordering between the early_fulfill and the complete
+     * (for example) is not specified. In this case the prior_task_state
+     * needs to be added to the early return if condition below.
+     */
     auto* pprior = INTERNAL(prior_task_data);
     auto* pnext  = INTERNAL(next_task_data);
     assert(pprior != nullptr);
-    auto* state_prior  = reinterpret_cast<ompt_task_save_state*>(pprior->ptr);
+    auto* state_prior = reinterpret_cast<ompt_task_save_state*>(pprior->ptr);
+    if(state_prior == nullptr)
+        ROCP_FATAL << "state_prior == nullptr prior_task_status: " << prior_task_status << ".";
+
     auto* state_next   = pnext ? reinterpret_cast<ompt_task_save_state*>(pnext->ptr) : nullptr;
     auto* prior_corrid = context::get_latest_correlation_id();
     if(state_prior->corr_id == prior_corrid && state_prior->task_flags != 0)
@@ -182,9 +190,10 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
         context::push_correlation_id(state_next->corr_id);
     }
     if(prior_task_status == ompt_task_yield || prior_task_status == ompt_task_detach ||
-       prior_task_status == ompt_task_switch)
+       prior_task_status == ompt_task_switch || prior_task_status == ompt_task_early_fulfill)
         return;
     // the prior task is done
+    assert(state_prior != nullptr);
     assert(state_prior->task_flags != 0);
     if(prior_task_status == ompt_task_complete)
     {
@@ -919,9 +928,13 @@ ompt_impl<OpIdx>::event_common(Args... args)
                                buffered_contexts,
                                external_corr_ids);
 
-    auto     buffer_record    = common::init_public_api_struct(buffer_ompt_record_t{});
-    auto     tracer_data      = common::init_public_api_struct(callback_ompt_data_t{});
-    auto*    corr_id          = tracing::correlation_service::construct(ref_count);
+    auto  buffer_record = common::init_public_api_struct(buffer_ompt_record_t{});
+    auto  tracer_data   = common::init_public_api_struct(callback_ompt_data_t{});
+    auto* corr_id       = tracing::correlation_service::construct(ref_count);
+
+    // During finalization, correlation ID construction may return nullptr
+    if(!corr_id) return nullptr;
+
     uint64_t internal_corr_id = corr_id->internal;
     uint64_t ancestor_corr_id = corr_id->ancestor;
 
@@ -972,6 +985,7 @@ void
 ompt_impl<OpIdx>::event(Args&&... args)
 {
     auto corr_id = ompt_impl<OpIdx>::event_common(std::forward<Args>(args)...);
+    if(!corr_id) return;  // During finalization
     context::pop_latest_correlation_id(corr_id);
     corr_id->sub_ref_count();
 }

@@ -1,36 +1,15 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
 #include "amd_hip_mx_common.h"
-
-#include "amd_hip_fp16.h"
-#include "amd_hip_bf16.h"
 #include "amd_hip_fp8.h"
 
-#include "amd_hip_ocp_types.h"
 #include "amd_hip_ocp_host.hpp"
-#include "hip/amd_detail/amd_hip_mx_common.h"
 
 #if defined(__HIPCC_RTC__)
 #define __FP6_HOST_DEVICE__ __device__
@@ -44,42 +23,14 @@ typedef __hip_fp8_storage_t __hip_fp6_storage_t;
 typedef __hip_fp8x2_storage_t __hip_fp6x2_storage_t;
 typedef __hip_fp8x4_storage_t __hip_fp6x4_storage_t;
 
-static_assert(sizeof(__hip_fp6_storage_t[4]) == sizeof(uint32_t));
-static_assert(sizeof(__hip_fp6x2_storage_t[2]) == sizeof(uint32_t));
-static_assert(sizeof(__hip_fp6x4_storage_t[2]) == sizeof(uint64_t));
+static_assert(sizeof(__hip_fp6_storage_t[4]) == sizeof(uint32_t), "");
+static_assert(sizeof(__hip_fp6x2_storage_t[2]) == sizeof(uint32_t), "");
+static_assert(sizeof(__hip_fp6x4_storage_t[2]) == sizeof(uint64_t), "");
 
 enum __hip_fp6_interpretation_t {
   __HIP_E3M2 = 0, /**< FP6 E3M2 Type*/
   __HIP_E2M3 = 1, /**< FP6 E2M3 Type */
 };
-
-namespace internal {
-__FP6_HOST_DEVICE_STATIC__ __amd_fp16_storage_t half_to_f16(const __half val) {
-  __half_raw tmp = val;
-  return tmp.data;
-}
-__FP6_HOST_DEVICE_STATIC__ __amd_fp16x2_storage_t half2_to_f16x2(const __half2 val) {
-  __half2_raw tmp = val;
-  return tmp.data;
-}
-__FP6_HOST_DEVICE_STATIC__ __amd_bf16_storage_t hipbf16_to_bf16(const __hip_bfloat16 val) {
-  static_assert(sizeof(__hip_bfloat16) == sizeof(__amd_bf16_storage_t));
-  union {
-    __hip_bfloat16 hip_bf16;
-    __amd_bf16_storage_t bf16;
-  } u{val};
-  return u.bf16;
-}
-__FP6_HOST_DEVICE_STATIC__ __amd_bf16x2_storage_t hipbf162_to_bf16x2(const __hip_bfloat162 val) {
-  static_assert(sizeof(__hip_bfloat162) == sizeof(__amd_bf16x2_storage_t));
-  union {
-    __hip_bfloat162 hip_bf16;
-    __amd_bf16x2_storage_t bf16;
-  } u{val};
-  return u.bf16;
-}
-}  // namespace internal
-
 
 // Note: Ignore rounding input on AMD GPUs for now. At the moment AMD GPUs do not support rounding
 // modes, all the inputs are rounded to nearest or use an input to do stochastic rounding.
@@ -413,7 +364,7 @@ struct __hip_fp6_e2m3 {
     return __hip_cvt_fp6_to_halfraw(__x, __HIP_E2M3);
   }
   __FP6_HOST_DEVICE__ operator __hip_bfloat16_raw() const {
-    static_assert(sizeof(__hip_bfloat16_raw) == sizeof(__amd_bf16_storage_t));
+    static_assert(sizeof(__hip_bfloat16_raw) == sizeof(__amd_bf16_storage_t), "");
     union {
       __hip_bfloat16_raw bf16_raw;
       __amd_bf16_storage_t bf16;
@@ -482,7 +433,7 @@ struct __hip_fp6_e3m2 {
     return __hip_cvt_fp6_to_halfraw(__x, __HIP_E3M2);
   }
   __FP6_HOST_DEVICE__ operator __hip_bfloat16_raw() const {
-    static_assert(sizeof(__hip_bfloat16_raw) == sizeof(__amd_bf16_storage_t));
+    static_assert(sizeof(__hip_bfloat16_raw) == sizeof(__amd_bf16_storage_t), "");
     union {
       __hip_bfloat16_raw bf16_raw;
       __amd_bf16_storage_t bf16;
@@ -534,7 +485,7 @@ struct __hip_fp6x2_e2m3 {
     return __hip_cvt_fp6x2_to_halfraw2(__x, __HIP_E2M3);
   }
   __FP6_HOST_DEVICE__ operator __hip_bfloat162_raw() const {
-    static_assert(sizeof(__hip_bfloat162_raw) == sizeof(__amd_bf16x2_storage_t));
+    static_assert(sizeof(__hip_bfloat162_raw) == sizeof(__amd_bf16x2_storage_t), "");
     union {
       __hip_bfloat162_raw bf162_raw;
       __amd_bf16x2_storage_t bf16x2;
@@ -543,7 +494,7 @@ struct __hip_fp6x2_e2m3 {
     __amd_fp6x32_storage_t in;
     __amd_bf16x32_storage_t out;
     in[0] = __x & 0x3Fu;          // first 6 bits
-    in[0] |= (__x & FC00u) >> 2;  // next 6 bits
+    in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
     out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6(in, 1.0f /* scale */);
     u.bf16x2 = {out[0], out[1]};
 #else
@@ -559,9 +510,9 @@ struct __hip_fp6x2_e2m3 {
     __amd_fp6x32_storage_t in;
     __amd_floatx32_storage_t out;
     in[0] = __x & 0x3Fu;          // first 6 bits
-    in[0] |= (__x & FC00u) >> 2;  // next 6 bits
+    in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
     out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
-    auto fp32x2 = {out[0], out[1]};
+    __amd_floatx2_storage_t fp32x2 = {out[0], out[1]};
 #else
     using namespace fcbx;
     auto fp32x2 = __amd_floatx2_storage_t{to_float<float, Encoding::E2M3, true>(__x & 0xFFu, 0),
@@ -594,7 +545,7 @@ struct __hip_fp6x2_e3m2 {
     return __hip_cvt_fp6x2_to_halfraw2(__x, __HIP_E3M2);
   }
   __FP6_HOST_DEVICE__ operator __hip_bfloat162_raw() const {
-    static_assert(sizeof(__hip_bfloat162_raw) == sizeof(__amd_bf16x2_storage_t));
+    static_assert(sizeof(__hip_bfloat162_raw) == sizeof(__amd_bf16x2_storage_t), "");
     union {
       __hip_bfloat162_raw bf162_raw;
       __amd_bf16x2_storage_t bf16x2;
@@ -603,7 +554,7 @@ struct __hip_fp6x2_e3m2 {
     __amd_fp6x32_storage_t in;
     __amd_bf16x32_storage_t out;
     in[0] = __x & 0x3Fu;          // first 6 bits
-    in[0] |= (__x & FC00u) >> 2;  // next 6 bits
+    in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
     out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6(in, 1.0f /* scale */);
     u.bf16x2 = {out[0], out[1]};
 #else
@@ -619,9 +570,9 @@ struct __hip_fp6x2_e3m2 {
     __amd_fp6x32_storage_t in;
     __amd_floatx32_storage_t out;
     in[0] = __x & 0x3Fu;          // first 6 bits
-    in[0] |= (__x & FC00u) >> 2;  // next 6 bits
+    in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
     out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
-    auto fp32x2 = {out[0], out[1]};
+    __amd_floatx2_storage_t fp32x2 = {out[0], out[1]};
 #else
     using namespace fcbx;
     auto fp32x2 = __amd_floatx2_storage_t{to_float<float, Encoding::E3M2, true>(__x & 0xFFu, 0),
@@ -664,8 +615,8 @@ struct __hip_fp6x4_e2m3 {
     in[0] |= ((__x >> 16) & 0x3Fu) << 12;
     in[0] |= ((__x >> 24) & 0x3Fu) << 18;
     out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
-    auto fp32x2_1 = {out[0], out[1]};
-    auto fp32x2_2 = {out[2], out[3]};
+    __amd_floatx2_storage_t fp32x2_1 = {out[0], out[1]};
+    __amd_floatx2_storage_t fp32x2_2 = {out[2], out[3]};
 #else
     using namespace fcbx;
     auto fp32x2_1 =
@@ -712,8 +663,8 @@ struct __hip_fp6x4_e3m2 {
     in[0] |= ((__x >> 16) & 0x3Fu) << 12;
     in[0] |= ((__x >> 24) & 0x3Fu) << 18;
     out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
-    auto fp32x2_1 = {out[0], out[1]};
-    auto fp32x2_2 = {out[2], out[3]};
+    __amd_floatx2_storage_t fp32x2_1 = {out[0], out[1]};
+    __amd_floatx2_storage_t fp32x2_2 = {out[2], out[3]};
 #else
     using namespace fcbx;
     auto fp32x2_1 =

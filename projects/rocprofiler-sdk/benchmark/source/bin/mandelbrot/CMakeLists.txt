@@ -29,6 +29,8 @@ set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
+find_package(rocprofiler-sdk-roctx REQUIRED)
+
 set_source_files_properties(mandelbrot.cpp PROPERTIES LANGUAGE HIP)
 set_source_files_properties(utils.cpp PROPERTIES LANGUAGE HIP)
 
@@ -37,6 +39,7 @@ target_sources(mandelbrot PRIVATE mandelbrot.cpp utils.cpp)
 target_compile_options(mandelbrot PRIVATE -W -Wall -Wextra -Wpedantic -Werror
                                           -ffp-contract=fast)
 target_include_directories(mandelbrot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(mandelbrot PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
 
 install(
     TARGETS mandelbrot

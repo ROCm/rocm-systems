@@ -1,53 +1,104 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 #
 # rocprofiler-systems tests
 #
 include_guard(GLOBAL)
 
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
+if(NOT ROCPROFSYS_USE_PYTESTS)
+    # TODO: Will be the default once TheRock is switched to CTests
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pytest.cmake)
+endif()
 
-# test groups
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-config-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pthread-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-user-api-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-mpi-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-kokkos-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-openmp-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-code-coverage-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-fork-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-time-window-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-attach-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rccl-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-overflow-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-annotate-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-causal-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-decode-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-nic-perf.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-hip-stream.cmake)
+# ------------------------------------------------------------------------------#
+#
+# Move test files to build directory
+#
+# ------------------------------------------------------------------------------#
 
-add_subdirectory(source)
+set(ROCPROFSYS_PYTHON_VALIDATION_FILES
+    ${CMAKE_CURRENT_LIST_DIR}/check_amd_smi_metrics.py
+    ${CMAKE_CURRENT_LIST_DIR}/validate-causal-json.py
+    ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
+    ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
+    ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py
+)
+
+set(ROCPROFSYS_TEST_SCRIPTS
+    ${CMAKE_CURRENT_LIST_DIR}/run-rocprof-sys-pid.sh
+    ${CMAKE_CURRENT_LIST_DIR}/get_default_nic.sh
+    ${CMAKE_CURRENT_LIST_DIR}/generate_papi_nic_events.sh
+    ${CMAKE_CURRENT_LIST_DIR}/run_rocprofiler_systems.py
+)
+
+set(_capchk_dir ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests)
+add_executable(
+    rocprof-sys-capchk
+    EXCLUDE_FROM_ALL
+    ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-capchk.cpp
+)
+set_target_properties(
+    rocprof-sys-capchk
+    PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+        RUNTIME_OUTPUT_DIRECTORY "${_capchk_dir}"
+)
+
+add_custom_target(
+    copy-test-files
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E make_directory
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_PYTHON_VALIDATION_FILES}
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/README.md
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/rocpd-validation-rules
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_TEST_SCRIPTS}
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
+)
+add_dependencies(copy-test-files rocprof-sys-capchk)
+
+# ------------------------------------------------------------------------------#
+#
+# Pytests install
+#
+# ------------------------------------------------------------------------------#
+
+if(ROCPROFSYS_INSTALL_TESTING)
+    # Python Validation scripts
+    install(
+        PROGRAMS ${ROCPROFSYS_PYTHON_VALIDATION_FILES}
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
+    install(
+        DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
+    # Scripts
+    install(
+        PROGRAMS ${ROCPROFSYS_TEST_SCRIPTS}
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
+    # Capability check binary
+    install(
+        TARGETS rocprof-sys-capchk
+        RUNTIME
+            DESTINATION share/rocprofiler-systems/tests
+            COMPONENT rocprofiler-systems-tests
+    )
+endif()

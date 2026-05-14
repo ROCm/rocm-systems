@@ -19,8 +19,9 @@ set(TOOL_OUTPUT_HEADERS
     generateStats.hpp
     generateRocpd.hpp
     generator.hpp
-    kernel_symbol_info.hpp
     host_symbol_info.hpp
+    kernel_symbol_info.hpp
+    kfd_info.hpp
     metadata.hpp
     node_info.hpp
     output_config.hpp
@@ -60,6 +61,7 @@ target_sources(rocprofiler-sdk-output-library PRIVATE ${TOOL_OUTPUT_SOURCES}
 target_link_libraries(
     rocprofiler-sdk-output-library
     PUBLIC rocprofiler-sdk::rocprofiler-sdk-rocpd-library
+           rocprofiler-sdk::rocprofiler-sdk-aqlprofile
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
             rocprofiler-sdk::rocprofiler-sdk-build-flags
             rocprofiler-sdk::rocprofiler-sdk-memcheck

@@ -1,6 +1,6 @@
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  * Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
  *
  * See LICENSE.txt for license information
@@ -11,18 +11,26 @@
 #include "rccl/rccl.h"
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <iostream>
+#include <pthread.h>
 #include <stdio.h>
+#include <string>
+#include <utility>
+#include <vector>
 #ifdef MPI_SUPPORT
 #    include "mpi.h"
 #endif
 #include "nccl1_compat.h"
 #include "timer.h"
-#include <cstring>
-#include <fstream>
-#include <iostream>
-#include <pthread.h>
-// Ensures backward compatibility for FP8 types in RCCL 2.24.3 and later
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 24, 3)
+
+// Ensures backward compatibility for FP8 datatypes
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 24, 3)
+#    define ncclFloat8e4m3 ncclFp8E4M3
+#    define ncclFloat8e5m2 ncclFp8E5M2
+#else
+// For newer RCCL versions, define old names in terms of new names
 #    define ncclFp8E4M3 ncclFloat8e4m3
 #    define ncclFp8E5M2 ncclFloat8e5m2
 #endif
@@ -114,7 +122,10 @@ struct testColl
                   int nranks);
     testResult_t (*runColl)(void* sendbuff, void* recvbuff, size_t count,
                             ncclDataType_t type, ncclRedOp_t op, int root,
-                            ncclComm_t comm, cudaStream_t stream);
+                            ncclComm_t comm, cudaStream_t stream, void* bias);
+    testResult_t (*getAlgoProtoChannels)(ncclComm_t comm, size_t count,
+                                         ncclDataType_t type, int* algo, int* proto,
+                                         int* nchannels);
 };
 extern struct testColl allReduceTest;
 extern struct testColl allGatherTest;
@@ -139,6 +150,7 @@ public:
     void addResult(int gpusPerRank, int ranksPerNode, int totalRanks, size_t numBytes,
                    int inPlace, double timeUsec, double algBw, double busBw,
                    int64_t wrongElts = -1);
+    void writeFile();
 
 private:
     bool isMainThread();
@@ -154,13 +166,14 @@ private:
         return std::make_pair("\"" + v + "\"", k);
     };
 
-    bool          _outputValid = false;
-    std::ofstream _out;
-    std::string   _outputFormat;
-    size_t        _numCycle = 0;
-    std::string   _collectiveName;
-    std::string   _typeName;
-    std::string   _opName;
+    bool                                                          _outputValid = false;
+    std::ofstream                                                 _out;
+    std::string                                                   _outputFormat;
+    size_t                                                        _numCycle = 0;
+    std::string                                                   _collectiveName;
+    std::string                                                   _typeName;
+    std::string                                                   _opName;
+    std::vector<std::vector<std::pair<std::string, std::string>>> _outputData;
 };
 
 struct testEngine
@@ -200,6 +213,7 @@ struct threadArgs
     ncclUniqueId  ncclId;
     ncclComm_t*   comms;
     cudaStream_t* streams;
+    void**        bias;
 
     void**  expected;
     size_t  expectedBytes;
@@ -233,11 +247,14 @@ extern testResult_t
 InitDataReduce(void* data, const size_t count, const size_t offset, ncclDataType_t type,
                ncclRedOp_t op, const uint64_t seed, const int nranks);
 extern testResult_t
+InitDataApplyBias(void* expected, void* bias, const size_t count, const size_t offset,
+                  ncclDataType_t type, ncclRedOp_t op);
+extern testResult_t
 InitData(void* data, const size_t count, size_t offset, ncclDataType_t type,
          ncclRedOp_t op, const uint64_t seed, const int nranks, const int rank);
-extern void
-AllocateBuffs(void** sendbuff, void** recvbuff, void** expected, void** expectedHost,
-              size_t nbytes, int nranks);
+extern testResult_t
+AllocateBuffs(void** sendbuff, size_t sendBytes, void** recvbuff, size_t recvBytes,
+              void** expected, size_t nbytes, void** bias);
 
 #include <unistd.h>
 
@@ -304,6 +321,29 @@ getHostHash(const char* hostname)
     return getHash(hostHash, strlen(hostHash));
 }
 
+#if NCCL_MAJOR >= 2 && RCCL_BFLOAT16 == 1
+#    define HAVE_BF16 1
+#else
+#    define HAVE_BF16 0
+#endif
+#if NCCL_MAJOR >= 2 && RCCL_FLOAT8 == 1
+#    define HAVE_FP8 1
+#else
+#    define HAVE_FP8 0
+#endif
+
+#if NCCL_MAJOR >= 2
+#    if defined(__CUDA_BF16_TYPES_EXIST__) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 10, 0)
+#        undef HAVE_BF16
+#        define HAVE_BF16 1
+#        if defined(__CUDA_FP8_TYPES_EXIST__) &&                                         \
+            NCCL_VERSION_CODE >= NCCL_VERSION(2, 24, 0)
+#            undef HAVE_FP8
+#            define HAVE_FP8 1
+#        endif
+#    endif
+#endif
+
 static size_t
 wordSize(ncclDataType_t type)
 {
@@ -313,14 +353,14 @@ wordSize(ncclDataType_t type)
 #if NCCL_MAJOR >= 2
         // case ncclInt8:
         case ncclUint8:
-#    if NCCL_MAJOR >= 2 && RCCL_FLOAT8 == 1
-        case ncclFp8E4M3:
-        case ncclFp8E5M2:
+#    if HAVE_FP8
+        case ncclFloat8e4m3:
+        case ncclFloat8e5m2:
 #    endif
 #endif
             return 1;
         case ncclHalf:
-#if NCCL_MAJOR >= 2 && RCCL_BFLOAT16 == 1
+#if HAVE_BF16
         case ncclBfloat16:
 #endif
             // case ncclFloat16:
@@ -426,5 +466,31 @@ extern int              is_main_proc;
 extern thread_local int is_main_thread;
 #define PRINT                                                                            \
     if(is_main_thread) printf
+
+typedef enum
+{
+    ncclFuncBroadcast         = 0,
+    ncclFuncReduce            = 1,
+    ncclFuncAllGather         = 2,
+    ncclFuncReduceScatter     = 3,
+    ncclFuncAllReduce         = 4,
+    ncclFuncAllReduceWithBias = 5,
+    ncclFuncSendRecv          = 6,
+    ncclFuncSend              = 7,
+    ncclFuncRecv              = 8,
+    ncclFuncAllToAllPivot     = 9,
+    ncclNumFuncs              = 10
+} ncclFunc_t;
+
+typedef ncclResult_t (*rcclTestsGetAlgoInfo_t)(struct ncclComm* comm, ncclFunc_t coll,
+                                               uint64_t count, ncclDataType_t dataType,
+                                               int collNetSupport, int nvlsSupport,
+                                               int numPipeOps, int* algo, int* protocol,
+                                               int* maxChannels);
+typedef ncclResult_t (*rcclTestsGetAlgoName_t)(int algo, const char** algoName);
+typedef ncclResult_t (*rcclTestsGetProtocolName_t)(int          protocol,
+                                                   const char** protocolName);
+
+#include "rccl_compat.h"
 
 #endif

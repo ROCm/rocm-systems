@@ -32,6 +32,7 @@ project(
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "core")
 set(PACKAGE_NAME ${PROJECT_NAME})
+string(REPLACE "-" "_" PACKAGE_NAME_UNDERSCORED ${PACKAGE_NAME})
 
 if(NOT PROJECT_IS_TOP_LEVEL)
     set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
@@ -39,7 +40,8 @@ endif()
 
 find_package(Git)
 
-if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+if(Git_FOUND AND (EXISTS "${PROJECT_SOURCE_DIR}/../../.git"
+                  OR EXISTS "${PROJECT_SOURCE_DIR}/.git"))
     execute_process(
         COMMAND ${GIT_EXECUTABLE} describe --tags
         OUTPUT_VARIABLE ROCPROFILER_SDK_GIT_DESCRIBE
@@ -119,8 +121,17 @@ add_subdirectory(source)
 include(rocprofiler_config_install)
 include(rocprofiler_config_install_roctx)
 include(rocprofiler_config_install_rocpd)
+include(rocprofiler_config_install_rocattach)
+include(rocprofiler_config_install_tests)
 
-if(ROCPROFILER_BUILD_TESTS)
+# ROCPROFILER_BUILD_INTEGRATION_TESTS is not a standard option. If not defined, set it as
+# a local (non-cached) variable equal to ROCPROFILER_BUILD_TESTS. If one only wants to
+# build and install unit tests, they can use -DROCPROFILER_BUILD_INTEGRATION_TESTS=OFF.
+if(NOT DEFINED ROCPROFILER_BUILD_INTEGRATION_TESTS)
+    set(ROCPROFILER_BUILD_INTEGRATION_TESTS ${ROCPROFILER_BUILD_TESTS})
+endif()
+
+if(ROCPROFILER_BUILD_TESTS AND ROCPROFILER_BUILD_INTEGRATION_TESTS)
     add_subdirectory(tests)
 endif()
 

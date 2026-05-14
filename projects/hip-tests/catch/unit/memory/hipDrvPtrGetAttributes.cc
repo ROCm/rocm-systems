@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
  *  Tests for hipDrvPointerGetAttributes API
@@ -42,17 +26,15 @@ constexpr size_t N{1000000};
 
 /* This testcase verifies Negative Scenarios of
  * hipDrvPointerGetAttributes API */
-TEST_CASE("Unit_hipDrvPtrGetAttributes_Negative") {
+HIP_TEST_CASE(Unit_hipDrvPtrGetAttributes_Negative) {
   HIP_CHECK(hipSetDevice(0));
   Nbytes = N * sizeof(int);
   int deviceId;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   int* A_d;
-  int* A_Pinned_h;
 
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_Pinned_h), Nbytes, hipHostMallocDefault));
   HIP_CHECK(hipGetDevice(&deviceId));
   unsigned int device_ordinal;
   int* dev_ptr{nullptr};
@@ -94,20 +76,20 @@ TEST_CASE("Unit_hipDrvPtrGetAttributes_Negative") {
         hipErrorInvalidValue);
   }
 #endif
+
+  HIP_CHECK(hipFree(A_d));
 }
 
 // Testcase verifies functional scenarios of hipDrvPointerGetAttributes API
-TEST_CASE("Unit_hipDrvPtrGetAttributes_Functional") {
+HIP_TEST_CASE(Unit_hipDrvPtrGetAttributes_Functional) {
   HIP_CHECK(hipSetDevice(0));
   Nbytes = N * sizeof(int);
   int deviceId;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   int* A_d;
-  int* A_Pinned_h;
 
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_Pinned_h), Nbytes, hipHostMallocDefault));
   HIP_CHECK(hipGetDevice(&deviceId));
 
   SECTION("Passing device attributes to device pointer") {
@@ -165,13 +147,20 @@ TEST_CASE("Unit_hipDrvPtrGetAttributes_Functional") {
     int device_ordinal;
     void* data[2];
     int* host_ptr;
+    int* pinned_host_ptr;
     data[0] = (&host_ptr);
     data[1] = (&device_ordinal);
+
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&pinned_host_ptr), Nbytes, hipHostMallocDefault));
+
     hipPointer_attribute attributes[] = {HIP_POINTER_ATTRIBUTE_HOST_POINTER,
                                          HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL};
     HIP_CHECK(hipDrvPointerGetAttributes(2, attributes, data,
-                                         reinterpret_cast<hipDeviceptr_t>(A_Pinned_h)));
-    REQUIRE(host_ptr == A_Pinned_h);
+                                         reinterpret_cast<hipDeviceptr_t>(pinned_host_ptr)));
+    REQUIRE(host_ptr == pinned_host_ptr);
     REQUIRE(device_ordinal == deviceId);
+    HIP_CHECK(hipFreeHost(pinned_host_ptr));
   }
+
+  HIP_CHECK(hipFree(A_d));
 }

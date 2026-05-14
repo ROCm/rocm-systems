@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <string>
 #include <map>
@@ -593,7 +579,7 @@ int getOptionDesc(std::string& options, size_t StartPos, bool IsShortForm, Optio
 }
 
 bool processOption(int OptDescTableIx, Options& Opts, const std::string& Value, bool IsPrefixOption,
-                   bool IsOffFlag, bool IsLC) {
+                   bool IsOffFlag) {
   OptionVariables* ovars = Opts.oVariables;
   OptionDescriptor* od = &OptDescTable[OptDescTableIx];
 
@@ -733,9 +719,7 @@ bool processOption(int OptDescTableIx, Options& Opts, const std::string& Value, 
 
       Opts.clcOptions.append(" -D__FAST_RELAXED_MATH__=1");
       Opts.clangOptions.push_back("-D__FAST_RELAXED_MATH__=1");
-      if (IsLC) {  // w/a for SWDEV-116690
-        Opts.clangOptions.push_back("-cl-fast-relaxed-math");
-      }
+      Opts.clangOptions.push_back("-cl-fast-relaxed-math");
 
       // fall-through to handle UnsafeMathOpt
     case OID_UnsafeMathOpt:
@@ -861,10 +845,8 @@ bool processOption(int OptDescTableIx, Options& Opts, const std::string& Value, 
       break;
 
     case OID_OptUseNative:
-      if (IsLC) {
-        Opts.llvmOptions.append(" -mllvm -amdgpu-use-native=");
-        Opts.llvmOptions.append(sval);
-      }
+      Opts.llvmOptions.append(" -mllvm -amdgpu-use-native=");
+      Opts.llvmOptions.append(sval);
       break;
 
     case OID_WFComma:
@@ -886,9 +868,7 @@ bool processOption(int OptDescTableIx, Options& Opts, const std::string& Value, 
             Opts.clangOptions.push_back(sval);
         } else if (((OptionIdentifier)OptDescTableIx) == OID_WBComma) {
           Opts.llvmOptions.append(" ");
-          if (IsLC) {
-            Opts.llvmOptions.append("-mllvm ");
-          }
+          Opts.llvmOptions.append("-mllvm ");
           Opts.llvmOptions.append(sval);
         } else if (((OptionIdentifier)OptDescTableIx) == OID_WHComma) {
           Opts.finalizerOptions.push_back(sval);
@@ -953,7 +933,7 @@ namespace amd {
 
 namespace option {
 
-bool parseAllOptions(std::string& options, Options& Opts, bool linkOptsOnly, bool isLC) {
+bool parseAllOptions(std::string& options, Options& Opts, bool linkOptsOnly) {
   Opts.origOptionStr = options;
   OptionVariables* ovars = Opts.oVariables;
   OptionDescriptor* od = OptDescTable;
@@ -1084,8 +1064,7 @@ bool parseAllOptions(std::string& options, Options& Opts, bool linkOptsOnly, boo
       if (!(OPTION_info(od) & OA_RUNTIME)) continue;
     }
 
-    if (!processOption(option_ndx, Opts, value, isPrefix_option, (isPrefix_mno || isPrefix_fno),
-                       isLC)) {
+    if (!processOption(option_ndx, Opts, value, isPrefix_option, (isPrefix_mno || isPrefix_fno))) {
       // Keep the optionsLog set in processOption().
       std::string tmpStr("Invalid option: ");
       tmpStr += options.substr(bpos, (pos == std::string::npos) ? pos : pos - bpos);
@@ -1240,8 +1219,7 @@ Options::Options()
       dumpFileRoot(),
       currKernelName(NULL),
       encryptCode(0),
-      MemoryHandles(),
-      libraryType_(amd::LibraryUndefined) {
+      MemoryHandles() {
   oVariables = new OptionVariables();
   ::memset(flags, 0, sizeof(flags));
 
@@ -1553,7 +1531,7 @@ bool Options::setOptionVariablesAs(const Options& other) {
   return true;
 }
 
-std::string Options::getStringFromStringVec(std::vector<std::string>& stringVec) {
+std::string Options::getStringFromStringVec(const std::vector<std::string>& stringVec) {
   const char* const delim = " ";
   std::ostringstream strstr;
   std::copy(stringVec.begin(), stringVec.end(), std::ostream_iterator<std::string>(strstr, delim));

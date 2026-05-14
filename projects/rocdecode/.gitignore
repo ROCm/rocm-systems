@@ -1,0 +1,6 @@
+build/
+samples/*/build
+.vscode/
+doxygen_output*
+samples/videoDecodeMultiFiles/example.txt
+api/rocdecode_version.h

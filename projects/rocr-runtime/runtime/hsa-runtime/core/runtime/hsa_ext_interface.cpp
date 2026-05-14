@@ -2,24 +2,24 @@
 //
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
-// 
+//
 // Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
-// 
+//
 // Developed by:
-// 
+//
 //                 AMD Research and AMD HSA Software Development
-// 
+//
 //                 Advanced Micro Devices, Inc.
-// 
+//
 //                 www.amd.com
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
 // deal with the Software without restriction, including without limitation
 // the rights to use, copy, modify, merge, publish, distribute, sublicense,
 // and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
+//
 //  - Redistributions of source code must retain the above copyright notice,
 //    this list of conditions and the following disclaimers.
 //  - Redistributions in binary form must reproduce the above copyright
@@ -29,7 +29,7 @@
 //    nor the names of its contributors may be used to endorse or promote
 //    products derived from this Software without specific prior written
 //    permission.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -63,7 +63,7 @@ ExtensionEntryPoints::ExtensionEntryPoints() {
 
 // Initialize Finalizer function table to be NULLs
 void ExtensionEntryPoints::InitFinalizerExtTable() {
-  
+
   // Initialize Version of Api Table
   finalizer_api.version.major_id = 0x00;
   finalizer_api.version.minor_id = 0x00;
@@ -79,7 +79,7 @@ void ExtensionEntryPoints::InitFinalizerExtTable() {
 
 // Initialize Image function table to be NULLs
 void ExtensionEntryPoints::InitImageExtTable() {
- 
+
   // Initialize Version of Api Table
   image_api.version.major_id = 0x00;
   image_api.version.minor_id = 0x00;
@@ -128,10 +128,10 @@ void ExtensionEntryPoints::InitAmdExtTable() {
 // begins hosting Api's from other extension libraries
 void ExtensionEntryPoints::UpdateAmdExtTable(decltype(::hsa_amd_image_create)* func_ptr) {
   assert(hsa_api_table().amd_ext_api.hsa_amd_image_create_fn ==
-             (decltype(hsa_amd_image_create)*)hsa_ext_null && 
+             (decltype(hsa_amd_image_create)*)hsa_ext_null &&
              "Duplicate load of extension import.");
   assert(hsa_internal_api_table().amd_ext_api.hsa_amd_image_create_fn ==
-             (decltype(hsa_amd_image_create)*)hsa_ext_null && 
+             (decltype(hsa_amd_image_create)*)hsa_ext_null &&
              "Duplicate load of extension import.");
   hsa_api_table().amd_ext_api.hsa_amd_image_create_fn = func_ptr;
   hsa_internal_api_table().amd_ext_api.hsa_amd_image_create_fn = func_ptr;
@@ -226,7 +226,7 @@ bool ExtensionEntryPoints::LoadFinalizer(std::string library_name) {
     return false;
   }
   libs_.push_back(lib);
-  
+
   void* ptr;
 
   ptr = os::GetExportAddress(lib, "hsa_ext_program_create_impl");
@@ -281,12 +281,12 @@ bool ExtensionEntryPoints::LoadFinalizer(std::string library_name) {
     finalizer_api.hsa_ext_program_finalize_fn =
         (decltype(::hsa_ext_program_finalize)*)ptr;
   }
-  
+
   // Initialize Version of Api Table
   finalizer_api.version.major_id = HSA_FINALIZER_API_TABLE_MAJOR_VERSION;
   finalizer_api.version.minor_id = sizeof(::FinalizerExtTable);
   finalizer_api.version.step_id = HSA_FINALIZER_API_TABLE_STEP_VERSION;
- 
+
   // Update handle of table of HSA extensions
   hsa_internal_api_table().CloneExts(&finalizer_api,
                                     core::HsaApiTable::HSA_EXT_FINALIZER_API_TABLE_ID);
@@ -474,6 +474,40 @@ hsa_status_t hsa_ext_image_create_with_layout(
                                access_permission, image_data_layout,
                                image_data_row_pitch, image_data_slice_pitch,
                                image);
+}
+
+hsa_status_t hsa_ext_image_data_get_info_v2(
+    hsa_agent_t agent, const hsa_ext_image_descriptor_v2_t* image_descriptor,
+    hsa_access_permission_t access_permission,
+    hsa_ext_image_data_info_t* image_data_info) {
+  return rocr::core::Runtime::runtime_singleton_->extensions_.image_api
+      .hsa_ext_image_data_get_info_v2_fn(agent, image_descriptor,
+                                         access_permission, image_data_info);
+}
+
+hsa_status_t hsa_ext_image_create_v2(hsa_agent_t agent,
+                                     const hsa_ext_image_descriptor_v2_t* image_descriptor,
+                                     const void* image_data,
+                                     hsa_access_permission_t access_permission,
+                                     hsa_ext_image_t* image) {
+  return rocr::core::Runtime::runtime_singleton_->extensions_.image_api
+      .hsa_ext_image_create_v2_fn(agent, image_descriptor, image_data,
+                                  access_permission, image);
+}
+
+hsa_status_t hsa_ext_image_destroy_v2(hsa_agent_t agent, hsa_ext_image_t image) {
+  return rocr::core::Runtime::runtime_singleton_->extensions_.image_api
+      .hsa_ext_image_destroy_v2_fn(agent, image);
+}
+
+hsa_status_t hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
+                                                  const hsa_ext_image_t* mipmap_array,
+                                                  uint32_t mip_level,
+                                                  const hsa_ext_image_descriptor_v2_t* image_descriptor,
+                                                  hsa_ext_image_t* level_view) {
+  return rocr::core::Runtime::runtime_singleton_->extensions_.image_api
+      .hsa_ext_image_mipmap_array_get_level_fn(agent, mipmap_array, mip_level, image_descriptor,
+                                               level_view);
 }
 
 hsa_status_t HSA_API hsa_ven_amd_pcs_iterate_configuration(

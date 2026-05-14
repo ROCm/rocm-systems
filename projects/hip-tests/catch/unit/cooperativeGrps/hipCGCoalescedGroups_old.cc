@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2020 - 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
@@ -250,7 +234,6 @@ void verifyResultsSimpleCoalescedGroups(int* hPtr, int* dPtr, int size) {
   }
 }
 
-
 static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
   hipError_t err;
   int blockSize = 1;
@@ -258,9 +241,13 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
 
   std::vector<unsigned int> cg_sizes = {1, 2, 3};
   for (auto i : cg_sizes) {
-    int numTiles = ((blockSize * threadsPerBlock) / i) / tileSz;
+    // Match device: only threads with id % cg_sizes == 0 participate in coalesced_threads()
+    int totalThreads = blockSize * threadsPerBlock;
+    int participatingThreads = (totalThreads + i - 1) / i;
+    // Kernel writes result[thread_rank()/tileSz]; partial tiles still have a leader, so use ceiling
+    int numTiles = (participatingThreads + tileSz - 1) / tileSz;
 
-    // numTiles = 0 when partitioning is possible. The below statement is to avoid
+    // numTiles = 0 when partitioning is not possible. The below statement is to avoid
     // out-of-bounds error and still evaluate failure case.
     numTiles = (numTiles == 0) ? 1 : numTiles;
 
@@ -268,22 +255,27 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
     // based on the sum of their respective thread ranks to use for verification
     int* expectedSum = new int[numTiles];
     int temp = 0, sum = 0;
-    for (int i = 1; i <= numTiles; i++) {
+    for (int j = 1; j <= numTiles; j++) {
       sum = temp;
-      temp = (((tileSz * i) - 1) * (tileSz * i)) / 2;
-      expectedSum[i - 1] = temp - sum;
+      temp = (((tileSz * j) - 1) * (tileSz * j)) / 2;
+      expectedSum[j - 1] = temp - sum;
+    }
+    // Last tile may be partial; expected sum = (size-1)*size/2 for that tile
+    if (participatingThreads % tileSz != 0 && numTiles > 0) {
+      int lastTileSize = participatingThreads - (numTiles - 1) * tileSz;
+      expectedSum[numTiles - 1] = (lastTileSize - 1) * lastTileSize / 2;
     }
 
     int* dResult = NULL;
-    HIPCHECK(hipMalloc(&dResult, sizeof(int) * numTiles));
+    HIP_CHECK(hipMalloc(&dResult, sizeof(int) * numTiles));
 
     int* globalMem = NULL;
     if (useGlobalMem) {
-      HIPCHECK(hipMalloc((void**)&globalMem, threadsPerBlock * sizeof(int)));
+      HIP_CHECK(hipMalloc((void**)&globalMem, threadsPerBlock * sizeof(int)));
     }
 
     int* hResult = NULL;
-    HIPCHECK(hipHostMalloc(&hResult, numTiles * sizeof(int), hipHostMallocDefault));
+    HIP_CHECK(hipHostMalloc(&hResult, numTiles * sizeof(int), hipHostMallocDefault));
     memset(hResult, 0, numTiles * sizeof(int));
 
     // Launch Kernel
@@ -308,13 +300,13 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
       }
     }
 
-    HIPCHECK(hipMemcpy(hResult, dResult, numTiles * sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(hResult, dResult, numTiles * sizeof(int), hipMemcpyDeviceToHost));
     verifyResultsSimpleCoalescedGroups(expectedSum, hResult, numTiles);
     // Free all allocated memory on host and device
-    HIPCHECK(hipFree(dResult));
-    HIPCHECK(hipHostFree(hResult));
+    HIP_CHECK(hipFree(dResult));
+    HIP_CHECK(hipHostFree(hResult));
     if (useGlobalMem) {
-      HIPCHECK(hipFree(globalMem));
+      HIP_CHECK(hipFree(globalMem));
     }
     delete[] expectedSum;
 
@@ -322,7 +314,7 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
   }
 }
 static void test_shfl_any_to_any() {
-  std::vector<unsigned int> cg_sizes = {1, 2, 3};
+  std::vector<unsigned int> cg_sizes = {1, 2};
   for (auto i : cg_sizes) {
     hipError_t err;
     int blockSize = 1;
@@ -464,14 +456,12 @@ static void test_shfl_broadcast() {
   }
 }
 
-TEST_CASE("Unit_coalesced_groups") {
+HIP_TEST_CASE(Unit_coalesced_groups) {
   // Use default device for validating the test
   int deviceId;
   HIP_CHECK(hipGetDevice(&deviceId));
   hipDeviceProp_t deviceProperties;
   HIP_CHECK(hipGetDeviceProperties(&deviceProperties, deviceId));
-
-  std::cout << "Now testing coalesced_groups" << '\n' << std::endl;
 
   int *data_to_filter, *filtered_data, nres = 0;
   int *d_data_to_filter, *d_filtered_data, *d_nres;

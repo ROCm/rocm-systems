@@ -1,3 +1,5 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 #ifndef INCLUDE_RDC_RDC_PRIVATE_H_
 #define INCLUDE_RDC_RDC_PRIVATE_H_
@@ -41,7 +43,7 @@ typedef struct {
  */
 typedef enum {
   RDCD_COMPONENT
-  //If needed later, add them one by one
+  // If needed later, add them one by one
 } mixed_component_t;
 
 /**
@@ -57,7 +59,8 @@ typedef enum {
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t get_mixed_component_version(rdc_handle_t p_rdc_handle, mixed_component_t component, mixed_component_version_t* p_mixed_compv);
+rdc_status_t get_mixed_component_version(rdc_handle_t p_rdc_handle, mixed_component_t component,
+                                         mixed_component_version_t* p_mixed_compv);
 
 #ifdef __cplusplus
 }

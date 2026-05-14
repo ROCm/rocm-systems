@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # ########################################################################################
 #
 # rocprofsys (Python)
@@ -129,14 +132,6 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
     rocprofiler_systems_configure_pytarget(libpyrocprofiler-systems-${_VERSION}
                                            ${_VERSION}
     )
-
-    if(ROCPROFSYS_USE_PYTHON)
-        rocprofiler_systems_python_console_script(
-            "${BINARY_NAME_PREFIX}-python" "rocprofsys"
-            VERSION ${_VERSION}
-            ROOT_DIR "${Python3_ROOT_DIR}"
-        )
-    endif()
     math(EXPR _INDEX "${_INDEX} + 1")
 endforeach()
 

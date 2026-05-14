@@ -166,7 +166,7 @@ class PcsRuntime {
 }
   // Map of pc sampling sessions indexed by hsa_ven_amd_pcs_t handle
   std::map<uint64_t, PcSamplingSession> pc_sampling_;
-  KernelMutex pc_sampling_lock_;
+  std::mutex pc_sampling_lock_;
   uint64_t pc_sampling_id_;
 
   DISALLOW_COPY_AND_ASSIGN(PcsRuntime);

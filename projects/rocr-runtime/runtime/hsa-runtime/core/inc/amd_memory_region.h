@@ -105,7 +105,8 @@ class MemoryRegion : public core::MemoryRegion {
   hsa_status_t Migrate(uint32_t flag, const void* ptr) const;
 
   hsa_status_t Lock(uint32_t num_agents, const hsa_agent_t* agents,
-                    void* host_ptr, size_t size, void** agent_ptr) const;
+                    void* host_ptr, size_t size, uint32_t flags,
+                                                      void** agent_ptr) const;
 
   hsa_status_t Unlock(void* host_ptr) const;
 
@@ -186,7 +187,7 @@ private:
 
   // Protects against concurrent allow_access calls to fragments of the same block by virtue of all
   // fragments of the block routing to the same MemoryRegion.
-  mutable KernelMutex access_lock_;
+  mutable std::mutex access_lock_;
 
   static const size_t kPageSize_;
 

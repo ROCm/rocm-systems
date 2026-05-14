@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
@@ -82,9 +69,11 @@ class eventQuery {
   hipError_t result_status = hipSuccess;
 };
 
+static size_t captureN() { return isQuickLevel() ? 10000 : 1000000; }
+
 template <typename T, typename F>
 void captureStreamAndLaunchGraph(F graphFunc, hipStreamCaptureMode mode, hipStream_t stream) {
-  constexpr size_t N = 1000000;
+  const size_t N = captureN();
   size_t Nbytes = N * sizeof(T);
 
   hipGraph_t graph{nullptr};
@@ -137,7 +126,7 @@ void captureStreamAndLaunchGraph(F graphFunc, hipStreamCaptureMode mode, hipStre
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_Functional") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_Functional) {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -182,7 +171,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_Parameters) {
   const auto stream_type = GENERATE(Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -195,6 +184,9 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_Parameters") {
     HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
     HIP_CHECK_ERROR(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal),
                     hipErrorIllegalState);
+    hipGraph_t graph;
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    HIP_CHECK(hipGraphDestroy(graph));
   }
   SECTION("Creating hipStream with invalid mode") {
     HIP_CHECK_ERROR(hipStreamBeginCapture(stream, hipStreamCaptureMode(-1)), hipErrorInvalidValue);
@@ -213,7 +205,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_Basic) {
   hipGraph_t graph{nullptr};
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
@@ -315,12 +307,13 @@ static void colligatedStrmCapture(const hipStream_t& stream1, const hipStream_t&
   HIP_CHECK(hipGraphExecDestroy(graphExec1));
   HIP_CHECK(hipGraphDestroy(graph2));
   HIP_CHECK(hipGraphDestroy(graph1));
+  HIP_CHECK(hipEventDestroy(event));
 }
 
 /* Local function for colligated stream capture functionality
  */
 static void colligatedStrmCaptureFunc(const hipStream_t& stream1, const hipStream_t& stream2) {
-  constexpr size_t N = 1000000;
+  const size_t N = captureN();
   size_t Nbytes = N * sizeof(int);
 
   hipGraph_t graph1{nullptr}, graph2{nullptr};
@@ -388,7 +381,7 @@ static void threadStrmCaptureFunc(hipStream_t stream, int* A_h, int* A_d, int* B
 /* Local Function for multithreaded tests
  */
 static void multithreadedTest(hipStreamCaptureMode mode) {
-  constexpr size_t N = 1000000;
+  const size_t N = captureN();
   size_t Nbytes = N * sizeof(int);
 
   hipGraph_t graph1{nullptr}, graph2{nullptr};
@@ -456,7 +449,7 @@ static void multithreadedTest(hipStreamCaptureMode mode) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Flags") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Flags) {
   const auto stream_flags1 = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   const auto stream_flags2 = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   StreamGuard stream_guard1(Streams::withFlags, stream_flags1);
@@ -482,7 +475,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Flags") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Priority") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Priority) {
   int minPriority = 0, maxPriority = 0;
   HIP_CHECK(hipDeviceGetStreamPriorityRange(&minPriority, &maxPriority));
   StreamGuard stream_guard1(Streams::withPriority, hipStreamDefault, minPriority);
@@ -507,7 +500,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Priority") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Flags") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Flags) {
   const auto stream_flags1 = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   const auto stream_flags2 = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   StreamGuard stream_guard1(Streams::withFlags, stream_flags1);
@@ -533,7 +526,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Flags") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Prio") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Prio) {
   int minPriority = 0, maxPriority = 0;
   HIP_CHECK(hipDeviceGetStreamPriorityRange(&minPriority, &maxPriority));
   StreamGuard stream_guard1(Streams::withPriority, hipStreamDefault, minPriority);
@@ -557,7 +550,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Prio") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_ColligatedStrmCaptureFunc") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_ColligatedStrmCaptureFunc) {
   StreamGuard stream_guard1(Streams::created);
   hipStream_t stream1 = stream_guard1.stream();
   StreamGuard stream_guard2(Streams::created);
@@ -578,7 +571,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_ColligatedStrmCaptureFunc") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_Multithreaded") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_Multithreaded) {
   const hipStreamCaptureMode captureMode = GENERATE(
       hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
   multithreadedTest(captureMode);
@@ -602,7 +595,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_Multithreaded") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_Multiplestrms") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_Multiplestrms) {
   StreamsGuard streams(3);
   hipGraph_t graphs[3];
 
@@ -653,6 +646,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_Multiplestrms") {
     REQUIRE(numNodes1 == 1);
     REQUIRE(numNodes2 == 1);
     REQUIRE(numNodes3 == 1);
+    HIP_CHECK(hipEventDestroy(event));
   }
 
   for (int i = 0; i < 3; i++) {
@@ -674,7 +668,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_Multiplestrms") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_CapturingFromWithinStrms") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_CapturingFromWithinStrms) {
   constexpr int INCREMENT_KERNEL_FINALEXP_VAL = 7;
 
   hipGraph_t graph{nullptr};
@@ -740,7 +734,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_CapturingFromWithinStrms") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Negative_DetectingInvalidCapture") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_DetectingInvalidCapture) {
   StreamsGuard streams(2);
   EventsGuard events(1);
   hipEvent_t event = events[0];
@@ -754,6 +748,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_DetectingInvalidCapture") {
   HIP_CHECK_ERROR(hipStreamBeginCapture(streams[1], hipStreamCaptureModeGlobal),
                   hipErrorIllegalState);
   HIP_CHECK(hipStreamEndCapture(streams[0], &graph));
+  HIP_CHECK(hipGraphDestroy(graph));
 }
 
 /**
@@ -768,7 +763,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_DetectingInvalidCapture") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_CapturingMultGraphsFrom1Strm") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_CapturingMultGraphsFrom1Strm) {
   hipGraph_t graphs[3];
 
   StreamGuard stream_guard(Streams::created);
@@ -817,7 +812,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_CapturingMultGraphsFrom1Strm") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Negative_CheckingSyncDuringCapture") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_CheckingSyncDuringCapture) {
   const hipStreamCaptureMode captureMode = GENERATE(
       hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
   const unsigned int stream_flag = GENERATE(hipStreamDefault, hipStreamNonBlocking);
@@ -846,6 +841,9 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_CheckingSyncDuringCapture") {
     HIP_CHECK(hipEventRecord(e, stream));
     HIP_CHECK_ERROR(hipEventQuery(e), hipErrorCapturedEvent);
   }
+
+  hipGraph_t graph;
+  HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph), hipErrorStreamCaptureInvalidated);
 }
 
 /**
@@ -864,7 +862,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_CheckingSyncDuringCapture") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapture") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapture) {
   const hipStreamCaptureMode captureMode = GENERATE(
       hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
   const unsigned int stream_flag = GENERATE(hipStreamDefault, hipStreamNonBlocking);
@@ -880,21 +878,40 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapt
   HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
   SECTION("Synchronize stream during capture") {
     streamSync func;
+    hipGraph_t gr;
     hipError_t expected = hipSuccess;
-    if (captureMode == hipStreamCaptureModeGlobal) expected = hipErrorStreamCaptureUnsupported;
+    hipError_t capture_err = hipSuccess;
+    if (captureMode == hipStreamCaptureModeGlobal) {
+      expected = hipErrorStreamCaptureUnsupported;
+      capture_err = hipErrorStreamCaptureInvalidated;
+    }
 
     std::thread t(std::ref(func), concurrent_stream);
     t.join();
     REQUIRE(func.result_status == expected);
+    HIP_CHECK_ERROR(hipStreamEndCapture(stream, &gr), capture_err);
+    if (capture_err == hipSuccess) {
+      HIP_CHECK(hipGraphDestroy(gr));
+    }
   }
   SECTION("Query stream during capture") {
     streamQuery func;
+    hipGraph_t gr;
     hipError_t expected = hipSuccess;
-    if (captureMode == hipStreamCaptureModeGlobal) expected = hipErrorStreamCaptureUnsupported;
+    hipError_t capture_err = hipSuccess;
+    if (captureMode == hipStreamCaptureModeGlobal) {
+      expected = hipErrorStreamCaptureUnsupported;
+      capture_err = hipErrorStreamCaptureInvalidated;
+    }
 
     std::thread t(std::ref(func), concurrent_stream);
     t.join();
     REQUIRE(func.result_status == expected);
+
+    HIP_CHECK_ERROR(hipStreamEndCapture(stream, &gr), capture_err);
+    if (capture_err == hipSuccess) {
+      HIP_CHECK(hipGraphDestroy(gr));
+    }
   }
   SECTION("Synchronize device during capture") {
     deviceSync func;
@@ -903,6 +920,8 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapt
     std::thread t(std::ref(func));
     t.join();
     REQUIRE(func.result_status == expected);
+    hipGraph_t gr;
+    HIP_CHECK_ERROR(hipStreamEndCapture(stream, &gr), hipErrorStreamCaptureInvalidated);
   }
   SECTION("Synchronize event during capture") {
     eventSync func;
@@ -911,6 +930,9 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapt
     std::thread t(std::ref(func), e);
     t.join();
     REQUIRE(func.result_status == expected);
+    hipGraph_t gr;
+    HIP_CHECK(hipStreamEndCapture(stream, &gr));
+    HIP_CHECK(hipGraphDestroy(gr));
   }
   SECTION("Query for an event during capture") {
     eventQuery func;
@@ -919,6 +941,9 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapt
     std::thread t(std::ref(func), e);
     t.join();
     REQUIRE(func.result_status == expected);
+    hipGraph_t gr;
+    HIP_CHECK(hipStreamEndCapture(stream, &gr));
+    HIP_CHECK(hipGraphDestroy(gr));
   }
 }
 
@@ -938,7 +963,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapt
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Negative_UnsafeCallsDuringCapture") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_UnsafeCallsDuringCapture) {
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
 
@@ -961,6 +986,9 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_UnsafeCallsDuringCapture") {
   SECTION("hipMemset during capture") {
     HIP_CHECK_ERROR(hipMemset(devMem.ptr(), 0, sizeof(int)), hipErrorStreamCaptureImplicit);
   }
+
+  hipGraph_t graph;
+  HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph), hipErrorStreamCaptureInvalidated);
 }
 
 /**
@@ -979,7 +1007,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_UnsafeCallsDuringCapture") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Negative_EndingCapwhenCapInProg") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_EndingCapwhenCapInProg) {
   hipGraph_t graph{nullptr};
 
   StreamsGuard streams_guard(2);
@@ -996,6 +1024,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_EndingCapwhenCapInProg") {
     HIP_CHECK(hipStreamWaitEvent(stream2, e, 0));
     dummyKernel<<<1, 1, 0, stream2>>>();
     HIP_CHECK_ERROR(hipStreamEndCapture(stream1, &graph), hipErrorStreamCaptureUnjoined);
+    HIP_CHECK(hipEventDestroy(e));
   }
   SECTION("End strm capture when forked strm still has operations") {
     EventsGuard events_guard(2);
@@ -1024,13 +1053,12 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_EndingCapwhenCapInProg") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_MultiGPU") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_MultiGPU) {
   int devcount = 0;
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return
   if (devcount < 2) {
-    SUCCEED("skipping the testcases as numDevices < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   hipStream_t* stream = reinterpret_cast<hipStream_t*>(malloc(devcount * sizeof(hipStream_t)));
   REQUIRE(stream != nullptr);
@@ -1073,8 +1101,11 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_MultiGPU") {
   // Destroy all device resources
   for (int dev = 0; dev < devcount; dev++) {
     HIP_CHECK(hipSetDevice(dev));
+    HIP_CHECK(hipFree(devMem[dev]));
     HIP_CHECK(hipGraphExecDestroy(graphExec[dev]));
     HIP_CHECK(hipStreamDestroy(stream[dev]));
+    HIP_CHECK(hipGraphDestroy(graph[dev]));
+    free(hostMem[dev]);
   }
   free(graphExec);
   free(hostMem);
@@ -1099,7 +1130,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_MultiGPU") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_nestedStreamCapture") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_nestedStreamCapture) {
   constexpr int INCREMENT_KERNEL_FINALEXP_VAL = 7;
 
   hipGraph_t graph{nullptr};
@@ -1161,7 +1192,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_nestedStreamCapture") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_streamReuse") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_streamReuse) {
   constexpr int increment_kernel_vals[3] = {7, 3, 5};
 
   hipGraph_t graphs[3];
@@ -1247,7 +1278,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_streamReuse") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_captureComplexGraph") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_captureComplexGraph) {
   constexpr int GRIDSIZE = 256;
   constexpr int BLOCKSIZE = 256;
   constexpr int CONST_KER1_VAL = 3;
@@ -1334,7 +1365,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_captureComplexGraph") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_captureEmptyStreams") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Positive_captureEmptyStreams) {
   hipGraph_t graph{nullptr};
 
   // Stream and event create
@@ -1371,7 +1402,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_captureEmptyStreams") {
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamBeginCapture_StreamSync_OngoingCapture") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_StreamSync_OngoingCapture) {
   hipStreamCaptureMode flag = hipStreamCaptureModeRelaxed;
   constexpr int GRIDSIZE = 1;
   constexpr int BLOCKSIZE = 512;
@@ -1497,7 +1528,7 @@ static void captureStrmThread(hipGraph_t* graph, int* Ah, int* Ad, int* Bh, int*
   }
 }
 
-TEST_CASE("Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread") {
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread) {
   constexpr int GRIDSIZE = 1;
   constexpr int BLOCKSIZE = 512;
   constexpr int VALUE1 = 7, VALUE2 = 11;
@@ -1524,6 +1555,8 @@ TEST_CASE("Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread") {
                              stream[1]));
     error = hipStreamSynchronize(stream[1]);
     REQUIRE(error == hipErrorStreamCaptureUnsupported);
+    hipGraph_t graph;
+    HIP_CHECK_ERROR(hipStreamEndCapture(stream[0], &graph), hipErrorStreamCaptureInvalidated);
   }
   SECTION("Capture Flag = hipStreamCaptureModeThreadLocal Single Threaded") {
     StreamsGuard stream(2);
@@ -1535,6 +1568,8 @@ TEST_CASE("Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread") {
                              stream[1]));
     error = hipStreamSynchronize(stream[1]);
     REQUIRE(error == hipErrorStreamCaptureUnsupported);
+    hipGraph_t graph;
+    HIP_CHECK_ERROR(hipStreamEndCapture(stream[0], &graph), hipErrorStreamCaptureInvalidated);
   }
   SECTION("Capture Flag = hipStreamCaptureModeGlobal Multithreaded") {
     captureStrmThread(&graph, Ah.host_ptr(), Ad.ptr(), Bh.host_ptr(), Bd.ptr(), BLOCKSIZE, GRIDSIZE,
@@ -1566,6 +1601,91 @@ TEST_CASE("Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread") {
     HIP_CHECK(hipGraphExecDestroy(graphExec));
     HIP_CHECK(hipGraphDestroy(graph));
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify behavior when event is recorded multiple times while capture is active
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_MultipleStreams_ReuseEvent) {
+  // Allocate streams
+  hipStream_t str0, str1, str2;
+  hipEvent_t ev0, ev1, ev2;
+  // Instantiate graph for str0
+  hipGraph_t graph0;
+  hipGraphExec_t graphExec0;
+  // Instantiate graph for str1
+  hipGraph_t graph1;
+  hipGraphExec_t graphExec1;
+
+  // Create streams
+  HIP_CHECK(hipStreamCreate(&str0));
+  HIP_CHECK(hipStreamCreate(&str1));
+  HIP_CHECK(hipStreamCreate(&str2));
+
+  // Create events
+  HIP_CHECK(hipEventCreate(&ev0));
+  HIP_CHECK(hipEventCreate(&ev1));
+  HIP_CHECK(hipEventCreate(&ev2));
+
+  // Enable capture on streams str0 and str1
+  HIP_CHECK(hipStreamBeginCapture(str0, hipStreamCaptureModeGlobal));
+  // str1 in relaxed mode so hipGraphInstantiate can be called on cuda without error
+  HIP_CHECK(hipStreamBeginCapture(str1, hipStreamCaptureModeRelaxed));
+
+  dummyKernel<<<1, 1, 0, str0>>>();
+  HIP_CHECK(hipPeekAtLastError());
+  HIP_CHECK(hipEventRecord(ev0, str0));
+  HIP_CHECK(hipEventRecord(ev1, str1));
+  HIP_CHECK(hipStreamWaitEvent(str2, ev0, 0));
+  dummyKernel<<<1, 1, 0, str2>>>();
+  HIP_CHECK(hipPeekAtLastError());
+  HIP_CHECK(hipEventRecord(ev2, str2));
+
+  HIP_CHECK(hipStreamWaitEvent(str0, ev2, 0));
+  dummyKernel<<<1, 1, 0, str0>>>();
+  HIP_CHECK(hipPeekAtLastError());
+
+  // Instantiate graph for str0
+  HIP_CHECK(hipStreamEndCapture(str0, &graph0));
+  HIP_CHECK(hipGraphInstantiate(&graphExec0, graph0, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphDestroy(graph0));
+
+  HIP_CHECK(hipStreamWaitEvent(str2, ev1, 0));
+  HIP_CHECK(hipEventRecord(ev2, str2));
+
+  HIP_CHECK(hipStreamWaitEvent(str1, ev2, 0));
+  dummyKernel<<<1, 1, 0, str1>>>();
+  HIP_CHECK(hipPeekAtLastError());
+
+  HIP_CHECK(hipStreamEndCapture(str1, &graph1));
+
+  // Launch graph0
+  HIP_CHECK(hipGraphLaunch(graphExec0, str0));
+  HIP_CHECK(hipStreamSynchronize(str0));
+  HIP_CHECK(hipGraphExecDestroy(graphExec0));
+
+  // Instantiate and launch graph for str1
+  HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(graphExec1, str1));
+  HIP_CHECK(hipStreamSynchronize(str1));
+  HIP_CHECK(hipGraphExecDestroy(graphExec1));
+  HIP_CHECK(hipGraphDestroy(graph1));
+
+  // Clean up resources
+  HIP_CHECK(hipEventDestroy(ev0));
+  HIP_CHECK(hipEventDestroy(ev1));
+  HIP_CHECK(hipEventDestroy(ev2));
+  HIP_CHECK(hipStreamDestroy(str0));
+  HIP_CHECK(hipStreamDestroy(str1));
+  HIP_CHECK(hipStreamDestroy(str2));
 }
 
 /**

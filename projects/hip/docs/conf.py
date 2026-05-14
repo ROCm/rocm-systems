@@ -53,13 +53,12 @@ suppress_warnings = ["etoc.toctree"]
 
 numfig = False
 
-exclude_patterns = [
-    "doxygen/mainpage.md",
-    "understand/glossary.md",
-    'how-to/debugging_env.rst',
-    "data/env_variables_hip.rst"
-]
+html_static_path = ["sphinx/static/css"]
+html_css_files = ["rocm_custom.css"]
 
-git_url = subprocess.check_output(['git', 'config', '--get', 'remote.origin.url']).strip().decode('ascii')
-if git_url.find("git:") != -1:
-    html_theme_options = {"repository_url": "https://github.com/ROCm/hip"}
+exclude_patterns = [
+    "./doxygen/mainpage.md",
+    "./understand/glossary.md",
+    './how-to/debugging_env.rst',
+    "./reference/env_variables"
+]

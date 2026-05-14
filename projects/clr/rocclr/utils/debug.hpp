@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef DEBUG_HPP_
 #define DEBUG_HPP_
@@ -67,6 +53,7 @@ enum LogMask {
   LOG_MEM_POOL = 262144,  //!< (0x40000) Memory pool allocation, including memory in graphs
   LOG_TS = 524288,        //!< (0x80000) Timestamp details
   LOG_COMGR = 1048576,    //!< (0x100000) Comgr path information print
+  LOG_KERN2 = 2097152,    //!< (0x200000) More detailed kernel info shader name
   LOG_ALWAYS = -1         //!< (0xFFFFFFFF) Log always even mask flag is zero
 };
 
@@ -86,6 +73,18 @@ extern void log_timestamped(LogLevel level, const char* file, int line, const ch
 extern void log_printf(LogLevel level, const char* file, int line, const char* format, ...);
 extern void log_printf(LogLevel level, const char* file, int line, uint64_t* start,
                        const char* format, ...);
+
+//! \brief Enable async logging (logs buffered in memory, flushed by background thread).
+extern void EnableAsyncLogging(bool enable);
+
+//! \brief Check if async logging is enabled.
+extern bool IsAsyncLoggingEnabled();
+
+//! \brief Force flush of pending async log entries (notify worker thread and wait).
+extern void FlushAsyncLogs();
+
+//! \brief Force flush of pending async log entries in the current thread (synchronous).
+extern void FlushAsyncLogsInCurrentThread();
 
 /*@}*/  // namespace amd
 }  // namespace amd
@@ -257,12 +256,5 @@ inline void warning(const char* msg) { amd::report_warning(msg); }
   ClPrint(amd::LOG_WARNING, amd::LOG_ALWAYS, format, ##__VA_ARGS__)
 #define LogPrintfInfo(format, ...) ClPrint(amd::LOG_INFO, amd::LOG_ALWAYS, format, ##__VA_ARGS__)
 
-#if (defined(DEBUG) || defined(DEV_LOG_ENABLE))
-#define DevLogPrintfError(format, ...) LogPrintfError(format, ##__VA_ARGS__)
-#define DevLogError(msg) LogError(msg)
-#else
-#define DevLogPrintfError(format, ...)
-#define DevLogError(msg)
-#endif
 
 #endif /*DEBUG_HPP_*/

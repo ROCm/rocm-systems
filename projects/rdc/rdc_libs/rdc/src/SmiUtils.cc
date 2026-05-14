@@ -235,14 +235,20 @@ amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
     return AMDSMI_STATUS_INVAL;
   }
 
-  amdsmi_gpu_metrics_t metrics;
-  memset(&metrics, 0, sizeof(metrics));
-  ret = get_metrics_info(proc_handle, &metrics);
+  amdsmi_accelerator_partition_profile_t profile;
+  memset(&profile, 0, sizeof(profile));
+  uint32_t partition_id{};
+
+  ret = amdsmi_get_gpu_accelerator_partition_profile(proc_handle, &profile, &partition_id);
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;
   }
 
-  *num_partition = metrics.num_partition;
+  if (partition_id != 0) {
+    return AMDSMI_STATUS_UNEXPECTED_DATA;
+  }
+
+  *num_partition = profile.num_partitions;
 
   return ret;
 }

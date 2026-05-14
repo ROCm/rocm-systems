@@ -1,30 +1,20 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "cache_manager.hpp"
+#include <cstdint>
+
+#include "core/agent_manager.hpp"
 #include "core/config.hpp"
-#include "core/trace_cache/storage_parser.hpp"
-#include "debug.hpp"
-#include "trace_cache/rocpd_post_processing.hpp"
+#include "core/output_file_registry.hpp"
+#include "core/trace_cache/data_types.hpp"
+#include "core/trace_cache/discovery.hpp"
+#include "core/trace_cache/post_processor.hpp"
+#include "library/runtime.hpp"
+#include "logger/debug.hpp"
+
+#include <memory>
+#include <unistd.h>
 
 namespace rocprofsys
 {
@@ -38,41 +28,66 @@ cache_manager::get_instance()
     return instance;
 }
 
-cache_manager::cache_manager()
-: m_postprocessing{ m_metadata }
-{
-    m_postprocessing.register_parser_callback(m_parser);
-}
-
 void
-cache_manager::post_process()
+cache_manager::post_process_bulk(output_file_registry& _output_registry,
+                                 progress::tracker&    _tracker)
 {
+    LOG_TRACE("Starting trace cache bulk post-processing");
+
+    if(!is_root_process())
+    {
+        LOG_DEBUG("Not root process, skipping bulk post-processing");
+        return;
+    }
+
     if(m_storage.is_running())
     {
-        ROCPROFSYS_WARNING(2, "Postprocessing called without previously shutting down "
-                              "cache storage. Calling shutdown explicitly..\n");
+        LOG_WARNING("Post-processing called without previously shutting down cache "
+                    "storage. Calling shutdown explicitly..");
         shutdown();
     }
 
-    if(get_use_rocpd())
-    {
-        ROCPROFSYS_PRINT(
-            "Generating rocpd with collected data. This may take a while..\n");
-    }
-    post_process_metadata();
-    m_parser.consume_storage();
-}
+    const auto root_pid = get_root_process_id();
+    LOG_DEBUG("Root process ID: {}", root_pid);
 
-void
-cache_manager::post_process_metadata()
-{
-    m_postprocessing.post_process_metadata();
+    const auto temp_directory_content =
+        discovery::list_dir_files(trace_cache::tmp_directory);
+    LOG_TRACE("Found {} files in temp directory", temp_directory_content.size());
+
+    const auto cache_files =
+        discovery::find_cache_files(root_pid, temp_directory_content);
+    LOG_DEBUG("Found {} cache file pairs to process", cache_files.size());
+
+    if(config::output_filtering::is_output_enabled_for_current_mpi_rank())
+    {
+        const data::enabled_formats_t enabled_formats;
+        enabled_formats.print();
+
+        auto processor_configs = post_processor::make_configs(cache_files, root_pid);
+
+        processor_configs.push_back(std::make_shared<data::processor_config_t>(
+            getpid(), root_pid, m_metadata,
+            std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
+
+        LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
+        post_processor processor{ _tracker, _output_registry };
+        processor.process(processor_configs, enabled_formats);
+
+        if(enabled_formats.is_perfetto_enabled() && get_merge_perfetto_files())
+            discovery::merge_perfetto_files();
+    }
+
+    discovery::clear(cache_files);
+
+    LOG_TRACE("Trace cache bulk post-processing completed");
 }
 
 void
 cache_manager::shutdown()
 {
+    LOG_DEBUG("Shutting down cache manager storage");
     m_storage.shutdown();
+    LOG_TRACE("Cache manager storage shutdown complete");
 }
 
 }  // namespace trace_cache

@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 
@@ -32,8 +20,8 @@ THE SOFTWARE.
   }
 
 __global__ static void addition(float* C, float* A, float* B, size_t N) {
-  size_t offset = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-  size_t stride = hipBlockDim_x * hipGridDim_x;
+  size_t offset = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t stride = blockDim.x * gridDim.x;
 
   for (size_t i = offset; i < N; i += stride) {
     C[i] = A[i] + B[i];
@@ -121,7 +109,9 @@ __global__ static void test_gws(uint* buf, uint bufSize, int64_t* tmpBuf, int64_
     tmpBuf[blockIdx.x] = sum;
   }
 
-  gg.sync();
+  // TODO: remove syncthreads with grid sync when compiler issue is fixed
+  // gg.sync();
+  __syncthreads();
 
   if (offset == 0) {
     for (uint i = 1; i < gridDim.x; ++i) {
@@ -139,7 +129,7 @@ static int cooperativeKernelTest() {
   int64_t* Ah;
 
   hipDeviceProp_t deviceProp;
-  hipGetDeviceProperties(&deviceProp, 0);
+  CHECK_RET_VAL(hipGetDeviceProperties(&deviceProp, 0));
 
   if (!deviceProp.cooperativeLaunch) {
     return testResult;
@@ -170,8 +160,8 @@ static int cooperativeKernelTest() {
     dimBlock.x = workgroups[i];
     /* Calculate the device occupancy to know how many blocks can be
        run concurrently */
-    hipOccupancyMaxActiveBlocksPerMultiprocessor(
-        &numBlocks, test_gws, dimBlock.x * dimBlock.y * dimBlock.z, dimBlock.x * sizeof(int64_t));
+    CHECK_RET_VAL(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+        &numBlocks, test_gws, dimBlock.x * dimBlock.y * dimBlock.z, dimBlock.x * sizeof(int64_t)));
     dimGrid.x = deviceProp.multiProcessorCount * std::min(numBlocks, 32);
     CHECK_RET_VAL(hipMalloc(reinterpret_cast<void**>(&dB), dimGrid.x * sizeof(int64_t)));
 

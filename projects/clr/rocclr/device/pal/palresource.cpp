@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/program.hpp"
 #include "platform/kernel.hpp"
@@ -265,13 +251,13 @@ GpuMemoryReference::~GpuMemoryReference() {
         device_.vgpus()[idx]->releaseMemory(this);
       }
     } else {
-      amd::ScopedLock l(gpu_->execution());
+      std::scoped_lock l(gpu_->execution());
       gpu_->releaseMemory(this);
     }
     if (device_.vgpus().size() != 0) {
       assert(device_.vgpus()[0] == device_.xferQueue() && "Wrong transfer queue!");
       // Lock the transfer queue, since it's not handled by ScopedLockVgpus
-      amd::ScopedLock k(device_.xferMgr().lockXfer());
+      std::scoped_lock k(*(device_.xferMgr().lockXfer()));
       device_.vgpus()[0]->releaseMemory(this);
     }
   }
@@ -407,7 +393,7 @@ Resource::~Resource() {
 }
 
 // ================================================================================================
-static uint32_t GetHSAILImageFormatType(const cl_image_format& format) {
+static uint32_t GetHSAImageFormatType(const cl_image_format& format) {
   static const uint32_t FormatType[] = {HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT8,
                                         HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT16,
                                         HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT8,
@@ -431,7 +417,7 @@ static uint32_t GetHSAILImageFormatType(const cl_image_format& format) {
 }
 
 // ================================================================================================
-static uint32_t GetHSAILImageOrderType(const cl_image_format& format) {
+static uint32_t GetHSAImageOrderType(const cl_image_format& format) {
   static const uint32_t OrderType[] = {HSA_EXT_IMAGE_CHANNEL_ORDER_R,
                                        HSA_EXT_IMAGE_CHANNEL_ORDER_A,
                                        HSA_EXT_IMAGE_CHANNEL_ORDER_RG,
@@ -569,8 +555,8 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
     }
 
     dev().iDev()->CreateTypedBufferViewSrds(1, &viewInfo, hwState_);
-    hwState_[8] = GetHSAILImageFormatType(desc().format_);
-    hwState_[9] = GetHSAILImageOrderType(desc().format_);
+    hwState_[8] = GetHSAImageFormatType(desc().format_);
+    hwState_[9] = GetHSAImageOrderType(desc().format_);
     hwState_[10] = static_cast<uint32_t>(desc().width_);
     hwState_[11] = 0;  // one extra reserved field in the argument
     return true;
@@ -741,8 +727,8 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   viewInfo.subresRange = ImgSubresRange;
   dev().iDev()->CreateImageViewSrds(1, &viewInfo, hwState_);
 
-  hwState_[8] = GetHSAILImageFormatType(desc().format_);
-  hwState_[9] = GetHSAILImageOrderType(desc().format_);
+  hwState_[8] = GetHSAImageFormatType(desc().format_);
+  hwState_[9] = GetHSAImageOrderType(desc().format_);
   hwState_[10] = static_cast<uint32_t>(desc().width_);
   hwState_[11] = 0;  // one extra reserved field in the argument
 
@@ -961,8 +947,8 @@ bool Resource::CreateInterop(CreateParams* params) {
       viewInfo.possibleLayouts.usages = Pal::LayoutShaderWrite;
       dev().iDev()->CreateImageViewSrds(1, &viewInfo, hwState_);
 
-      hwState_[8] = GetHSAILImageFormatType(desc().format_);
-      hwState_[9] = GetHSAILImageOrderType(desc().format_);
+      hwState_[8] = GetHSAImageFormatType(desc().format_);
+      hwState_[9] = GetHSAImageOrderType(desc().format_);
       hwState_[10] = static_cast<uint32_t>(desc().width_);
       hwState_[11] = 0;  // one extra reserved field in the argument
     }
@@ -983,8 +969,8 @@ bool Resource::CreateInterop(CreateParams* params) {
     }
 
     dev().iDev()->CreateTypedBufferViewSrds(1, &viewInfo, hwState_);
-    hwState_[8] = GetHSAILImageFormatType(desc().format_);
-    hwState_[9] = GetHSAILImageOrderType(desc().format_);
+    hwState_[8] = GetHSAImageFormatType(desc().format_);
+    hwState_[9] = GetHSAImageOrderType(desc().format_);
     hwState_[10] = static_cast<uint32_t>(desc().width_);
     hwState_[11] = 0;  // one extra reserved field in the argument
   } else {
@@ -1047,8 +1033,8 @@ bool Resource::CreateInterop(CreateParams* params) {
         (desc().format_.image_channel_data_type == CL_UNORM_INT24)) {
       hwState_[1] = (hwState_[1] & ~0x1ff00000) | 0x08d00000;
     }
-    hwState_[8] = GetHSAILImageFormatType(desc().format_);
-    hwState_[9] = GetHSAILImageOrderType(desc().format_);
+    hwState_[8] = GetHSAImageFormatType(desc().format_);
+    hwState_[9] = GetHSAImageOrderType(desc().format_);
     hwState_[10] = static_cast<uint32_t>(desc().width_);
     hwState_[11] = 0;  // one extra reserved field in the argument
   }
@@ -1393,7 +1379,7 @@ void Resource::free() {
   // and resource can be reused on another async queue without a wait on a busy operation
   if (wait) {
     if (memRef_->gpu_ == nullptr) {
-      amd::ScopedLock l(dev().vgpusAccess());
+      std::scoped_lock l(dev().vgpusAccess());
       // Release all memory objects on all virtual GPUs
       for (uint idx = 1; idx < dev().vgpus().size(); ++idx) {
         dev().vgpus()[idx]->waitForEvent(&events_[idx]);
@@ -1565,7 +1551,11 @@ bool Resource::partialMemCopyTo(VirtualGPU& gpu, const amd::Coord3D& srcOrigin,
     copyRegion.gpuMemoryDepthPitch =
         (srcOrigin[2]) ? srcOrigin[2]
                        : copyRegion.gpuMemoryRowPitch * copyRegion.imageExtent.height;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 955
     gpu.iCmd()->CmdCopyMemoryToImage(*iMem(), *dstResource.image_, imgLayout, 1, &copyRegion);
+#else
+    gpu.iCmd()->CmdCopyMemoryToImage(*iMem(), *dstResource.image_, imgLayout, 1, &copyRegion, 0);
+#endif
   } else if (!desc().buffer_ && dstResource.desc().buffer_) {
     Pal::MemoryImageCopyRegion copyRegion = {};
     uint32_t arraySliceIdx = img2Darray ? srcOrigin[2] : img1Darray ? srcOrigin[1] : 0;
@@ -1828,7 +1818,7 @@ void* Resource::gpuMemoryMap(size_t* pitch, uint flags, Pal::IGpuMemory* resourc
     return nullptr;
     //        return const_cast<Device&>(dev()).resMapLocal(*pitch, resource, flags);
   } else {
-    amd::ScopedLock lk(dev().lockPAL());
+    std::scoped_lock lk(dev().lockPAL());
     void* address;
     if (image_ != nullptr) {
       constexpr Pal::SubresId ImgSubresId = {0, 0, 0};
@@ -1919,7 +1909,7 @@ bool Resource::isModified(VirtualGPU& gpu) const {
 // ================================================================================================
 void Resource::palFree() const {
   if (desc().type_ == OGLInterop) {
-    amd::ScopedLock lk(dev().lockPAL());
+    std::scoped_lock lk(dev().lockPAL());
     dev().resGLFree(glPlatformContext_, glInteropMbRes_, glType_);
   }
   memRef_->release();
@@ -2073,6 +2063,10 @@ bool MemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
   createInfo.heaps[2] = Pal::GpuHeapGartUswc;
   createInfo.flags.peerWritable = device_->P2PAccessAllowed();
   createInfo.mallPolicy = static_cast<Pal::GpuMemMallPolicy>(device_->settings().mallPolicy_);
+  if (amd::IS_HIP && PAL_HIP_IPC_FLAG) {
+    // set interprocess for IPC memory support
+    createInfo.flags.interprocess = 1;
+  }
   GpuMemoryReference* mem_ref = GpuMemoryReference::Create(*device_, createInfo);
   if (mem_ref != nullptr) {
     // Workaround: some chunk memory are not guaranteed to be resident during initial allocation.
@@ -2117,6 +2111,10 @@ bool FineMemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
   createInfo.flags.useReservedGpuVa = (reserved_va != nullptr);
   createInfo.pReservedGpuVaOwner = reserved_va;
   createInfo.mallPolicy = Pal::GpuMemMallPolicy::Never;
+  if (amd::IS_HIP && PAL_HIP_IPC_FLAG) {
+    //set interprocess for IPC memory support
+    createInfo.flags.interprocess = 1;
+  }
   GpuMemoryReference* mem_ref = GpuMemoryReference::Create(*device_, createInfo);
   if ((mem_ref != nullptr) && InitAllocator(mem_ref)) {
     // Workaround: some chunk memory are not guaranteed to be resident during initial allocation.
@@ -2137,6 +2135,10 @@ bool FineUncachedMemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved
   createInfo.pReservedGpuVaOwner = reserved_va;
   createInfo.flags.gl2Uncached = true;
   createInfo.mallPolicy = Pal::GpuMemMallPolicy::Never;
+  if (amd::IS_HIP && PAL_HIP_IPC_FLAG) {
+    //set interprocess for IPC memory support
+    createInfo.flags.interprocess = 1;
+  }
   GpuMemoryReference* mem_ref = GpuMemoryReference::Create(*device_, createInfo);
   if ((mem_ref != nullptr) && InitAllocator(mem_ref)) {
     // Workaround: some chunk memory are not guaranteed to be resident during initial allocation.
@@ -2193,10 +2195,11 @@ GpuMemoryReference* MemorySubAllocator::Allocate(Pal::gpusize size, Pal::gpusize
 }
 
 // ================================================================================================
-bool MemorySubAllocator::Free(amd::Monitor* monitor, GpuMemoryReference* ref, Pal::gpusize offset) {
+bool MemorySubAllocator::Free(std::recursive_mutex& monitor, GpuMemoryReference* ref,
+                              Pal::gpusize offset) {
   bool release_mem = false;
   {
-    amd::ScopedLock l(monitor);
+    std::scoped_lock l(monitor);
     // Find if current memory reference is a chunk allocation
     auto it = heaps_.find(ref);
     if (it == heaps_.end()) {
@@ -2233,14 +2236,14 @@ bool ResourceCache::addGpuMemory(Resource::Descriptor* desc, GpuMemoryReference*
     // We do no sub allocate VA Range.
     result = false;
   } else if ((desc->type_ == Resource::Local) && !desc->SVMRes_) {
-    result = mem_sub_alloc_local_.Free(&lockCacheOps_, ref, offset);
+    result = mem_sub_alloc_local_.Free(lockCacheOps_, ref, offset);
   } else if ((desc->type_ == Resource::Local) && desc->SVMRes_) {
-    result = mem_sub_alloc_coarse_.Free(&lockCacheOps_, ref, offset);
+    result = mem_sub_alloc_coarse_.Free(lockCacheOps_, ref, offset);
   } else if (desc->SVMRes_) {
     if (desc->gl2CacheDisabled_) {
-      result = mem_sub_alloc_fine_uncached_.Free(&lockCacheOps_, ref, offset);
+      result = mem_sub_alloc_fine_uncached_.Free(lockCacheOps_, ref, offset);
     } else {
-      result = mem_sub_alloc_fine_.Free(&lockCacheOps_, ref, offset);
+      result = mem_sub_alloc_fine_.Free(lockCacheOps_, ref, offset);
     }
   }
 
@@ -2263,7 +2266,7 @@ bool ResourceCache::addGpuMemory(Resource::Descriptor* desc, GpuMemoryReference*
       // Copy the original desc to the cached version
       memcpy(descCached, desc, sizeof(Resource::Descriptor));
 
-      amd::ScopedLock l(&lockCacheOps_);
+      std::scoped_lock l(lockCacheOps_);
       // Add the current resource to the cache
       resCache_.push_front({descCached, ref});
       ref->gpu_ = nullptr;
@@ -2285,7 +2288,7 @@ GpuMemoryReference* ResourceCache::findGpuMemory(Resource::Descriptor* desc, Pal
                                                  Pal::gpusize alignment,
                                                  const Pal::IGpuMemory* reserved_va,
                                                  Pal::gpusize* offset) {
-  amd::ScopedLock l(&lockCacheOps_);
+  std::scoped_lock l(lockCacheOps_);
   GpuMemoryReference* ref = nullptr;
 
   // Check if the runtime can suballocate memory
@@ -2360,7 +2363,7 @@ void ResourceCache::removeLast() {
   std::pair<Resource::Descriptor*, GpuMemoryReference*> entry;
   {
     // Protect access to the global data
-    amd::ScopedLock l(&lockCacheOps_);
+    std::scoped_lock l(lockCacheOps_);
     if (resCache_.size() > 0) {
       entry = resCache_.back();
       resCache_.pop_back();

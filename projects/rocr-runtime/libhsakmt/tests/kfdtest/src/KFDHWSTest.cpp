@@ -124,19 +124,18 @@ timeout:
 
 }
 
-void RunTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDHWSTest::RunTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDHWSTest* pKKFDHWSTest = (KFDHWSTest*)pTestParamters->pTestObject;
-
-    pKKFDHWSTest->RunTest_GPU(gpuNode, 3, 13, 40);
+    RunTest_GPU(gpuNode, 3, 13, 40);
 }
 
 TEST_F(KFDHWSTest, MultiProcessOversubscribed) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(RunTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->RunTest(gpuNode);
+    }));
 
     TEST_END
 }

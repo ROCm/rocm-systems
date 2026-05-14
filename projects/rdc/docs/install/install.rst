@@ -87,8 +87,8 @@ Build RDC
 
    .. code-block:: shell
 
-    git clone https://github.com/ROCm/rdc
-    cd rdc
+    git clone https://github.com/ROCm/rocm-systems --recursive
+    cd rocm-systems/projects/rdc
 
 2. Configure the build:
 

@@ -1,22 +1,8 @@
-/* Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -96,6 +82,7 @@ struct MemoryTimestamp {
 
   std::unordered_set<hip::Stream*> safe_streams_;  //!< Safe streams for memory reuse
   hip::Event* event_ = nullptr;  //!< Last known HIP event, associated with the memory object
+  uint32_t refcount_ = 0;  //!< VA-mapping refcount: >0 means skip unmap/erase (graph caching)
 };
 
 class Heap : public amd::EmbeddedObject {
@@ -150,6 +137,17 @@ class Heap : public amd::EmbeddedObject {
   /// Get the size of all allocations in the heap
   uint64_t GetTotalSize() const { return total_size_; }
 
+  /// Get the total size of allocations with refcount > 0 (graph-cached, VA-mapped)
+  uint64_t GetRefcountedSize() const {
+    uint64_t size = 0;
+    for (const auto& it : allocations_) {
+      if (it.second.refcount_ > 0) {
+        size += it.first.first;
+      }
+    }
+    return size;
+  }
+
   /// Get the size of all allocations in the heap
   uint64_t GetMaxTotalSize() const { return max_total_size_; }
 
@@ -169,6 +167,21 @@ class Heap : public amd::EmbeddedObject {
   /// Checks if memory belongs to this heap
   bool IsActiveMemory(amd::Memory* memory) const {
     return (allocations_.find({memory->getSize(), memory}) != allocations_.end());
+  }
+
+  /// Increments refcount for the given memory allocation
+  void IncrementRefCount(amd::Memory* memory) {
+    if (auto it = allocations_.find({memory->getSize(), memory}); it != allocations_.end()) {
+      it->second.refcount_++;
+    }
+  }
+
+  /// Decrements refcount for the given memory allocation
+  void DecrementRefCount(amd::Memory* memory) {
+    if (auto it = allocations_.find({memory->getSize(), memory}); it != allocations_.end()) {
+      assert(it->second.refcount_ > 0);
+      it->second.refcount_--;
+    }
   }
 
   /// Enabled VM heap for memory, instead of direct allocations
@@ -215,10 +228,9 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
 
   MemoryPool(hip::Device* device, const hipMemPoolProps* props = nullptr, bool phys_mem = false)
       : VmHeapArray(device->devices()[0],
-                    [this]() -> amd::HostQueue& { return *device_->NullStream(); }),
+                    [this]() -> amd::HostQueue& { return *device_->NullStream(false); }),
         busy_heap_(device, *this),
         free_heap_(device, *this),
-        lock_pool_ops_(true),
         device_(device),
         shared_(nullptr),
         max_total_size_(0) {
@@ -240,7 +252,8 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
     }
     state_.interprocess_ = properties_.handleTypes != hipMemHandleTypeNone;
     // Check if VM heap can be enabled
-    if (DEBUG_HIP_MEM_POOL_VMHEAP && !state_.phys_mem_ && !state_.interprocess_) {
+    if (DEBUG_HIP_MEM_POOL_VMHEAP && AMD_DIRECT_DISPATCH &&
+        !state_.phys_mem_ && !state_.interprocess_) {
       state_.use_vm_heap_ = true;
       busy_heap_.EnableVmHeap();
       free_heap_.EnableVmHeap();
@@ -264,7 +277,8 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   void* AllocateMemory(size_t size, Stream* stream, void* dptr = nullptr);
 
   /// Frees memory by placing memory object with HIP event into free_heap_
-  bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr);
+  bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr,
+                  bool skip_event = false);
 
   /// Check if memory is active and belongs to the busy heap
   bool IsBusyMemory(amd::Memory* memory) const { return busy_heap_.IsActiveMemory(memory); }
@@ -284,7 +298,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
 
   /// Add a safe stream for quick looks-ups if event dependencies option is enabled
   void AddSafeStream(Stream* event_stream, Stream* wait_stream) {
-    amd::ScopedLock lock(lock_pool_ops_);
+    std::scoped_lock lock(lock_pool_ops_);
     if (EventDependencies()) {
       free_heap_.AddSafeStream(event_stream, wait_stream);
     }
@@ -327,6 +341,20 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   bool GraphInUse() const { return (state_.graph_in_use_) ? true : false; }
   void SetGraphInUse() { state_.graph_in_use_ = true; }
 
+  /// Increments refcount for the given memory in either busy or free heap
+  void IncrementRefCount(amd::Memory* memory) {
+    std::scoped_lock lock(lock_pool_ops_);
+    busy_heap_.IncrementRefCount(memory);
+    free_heap_.IncrementRefCount(memory);
+  }
+
+  /// Decrements refcount for the given memory in either busy or free heap
+  void DecrementRefCount(amd::Memory* memory) {
+    std::scoped_lock lock(lock_pool_ops_);
+    busy_heap_.DecrementRefCount(memory);
+    free_heap_.DecrementRefCount(memory);
+  }
+
  private:
   MemoryPool() = delete;
   MemoryPool(const MemoryPool&) = delete;
@@ -349,7 +377,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   } state_;
 
   hipMemPoolProps properties_;  //!< Properties of the memory pool
-  amd::Monitor lock_pool_ops_;  //!< Access to the pool must be lock protected
+  std::recursive_mutex lock_pool_ops_;  //!< Access to the pool must be lock protected
   std::map<hip::Device*, hipMemAccessFlags>
       access_map_;  //!< Map of access to the pool from devices
 

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
@@ -311,7 +298,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
 /**
  * Multiprocess device side malloc test.
  */
-TEST_CASE("Unit_deviceAllocation_Malloc_MultProcess") {
+HIP_TEST_CASE(Unit_deviceAllocation_Malloc_MultProcess) {
   auto res = testDeviceAllocMulProc(true);
   REQUIRE(res == true);
 }
@@ -319,7 +306,7 @@ TEST_CASE("Unit_deviceAllocation_Malloc_MultProcess") {
 /**
  * Multiprocess device side new test.
  */
-TEST_CASE("Unit_deviceAllocation_New_MultProcess") {
+HIP_TEST_CASE(Unit_deviceAllocation_New_MultProcess) {
   auto res = testDeviceAllocMulProc(false);
   REQUIRE(res == true);
 }
@@ -327,7 +314,7 @@ TEST_CASE("Unit_deviceAllocation_New_MultProcess") {
 /**
  * Multiprocess device side malloc, write and free test.
  */
-TEST_CASE("Unit_deviceAllocation_MallocFree_MultProcess") {
+HIP_TEST_CASE(Unit_deviceAllocation_MallocFree_MultProcess) {
   auto res = testDeviceMemMulProc(true);
   REQUIRE(res == true);
 }
@@ -335,7 +322,7 @@ TEST_CASE("Unit_deviceAllocation_MallocFree_MultProcess") {
 /**
  * Multiprocess device side new, write and delete test.
  */
-TEST_CASE("Unit_deviceAllocation_NewDelete_MultProcess") {
+HIP_TEST_CASE(Unit_deviceAllocation_NewDelete_MultProcess) {
   auto res = testDeviceMemMulProc(false);
   REQUIRE(res == true);
 }

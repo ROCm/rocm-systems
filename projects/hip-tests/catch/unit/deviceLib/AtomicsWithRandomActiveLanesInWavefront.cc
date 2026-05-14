@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 // Testcase Description:
 // Verifies working of following Global Atomic Operations:
@@ -186,7 +173,7 @@ bool verifyAdd_divValue(T* gpuData, int len, bool* activeLanes, T* divergentValu
     if (activeLanes[i]) val += divergentValue[i];
   }
   if (std::is_same<T, float>::value) {
-    REQUIRE(val == Approx(gpuData[0]));
+    REQUIRE(val == Catch::Approx(gpuData[0]));
     return true;
   }
   return val == gpuData[0];
@@ -199,7 +186,7 @@ bool verifySub_divValue(T* gpuData, int len, bool* activeLanes, T* divergentValu
     if (activeLanes[i]) val -= divergentValue[i];
   }
   if (std::is_same<T, float>::value) {
-    REQUIRE(val == Approx(gpuData[1]));
+    REQUIRE(val == Catch::Approx(gpuData[1]));
     return true;
   }
   return val == gpuData[1];
@@ -213,7 +200,7 @@ bool verifyMax_divValue(T* gpuData, int len, bool* activeLanes, T* divergentValu
   }
 
   if (std::is_same<T, float>::value) {
-    REQUIRE(val == Approx(gpuData[2]));
+    REQUIRE(val == Catch::Approx(gpuData[2]));
     return true;
   }
   return val == gpuData[2];
@@ -227,7 +214,7 @@ bool verifyMin_divValue(T* gpuData, int len, bool* activeLanes, T* divergentValu
   }
 
   if (std::is_same<T, float>::value) {
-    REQUIRE(val == Approx(gpuData[3]));
+    REQUIRE(val == Catch::Approx(gpuData[3]));
     return true;
   }
   return val == gpuData[3];
@@ -470,6 +457,7 @@ template <typename T> static void runIntTest() {
 
   // Cleanup memory
   free(hOData);
+  free(hIActiveLanes);
   HIP_CHECK(hipFree(dOData));
   HIP_CHECK(hipFree(dIActiveLanes));
 }
@@ -678,6 +666,8 @@ template <typename T> static void runDivIntTest() {
 
   // Cleanup memory
   free(hOData);
+  free(hIDivValues);
+  free(hIActiveLanes);
   HIP_CHECK(hipFree(dOData));
   HIP_CHECK(hipFree(dIActiveLanes));
   HIP_CHECK(hipFree(dIDivValues));
@@ -777,57 +767,27 @@ static void runDivFloatTest() {
 }
 
 /*
-This testcases perform the following scenario of atomic opearations on Uniform value
-for INT and UNSIGNED INT types
-  // 1. atomicAdd
-  // 2. atomicSub
-  // 3. atomicMax
-  // 4. atomicMin
-  // 5. atomicAnd
-  // 6. atomicOr
-  // 7. atomicXor
+This testcases perform the following scenario of atomic opearations on Uniform and Divergent values
+for INT, UNSIGNED INT, and FLOAT types:
+  Uniform and Divergent Integer (int, unsigned int):
+    // 1. atomicAdd
+    // 2. atomicSub
+    // 3. atomicMax
+    // 4. atomicMin
+    // 5. atomicAnd
+    // 6. atomicOr
+    // 7. atomicXor
+  Uniform and Divergent Float:
+    // 1. atomicAdd
+    // 2. atomicSub
+    // 3. atomicMax
+    // 4. atomicMin
 */
-TEST_CASE("Unit_AtomicsWithRandomActiveLanesInWavefront_UniformInteger") {
-  SECTION("test for int") { runIntTest<int>(); }
-  SECTION("test for unsigned int") { runIntTest<unsigned int>(); }
-}
-
-/*
-This testcases perform the following scenario of atomic opearations on Uniform value
-for FLOAT types
-  // 1. atomicAdd
-  // 2. atomicSub
-  // 3. atomicMax
-  // 4. atomicMin
-*/
-TEST_CASE("Unit_AtomicsWithRandomActiveLanesInWavefront_UniformFloat") {
-  SECTION("test for float") { runFloatTest(); }
-}
-
-/*
-This testcases perform the following scenario of atomic opearations on Divergent values
-for INT and UNSIGNED INT types
-  // 1. atomicAdd
-  // 2. atomicSub
-  // 3. atomicMax
-  // 4. atomicMin
-  // 5. atomicAnd
-  // 6. atomicOr
-  // 7. atomicXor
-*/
-TEST_CASE("Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentInteger") {
-  SECTION("test for int") { runDivIntTest<int>(); }
-  SECTION("test for unsigned int") { runDivIntTest<unsigned int>(); }
-}
-
-/*
-This testcases perform the following scenario of atomic opearations on Divergent values
-for FLOAT types
-  // 1. atomicAdd
-  // 2. atomicSub
-  // 3. atomicMax
-  // 4. atomicMin
-*/
-TEST_CASE("Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentFloat") {
-  SECTION("test for float") { runDivFloatTest(); }
+HIP_TEST_CASE(Unit_AtomicsWithRandomActiveLanesInWavefront) {
+  SECTION("Uniform Integer - int") { runIntTest<int>(); }
+  SECTION("Uniform Integer - unsigned int") { runIntTest<unsigned int>(); }
+  SECTION("Uniform Float") { runFloatTest(); }
+  SECTION("Divergent Integer - int") { runDivIntTest<int>(); }
+  SECTION("Divergent Integer - unsigned int") { runDivIntTest<unsigned int>(); }
+  SECTION("Divergent Float") { runDivFloatTest(); }
 }

@@ -4,16 +4,143 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.2.0 for ROCm 7.1
+## ROCm Systems Profiler 1.6.0 for ROCm 7.13.0
+
+### Added
+
+- GPU graphics and memory clock frequency metrics (`gfx_clock`, `mem_clock`) via AMD SMI, exposing `current_gfxclk` and `current_uclk` in MHz as PMC samples. Configure via `ROCPROFSYS_AMD_SMI_METRICS=gfx_clock,mem_clock`.
+- Kernel Fusion Driver (KFD) event tracing support to capture page faults, page migrations, queue evictions, GPU unmap events, and dropped events. Requires ROCProfiler-SDK 1.2.1 or later. Enable with `ROCPROFSYS_ROCM_DOMAINS=kfd_events`.
+- Support for pause and resume of profiling via `roctxProfilerPause` and `roctxProfilerResume`.
+- Support for selective region tracing via the `ROCPROFSYS_SELECTED_REGIONS` environment variable, limiting tracing to specified regions.
+- `--selected-regions` CLI argument to `rocprof-sys-sample`, `rocprof-sys-run`, and `rocprof-sys-instrument` for specifying selective region tracing from the command line.
+- Support for re-attaching to a previously profiled process. After detaching, `rocprof-sys-attach` can re-attach to the same PID for a new profiling session.
+- MPI-rank-based file output filtering feature controlled with two new CLI arguments: `--rank-filter-output` and `--rank-filter-id`.
+- JSON-based configurable preset system with `--preset=<name>` flag, replacing the old `--<preset-name>` flags. Presets are now loaded from JSON files in `source/bin/common/presets/`, making them extensible and exportable. Use `--list-presets` to see available presets and `--explain=<name>` for detailed preset information.
+- Domain flags for composable configuration: `--gpu[=metrics]`, `--rocm[=domains]`, `--cpu[=hz]`, `--parallel[=runtimes]`. Domain flags can be combined with presets to customize profiling without editing configuration files.
+- Configuration export via `--export-config[=file]` to save resolved settings as reusable JSON configuration files. Exported configs can be loaded back with `--preset=./config.json`.
+- Topic-based help system: `--help` now shows a compact summary with essential options and a list of help topics. Use `--help=<topic>` (e.g., `--help=sampling`, `--help=gpu`, `--help=tracing`) to see only relevant options. Use `--help=all` for the full option listing.
+- Post-run output summary during library finalization showing result file locations.
+- JSON schema file (`share/rocprofiler-systems/presets/schema.json`) for preset validation.
+- Documentation (`docs/how-to/instrumenting-rewriting-binary-application.rst`) describing what to do when Dyninst reports a "Failed to transform trace" error during instrumentation.
+- Progress bars during trace cache post-processing: perfetto generation (`sequential dispatch`) shows one bar per buffered_storage file in turn; rocpd generation (`multithreaded dispatch`) shows a single aggregate bar accumulating updates from all worker threads.
+- Per-stream Perfetto tracks (`HIP Activity Stream {N}`) for kernel dispatch, scratch memory, and memory copy events in the trace-cache path, matching the buffered tracing behavior. Controlled via `ROCPROFSYS_ROCM_GROUP_BY_QUEUE` (default: `false` — group by HIP stream).
+
+### Changed
+
+- `rocprof-sys-avail` no longer queries GPU devices or hardware counters unless `--hw-counters` or `--all` is requested, reducing startup time and allowing settings/component queries in environments without GPU/ROCm.
+- `rocprof-sys-instrument` diagnostic file dumps (available, instrumented, excluded, coverage, overlapping) are now gated behind the `--dump-info` flag instead of being generated unconditionally.
+- Preset flags changed from `--balanced` to `--preset=balanced` syntax. The old `--<preset-name>` flags are still supported and handled within `preset_registry`.
+- Removed the `ROCPROFSYS_USE_ROCM` CMake option. ROCm is now required for building the ROCm Systems Profiler.
+- `rocprof-sys-sample` - Aligned flags with `rocprof-sys-run`. Renamed `--freq`, `--cputime` and `--realtime` to `--sampling-freq`, `--sampling-cputime` and `--sampling-realtime`, respectively. Old flags are still handled as a part of backward compatibility.
+
+### Resolved issues
+
+- Fixed an issue where the `--rocm-domains` CLI option for `rocprof-sys-run` was not recognized.
+
+## ROCm Systems Profiler 1.5.0 for ROCm 7.12.0
+
+### Added
+
+- Per-GPU RCCL communication data counters (Send/Recv) in `rocpd` output with multi-GPU device attribution using `ncclCommCuDevice` API.
+- Presets profiles that configure the rocprofiler-system tools for common profiling scenarios, offering optimized configurations for specific use cases.
+- SDMA (System Direct Memory Access) utilization metrics support via AMD SMI, showing device-level SDMA usage percentage aggregated from all processes. Configure via `ROCPROFSYS_AMD_SMI_METRICS=sdma_usage`.
+- `rocprof-sys-attach` CLI tool for attaching to and profiling running processes via rocprofiler-sdk rocattach API (experimental).
+- Support for OpenSHMEM API tracing via `ROCPROFSYS_USE_SHMEM=ON` configuration setting.
+
+### Changed
+
+- Simplify categorizing like pmc_info events by removing the "_<idx>" from the "symbol" field. ie., "JpegAct_0" -> "JpegAct".
+- Added `libhsa-runtime64.so` and `libomp.so` to the internal library exclusion list for runtime instrumentation to prevent instrumenting of runtime library internals.
+- RCCL implementation refactored with `production_pmc_registrar` for improved testability and separation of concerns.
+- Unsupported RCCL datatypes now gracefully return 0 with `LOG_WARNING` instead of aborting profiler, allowing continued profiling with newer RCCL versions.
+- Added AI NIC support.
+
+### Resolved issues
+
+- Fixed an issue where JPEG engine activity PMC events were not being collected for MI35X systems. Only the first 32 JPEG engines were being collected.
+- Fixed MPI perfetto trace file merging when using trace cache mode with `ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON`.
+  Previously, each MPI rank would produce a separate trace file; now all ranks' traces are correctly merged into a single output file.
+
+## ROCm Systems Profiler 1.4.0 for ROCm 7.11.0
+
+### Added
+
+- Support for UCX (Unified Communication X) API tracing.
+- Profiling and metric collection capabilities for XGMI and PCIe data.
+- How-to document for XGMI and PCIe sampling and monitoring.
+- Documentation for `--trace-legacy` / `-L` CLI flag for direct tracing mode.
+- Added dependency to `spdlog` library.
+- Added environment variable `ROCPROFSYS_LOG_LEVEL` which control level of logging.
+  - Available log levels: `critical`, `error`, `warning`, `info`(default), `debug`, `trace` and `off`.
+- Added cmake option `ROCPROFSYS_GFX_TARGETS` which controls GFX targets used to build example binaries.
+
+### Changed
+
+- `ROCPROFSYS_TRACE` now controls whether perfetto tracing is enabled (default: true when tracing mode).
+- `ROCPROFSYS_TRACE_LEGACY` controls whether to use legacy direct mode (true) or cached mode (false, default).
+- By default, tracing uses deferred trace generation (cached mode) for improved performance and minimal runtime overhead.
+- `--trace` / `-T` CLI flag enables tracing with cached mode by default.
+- `--trace-legacy` / `-L` CLI flag enables legacy direct mode for tracing.
+- Changed thread storage allocation from a hard-coded 4096-element array to a compile-time computed size derived from the ROCPROFSYS_MAX_THREADS configuration flag.
+- Changed logging module to use `spdlog` library.
+
+### Resolved issues
+
+- Fixed application termination with segfault when thread creation surpasses ROCPROFSYS_MAX_THREADS configuration.
+- Fixed how `roctxRange` markers are handled in the `rocpd` output. The "push" and "pop" markers are now shown as a single event.
+
+### Removed
+
+- `ROCPROFSYS_TRACE_CACHED` environment variable (tracing now uses cached mode by default when `ROCPROFSYS_TRACE_LEGACY=false`).
+
+### Deprecated
+
+- `ROCPROFSYS_USE_PERFETTO` environment variable (use `ROCPROFSYS_TRACE`).
+- `ROCPROFSYS_VERBOSE` and `ROCPROFSYS_DEBUG` environment variables (use `ROCPROFSYS_LOG_LEVEL`).
+
+## ROCm Systems Profiler 1.3.0 for ROCm 7.2.0
+
+### Added
+
+- Added a `ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS` configuration setting to set the flush period for Perfetto traces. The default value is 10000 ms (10 seconds).
+- Added fetching of the `rocpd` schema from rocprofiler-sdk-rocpd
+
+### Changed
+
+- Improved Fortran main function detection to ensure `rocprof-sys-instrument` uses the Fortran program main function instead of the C wrapper.
+
+### Resolved issues
+
+- Fixed a crash when running `rocprof-sys-python` with ROCPROFSYS_USE_ROCPD enabled.
+- Fixed an issue where kernel/memory-copy events could appear on the wrong Perfetto track (e.g., queue track when stream grouping was requested) because _group_by_queue state leaked between records.
+
+## ROCm Systems Profiler 1.2.1 for ROCm 7.1.1
+
+### Resolved issues
+
+- Fixed an issue of OpenMP Tools (OMPT) events, GPU performance counters, VA-API, MPI, and host events failing to be collected in the `rocpd` output.
+
+## ROCm Systems Profiler 1.2.0 for ROCm 7.1.0
 
 ### Added
 
 - ``ROCPROFSYS_ROCM_GROUP_BY_QUEUE`` configuration setting to allow grouping of events by hardware queue, instead of the default grouping.
-- Support for rocPD database output with the `ROCPROFSYS_USE_ROCPD` configuration setting.
+- Support for `rocpd` database output with the `ROCPROFSYS_USE_ROCPD` configuration setting.
+- Support for profiling PyTorch workloads using the `rocpd` output database.
+- Support for tracing OpenMP API in Fortran applications.
+- An error warning that is triggered if the profiler application fails due to SELinux enforcement being enabled. The warning includes steps to disable SELinux enforcement.
 
-## Changed
+### Changed
 
 - Updated the grouping of "kernel dispatch" and "memory copy" events in Perfetto traces. They are now grouped together by HIP Stream rather than separately and by hardware queue.
+- Updated PAPI module to v7.2.0b2.
+- ROCprofiler-SDK is now used for tracing OMPT API calls.
+
+## ROCm Systems Profiler 1.1.1 for ROCm 7.0.2
+
+### Resolved issues
+
+- Fixed an issue where ROC-TX ranges were displayed as two separate events instead of a single spanning event.
 
 ## ROCm Systems Profiler 1.1.0 for ROCm 7.0
 

@@ -37,19 +37,29 @@
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <stdio.h>
 #include <strings.h>
 #include "fmm.h"
 #include <dlfcn.h>
 #include <string.h>
 
 int (*hsakmt_fn_amdgpu_device_get_fd)(HsaAMDGPUDeviceHandle device_handle);
+int (*hsakmt_fn_amdgpu_device_initialize2)(int fd,
+					 bool deduplicate_device,
+					 uint32_t *major_version,
+					 uint32_t *minor_version,
+					 HsaAMDGPUDeviceHandle *device_handle);
 
 static const char kfd_device_name[] = "/dev/kfd";
 static const char kfd_udmabuf_device_name[] = "/dev/udmabuf";
 static pid_t parent_pid = -1;
 int hsakmt_debug_level;
 bool hsakmt_forked;
+
+HsaKFDContext hsakmt_primary_kfd_ctx = {
+	.fd = -1,
+	.hsakmt_is_primary_ctx = true,
+	.hsakmt_is_svm_api_supported = false,
+};
 
 /* hsakmt_is_forked_child detects when the process has forked since the last
  * time this function was called. We cannot rely on pthread_atfork
@@ -99,16 +109,20 @@ static void child_fork_handler(void)
  * The topology information is duplicated from the parent is valid
  * in the child process so it is not cleared
  */
-static void clear_after_fork(void)
+static void clear_after_fork(HsaKFDContext *ctx)
 {
-	hsakmt_clear_process_doorbells();
-	hsakmt_clear_events_page();
-	hsakmt_fmm_clear_all_mem();
-	hsakmt_destroy_device_debugging_memory();
-	if (hsakmt_kfd_fd) {
-		close(hsakmt_kfd_fd);
-		hsakmt_kfd_fd = -1;
-	}
+	hsakmt_clear_process_doorbells(ctx);
+	hsakmt_clear_events_page(ctx);
+	hsakmt_fmm_clear_all_mem(ctx);
+	hsakmt_destroy_device_debugging_memory(ctx);
+
+	int fd = ctx->fd;
+	if (fd >= 0) {
+		/* Don't close the memfd when using model - FFM owns its lifecycle */
+		if (!hsakmt_use_model)
+			close(fd);
+		hsakmt_kfdcontext_clear_context(ctx);
+ 	}
 	if (hsakmt_udmabuf_dev_fd > 0) {
 		close(hsakmt_udmabuf_dev_fd);
 		hsakmt_udmabuf_dev_fd = -1;
@@ -147,10 +161,13 @@ static HSAKMT_STATUS init_vars_from_env(void)
 	if (envvar)
 		hsakmt_zfb_support = atoi(envvar);
 
+	envvar = getenv("PM4_TARGET_XCC");
+	if (envvar)
+		hsakmt_pm4_target_xcc = atoi(envvar);
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
+HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
 {
 	HSAKMT_STATUS result;
 	int fd = -1;
@@ -166,7 +183,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 	 * belong to the parent
 	 */
 	if (hsakmt_is_forked_child())
-		clear_after_fork();
+		clear_after_fork(&hsakmt_primary_kfd_ctx);
 
 	if (hsakmt_kfd_open_count == 0) {
 		static bool atfork_installed = false;
@@ -177,6 +194,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 		else
 			pr_info("amdgpu_device_get_fd is available %p\n", hsakmt_fn_amdgpu_device_get_fd);
 
+		hsakmt_fn_amdgpu_device_initialize2 = dlsym(RTLD_DEFAULT, "amdgpu_device_initialize2");
+		if ((error = dlerror()) != NULL)
+			pr_err("amdgpu_device_initialize2 is not available: %s\n", error);
+		else
+			pr_info("amdgpu_device_initialize2 is available %p\n", hsakmt_fn_amdgpu_device_initialize2);
+
 		result = init_vars_from_env();
 		if (result != HSAKMT_STATUS_SUCCESS)
 			goto open_failed;
@@ -184,15 +207,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 		// Check if we are using the hsakmtmodel and setup initial state
 		model_init_env_vars();
 
-		if (hsakmt_kfd_fd < 0 && !hsakmt_use_model) {
+		if (hsakmt_primary_kfd_ctx.fd < 0 && !hsakmt_use_model) {
 			fd = open(kfd_device_name, O_RDWR | O_CLOEXEC);
 
 			if (fd == -1) {
 				result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
 				goto open_failed;
 			}
-
-			hsakmt_kfd_fd = fd;
+			hsakmt_kfdcontext_init_context(fd, &hsakmt_primary_kfd_ctx);
 		}
 
 		init_page_size();
@@ -214,19 +236,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 			pr_debug("udmabuf is not enabled\n");
 
 		useSvmStr = getenv("HSA_USE_SVM");
-		hsakmt_is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0"));
-		if(!hsakmt_use_model)
-			result = hsakmt_topology_sysfs_get_system_props(&sys_props);
-		
+		hsakmt_primary_kfd_ctx.hsakmt_is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0"));
+		result = hsakmt_topology_sysfs_get_system_props(&hsakmt_primary_kfd_ctx, &sys_props);
+
 		if (result != HSAKMT_STATUS_SUCCESS)
 			goto topology_sysfs_failed;
 
 		hsakmt_kfd_open_count = 1;
 
-		if (hsakmt_init_device_debugging_memory(sys_props.NumNodes) != HSAKMT_STATUS_SUCCESS)
+		if (hsakmt_init_device_debugging_memory(&hsakmt_primary_kfd_ctx, sys_props.NumNodes) != HSAKMT_STATUS_SUCCESS)
 			pr_warn("Insufficient Memory. Debugging unavailable\n");
 
-		hsakmt_init_counter_props(sys_props.NumNodes);
+		hsakmt_init_counter_props(&hsakmt_primary_kfd_ctx, sys_props.NumNodes);
+		*pCtx = &hsakmt_primary_kfd_ctx;
 
 		if (!atfork_installed) {
 			/* Atfork handlers cannot be uninstalled and
@@ -241,6 +263,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 		}
 	} else {
 		hsakmt_kfd_open_count++;
+		*pCtx = &hsakmt_primary_kfd_ctx;
 		result = HSAKMT_STATUS_KERNEL_ALREADY_OPENED;
 	}
 
@@ -256,7 +279,7 @@ open_failed:
 	return result;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void)
+HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFDCtx(void)
 {
 	HSAKMT_STATUS result;
 
@@ -264,13 +287,96 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void)
 
 	if (hsakmt_kfd_open_count > 0)	{
 		if (--hsakmt_kfd_open_count == 0) {
-			hsakmt_destroy_counter_props();
-			hsakmt_destroy_device_debugging_memory();
+			hsakmt_destroy_counter_props(&hsakmt_primary_kfd_ctx);
+			hsakmt_destroy_device_debugging_memory(&hsakmt_primary_kfd_ctx);
+			hsakmt_fmm_clear_all_aperture(&hsakmt_primary_kfd_ctx);
+
+			if (hsakmt_use_model && hsakmt_primary_kfd_ctx.fd >= 0) {
+				close(hsakmt_primary_kfd_ctx.fd);
+				hsakmt_kfdcontext_clear_context(&hsakmt_primary_kfd_ctx);
+
+			}
 		}
 
 		result = HSAKMT_STATUS_SUCCESS;
 	} else
 		result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
+
+	pthread_mutex_unlock(&hsakmt_mutex);
+
+	return result;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
+{
+	HsaKFDContext *pCtx = NULL;
+	return hsaKmtOpenKFDCtx(&pCtx);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void)
+{
+	return hsaKmtCloseKFDCtx();
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtOpenSecondaryKFDCtx(HsaKFDContext **pCtx)
+{
+	HSAKMT_STATUS result = HSAKMT_STATUS_SUCCESS;
+	int kfd_fd = -1;
+	HsaKFDContext *new_ctx = NULL;
+
+	CHECK_KFD_OPEN();
+	pthread_mutex_lock(&hsakmt_mutex);
+
+	kfd_fd = open(kfd_device_name, O_RDWR | O_CLOEXEC);
+	if (kfd_fd < 0) {
+		result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
+	} else {
+		struct kfd_ioctl_create_process_args args = {};
+		if (hsakmt_ioctl(kfd_fd, AMDKFD_IOC_CREATE_PROCESS, &args)) {
+			goto create_process_failed;
+		} else {
+			new_ctx = calloc(1, sizeof(HsaKFDContext));
+			if (!new_ctx) {
+				result = HSAKMT_STATUS_NO_MEMORY;
+				goto create_process_failed;
+			}
+			hsakmt_kfdcontext_init_context(kfd_fd, new_ctx);
+			new_ctx->hsakmt_is_primary_ctx = false;
+			new_ctx->hsakmt_is_svm_api_supported = false;
+
+			*pCtx = new_ctx;
+		}
+	}
+
+	pthread_mutex_unlock(&hsakmt_mutex);
+	return result;
+
+create_process_failed:
+	if (kfd_fd >= 0)
+		close(kfd_fd);
+
+	pthread_mutex_unlock(&hsakmt_mutex);
+	return result;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCloseSecondaryKFDCtx(HsaKFDContext *ctx)
+{
+	HSAKMT_STATUS result = HSAKMT_STATUS_INVALID_PARAMETER;
+
+	pthread_mutex_lock(&hsakmt_mutex);
+
+	if (ctx && !ctx->hsakmt_is_primary_ctx && ctx->fd >= 0) {
+		hsakmt_clear_events_page(ctx);
+		hsakmt_destroy_counter_props(ctx);
+		hsakmt_destroy_device_debugging_memory(ctx);
+		hsakmt_fmm_clear_all_aperture(ctx);
+
+		close(ctx->fd);
+		hsakmt_kfdcontext_clear_context(ctx);
+		free(ctx);
+
+		result = HSAKMT_STATUS_SUCCESS;
+	}
 
 	pthread_mutex_unlock(&hsakmt_mutex);
 

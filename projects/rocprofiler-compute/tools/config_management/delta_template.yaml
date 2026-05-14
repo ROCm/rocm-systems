@@ -1,0 +1,164 @@
+# Delta YAML Template
+# Use this template when creating delta files for architecture config changes
+#
+# Filename: <target_arch>_diff.yaml (e.g., gfx950_diff.yaml)
+# Location: src/rocprof_compute_soc/analysis_configs/gfx<arch>/config_delta/
+#
+# All three sections (Addition, Deletion, Modification) are REQUIRED
+# Use empty list [] if no changes in a section
+
+Addition:
+  # Add new metrics, tables, or descriptions
+  # Example: Adding a new metric to existing table
+  - Panel Config:
+      id: 700  # Panel ID (matches config YAML)
+      title: Wavefront  # Panel title
+    metric_tables:
+      - metric_table:
+          id: 701  # Table ID
+          title: Wavefront Launch Stats  # Table title
+          metrics:
+            - New Metric Name:  # Metric name
+                avg: AVG(formula)  # All metric fields
+                min: MIN(formula)
+                max: MAX(formula)
+                unit: Units
+    metric_descriptions:
+      New Metric Name:
+        plain: "Plain text description (REQUIRED)"
+        rst: "RST description with :ref:`markup <link>` (optional, defaults to plain)"
+
+  # Example: Adding entire new table
+  - Panel Config:
+      id: 1100
+      title: Compute Units - Compute Pipeline
+    metric_tables:
+      - metric_table:
+          id: 1104  # New table ID
+          title: New Table Name
+          metric:  # Use 'metric' (not 'metrics') for full table
+            Metric One:
+              avg: AVG(formula)
+              unit: Units
+            Metric Two:
+              avg: AVG(formula)
+              unit: Units
+    metric_descriptions:
+      Metric One:
+        plain: "Description for metric one"
+      Metric Two:
+        plain: "Description for metric two"
+
+Deletion:
+  # Remove metrics, tables, or descriptions
+  # Example: Deleting specific metrics from table
+  - Panel Config:
+      id: 700
+      title: Wavefront
+    metric_tables:
+      - metric_table:
+          id: 701
+          title: Wavefront Launch Stats
+          metrics:
+            - Old Metric:  # Just the metric name and any field
+                avg: AVG(old_formula)  # Fields don't matter for deletion
+    metric_descriptions:
+      Old Metric:
+        plain: "Old description"  # Description also deleted with metric
+
+  # Example: Deleting entire table
+  - Panel Config:
+      id: 1100
+      title: Compute Units - Compute Pipeline
+    metric_tables:
+      - metric_table:
+          id: 1104  # Table to delete
+          title: Table Name
+          metric:  # Use 'metric' for full table deletion
+            Metric One:
+              avg: AVG(formula)
+
+Modification:
+  # Modify existing metrics or descriptions
+  # Only include fields that are changing
+  - Panel Config:
+      id: 700
+      title: Wavefront
+    metric_tables:
+      - metric_table:
+          id: 701
+          title: Wavefront Launch Stats
+          metrics:
+            - Existing Metric:
+                avg: AVG(new_formula)  # Only changed fields
+                # Other fields (min, max, unit) remain unchanged
+    metric_descriptions:
+      Existing Metric:
+        plain: "Updated plain text description"
+        rst: "Updated RST with **formatting**"
+
+  # Example: Updating only description, not metric
+  - Panel Config:
+      id: 1100
+      title: Compute Units - Compute Pipeline
+    metric_descriptions:
+      Some Metric:
+        plain: "New description text"
+        # rst will default to copy of plain if not specified
+
+# ============================================================================
+# IMPORTANT NOTES
+# ============================================================================
+#
+# 1. Panel Config:
+#    - id: Panel ID from the config YAML (e.g., 700)
+#    - title: Panel title (must match)
+#
+# 2. Metric Tables:
+#    - Use "metrics:" (list) when adding/deleting/modifying specific metrics
+#    - Use "metric:" (dict) when adding/deleting entire table
+#    - id: Table ID within panel (e.g., 701)
+#
+# 3. Metric Descriptions:
+#    - plain: Required - stored in config YAMLs
+#    - rst: Optional - if omitted, RST will be same as plain
+#    - Used for both docs and per-arch description files
+#
+# 4. Units:
+#    - Units are part of metric definition, NOT descriptions
+#    - Change units by modifying metric fields
+#    - Units auto-sync to description files
+#
+# 5. Multi-line strings:
+#    - Use | for literal multi-line
+#    - Use > for folded multi-line
+#
+# Example multi-line:
+#   description:
+#     plain: |
+#       This is line one.
+#       This is line two.
+#       This is line three.
+#     rst: |
+#       This is line one with :ref:`reference <link>`.
+#       This is line two.
+#
+# 6. Delta Naming:
+#    - Must be named: <source_arch>_diff.yaml
+#    - For gfx950 changes: gfx950_diff.yaml
+#    - Located in: gfx<arch>/config_delta/
+#
+# 7. RST Syntax:
+#    - :ref:`text <link>` - Cross-reference
+#    - :doc:`text <document>` - Document link
+#    - **bold** - Bold text
+#    - *italic* - Italic text
+#    - ``code`` - Inline code
+#    - `external link <url>`_ - External link
+#
+# 8. Common Mistakes:
+#    - Forgetting to include all three sections
+#    - Using 'metric' instead of 'metrics' or vice versa
+#    - Forgetting plain description (it's required!)
+#    - Wrong panel/table IDs
+#    - Inconsistent indentation (use 2 spaces)

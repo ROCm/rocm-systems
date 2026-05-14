@@ -1,28 +1,10 @@
-// MIT License
-//
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "common.hpp"
+#include "core/demangler.hpp"
 #include "defines.hpp"
 
 #include <timemory/components/types.hpp>
@@ -50,8 +32,8 @@ struct component_categories
         };
         (void) _cleanup;  // unused but set if sizeof...(Tp) == 0
 
-        TIMEMORY_FOLD_EXPRESSION(_v.emplace(TIMEMORY_JOIN(
-            "::", "component", _cleanup(tim::try_demangle<Tp>(), "tim::"))));
+        ROCPROFSYS_FOLD_EXPRESSION(_v.emplace(TIMEMORY_JOIN(
+            "::", "component", _cleanup(rocprofsys::utility::demangle<Tp>(), "tim::"))));
     }
 
     void operator()(std::set<std::string>& _v) const
@@ -67,7 +49,7 @@ struct component_categories<void>
     template <size_t... Idx>
     void operator()(std::set<std::string>& _v, std::index_sequence<Idx...>) const
     {
-        TIMEMORY_FOLD_EXPRESSION(component_categories<comp::enumerator_t<Idx>>{}(_v));
+        ROCPROFSYS_FOLD_EXPRESSION(component_categories<comp::enumerator_t<Idx>>{}(_v));
     }
 
     void operator()(std::set<std::string>& _v) const

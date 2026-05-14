@@ -1,0 +1,115 @@
+name: ROCR Runtime WSL
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "projects/rocr-runtime/**"
+      - "projects/clr/**"
+      - "projects/hip/**"
+      - "projects/hip-tests/**"
+      - ".github/workflows/rocr-runtime-wsl.yml"
+  push:
+    branches:
+      - develop
+    paths:
+      - "projects/rocr-runtime/**"
+      - "projects/clr/**"
+      - "projects/hip/**"
+      - "projects/hip-tests/**"
+      - ".github/workflows/rocr-runtime-wsl.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  rocr-runtime-wsl-test:
+    name: ROCR Runtime WSL Test
+    runs-on: rocr-runtime-libhsakmt-wsl
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: |
+            projects/rocr-runtime
+          sparse-checkout-cone-mode: true
+
+      - name: Configure MSVC and Windows SDK
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+      - name: Detect Windows SDK version
+        id: detect-sdk
+        shell: powershell
+        run: |
+          $sdkPath = "C:\Program Files (x86)\Windows Kits\10\Include"
+          if (Test-Path $sdkPath) {
+            $versions = Get-ChildItem $sdkPath -Directory | Sort-Object Name -Descending
+            $latestVersion = $versions[0].Name
+            echo "Found Windows SDK version: $latestVersion"
+            echo "SDK_VERSION=$latestVersion" >> $env:GITHUB_OUTPUT
+            echo "SDK_BASE_PATH=$sdkPath\$latestVersion" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "Windows SDK not found at $sdkPath"
+            exit 1
+          }
+
+      - name: Set up WSL with Ubuntu
+        uses: Vampire/setup-wsl@6a8db447be7ed35f2f499c02c6e60ff77ef11278 # v6.0.0
+        with:
+          distribution: Ubuntu-24.04
+          update: true
+          additional-packages: build-essential cmake ninja-build
+
+      - name: Copy repository into WSL
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          # Copy the checked out repository to WSL home directory
+          cp -r /mnt/c/a/rocm-systems/rocm-systems ~/rocm-systems
+          ls -la ~/rocm-systems/projects/rocr-runtime/
+
+      - name: Verify WSL environment
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          echo "Testing WSL environment..."
+          cmake --version
+          ninja --version
+          echo "ROCR Runtime project location:"
+          ls -la ~/rocm-systems/projects/rocr-runtime/
+
+      - name: Build libhsakmt with Windows SDK
+        shell: wsl-bash {0}
+        env:
+          WIN_SDK_VERSION: ${{ steps.detect-sdk.outputs.SDK_VERSION }}
+        run: |
+          set -euo pipefail
+          cd ~/rocm-systems/projects/rocr-runtime/libhsakmt
+          
+          echo "Building libhsakmt in WSL with Windows SDK..."
+          
+          # Use the detected Windows SDK version from the host
+          WIN_SDK_VERSION="${WIN_SDK_VERSION:-10.0.26100.0}"
+          export win_sdk="/mnt/c/Program Files (x86)/Windows Kits/10/Include/${WIN_SDK_VERSION}/"
+          
+          echo "Using Windows SDK version: ${WIN_SDK_VERSION}"
+          echo "Windows SDK path: ${win_sdk}"
+          
+          # Verify the Windows SDK is accessible from WSL
+          if [ ! -d "${win_sdk}" ]; then
+            echo "ERROR: Windows SDK not found at ${win_sdk}"
+            echo "Available SDK versions:"
+            ls -la "/mnt/c/Program Files (x86)/Windows Kits/10/Include/" || echo "SDK directory not accessible"
+            exit 1
+          fi
+          
+          # Build the library
+          mkdir -p build
+          cd build
+          cmake .. -G Ninja -DWIN_SDK="${win_sdk}/shared"
+          ninja
+          
+          echo "libhsakmt build completed successfully!"

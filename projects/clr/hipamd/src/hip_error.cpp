@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 
@@ -191,6 +177,10 @@ const char* ihipGetErrorName(hipError_t hip_error) {
       return "hipErrorStreamCaptureWrongThread";
     case hipErrorGraphExecUpdateFailure:
       return "hipErrorGraphExecUpdateFailure";
+    case hipErrorInvalidChannelDescriptor:
+      return "hipErrorInvalidChannelDescriptor";
+    case hipErrorInvalidTexture:
+      return "hipErrorInvalidTexture";
     case hipErrorTbd:
       return "hipErrorTbd";
     default:
@@ -341,10 +331,16 @@ const char* ihipGetErrorString(hipError_t hip_error) {
     case hipErrorGraphExecUpdateFailure:
       return "the graph update was not performed because it included changes which violated "
              "constraints specific to instantiated graph update";
+    case hipErrorInvalidChannelDescriptor:
+      return "invalid resource description of texture passed to the api";
+    case hipErrorInvalidTexture:
+      return "invalid texture object passed to the api";
     case hipErrorRuntimeMemory:
       return "runtime memory call returned error";
     case hipErrorRuntimeOther:
       return "runtime call other than memory returned error";
+    case hipErrorInvalidClusterSize:
+      return "a kernel launch error has occurred due to cluster misconfiguration";
     case hipErrorUnknown:
     default:
       return "unknown error";

@@ -1,28 +1,15 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
 #include <vulkan/vulkan.h>
 
 #ifdef _WIN64
-
+#define NOMINMAX
 #include <Windows.h>
 #include <winnt.h>
 #include <VersionHelpers.h>
@@ -182,6 +169,11 @@ class VulkanTest {
 
   VkQueue GetQueue() const { return _queue; }
 
+  void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
+                    VkBuffer& buffer, VkDeviceMemory& buffer_memory, bool external = false);
+
+  void CopyBuffer(VkBuffer src_buffer, VkBuffer dst_buffer, VkDeviceSize size);
+
  private:
   void CreateInstance();
 
@@ -300,14 +292,16 @@ VulkanTest::MappedBuffer<T> VulkanTest::CreateMappedStorage(uint32_t count,
   }
 
   VkExportMemoryAllocateInfoKHR vulkan_export_memory_allocate_info = {};
+#ifdef _WIN64
+  WindowsSecurityAttributes winSecurityAttributes;
+  VkExportMemoryWin32HandleInfoKHR vulkanExportMemoryWin32HandleInfoKHR = {};
+#endif
+
   if (external) {
     vulkan_export_memory_allocate_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR;
     vulkan_export_memory_allocate_info.handleTypes = _mem_handle_type;
 
 #ifdef _WIN64
-    WindowsSecurityAttributes winSecurityAttributes;
-
-    VkExportMemoryWin32HandleInfoKHR vulkanExportMemoryWin32HandleInfoKHR = {};
     vulkanExportMemoryWin32HandleInfoKHR.sType =
         VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
     vulkanExportMemoryWin32HandleInfoKHR.pNext = NULL;
@@ -321,6 +315,7 @@ VulkanTest::MappedBuffer<T> VulkanTest::CreateMappedStorage(uint32_t count,
         ? &vulkanExportMemoryWin32HandleInfoKHR
         : NULL;
 #endif
+
     allocate_info.pNext = &vulkan_export_memory_allocate_info;
   }
 

@@ -45,6 +45,8 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
 - HSA
 - Pthreads
 - MPI
+- RCCL
+- UCX
 - Kokkos-Tools (KokkosP)
 - OpenMP-Tools (OMPT)
 
@@ -64,9 +66,11 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
   - Utilization
   - VCN Utilization
   - JPEG Utilization
+  - XGMI interconnect metrics (link width, link speed, read/write data)
+  - PCIe metrics (link width, link speed, bandwidth)
 
 > [!NOTE]
-> The availability of VCN and JPEG engine utilization depends on device support for different ASICs. If unsupported, all values for VCN_ACTIVITY and JPEG_ACTIVITY will be reported as N/A in the output of `amd-smi metric --usage`.
+> The availability of VCN, JPEG, XGMI, and PCIe metrics depends on device support, system topology, and GPU architecture. If unsupported, all values will be reported as N/A in the output of `amd-smi metric --usage`.
 
 ### CPU metrics
 
@@ -89,21 +93,6 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
 ## Quick start
 
 ### Installation
-
-- Visit [Releases](https://github.com/ROCm/rocprofiler-systems/releases) page
-- Select appropriate installer (recommendation: `.sh` scripts do not require super-user priviledges unlike the DEB/RPM installers)
-  - If targeting a ROCm application, find the installer script with the matching ROCm version
-  - If you are unsure about your Linux distro, check `/etc/os-release` or use the `rocprofiler-systems-install.py` script
-
-If the above recommendation is not desired, download the `rocprofiler-systems-install.py` and specify `--prefix <install-directory>` when
-executing it. This script will attempt to auto-detect a compatible OS distribution and version.
-If ROCm support is desired, specify `--rocm X.Y` where `X` is the ROCm major version and `Y`
-is the ROCm minor version, e.g. `--rocm 6.2`.
-
-```console
-wget https://github.com/ROCm/rocprofiler-systems/releases/latest/download/rocprofiler-systems-install.py
-python3 ./rocprofiler-systems-install.py --prefix /opt/rocprofiler-systems --rocm 6.2
-```
 
 See the [ROCm Systems Profiler installation guide](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/install/install.html) for detailed information.
 
@@ -184,6 +173,14 @@ source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
 > git config --global --add safe.directory /home/development/external/timemory
 > ```
 
+Install the Python test dependencies (requires Python 3.8+):
+
+```shell
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
 Then, use the following command to start automated testing:
 
 ```shell
@@ -232,6 +229,69 @@ rocprof-sys-sample --help
 rocprof-sys-sample <rocprof-sys-options> -- <exe> <exe-options>
 rocprof-sys-sample -f 1000 -- ls -la
 ```
+
+### Preset Profiling Modes
+
+Instead of manually configuring numerous options, use preset modes optimized for common workloads:
+
+**General Purpose:**
+
+- **`--balanced`** - Balanced profiling with moderate overhead and comprehensive data
+- **`--profile-only`** - Profiling-only mode without tracing (flat profile, minimal overhead)
+- **`--detailed`** - Comprehensive profiling with full system metrics
+
+**Workload-Specific:**
+
+- **`--trace-hpc`** - Optimized for HPC/MPI/OpenMP applications
+  - Automatically enables OMPT, MPIP, and relevant hardware counters
+- **`--workload-trace`** - Optimized for AI/ML/GPU workloads which are supported by ROCm stack
+  - Automatically enables GPU tracing, RCCL, and increases buffer sizes
+- **`--trace-gpu`** - GPU workload analysis with host functions, MPI, and device activity
+- **`--trace-openmp`** - OpenMP offload workloads with HSA domains
+- **`--profile-mpi`** - MPI communication latency profiling
+- **`--trace-hw-counters`** - Hardware counter collection during execution
+  - Automatically enables tracing VALU utilization
+
+**API Tracing:**
+
+- **`--sys-trace`** - Comprehensive system API tracing
+- **`--runtime-trace`** - Runtime API tracing
+  - Excludes compiler and low-level HSA
+
+**Example:**
+
+```bash
+# HPC application with MPI
+mpirun -n 4 rocprof-sys-sample --trace-hpc -- ./mpi_app
+
+# Balanced profiling with moderate overhead
+rocprof-sys-sample --balanced -- ./myapp
+```
+
+### Pre-Execution Information
+
+When using preset modes, ROCm Systems Profiler displays helpful information before execution:
+
+- Which preset is active
+- Where results will be saved
+- How to visualize the results
+- Warnings about potential issues (e.g., unwritable output directory)
+
+### Smart Validation
+
+The tools now validate your command-line options and provide clear guidance:
+
+- **Preset conflict detection**: Warns if multiple conflicting presets are specified
+- **Clear error messages**: Contextual help when problems occur
+- **Actionable solutions**: Step-by-step troubleshooting for common issues
+
+### Enhanced Help Text
+
+All binaries now feature structured help organized by skill level:
+
+- **Quick Start**: Get profiling immediately with minimal configuration
+- **Workload-Specific**: Use presets optimized for your application type
+- **Custom Configuration**: Advanced options for fine-grained control
 
 ### Binary instrumentation
 
@@ -376,7 +436,7 @@ for `foo` via the direct call within `spam`. There will be no entries for `bar` 
 Perfetto tracing with the system backend supports multiple processes writing to the same
 output file. Thus, it is a useful technique if rocprofiler-systems is built with partial MPI support
 because all the perfetto output will be coalesced into a single file. The
-installation docs for perfetto can be found [here](https://perfetto.dev/docs/contributing/build-instructions).
+installation docs for perfetto can be found in the [Perfetto build instructions](https://perfetto.dev/docs/contributing/build-instructions).
 If you are building rocprofiler-systems from source, you can configure CMake with `ROCPROFSYS_INSTALL_PERFETTO_TOOLS=ON`
 and the `perfetto` and `traced` applications will be installed as part of the build process. However,
 it should be noted that to prevent this option from accidentally overwriting an existing perfetto install,

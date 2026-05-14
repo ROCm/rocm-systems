@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
 
 #include <fmt/core.h>
@@ -29,6 +30,7 @@
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -64,6 +66,7 @@ public:
     bool               empty() const { return empty_; }
 
     void setflags(uint32_t flags) { this->flags_ = flags; }
+    void set_id(uint64_t id) { this->id_ = id; }
 
     friend bool operator<(Metric const& lhs, Metric const& rhs);
     friend bool operator==(Metric const& lhs, Metric const& rhs);
@@ -103,18 +106,17 @@ std::shared_ptr<const counter_metrics_t>
 loadMetrics(bool reload = false, std::optional<ArchMetric> add_metric = std::nullopt);
 
 /**
- * Get the metrics that apply to a specific agent. Supplied parameter
- * is the GFXIP of the agent.
+ * Get the metrics that apply to a specific agent.
  */
 std::vector<Metric>
-getMetricsForAgent(const std::string&);
+getMetricsForAgent(const rocprofiler_agent_t* agent);
 
 /**
  * Get the metric event ids for perfcounters options in thread trace
  * applicable only for GFX9 agents and SQ block counters
  */
 std::unordered_map<uint64_t, int>
-getPerfCountersIdMap();
+getPerfCountersIdMap(const rocprofiler_agent_t* agent);
 
 /**
  * Checks if a metric is valid for a given agent
@@ -127,6 +129,9 @@ checkValidMetric(const std::string& agent, const Metric& metric);
  */
 rocprofiler_status_t
 setCustomCounterDefinition(const CustomCounterDefinition& def);
+
+bool
+has_spm_support(const Metric& metric, rocprofiler_agent_id_t agent_id);
 }  // namespace counters
 }  // namespace rocprofiler
 

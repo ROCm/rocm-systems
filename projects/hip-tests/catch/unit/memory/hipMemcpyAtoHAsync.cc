@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
@@ -42,10 +29,9 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemcpyAtoHAsync_Basic") {
+HIP_TEST_CASE(Unit_hipMemcpyAtoHAsync_Basic) {
 #if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
-  return;
+  HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
 #else
   HIP_CHECK(hipSetDevice(0));
   CHECK_IMAGE_SUPPORT
@@ -71,6 +57,30 @@ TEST_CASE("Unit_hipMemcpyAtoHAsync_Basic") {
   free(A_h);
   free(B_h);
 #endif
+}
+
+HIP_TEST_CASE(Unit_hipMemcpyAtoHAsync_Capture) {
+  CHECK_IMAGE_SUPPORT
+
+  constexpr int kRows = 1;
+  constexpr int kCols = 1;
+  auto host_data = std::make_unique<int[]>(kRows * kCols);
+
+  hipArray_t device_array = nullptr;
+  hipChannelFormatDesc channel_desc = hipCreateChannelDesc<int>();
+  HIP_CHECK(hipMallocArray(&device_array, &channel_desc, kCols, kRows, hipArrayDefault));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(
+      hipMemcpyAtoHAsync(host_data.get(), device_array, 0, sizeof(int) * kCols * kRows, stream));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipFreeArray(device_array));
+  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 /**

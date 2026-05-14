@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 #include "utils.hpp"
 
+#include <cstring>
 #include <thread>
 #ifdef __linux__
 #    include <sys/sysinfo.h>

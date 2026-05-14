@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 #[=======================================================================[.rst:
 FindLibDW
 ---------
@@ -71,8 +74,7 @@ else()
 
     if(EXISTS "${LibDW_INCLUDE_DIRS}/version.h")
         file(
-            STRINGS
-            "${LibDW_INCLUDE_DIRS}/version.h"
+            STRINGS "${LibDW_INCLUDE_DIRS}/version.h"
             _version_line
             REGEX "^#define _ELFUTILS_VERSION[ \t]+[0-9]+"
         )

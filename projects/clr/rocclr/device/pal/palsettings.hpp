@@ -1,27 +1,12 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
 #include "top.hpp"
-#include "library.hpp"
 #include "palDevice.h"
 
 /*! \addtogroup pal PAL Resource Implementation
@@ -63,7 +48,7 @@ class Settings : public device::Settings {
       uint imageSupport_ : 1;         //!< Report images support
       uint doublePrecision_ : 1;      //!< Enables double precision support
       uint use64BitPtr_ : 1;          //!< Use 64bit pointers on GPU
-      uint force32BitOcl20_ : 1;      //!< Force 32bit apps to take CLANG/HSAIL path on GPU
+      uint force32BitOcl20_ : 1;      //!< Force 32bit apps to take CLANG path on GPU
       uint imageDMA_ : 1;             //!< Enable direct image DMA transfers
       uint threadTraceEnable_ : 1;    //!< Thread trace enable
       uint svmAtomics_ : 1;           //!< SVM device atomics
@@ -107,8 +92,6 @@ class Settings : public device::Settings {
   uint64_t subAllocationMinSize_;    //!< Minimum size allowed for suballocations
   uint64_t subAllocationMaxSize_;    //!< Maximum size allowed with suballocations
   uint64_t subAllocationChunkSize_;  //!< Chunk size for suballocaitons
-
-  amd::LibrarySelector libSelector_;  //!< Select linking libraries for compiler
 
   size_t prepinnedMinSize_;  //!< minimal memory size for prepinned transfer
   uint32_t limit_blit_wg_;   //!< The number of workgroups for blit execution

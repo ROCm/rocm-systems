@@ -67,10 +67,12 @@ enum amd_hw_ip_block_type {
   DCI_HWIP,
   PCIE_HWIP,
   ISP_HWIP,
+  ATU_HWIP,
+  AIGC_HWIP,
   MAX_HWIP
 };
 
-#define HWIP_MAX_INSTANCE 44
+#define HWIP_MAX_INSTANCE 48
 #define HWIP_MAX_SEGMENT 32
 
 struct Register {
@@ -89,6 +91,11 @@ struct Register {
                               uint32_t base_idx_val)
       : hwip(hwip_val), ip_inst(ip_inst_val), offset(offset_val), base_idx(base_idx_val) {}
 };
+
+inline bool operator==(const Register& lhs, const Register& rhs) {
+  return lhs.hwip == rhs.hwip && lhs.ip_inst == rhs.ip_inst && lhs.offset == rhs.offset &&
+         lhs.base_idx == rhs.base_idx;
+}
 
 struct reg_base_offset_table {
   using segment_array_t = std::array<uint32_t, HWIP_MAX_SEGMENT>;

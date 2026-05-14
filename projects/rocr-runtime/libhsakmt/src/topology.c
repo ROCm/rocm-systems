@@ -72,16 +72,6 @@ typedef struct {
 	HsaIoLinkProperties *link;
 } node_props_t;
 
-static HsaSystemProperties *g_system;
-static node_props_t *g_props;
-
-/* This array caches sysfs based node IDs of CPU nodes + all supported GPU nodes.
- * It will be used to map user-node IDs to sysfs-node IDs.
- */
-static uint32_t *map_user_to_sysfs_node_id;
-static uint32_t map_user_to_sysfs_node_id_size;
-static uint32_t num_sysfs_nodes;
-
 static int processor_vendor = -1;
 /* Supported System Vendors */
 enum SUPPORTED_PROCESSOR_VENDORS {
@@ -96,8 +86,45 @@ static const char *supported_processor_vendor_name[] = {
 	"\n"			// POWER requires a different search method
 };
 
-static HSAKMT_STATUS topology_take_snapshot(void);
-static void topology_drop_snapshot(void);
+/*
+ * KFD Topology Context
+ */
+struct hsa_kfd_topology_context
+{
+	HsaSystemProperties* system_props;
+	node_props_t *node_props;
+
+	/* This array caches sysfs based node IDs of CPU nodes + all supported GPU nodes.
+	* It will be used to map user-node IDs to sysfs-node IDs.
+	*/
+	uint32_t *map_user_to_sysfs_node_id;
+	uint32_t map_user_to_sysfs_node_id_size;
+
+	uint32_t num_sysfs_nodes;
+};
+
+struct hsa_kfd_topology_context *hsakmt_kfdcontext_get_topology_context(HsaKFDContext *ctx)
+{
+	assert(ctx);
+	if (!ctx) {
+		pr_err("Expected a non-null ptr for HsaKFDContext");
+		return NULL;
+	}
+
+	if (ctx->topology_context)
+		return ctx->topology_context;
+
+	ctx->topology_context = calloc(1, sizeof(struct hsa_kfd_topology_context));
+	if (!ctx->topology_context) {
+		pr_err("Alloc memory failed for struct hsa_kfd_topology_context size %zu\n",
+				 sizeof(struct hsa_kfd_topology_context));
+		return NULL;
+	}
+	return ctx->topology_context;
+}
+
+static HSAKMT_STATUS topology_take_snapshot(HsaKFDContext *ctx);
+static void topology_drop_snapshot(HsaKFDContext *ctx);
 
 static const struct hsa_gfxip_table gfxip_lookup_table[] = {
 	/* Kaveri Family */
@@ -610,12 +637,15 @@ err:
 	return ret;
 }
 
-static HSAKMT_STATUS topology_sysfs_map_node_id(uint32_t node_id, uint32_t *sys_node_id)
+static HSAKMT_STATUS topology_sysfs_map_node_id(
+						struct hsa_kfd_topology_context *topology_ctx,
+						uint32_t node_id, uint32_t *sys_node_id)
 {
-	if ((!map_user_to_sysfs_node_id) || (node_id >= map_user_to_sysfs_node_id_size))
+	if ((!topology_ctx->map_user_to_sysfs_node_id) ||
+		(node_id >= topology_ctx->map_user_to_sysfs_node_id_size))
 		return HSAKMT_STATUS_NOT_SUPPORTED;
 
-	*sys_node_id = map_user_to_sysfs_node_id[node_id];
+	*sys_node_id = topology_ctx->map_user_to_sysfs_node_id[node_id];
 	return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -645,7 +675,8 @@ static HSAKMT_STATUS topology_sysfs_get_gpu_id(uint32_t sysfs_node_id, uint32_t 
  *	- if corresponding drm render node is not available.
  *	- if node information is not accessible (EPERM)
  */
-static HSAKMT_STATUS topology_sysfs_check_node_supported(uint32_t sysfs_node_id, bool *is_node_supported)
+static HSAKMT_STATUS topology_sysfs_check_node_supported(HsaKFDContext *ctx,
+					uint32_t sysfs_node_id, bool *is_node_supported)
 {
 	uint32_t gpu_id;
 	FILE *fd;
@@ -711,7 +742,7 @@ static HSAKMT_STATUS topology_sysfs_check_node_supported(uint32_t sysfs_node_id,
 	}
 
 	/* Open DRM Render device */
-	ret_value = hsakmt_open_drm_render_device(drm_render_minor);
+	ret_value = hsakmt_open_drm_render_device(ctx, drm_render_minor);
 	if (ret_value > 0)
 		*is_node_supported = true;
 	else if (ret_value != -ENOENT && ret_value != -EPERM)
@@ -723,7 +754,8 @@ err:
 	return ret;
 }
 
-HSAKMT_STATUS hsakmt_topology_sysfs_get_system_props(HsaSystemProperties *props)
+HSAKMT_STATUS hsakmt_topology_sysfs_get_system_props(HsaKFDContext *ctx,
+					HsaSystemProperties *props)
 {
 	FILE *fd;
 	char *read_buf, *p;
@@ -735,6 +767,7 @@ HSAKMT_STATUS hsakmt_topology_sysfs_get_system_props(HsaSystemProperties *props)
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 	bool is_node_supported = true;
 	uint32_t num_supported_nodes = 0;
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
 
 	assert(props);
 	snprintf(path, sizeof(path), KFD_SYSFS_PATH_SYSTEM_PROPERTIES, get_topology_dir());
@@ -777,34 +810,34 @@ HSAKMT_STATUS hsakmt_topology_sysfs_get_system_props(HsaSystemProperties *props)
 	 * which represent the node numbers
 	 */
 	snprintf(path, sizeof(path), KFD_SYSFS_PATH_NODES, get_topology_dir());
-	num_sysfs_nodes = num_subdirs(path, "");
+	topology_ctx->num_sysfs_nodes = num_subdirs(path, "");
 
-	if (map_user_to_sysfs_node_id == NULL) {
+	if (topology_ctx->map_user_to_sysfs_node_id == NULL) {
 		/* Trade off - num_sysfs_nodes includes all CPU and GPU nodes.
 		 * Slightly more memory is allocated than necessary.
 		 */
-		map_user_to_sysfs_node_id = calloc(num_sysfs_nodes, sizeof(uint32_t));
-		if (map_user_to_sysfs_node_id == NULL) {
+		topology_ctx->map_user_to_sysfs_node_id = calloc(topology_ctx->num_sysfs_nodes, sizeof(uint32_t));
+		if (topology_ctx->map_user_to_sysfs_node_id == NULL) {
 			ret = HSAKMT_STATUS_NO_MEMORY;
 			goto err2;
 		}
-		map_user_to_sysfs_node_id_size = num_sysfs_nodes;
-	} else if (num_sysfs_nodes > map_user_to_sysfs_node_id_size) {
-		free(map_user_to_sysfs_node_id);
-		map_user_to_sysfs_node_id = calloc(num_sysfs_nodes, sizeof(uint32_t));
-		if (map_user_to_sysfs_node_id == NULL) {
+		topology_ctx->map_user_to_sysfs_node_id_size = topology_ctx->num_sysfs_nodes;
+	} else if (topology_ctx->num_sysfs_nodes > topology_ctx->map_user_to_sysfs_node_id_size) {
+		free(topology_ctx->map_user_to_sysfs_node_id);
+		topology_ctx->map_user_to_sysfs_node_id = calloc(topology_ctx->num_sysfs_nodes, sizeof(uint32_t));
+		if (topology_ctx->map_user_to_sysfs_node_id == NULL) {
 			ret = HSAKMT_STATUS_NO_MEMORY;
 			goto err2;
 		}
-		map_user_to_sysfs_node_id_size = num_sysfs_nodes;
+		topology_ctx->map_user_to_sysfs_node_id_size = topology_ctx->num_sysfs_nodes;
 	}
 
-	for (uint32_t i = 0; i < num_sysfs_nodes; i++) {
-		ret = topology_sysfs_check_node_supported(i, &is_node_supported);
+	for (uint32_t i = 0; i < topology_ctx->num_sysfs_nodes; i++) {
+		ret = topology_sysfs_check_node_supported(ctx, i, &is_node_supported);
 		if (ret != HSAKMT_STATUS_SUCCESS)
 			goto sysfs_parse_failed;
 		if (is_node_supported)
-			map_user_to_sysfs_node_id[num_supported_nodes++] = i;
+			topology_ctx->map_user_to_sysfs_node_id[num_supported_nodes++] = i;
 	}
 	props->NumNodes = num_supported_nodes;
 
@@ -813,8 +846,8 @@ HSAKMT_STATUS hsakmt_topology_sysfs_get_system_props(HsaSystemProperties *props)
 	return ret;
 
 sysfs_parse_failed:
-	free(map_user_to_sysfs_node_id);
-	map_user_to_sysfs_node_id = NULL;
+	free(topology_ctx->map_user_to_sysfs_node_id);
+	topology_ctx->map_user_to_sysfs_node_id = NULL;
 err2:
 	free(read_buf);
 err1:
@@ -824,7 +857,7 @@ err1:
 
 static const struct hsa_gfxip_table *find_hsa_gfxip_device(uint16_t device_id, uint8_t gfxv_major)
 {
-	if (gfxv_major > 10)
+	if (gfxv_major > 12)
 		return NULL;
 
 	uint32_t i, table_size;
@@ -1042,39 +1075,41 @@ static int topology_get_node_props_from_drm(HsaNodeProperties *props)
 	if (props == NULL)
 		return -1;
 
-	drm_fd = drmOpenRender(props->DrmRenderMinor);
+	drm_fd = hsakmt_drm_open_render(props->DrmRenderMinor);
 	if (drm_fd < 0)
 		return -1;
 
-	if (amdgpu_device_initialize(drm_fd,
+	if (hsakmt_amdgpu_device_initialize(drm_fd,
 		&major_version, &minor_version, &device_handle) < 0) {
 		ret = -1;
 		goto err_device_initialize;
 	}
 
-	name = amdgpu_get_marketing_name(device_handle);
+	name = hsakmt_amdgpu_get_marketing_name(device_handle);
 	if (name != NULL) {
 		for (i = 0; name[i] != 0 && i < HSA_PUBLIC_NAME_SIZE - 1; i++)
 			props->MarketingName[i] = name[i];
 		props->MarketingName[i] = '\0';
 	}
 
-	if (amdgpu_query_gpu_info(device_handle, &gpu_info)) {
+	if (hsakmt_amdgpu_query_gpu_info(device_handle, &gpu_info)) {
 		ret = -1;
 		goto err_query_gpu_info;
 	}
 
 	props->FamilyID = gpu_info.family_id;
 	props->Integrated = !!(gpu_info.ids_flags & AMDGPU_IDS_FLAGS_FUSION);
+	props->WallClockKHz = gpu_info.gpu_counter_freq;
 
 err_query_gpu_info:
-	amdgpu_device_deinitialize(device_handle);
+	hsakmt_amdgpu_device_deinitialize(device_handle);
 err_device_initialize:
-	drmClose(drm_fd);
+	hsakmt_drm_close(drm_fd);
 	return ret;
 }
 
-static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
+static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
+						   uint32_t node_id,
 						   HsaNodeProperties *props,
 						   bool *p2p_links,
 						   uint32_t *num_p2pLinks)
@@ -1094,9 +1129,9 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
 	uint32_t simd_arrays_count = 0;
 
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
 	assert(props);
-	ret = topology_sysfs_map_node_id(node_id, &sys_node_id);
+	ret = topology_sysfs_map_node_id(topology_ctx, node_id, &sys_node_id);
 	if (ret != HSAKMT_STATUS_SUCCESS)
 		return ret;
 
@@ -1210,6 +1245,10 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
 			props->NumSdmaQueuesPerEngine = prop_val;
 		else if (strcmp(prop_name, "num_cp_queues") == 0)
 			props->NumCpQueues = prop_val;
+		else if (strcmp(prop_name, "cwsr_size") == 0)
+			props->CwsrSize = prop_val;
+		else if (strcmp(prop_name, "ctl_stack_size") == 0)
+			props->CtlStackSize = prop_val;
 		else if (strcmp(prop_name, "num_xcc") == 0)
 			props->NumXcc = prop_val;
 		else if (strcmp(prop_name, "family_id") == 0)
@@ -1218,7 +1257,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
 			gfxv = (uint32_t)prop_val;
 	}
 
-	if (!hsakmt_is_svm_api_supported)
+	if (!ctx->hsakmt_is_svm_api_supported)
 		props->Capability.ui32.SVMAPISupported = 0;
 
 	/* Bail out early, if a CPU node */
@@ -1235,7 +1274,8 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
 	hsa_gfxip = find_hsa_gfxip_device(props->DeviceId, gfxv_major);
 	if (hsa_gfxip || gfxv) {
 		snprintf(per_node_override, sizeof(per_node_override), "HSA_OVERRIDE_GFX_VERSION_%d", node_id);
-		if ((envvar = getenv(per_node_override)) || (envvar = getenv("HSA_OVERRIDE_GFX_VERSION"))) {
+		if (((envvar = getenv(per_node_override)) && strlen(envvar) > 0) || 
+		    ((envvar = getenv("HSA_OVERRIDE_GFX_VERSION")) && strlen(envvar) > 0)) {
 			/* HSA_OVERRIDE_GFX_VERSION=major.minor.stepping */
 			if ((sscanf(envvar, "%u.%u.%u%c",
 					&major, &minor, &step, &dummy) != 3) ||
@@ -1245,10 +1285,17 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
 				ret = HSAKMT_STATUS_ERROR;
 				goto out;
 			}
+			/* Prevent cross-major-version override */
+			if (gfxv_major != major) {
+				pr_err("HSA_OVERRIDE_GFX_VERSION: Device is gfx%d, override requested gfx%d not allowed\n",
+				     gfxv_major, major);
+				ret = HSAKMT_STATUS_ERROR;
+				goto out;
+			}
 			props->OverrideEngineId.ui32.Major = major & 0x3f;
 			props->OverrideEngineId.ui32.Minor = minor & 0xff;
 			props->OverrideEngineId.ui32.Stepping = step & 0xff;
-		}
+                }
 
 		if (hsa_gfxip) {
 			props->EngineId.ui32.Major = hsa_gfxip->major & 0x3f;
@@ -1272,12 +1319,37 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
 
 		/* Is dGPU Node, not APU
 		 * Retrieve the marketing name of the node.
+		 * Skip under the HSA model -- the DRM render node belongs
+		 * to the physical GPU, not the modelled one, so querying
+		 * it would report the wrong MarketingName, FamilyID, etc.
+		 * Instead, read the name from the model topology directory.
 		 */
-		if (topology_get_node_props_from_drm(props))
+		if (hsakmt_use_model) {
+			FILE *name_fd;
+			char name_buf[HSA_PUBLIC_NAME_SIZE] = {0};
+
+			snprintf(path, sizeof(path), KFD_SYSFS_PATH_NODES "/%d/name",
+				 get_topology_dir(), sys_node_id);
+			name_fd = fopen(path, "r");
+			if (name_fd) {
+				if (fgets(name_buf, sizeof(name_buf), name_fd)) {
+					int i;
+					for (i = 0; name_buf[i] && name_buf[i] != '\n'; i++)
+						;
+					name_buf[i] = '\0';
+
+					for (i = 0; name_buf[i] && i < HSA_PUBLIC_NAME_SIZE - 1; i++)
+						props->MarketingName[i] = (HSAuint16)name_buf[i];
+					props->MarketingName[i] = '\0';
+				}
+				fclose(name_fd);
+			}
+		} else if (topology_get_node_props_from_drm(props)) {
 			pr_info("failed to get marketing name for device ID 0x%x\n", props->DeviceId);
+		}
 
 		/* Get VGPR/SGPR size in byte per CU */
-		props->SGPRSizePerCU = SGPR_SIZE_PER_CU;
+		props->SGPRSizePerCU = hsakmt_get_sgpr_size_per_cu(HSA_GET_GFX_VERSION_FULL(props->EngineId.ui32));
 		props->VGPRSizePerCU = hsakmt_get_vgpr_size_per_cu(HSA_GET_GFX_VERSION_FULL(props->EngineId.ui32));
 
 	} else if (props->DeviceId)
@@ -1300,7 +1372,9 @@ out:
 	return ret;
 }
 
-static HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id,
+static HSAKMT_STATUS topology_sysfs_get_mem_props(
+						  struct hsa_kfd_topology_context *topology_ctx,
+						  uint32_t node_id,
 						  uint32_t mem_id,
 						  HsaMemoryProperties *props)
 {
@@ -1315,7 +1389,7 @@ static HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id,
 	uint32_t sys_node_id;
 
 	assert(props);
-	ret = topology_sysfs_map_node_id(node_id, &sys_node_id);
+	ret = topology_sysfs_map_node_id(topology_ctx, node_id, &sys_node_id);
 	if (ret != HSAKMT_STATUS_SUCCESS)
 		return ret;
 
@@ -1534,7 +1608,9 @@ exit:
 	return ret;
 }
 
-static HSAKMT_STATUS topology_sysfs_get_cache_props(uint32_t node_id,
+static HSAKMT_STATUS topology_sysfs_get_cache_props(
+						    struct hsa_kfd_topology_context *topology_ctx,
+						    uint32_t node_id,
 						    uint32_t cache_id,
 						    HsaCacheProperties *props)
 {
@@ -1549,7 +1625,7 @@ static HSAKMT_STATUS topology_sysfs_get_cache_props(uint32_t node_id,
 	uint32_t sys_node_id;
 
 	assert(props);
-	ret = topology_sysfs_map_node_id(node_id, &sys_node_id);
+	ret = topology_sysfs_map_node_id(topology_ctx, node_id, &sys_node_id);
 	if (ret != HSAKMT_STATUS_SUCCESS)
 		return ret;
 
@@ -1612,12 +1688,13 @@ err1:
 	return ret;
 }
 
-static HSAKMT_STATUS topology_map_sysfs_to_user_node_id(uint32_t sys_node_id, uint32_t *user_node_id)
+static HSAKMT_STATUS topology_map_sysfs_to_user_node_id(struct hsa_kfd_topology_context *topology_ctx,
+								 uint32_t sys_node_id, uint32_t *user_node_id)
 {
 	uint32_t node_id;
 
-	for (node_id = 0; node_id < map_user_to_sysfs_node_id_size; node_id++)
-		if (map_user_to_sysfs_node_id[node_id] == sys_node_id) {
+	for (node_id = 0; node_id < topology_ctx->map_user_to_sysfs_node_id_size; node_id++)
+		if (topology_ctx->map_user_to_sysfs_node_id[node_id] == sys_node_id) {
 			*user_node_id = node_id;
 			return HSAKMT_STATUS_SUCCESS;
 		}
@@ -1631,7 +1708,8 @@ static HSAKMT_STATUS topology_map_sysfs_to_user_node_id(uint32_t sys_node_id, ui
  * If node_to specified by the @iolink_id is not accessible the function returns HSAKMT_STATUS_NOT_SUPPORTED.
  * If node_to is accessible, then node_to is mapped from sysfs_node to user_node and returns HSAKMT_STATUS_SUCCESS.
  */
-static HSAKMT_STATUS topology_sysfs_get_iolink_props(uint32_t node_id,
+static HSAKMT_STATUS topology_sysfs_get_iolink_props(HsaKFDContext *ctx,
+						     uint32_t node_id,
 						     uint32_t iolink_id,
 						     HsaIoLinkProperties *props, bool p2pLink)
 {
@@ -1644,9 +1722,10 @@ static HSAKMT_STATUS topology_sysfs_get_iolink_props(uint32_t node_id,
 	int read_size;
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 	uint32_t sys_node_id;
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
 
 	assert(props);
-	ret = topology_sysfs_map_node_id(node_id, &sys_node_id);
+	ret = topology_sysfs_map_node_id(topology_ctx, node_id, &sys_node_id);
 	if (ret != HSAKMT_STATUS_SUCCESS)
 		return ret;
 
@@ -1693,13 +1772,13 @@ static HSAKMT_STATUS topology_sysfs_get_iolink_props(uint32_t node_id,
 			uint32_t sysfs_node_id;
 
 			sysfs_node_id = (uint32_t)prop_val;
-			ret = topology_sysfs_check_node_supported(sysfs_node_id, &is_node_supported);
+			ret = topology_sysfs_check_node_supported(ctx, sysfs_node_id, &is_node_supported);
 			if (!is_node_supported) {
 				ret = HSAKMT_STATUS_NOT_SUPPORTED;
 				memset(props, 0, sizeof(*props));
 				goto err2;
 			}
-			ret = topology_map_sysfs_to_user_node_id(sysfs_node_id, &props->NodeTo);
+			ret = topology_map_sysfs_to_user_node_id(topology_ctx, sysfs_node_id, &props->NodeTo);
 			if (ret != HSAKMT_STATUS_SUCCESS)
 				goto err2;
 		} else if (strcmp(prop_name, "weight") == 0)
@@ -1955,7 +2034,7 @@ try_alt_dir:
 	}
 }
 
-HSAKMT_STATUS topology_take_snapshot(void)
+HSAKMT_STATUS topology_take_snapshot(HsaKFDContext *ctx)
 {
 	uint32_t gen_start, gen_end, i, mem_id, cache_id;
 	HsaSystemProperties sys_props;
@@ -1966,6 +2045,7 @@ HSAKMT_STATUS topology_take_snapshot(void)
 	uint32_t num_ioLinks;
 	bool p2p_links = false;
 	uint32_t num_p2pLinks = 0;
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
 
 	cpuinfo = calloc(num_procs, sizeof(struct proc_cpuinfo));
 	if (!cpuinfo) {
@@ -1978,7 +2058,7 @@ retry:
 	ret = topology_sysfs_get_generation(&gen_start);
 	if (ret != HSAKMT_STATUS_SUCCESS)
 		goto err;
-	ret = hsakmt_topology_sysfs_get_system_props(&sys_props);
+	ret = hsakmt_topology_sysfs_get_system_props(ctx, &sys_props);
 	if (ret != HSAKMT_STATUS_SUCCESS)
 		goto err;
 	if (sys_props.NumNodes > 0) {
@@ -1988,7 +2068,7 @@ retry:
 			goto err;
 		}
 		for (i = 0; i < sys_props.NumNodes; i++) {
-			ret = topology_sysfs_get_node_props(i,
+			ret = topology_sysfs_get_node_props(ctx, i,
 					&temp_props[i].node,
 					&p2p_links, &num_p2pLinks);
 			if (ret != HSAKMT_STATUS_SUCCESS) {
@@ -2008,7 +2088,7 @@ retry:
 					goto err;
 				}
 				for (mem_id = 0; mem_id < temp_props[i].node.NumMemoryBanks; mem_id++) {
-					ret = topology_sysfs_get_mem_props(i, mem_id, &temp_props[i].mem[mem_id]);
+					ret = topology_sysfs_get_mem_props(topology_ctx, i, mem_id, &temp_props[i].mem[mem_id]);
 					if (ret != HSAKMT_STATUS_SUCCESS) {
 						free_properties(temp_props, i + 1);
 						goto err;
@@ -2024,7 +2104,8 @@ retry:
 					goto err;
 				}
 				for (cache_id = 0; cache_id < temp_props[i].node.NumCaches; cache_id++) {
-					ret = topology_sysfs_get_cache_props(i, cache_id, &temp_props[i].cache[cache_id]);
+					ret = topology_sysfs_get_cache_props(topology_ctx,
+							i, cache_id, &temp_props[i].cache[cache_id]);
 					if (ret != HSAKMT_STATUS_SUCCESS) {
 						free_properties(temp_props, i + 1);
 						goto err;
@@ -2059,7 +2140,7 @@ retry:
 				 */
 				while (sys_link_id < num_ioLinks &&
 					link_id < sys_props.NumNodes - 1) {
-					ret = topology_sysfs_get_iolink_props(i, sys_link_id++,
+					ret = topology_sysfs_get_iolink_props(ctx, i, sys_link_id++,
 								&temp_props[i].link[link_id], false);
 					if (ret == HSAKMT_STATUS_NOT_SUPPORTED) {
 						continue;
@@ -2080,7 +2161,7 @@ retry:
 				 */
 				while (sys_link_id < num_p2pLinks &&
 					link_id < sys_props.NumNodes - 1) {
-					ret = topology_sysfs_get_iolink_props(i, sys_link_id++,
+					ret = topology_sysfs_get_iolink_props(ctx, i, sys_link_id++,
 								&temp_props[i].link[link_id], true);
 					if (ret == HSAKMT_STATUS_NOT_SUPPORTED) {
 						continue;
@@ -2114,62 +2195,72 @@ retry:
 		goto retry;
 	}
 
-	if (!g_system) {
-		g_system = malloc(sizeof(HsaSystemProperties));
-		if (!g_system) {
+	if (!topology_ctx->system_props) {
+		topology_ctx->system_props = malloc(sizeof(HsaSystemProperties));
+		if (!topology_ctx->system_props) {
 			free_properties(temp_props, sys_props.NumNodes);
 			ret = HSAKMT_STATUS_NO_MEMORY;
 			goto err;
 		}
 	}
 
-	*g_system = sys_props;
-	if (g_props)
-		free(g_props);
-	g_props = temp_props;
+	*topology_ctx->system_props = sys_props;
+	if (topology_ctx->node_props)
+		free(topology_ctx->node_props);
+	topology_ctx->node_props = temp_props;
 err:
 	free(cpuinfo);
 	return ret;
 }
 
 /* Drop the Snapshot of the HSA topology information. Assume lock is held. */
-void topology_drop_snapshot(void)
+ void topology_drop_snapshot(HsaKFDContext *ctx)
 {
-	if (!!g_system != !!g_props)
+	struct hsa_kfd_topology_context *topology_ctx =
+				hsakmt_kfdcontext_get_topology_context(ctx);
+
+	if (!!topology_ctx->system_props != !!topology_ctx->node_props)
 		pr_warn("Probably inconsistency?\n");
 
-	if (g_props) {
+	if (topology_ctx->node_props) {
 		/* Remove state */
-		free_properties(g_props, g_system->NumNodes);
-		g_props = NULL;
+		free_properties(topology_ctx->node_props, topology_ctx->system_props->NumNodes);
+		topology_ctx->node_props = NULL;
 	}
 
-	free(g_system);
-	g_system = NULL;
+	free(topology_ctx->system_props);
+	topology_ctx->system_props = NULL;
 
-	if (map_user_to_sysfs_node_id) {
-		free(map_user_to_sysfs_node_id);
-		map_user_to_sysfs_node_id = NULL;
-		map_user_to_sysfs_node_id_size = 0;
+	if (topology_ctx->map_user_to_sysfs_node_id) {
+		free(topology_ctx->map_user_to_sysfs_node_id);
+		topology_ctx->map_user_to_sysfs_node_id = NULL;
+		topology_ctx->map_user_to_sysfs_node_id_size = 0;
 	}
 }
 
-HSAKMT_STATUS hsakmt_validate_nodeid(uint32_t nodeid, uint32_t *gpu_id)
+HSAKMT_STATUS hsakmt_validate_nodeid(HsaKFDContext *ctx, uint32_t nodeid, uint32_t *gpu_id)
 {
-	if (!g_props || !g_system || g_system->NumNodes <= nodeid)
+	struct hsa_kfd_topology_context *topology_ctx =
+				hsakmt_kfdcontext_get_topology_context(ctx);
+
+	if (!topology_ctx->node_props || !topology_ctx->system_props ||
+		topology_ctx->system_props->NumNodes <= nodeid)
 		return HSAKMT_STATUS_INVALID_NODE_UNIT;
 	if (gpu_id)
-		*gpu_id = g_props[nodeid].node.KFDGpuID;
+		*gpu_id = topology_ctx->node_props[nodeid].node.KFDGpuID;
 
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS hsakmt_gpuid_to_nodeid(uint32_t gpu_id, uint32_t *node_id)
+HSAKMT_STATUS hsakmt_gpuid_to_nodeid(HsaKFDContext *ctx, uint32_t gpu_id, uint32_t *node_id)
 {
 	uint64_t node_idx;
 
-	for (node_idx = 0; node_idx < g_system->NumNodes; node_idx++) {
-		if (g_props[node_idx].node.KFDGpuID == gpu_id) {
+	struct hsa_kfd_topology_context *topology_ctx =
+				hsakmt_kfdcontext_get_topology_context(ctx);
+
+	for (node_idx = 0; node_idx < topology_ctx->system_props->NumNodes; node_idx++) {
+		if (topology_ctx->node_props[node_idx].node.KFDGpuID == gpu_id) {
 			*node_id = node_idx;
 			return HSAKMT_STATUS_SUCCESS;
 		}
@@ -2179,11 +2270,14 @@ HSAKMT_STATUS hsakmt_gpuid_to_nodeid(uint32_t gpu_id, uint32_t *node_id)
 
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtAcquireSystemProperties(HsaSystemProperties *SystemProperties)
+HSAKMT_STATUS HSAKMTAPI hsaKmtAcquireSystemPropertiesCtx(HsaKFDContext *ctx,
+				        HsaSystemProperties *SystemProperties)
 {
 	HSAKMT_STATUS err = HSAKMT_STATUS_SUCCESS;
 
 	CHECK_KFD_OPEN();
+	struct hsa_kfd_topology_context *topology_ctx =
+				hsakmt_kfdcontext_get_topology_context(ctx);
 
 	if (!SystemProperties)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -2193,66 +2287,79 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAcquireSystemProperties(HsaSystemProperties *Syste
 	/* We already have a valid snapshot. Avoid double initialization that
 	 * would leak memory.
 	 */
-	if (g_system) {
-		*SystemProperties = *g_system;
+	if (topology_ctx->system_props) {
+		*SystemProperties = *topology_ctx->system_props;
 		goto out;
 	}
 
-	err = topology_take_snapshot();
+	err = topology_take_snapshot(ctx);
 	if (err != HSAKMT_STATUS_SUCCESS)
 		goto out;
 
-	assert(g_system);
+	assert(topology_ctx->system_props);
 
 	if (hsakmt_use_model)
 		model_init();
 
-	err = hsakmt_fmm_init_process_apertures(g_system->NumNodes);
+	err = hsakmt_fmm_init_process_apertures(ctx, topology_ctx->system_props->NumNodes);
 	if (err != HSAKMT_STATUS_SUCCESS)
 		goto init_process_apertures_failed;
 
-	err = hsakmt_init_process_doorbells(g_system->NumNodes);
+	err = hsakmt_init_process_doorbells(ctx, topology_ctx->system_props->NumNodes);
 	if (err != HSAKMT_STATUS_SUCCESS)
 		goto init_doorbells_failed;
 
-	*SystemProperties = *g_system;
+	*SystemProperties = *topology_ctx->system_props;
+
+	for (unsigned int node = 0; node < topology_ctx->system_props->NumNodes; node++) {
+		if (hsakmt_get_gfxv_by_node_id(ctx, node) == GFX_VERSION_GFX1151 &&
+		    hsakmt_kfd_version_info.KernelInterfaceMajorVersion == 1 &&
+		    hsakmt_kfd_version_info.KernelInterfaceMinorVersion < 20)
+			pr_err_once("WARNING: KFD ABI 1.20+ is recommended for gfx1151. Current KFD ABI is %i.%i. This may result in faults, crashes and other application instability\n", hsakmt_kfd_version_info.KernelInterfaceMajorVersion, hsakmt_kfd_version_info.KernelInterfaceMinorVersion);
+	}
 
 	goto out;
 
 init_doorbells_failed:
-	hsakmt_fmm_destroy_process_apertures();
+	hsakmt_fmm_destroy_process_apertures(ctx);
 init_process_apertures_failed:
-	topology_drop_snapshot();
+	topology_drop_snapshot(ctx);
 
 out:
 	pthread_mutex_unlock(&hsakmt_mutex);
 	return err;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtReleaseSystemProperties(void)
+HSAKMT_STATUS HSAKMTAPI hsaKmtReleaseSystemPropertiesCtx(HsaKFDContext *ctx)
 {
 	pthread_mutex_lock(&hsakmt_mutex);
 
-	hsakmt_destroy_process_doorbells();
-	hsakmt_fmm_destroy_process_apertures();
-	topology_drop_snapshot();
+	hsakmt_destroy_process_doorbells(ctx);
+	hsakmt_fmm_destroy_process_apertures(ctx);
+	topology_drop_snapshot(ctx);
 
 	pthread_mutex_unlock(&hsakmt_mutex);
 
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS hsakmt_topology_get_node_props(HSAuint32 NodeId,
+HSAKMT_STATUS hsakmt_topology_get_node_props(HsaKFDContext *ctx,
+				      HSAuint32 NodeId,
 				      HsaNodeProperties *NodeProperties)
 {
-	if (!g_system || !g_props || NodeId >= g_system->NumNodes)
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
+
+	if (!topology_ctx->system_props || !topology_ctx->node_props ||
+		NodeId >= topology_ctx->system_props->NumNodes)
 		return HSAKMT_STATUS_ERROR;
 
-	*NodeProperties = g_props[NodeId].node;
+	*NodeProperties = topology_ctx->node_props[NodeId].node;
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeProperties(HSAuint32 NodeId,
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodePropertiesCtx(HsaKFDContext *ctx,
+						HSAuint32 NodeId,
 						HsaNodeProperties *NodeProperties)
 {
 	HSAKMT_STATUS err;
@@ -2264,11 +2371,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeProperties(HSAuint32 NodeId,
 	CHECK_KFD_OPEN();
 	pthread_mutex_lock(&hsakmt_mutex);
 
-	err = hsakmt_validate_nodeid(NodeId, &gpu_id);
+	err = hsakmt_validate_nodeid(ctx, NodeId, &gpu_id);
 	if (err != HSAKMT_STATUS_SUCCESS)
 		goto out;
 
-	err = hsakmt_topology_get_node_props(NodeId, NodeProperties);
+	err = hsakmt_topology_get_node_props(ctx, NodeId, NodeProperties);
 	if (err != HSAKMT_STATUS_SUCCESS)
 		goto out;
 	/* For CPU only node don't add any additional GPU memory banks. */
@@ -2278,7 +2385,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeProperties(HSAuint32 NodeId,
 			NodeProperties->NumMemoryBanks += NUM_OF_DGPU_HEAPS;
 		else
 			NodeProperties->NumMemoryBanks += NUM_OF_IGPU_HEAPS;
-		if (hsakmt_fmm_get_aperture_base_and_limit(FMM_MMIO, gpu_id, &base,
+		if (hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_MMIO, gpu_id, &base,
 				&limit) == HSAKMT_STATUS_SUCCESS)
 			NodeProperties->NumMemoryBanks += 1;
 	}
@@ -2288,13 +2395,16 @@ out:
 	return err;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId,
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryPropertiesCtx(HsaKFDContext *ctx,
+						      HSAuint32 NodeId,
 						      HSAuint32 NumBanks,
 						      HsaMemoryProperties *MemoryProperties)
 {
 	HSAKMT_STATUS err = HSAKMT_STATUS_SUCCESS;
 	uint32_t i, gpu_id;
 	HSAuint64 aperture_limit;
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
+	node_props_t *node_props = topology_ctx->node_props;
 
 	if (!MemoryProperties)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -2302,15 +2412,15 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId,
 	CHECK_KFD_OPEN();
 	pthread_mutex_lock(&hsakmt_mutex);
 
-	err = hsakmt_validate_nodeid(NodeId, &gpu_id);
+	err = hsakmt_validate_nodeid(ctx, NodeId, &gpu_id);
 	if (err != HSAKMT_STATUS_SUCCESS)
 		goto out;
 
 	memset(MemoryProperties, 0, NumBanks * sizeof(HsaMemoryProperties));
 
-	for (i = 0; i < MIN(g_props[NodeId].node.NumMemoryBanks, NumBanks); i++) {
-		assert(g_props[NodeId].mem);
-		MemoryProperties[i] = g_props[NodeId].mem[i];
+	for (i = 0; i < MIN(node_props[NodeId].node.NumMemoryBanks, NumBanks); i++) {
+		assert(node_props[NodeId].mem);
+		MemoryProperties[i] = node_props[NodeId].mem[i];
 	}
 
 	/* The following memory banks does not apply to CPU only node */
@@ -2319,10 +2429,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId,
 
 	/*Add LDS*/
 	if (i < NumBanks &&
-		hsakmt_fmm_get_aperture_base_and_limit(FMM_LDS, gpu_id,
+		hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_LDS, gpu_id,
 				&MemoryProperties[i].VirtualBaseAddress, &aperture_limit) == HSAKMT_STATUS_SUCCESS) {
 		MemoryProperties[i].HeapType = HSA_HEAPTYPE_GPU_LDS;
-		MemoryProperties[i].SizeInBytes = g_props[NodeId].node.LDSSizeInKB * 1024;
+		MemoryProperties[i].SizeInBytes = node_props[NodeId].node.LDSSizeInKB * 1024;
 		i++;
 	}
 
@@ -2330,18 +2440,18 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId,
 	 * For dGPU the topology node contains Local Memory and it is added by
 	 * the for loop above
 	 */
-	if (hsakmt_get_gfxv_by_node_id(NodeId) == GFX_VERSION_KAVERI && i < NumBanks &&
-		g_props[NodeId].node.LocalMemSize > 0 &&
-		hsakmt_fmm_get_aperture_base_and_limit(FMM_GPUVM, gpu_id,
+	if (hsakmt_get_gfxv_by_node_id(ctx, NodeId) == GFX_VERSION_KAVERI && i < NumBanks &&
+		node_props[NodeId].node.LocalMemSize > 0 &&
+		hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_GPUVM, gpu_id,
 				&MemoryProperties[i].VirtualBaseAddress, &aperture_limit) == HSAKMT_STATUS_SUCCESS) {
 		MemoryProperties[i].HeapType = HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE;
-		MemoryProperties[i].SizeInBytes = g_props[NodeId].node.LocalMemSize;
+		MemoryProperties[i].SizeInBytes = node_props[NodeId].node.LocalMemSize;
 		i++;
 	}
 
 	/* Add SCRATCH */
 	if (i < NumBanks &&
-		hsakmt_fmm_get_aperture_base_and_limit(FMM_SCRATCH, gpu_id,
+		hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_SCRATCH, gpu_id,
 				&MemoryProperties[i].VirtualBaseAddress, &aperture_limit) == HSAKMT_STATUS_SUCCESS) {
 		MemoryProperties[i].HeapType = HSA_HEAPTYPE_GPU_SCRATCH;
 		MemoryProperties[i].SizeInBytes = (aperture_limit - MemoryProperties[i].VirtualBaseAddress) + 1;
@@ -2349,8 +2459,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId,
 	}
 
 	/* Add SVM aperture */
-	if (hsakmt_topology_is_svm_needed(g_props[NodeId].node.EngineId) && i < NumBanks &&
-	    hsakmt_fmm_get_aperture_base_and_limit(
+	if (hsakmt_topology_is_svm_needed(node_props[NodeId].node.EngineId) && i < NumBanks &&
+	    hsakmt_fmm_get_aperture_base_and_limit(ctx,
 		    FMM_SVM, gpu_id, &MemoryProperties[i].VirtualBaseAddress,
 		    &aperture_limit) == HSAKMT_STATUS_SUCCESS) {
 		MemoryProperties[i].HeapType = HSA_HEAPTYPE_DEVICE_SVM;
@@ -2360,7 +2470,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId,
 
 	/* Add mmio aperture */
 	if (i < NumBanks &&
-		hsakmt_fmm_get_aperture_base_and_limit(FMM_MMIO, gpu_id,
+		hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_MMIO, gpu_id,
 				&MemoryProperties[i].VirtualBaseAddress, &aperture_limit) == HSAKMT_STATUS_SUCCESS) {
 		MemoryProperties[i].HeapType = HSA_HEAPTYPE_MMIO_REMAP;
 		MemoryProperties[i].SizeInBytes = (aperture_limit - MemoryProperties[i].VirtualBaseAddress) + 1;
@@ -2372,13 +2482,15 @@ out:
 	return err;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeCacheProperties(HSAuint32 NodeId,
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeCachePropertiesCtx(HsaKFDContext *ctx,
+						     HSAuint32 NodeId,
 						     HSAuint32 ProcessorId,
 						     HSAuint32 NumCaches,
 						     HsaCacheProperties *CacheProperties)
 {
 	HSAKMT_STATUS err;
 	uint32_t i;
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
 
 	if (!CacheProperties)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -2387,19 +2499,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeCacheProperties(HSAuint32 NodeId,
 	pthread_mutex_lock(&hsakmt_mutex);
 
 	/* KFD ADD page 18, snapshot protocol violation */
-	if (!g_system || NodeId >= g_system->NumNodes) {
+	if (!topology_ctx->system_props || NodeId >= topology_ctx->system_props->NumNodes) {
 		err = HSAKMT_STATUS_INVALID_NODE_UNIT;
 		goto out;
 	}
 
-	if (NumCaches > g_props[NodeId].node.NumCaches) {
+	if (NumCaches > topology_ctx->node_props[NodeId].node.NumCaches) {
 		err = HSAKMT_STATUS_INVALID_PARAMETER;
 		goto out;
 	}
 
-	for (i = 0; i < MIN(g_props[NodeId].node.NumCaches, NumCaches); i++) {
-		assert(g_props[NodeId].cache);
-		CacheProperties[i] = g_props[NodeId].cache[i];
+	for (i = 0; i < MIN(topology_ctx->node_props[NodeId].node.NumCaches, NumCaches); i++) {
+		assert(topology_ctx->node_props[NodeId].cache);
+		CacheProperties[i] = topology_ctx->node_props[NodeId].cache[i];
 	}
 
 	err = HSAKMT_STATUS_SUCCESS;
@@ -2409,24 +2521,30 @@ out:
 	return err;
 }
 
-HSAKMT_STATUS hsakmt_topology_get_iolink_props(HSAuint32 NodeId,
+HSAKMT_STATUS hsakmt_topology_get_iolink_props(HsaKFDContext *ctx,
+					HSAuint32 NodeId,
 					HSAuint32 NumIoLinks,
 					HsaIoLinkProperties *IoLinkProperties)
 {
-	if (!g_system || !g_props || NodeId >= g_system->NumNodes)
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
+
+	if (!topology_ctx->system_props || !topology_ctx->node_props ||
+		NodeId >= topology_ctx->system_props->NumNodes)
 		return HSAKMT_STATUS_ERROR;
 
-	memcpy(IoLinkProperties, g_props[NodeId].link,
+	memcpy(IoLinkProperties, topology_ctx->node_props[NodeId].link,
 	       NumIoLinks * sizeof(*IoLinkProperties));
 
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeIoLinkProperties(HSAuint32 NodeId,
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeIoLinkPropertiesCtx(HsaKFDContext *ctx,
+						      HSAuint32 NodeId,
 						      HSAuint32 NumIoLinks,
 						      HsaIoLinkProperties *IoLinkProperties)
 {
 	HSAKMT_STATUS err;
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
 
 	if (!IoLinkProperties)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -2436,79 +2554,97 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeIoLinkProperties(HSAuint32 NodeId,
 	pthread_mutex_lock(&hsakmt_mutex);
 
 	/* KFD ADD page 18, snapshot protocol violation */
-	if (!g_system || NodeId >= g_system->NumNodes ) {
+	if (!topology_ctx->system_props || NodeId >= topology_ctx->system_props->NumNodes ) {
 		err = HSAKMT_STATUS_INVALID_NODE_UNIT;
 		goto out;
 	}
 
-	if (NumIoLinks > g_props[NodeId].node.NumIOLinks) {
+	if (NumIoLinks > topology_ctx->node_props[NodeId].node.NumIOLinks) {
 		err = HSAKMT_STATUS_INVALID_PARAMETER;
 		goto out;
 	}
 
-	assert(g_props[NodeId].link);
-	err = hsakmt_topology_get_iolink_props(NodeId, NumIoLinks, IoLinkProperties);
+	assert(topology_ctx->node_props[NodeId].link);
+	err = hsakmt_topology_get_iolink_props(ctx, NodeId, NumIoLinks, IoLinkProperties);
 
 out:
 	pthread_mutex_unlock(&hsakmt_mutex);
 	return err;
 }
 
-uint32_t hsakmt_get_gfxv_by_node_id(HSAuint32 node_id)
+uint32_t hsakmt_get_gfxv_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id)
 {
-	return HSA_GET_GFX_VERSION_FULL(g_props[node_id].node.EngineId.ui32);
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
+	return HSA_GET_GFX_VERSION_FULL(topology_ctx->node_props[node_id].node.EngineId.ui32);
 }
 
-uint16_t hsakmt_get_device_id_by_node_id(HSAuint32 node_id)
+uint16_t hsakmt_get_device_id_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id)
 {
-	if (!g_props || !g_system || g_system->NumNodes <= node_id)
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
+
+	if (!topology_ctx->node_props || !topology_ctx->system_props ||
+		topology_ctx->system_props->NumNodes <= node_id)
 		return 0;
 
-	return g_props[node_id].node.DeviceId;
+	return topology_ctx->node_props[node_id].node.DeviceId;
 }
 
-bool hsakmt_prefer_ats(HSAuint32 node_id)
+HSAuint8 hsakmt_device_is_apu_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id)
 {
-	return g_props[node_id].node.Capability.ui32.HSAMMUPresent
-			&& g_props[node_id].node.NumCPUCores
-			&& g_props[node_id].node.NumFComputeCores;
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
+
+	/* if no node prop available treat is as dGPU */
+	if (!topology_ctx->node_props || !topology_ctx->system_props ||
+		topology_ctx->system_props->NumNodes <= node_id)
+		return 0;
+
+	return topology_ctx->node_props[node_id].node.Integrated;
 }
 
-uint16_t hsakmt_get_device_id_by_gpu_id(HSAuint32 gpu_id)
+bool hsakmt_prefer_ats(HsaKFDContext *ctx, HSAuint32 node_id)
+{
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
+	return topology_ctx->node_props[node_id].node.Capability.ui32.HSAMMUPresent
+			&& topology_ctx->node_props[node_id].node.NumCPUCores
+			&& topology_ctx->node_props[node_id].node.NumFComputeCores;
+}
+
+uint16_t hsakmt_get_device_id_by_gpu_id(HsaKFDContext *ctx, HSAuint32 gpu_id)
 {
 	unsigned int i;
-
-	if (!g_props || !g_system)
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
+	if (!topology_ctx->node_props || !topology_ctx->system_props)
 		return 0;
 
-	for (i = 0; i < g_system->NumNodes; i++) {
-		if (g_props[i].node.KFDGpuID == gpu_id)
-			return g_props[i].node.DeviceId;
+	for (i = 0; i < topology_ctx->system_props->NumNodes; i++) {
+		if (topology_ctx->node_props[i].node.KFDGpuID == gpu_id)
+			return topology_ctx->node_props[i].node.DeviceId;
 	}
 
 	return 0;
 }
 
-uint32_t hsakmt_get_direct_link_cpu(uint32_t gpu_node)
+uint32_t hsakmt_get_direct_link_cpu(HsaKFDContext *ctx, HSAuint32 gpu_node)
 {
 	HSAuint64 size = 0;
 	int32_t cpu_id;
 	HSAuint32 i;
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
 
-	cpu_id = gpu_get_direct_link_cpu(gpu_node, g_props);
+	cpu_id = gpu_get_direct_link_cpu(gpu_node, topology_ctx->node_props);
 	if (cpu_id == -1)
 		return INVALID_NODEID;
 
-	assert(g_props[cpu_id].mem);
-
-	for (i = 0; i < g_props[cpu_id].node.NumMemoryBanks; i++)
-		size += g_props[cpu_id].mem[i].SizeInBytes;
+	assert(topology_ctx->node_props[cpu_id].mem);
+	for (i = 0; i < topology_ctx->node_props[cpu_id].node.NumMemoryBanks; i++)
+		size += topology_ctx->node_props[cpu_id].mem[i].SizeInBytes;
 
 	return size ? (uint32_t)cpu_id : INVALID_NODEID;
 }
 
 
-HSAKMT_STATUS hsakmt_validate_nodeid_array(uint32_t **gpu_id_array,
+HSAKMT_STATUS hsakmt_validate_nodeid_array(HsaKFDContext *ctx,
+		uint32_t **gpu_id_array,
 		uint32_t NumberOfNodes, uint32_t *NodeArray)
 {
 	HSAKMT_STATUS ret;
@@ -2522,7 +2658,7 @@ HSAKMT_STATUS hsakmt_validate_nodeid_array(uint32_t **gpu_id_array,
 	if (!(*gpu_id_array))
 		return HSAKMT_STATUS_NO_MEMORY;
 	for (i = 0; i < NumberOfNodes; i++) {
-		ret = hsakmt_validate_nodeid(NodeArray[i], *gpu_id_array + i);
+		ret = hsakmt_validate_nodeid(ctx, NodeArray[i], *gpu_id_array + i);
 		if (ret != HSAKMT_STATUS_SUCCESS) {
 			free(*gpu_id_array);
 			break;
@@ -2532,7 +2668,59 @@ HSAKMT_STATUS hsakmt_validate_nodeid_array(uint32_t **gpu_id_array,
 	return ret;
 }
 
-inline uint32_t hsakmt_get_num_sysfs_nodes(void)
+uint32_t hsakmt_get_num_sysfs_nodes(HsaKFDContext *ctx)
 {
-	return num_sysfs_nodes;
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
+	return topology_ctx->num_sysfs_nodes;
+}
+
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtAcquireSystemProperties(HsaSystemProperties *SystemProperties)
+{
+	return hsaKmtAcquireSystemPropertiesCtx(&hsakmt_primary_kfd_ctx, SystemProperties);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtReleaseSystemProperties(void)
+{
+	return hsaKmtReleaseSystemPropertiesCtx(&hsakmt_primary_kfd_ctx);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeProperties(HSAuint32 NodeId,
+						HsaNodeProperties *NodeProperties)
+{
+	return hsaKmtGetNodePropertiesCtx(&hsakmt_primary_kfd_ctx, NodeId, NodeProperties);
+}
+
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtGetNodeWallclockFrequency(HSAuint32 NodeId, uint64_t* Frequency)
+{
+	struct hsa_kfd_topology_context *topology_ctx =
+				hsakmt_kfdcontext_get_topology_context(&hsakmt_primary_kfd_ctx);
+	HsaNodeProperties *NodeProperties = &(topology_ctx->node_props[NodeId].node);
+
+	*Frequency = NodeProperties->WallClockKHz * 1000ull;
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId,
+						      HSAuint32 NumBanks,
+						      HsaMemoryProperties *MemoryProperties)
+{
+	return hsaKmtGetNodeMemoryPropertiesCtx(&hsakmt_primary_kfd_ctx, NodeId, NumBanks, MemoryProperties);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeCacheProperties(HSAuint32 NodeId,
+						     HSAuint32 ProcessorId,
+						     HSAuint32 NumCaches,
+						     HsaCacheProperties *CacheProperties)
+{
+	return hsaKmtGetNodeCachePropertiesCtx(&hsakmt_primary_kfd_ctx, NodeId, ProcessorId, NumCaches, CacheProperties);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeIoLinkProperties(HSAuint32 NodeId,
+						      HSAuint32 NumIoLinks,
+						      HsaIoLinkProperties *IoLinkProperties)
+{
+	return hsaKmtGetNodeIoLinkPropertiesCtx(&hsakmt_primary_kfd_ctx, NodeId, NumIoLinks, IoLinkProperties);
 }

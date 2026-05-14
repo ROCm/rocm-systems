@@ -1,6 +1,6 @@
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  * Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -1108,7 +1108,7 @@ prepareInput1(void* elts, intptr_t elt_n, int elt_ty, ReduceOp op, int rank_n,
 }
 }  // namespace
 
-void
+hipError_t
 ncclVerifiablePrepareInput(void* elts, intptr_t elt_n, int elt_ty, int red_op, int rank_n,
                            int rank_me, uint64_t seed, intptr_t elt_ix0,
                            cudaStream_t stream)
@@ -1135,6 +1135,7 @@ ncclVerifiablePrepareInput(void* elts, intptr_t elt_n, int elt_ty, int red_op, i
 #    endif
     }
 #    undef CASE_OP
+    return hipSuccess;
 }
 #endif
 
@@ -1198,7 +1199,7 @@ prepareExpected1(void* elts, intptr_t elt_n, int elt_ty, ReduceOp op, int rank_n
 }
 }  // namespace
 
-void
+hipError_t
 ncclVerifiablePrepareExpected(void* elts, intptr_t elt_n, int elt_ty, int red_op,
                               int rank_n, uint64_t seed, intptr_t elt_ix0,
                               cudaStream_t stream)
@@ -1224,6 +1225,7 @@ ncclVerifiablePrepareExpected(void* elts, intptr_t elt_n, int elt_ty, int red_op
 #    endif
     }
 #    undef CASE_OP
+    return hipSuccess;
 }
 #endif
 
@@ -1411,7 +1413,7 @@ verifyInline1(T const* results, intptr_t elt_n, int red_op, int rank_n, uint64_t
 }
 }  // namespace
 
-void
+hipError_t
 ncclVerifiableVerify(void const* results, void const* expected, intptr_t elt_n,
                      int elt_ty, int red_op, int rank_n, uint64_t seed, intptr_t elt_ix0,
                      int64_t* bad_elt_n, cudaStream_t stream)
@@ -1470,6 +1472,68 @@ ncclVerifiableVerify(void const* results, void const* expected, intptr_t elt_n,
         default: assert(0);
     }
 #    undef CASE_TY
+    return hipSuccess;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Apply bias to expected results
+
+namespace
+{
+template <typename T>
+__global__ void
+applyBias2(T* elts, T* bias, intptr_t elt_n)
+{
+    intptr_t i0 = blockIdx.x * (elt_n / gridDim.x);
+    i0 += blockIdx.x < elt_n % gridDim.x ? blockIdx.x : elt_n % gridDim.x;
+    intptr_t i1 = (blockIdx.x + 1) * (elt_n / gridDim.x);
+    i1 += blockIdx.x + 1 < elt_n % gridDim.x ? blockIdx.x + 1 : elt_n % gridDim.x;
+    intptr_t i = i0 + threadIdx.x;
+    while(i < i1)
+    {
+        elts[i] = ReduceSum()(elts[i], bias[i]);
+        i += blockDim.x;
+    }
+}
+
+void
+applyBias1(void* elts, void* bias, intptr_t elt_n, int elt_ty, cudaStream_t stream)
+{
+    int block_n = std::min<intptr_t>(32, (elt_n + 4 * 512 - 1) / (4 * 512));
+#    define CASE_TY(T)                                                                   \
+        applyBias2<<<block_n, 512, 0, stream>>>((T*) elts, (T*) bias, elt_n);            \
+        break;
+    switch(elt_ty)
+    {
+        case ncclInt8: CASE_TY(int8_t)
+        case ncclUint8: CASE_TY(uint8_t)
+        case ncclInt32: CASE_TY(int32_t)
+        case ncclUint32: CASE_TY(uint32_t)
+        case ncclInt64: CASE_TY(int64_t)
+        case ncclUint64: CASE_TY(uint64_t)
+        case ncclFloat16: CASE_TY(__half)
+#    if HAVE_ncclBfloat16
+        case ncclBfloat16: CASE_TY(hip_bfloat16)
+#    endif
+#    if HAVE_ncclfp8
+        case ncclFp8E4M3: CASE_TY(rccl_float8)
+        case ncclFp8E5M2: CASE_TY(rccl_bfloat8)
+#    endif
+        case ncclFloat32: CASE_TY(float)
+        case ncclFloat64: CASE_TY(double)
+        default: assert(0);
+    }
+#    undef CASE_TY
+}
+}  // namespace
+
+void
+ncclVerifiableApplyBias(void* elts, void* bias, intptr_t elt_n, int elt_ty, int red_op,
+                        intptr_t elt_ix0, cudaStream_t stream)
+{
+    (void) red_op;
+    (void) elt_ix0;
+    applyBias1(elts, bias, elt_n, elt_ty, stream);
 }
 #endif
 

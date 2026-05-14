@@ -1,32 +1,12 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "rocprof-sys-causal.hpp"
 
 #include "common/defines.h"
-#include "common/delimit.hpp"
+#include "common/env_vars.hpp"
 #include "common/environment.hpp"
-#include "common/join.hpp"
-#include "common/setup.hpp"
+#include "common/path.hpp"
 #include "core/mproc.hpp"
 #include "core/utility.hpp"
 
@@ -38,8 +18,7 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
-#include <array>
-#include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -52,7 +31,6 @@
 #include <string>
 #include <string_view>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -60,27 +38,21 @@ namespace color    = ::tim::log::color;
 namespace filepath = ::tim::filepath;
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
+namespace path     = rocprofsys::common::path;
+namespace env      = rocprofsys::env_vars;
 using namespace ::timemory::join;
+using rocprofsys::common::update_mode;
 using ::rocprofsys::utility::parse_numeric_range;
 using ::tim::get_env;
 using ::tim::log::monochrome;
 using ::tim::log::stream;
 
-namespace std
-{
-std::string
-to_string(bool _v)
-{
-    return (_v) ? "true" : "false";
-}
-}  // namespace std
-
 namespace
 {
 int  verbose       = 0;
-auto updated_envs  = std::set<std::string_view>{};
-auto original_envs = std::set<std::string>{};
-auto child_pids    = std::set<pid_t>{};
+auto updated_envs  = std::unordered_set<std::string_view>{};
+auto original_envs = std::unordered_set<std::string>{};
+auto child_pids    = std::unordered_set<pid_t>{};
 auto launcher      = std::string{};
 
 inline signal_handler&
@@ -121,11 +93,8 @@ forward_signal(int sig)
 int
 get_verbose()
 {
-    verbose     = get_env("ROCPROFSYS_CAUSAL_VERBOSE",
-                          get_env<int>("ROCPROFSYS_VERBOSE", verbose, false));
-    auto _debug = get_env("ROCPROFSYS_CAUSAL_DEBUG",
-                          get_env<bool>("ROCPROFSYS_DEBUG", false, false));
-    if(_debug) verbose += 8;
+    const auto* _log_level = std::getenv(env::LOG_LEVEL.data());
+    if(_log_level != nullptr) verbose = env::log_level_to_verbose(_log_level);
     return verbose;
 }
 
@@ -160,37 +129,22 @@ diagnose_status(pid_t _pid, int _status)
     return ::rocprofsys::mproc::diagnose_status(_pid, _status, get_verbose());
 }
 
-std::string
-get_realpath(const std::string& _v)
+const std::unordered_set<std::string_view>&
+get_updated_envs()
 {
-    auto* _tmp = realpath(_v.c_str(), nullptr);
-    auto  _ret = std::string{ _tmp };
-    free(_tmp);
-    return _ret;
+    return updated_envs;
 }
 
-void
-print_command(const std::vector<char*>& _argv, std::string_view _prefix)
-{
-    if(verbose >= 1)
-        stream(std::cout, color::info())
-            << _prefix << "Executing '" << join(array_config{ " " }, _argv) << "'...\n";
-
-    std::cerr << color::end() << std::flush;
-}
-
-std::vector<char*>
+std::vector<std::string>
 get_initial_environment()
 {
-    auto _env = std::vector<char*>{};
+    auto _env = std::vector<std::string>{};
     if(environ != nullptr)
     {
-        int idx = 0;
-        while(environ[idx] != nullptr)
+        for(int idx = 0; environ[idx] != nullptr; ++idx)
         {
-            auto* _v = environ[idx++];
-            original_envs.emplace(_v);
-            _env.emplace_back(strdup(_v));
+            original_envs.emplace(environ[idx]);
+            _env.emplace_back(environ[idx]);
         }
     }
 
@@ -203,6 +157,14 @@ get_initial_environment()
     update_env(_env, "ROCPROFSYS_THREAD_POOL_SIZE",
                get_env<int>("ROCPROFSYS_THREAD_POOL_SIZE", 0));
     update_env(_env, "ROCPROFSYS_LAUNCHER", "rocprof-sys-causal");
+
+    // Ensure libomptarget.so can be found by the target (OpenMP/HIP apps)
+    if(auto llvm_dir =
+           rocprofsys::common::discover_llvm_libdir_for_ompt(get_verbose() > 0);
+       !llvm_dir.empty())
+    {
+        update_env(_env, "LD_LIBRARY_PATH", llvm_dir, /*append=*/true);
+    }
 
     return _env;
 }
@@ -238,176 +200,57 @@ prepare_command_for_run(char* _exe, std::vector<char*>& _argv)
 }
 
 void
-prepare_environment_for_run(std::vector<char*>& _env)
+prepare_environment_for_run(std::vector<std::string>& _env)
 {
     if(launcher.empty())
     {
-        update_env(_env, "LD_PRELOAD",
-                   join(":", LIBPTHREAD_SO,
-                        get_realpath(get_internal_libpath("librocprof-sys-dl.so"))),
-                   true);
-        update_env(_env, "ROCPROFSYS_SCRIPT_DIR", get_internal_script_path());
+        update_env(
+            _env, "LD_PRELOAD",
+            join(":", LIBPTHREAD_SO,
+                 path::realpath(path::get_internal_libpath("librocprof-sys-dl.so"))),
+            true);
+        update_env(_env, "ROCPROFSYS_SCRIPT_DIR", path::get_internal_script_path());
+        update_env(_env, "ROCPROFSYS_ROOT", path::get_rocprofsys_root());
     }
-}
-
-std::string
-get_internal_libpath(const std::string& _lib)
-{
-    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-    return rocprofsys::common::join("/", _dir, "..", "lib", _lib);
-}
-
-std::string
-get_internal_script_path(void)
-{
-    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-
-    auto _script_dir = get_realpath(
-        rocprofsys::common::join("/", _dir, "..", "libexec", "rocprofiler-systems"));
-
-    return _script_dir;
-}
-
-void
-print_updated_environment(std::vector<char*> _env, std::string_view _prefix)
-{
-    if(get_verbose() < 0) return;
-
-    std::sort(_env.begin(), _env.end(), [](auto* _lhs, auto* _rhs) {
-        if(!_lhs) return false;
-        if(!_rhs) return true;
-        return std::string_view{ _lhs } < std::string_view{ _rhs };
-    });
-
-    std::vector<std::string_view> _updates = {};
-    std::vector<std::string_view> _general = {};
-
-    for(auto* itr : _env)
-    {
-        if(itr == nullptr) continue;
-
-        auto _is_omni = (std::string_view{ itr }.find("ROCPROFSYS") == 0);
-        auto _updated = false;
-        for(const auto& vitr : updated_envs)
-        {
-            if(std::string_view{ itr }.find(vitr) == 0)
-            {
-                _updated = true;
-                break;
-            }
-        }
-
-        if(_updated)
-            _updates.emplace_back(itr);
-        else if(verbose >= 1 && _is_omni)
-            _general.emplace_back(itr);
-    }
-
-    if(_general.size() + _updates.size() == 0 || verbose < 0) return;
-
-    std::cerr << std::endl;
-
-    for(auto& itr : _general)
-        stream(std::cerr, color::source()) << _prefix << itr << "\n";
-    for(auto& itr : _updates)
-        stream(std::cerr, color::source()) << _prefix << itr << "\n";
-
-    std::cerr << color::end() << std::flush;
 }
 
 template <typename Tp>
 void
-update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
+update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _env_val,
            bool _append, std::string_view _join_delim)
 {
-    updated_envs.emplace(_env_var);
-
-    auto _key = join("", _env_var, "=");
-    for(auto& itr : _environ)
-    {
-        if(!itr) continue;
-        if(std::string_view{ itr }.find(_key) == 0)
-        {
-            if(_append)
-            {
-                if(std::string_view{ itr }.find(join("", _env_val)) ==
-                   std::string_view::npos)
-                {
-                    auto _val = std::string{ itr }.substr(_key.length());
-                    free(itr);
-                    if(_env_var == "LD_PRELOAD")
-                    {
-                        itr =
-                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
-                                       .c_str());
-                    }
-                    else
-                    {
-                        itr =
-                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
-                                       .c_str());
-                    }
-                }
-            }
-            else
-            {
-                free(itr);
-                itr = strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str());
-            }
-            return;
-        }
-    }
-    _environ.emplace_back(
-        strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str()));
+    auto _mode = _append ? update_mode::APPEND : update_mode::REPLACE;
+    rocprofsys::common::update_env(_environ, _env_var, std::forward<Tp>(_env_val), _mode,
+                                   _join_delim, updated_envs, original_envs);
 }
 
 template <typename Tp>
 void
-add_default_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val)
+add_default_env(std::vector<std::string>& _environ, std::string_view _env_var,
+                Tp&& _env_val)
 {
-    auto _key = join("", _env_var, "=");
-    for(auto& itr : _environ)
-    {
-        if(!itr) continue;
-        if(std::string_view{ itr }.find(_key) == 0) return;
-    }
+    auto       _key = join("", _env_var, "=");
+    const auto exists =
+        std::any_of(_environ.begin(), _environ.end(), [&_key](const std::string& entry) {
+            return std::string_view{ entry }.find(_key) == 0;
+        });
 
-    updated_envs.emplace(_env_var);
-    _environ.emplace_back(
-        strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str()));
-}
+    if(exists) return;
 
-void
-remove_env(std::vector<char*>& _environ, std::string_view _env_var)
-{
-    auto _key   = join("", _env_var, "=");
-    auto _match = [&_key](auto itr) { return std::string_view{ itr }.find(_key) == 0; };
-
-    _environ.erase(std::remove_if(_environ.begin(), _environ.end(), _match),
-                   _environ.end());
-
-    for(const auto& itr : original_envs)
-    {
-        if(std::string_view{ itr }.find(_key) == 0)
-            _environ.emplace_back(strdup(itr.c_str()));
-    }
+    rocprofsys::common::update_env(_environ, _env_var, std::forward<Tp>(_env_val),
+                                   update_mode::REPLACE, ":", updated_envs,
+                                   original_envs);
 }
 
 std::vector<char*>
-parse_args(int argc, char** argv, std::vector<char*>& _env,
+parse_args(int argc, char** argv, std::vector<std::string>& _env,
            std::vector<std::map<std::string_view, std::string>>& _causal_envs)
 {
     using parser_t     = argparse::argument_parser;
     using parser_err_t = typename parser_t::result_type;
 
     auto help_check = [](parser_t& p, int _argc, char** _argv) {
-        std::set<std::string> help_args = { "-h", "--help", "-?" };
+        std::unordered_set<std::string> help_args = { "-h", "--help", "-?" };
         return (p.exists("help") || _argc == 1 ||
                 (_argc > 1 && help_args.find(_argv[1]) != help_args.end()));
     };
@@ -474,6 +317,15 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
             std::min<int>(_cols - parser.get_help_width() - 8, 120));
 
     parser.start_group("DEBUG OPTIONS", "");
+
+    parser.add_argument({ "--log-level" }, "Log level")
+        .max_count(1)
+        .dtype("string")
+        .choices({ "trace", "debug", "info", "warn", "error", "critical", "off" })
+        .action([&](parser_t& p) {
+            update_env(_env, "ROCPROFSYS_LOG_LEVEL", p.get<std::string>("log-level"));
+        });
+
     parser.add_argument({ "--monochrome" }, "Disable colorized output")
         .max_count(1)
         .dtype("bool")
@@ -484,17 +336,26 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
             update_env(_env, "ROCPROFSYS_MONOCHROME", (_monochrome) ? "1" : "0");
             update_env(_env, "MONOCHROME", (_monochrome) ? "1" : "0");
         });
-    parser.add_argument({ "--debug" }, "Debug output")
+    parser.add_argument({ "--debug" }, "[DEPRECATED Use --log-level=debug] Debug output")
         .max_count(1)
         .action([&](parser_t& p) {
             update_env(_env, "ROCPROFSYS_DEBUG", p.get<bool>("debug"));
+            update_env(_env, "ROCPROFSYS_LOG_LEVEL", "debug");
         });
-    parser.add_argument({ "-v", "--verbose" }, "Verbose output")
+    parser
+        .add_argument({ "-v", "--verbose" },
+                      "[DEPRECATED Use --log-level=trace] Verbose output")
         .count(1)
         .action([&](parser_t& p) {
             auto _v = p.get<int>("verbose");
             verbose = _v;
             update_env(_env, "ROCPROFSYS_VERBOSE", _v);
+
+            constexpr std::array<const char*, 5> log_levels = { "off", "info", "debug",
+                                                                "debug", "trace" };
+
+            auto index = std::clamp(_v + 1, 0, static_cast<int>(log_levels.size() - 1));
+            update_env(_env, "ROCPROFSYS_LOG_LEVEL", log_levels[index]);
         });
 
     std::string _config_file      = {};
@@ -625,21 +486,21 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
             update_env(_env, "ROCPROFSYS_CAUSAL_DURATION", p.get<double>("duration"));
         });
 
-    int64_t _niterations       = 1;
-    auto    _virtual_speedups  = std::vector<std::string>{};
-    auto    _function_scopes   = std::vector<std::string>{};
-    auto    _binary_scopes     = std::vector<std::string>{};
-    auto    _source_scopes     = std::vector<std::string>{};
-    auto    _function_excludes = std::vector<std::string>{};
-    auto    _binary_excludes   = std::vector<std::string>{};
-    auto    _source_excludes   = std::vector<std::string>{};
+    std::int64_t _niterations       = 1;
+    auto         _virtual_speedups  = std::vector<std::string>{};
+    auto         _function_scopes   = std::vector<std::string>{};
+    auto         _binary_scopes     = std::vector<std::string>{};
+    auto         _source_scopes     = std::vector<std::string>{};
+    auto         _function_excludes = std::vector<std::string>{};
+    auto         _binary_excludes   = std::vector<std::string>{};
+    auto         _source_excludes   = std::vector<std::string>{};
 
     parser
         .add_argument({ "-n", "--iterations" },
                       "Number of times to repeat the combination of run configurations")
         .count(1)
         .dtype("int")
-        .action([&](parser_t& p) { _niterations = p.get<int64_t>("iterations"); });
+        .action([&](parser_t& p) { _niterations = p.get<std::int64_t>("iterations"); });
 
     parser.start_group(
         "CAUSAL PROFILING OPTIONS (Combinatorial)",
@@ -673,7 +534,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
                     for(const auto& ditr : tim::delimit(itr, ",; \t\n\r"))
                     {
                         for(auto nitr :
-                            parse_numeric_range<int64_t, std::vector<int64_t>>(
+                            parse_numeric_range<std::int64_t, std::vector<std::int64_t>>(
                                 ditr, "virtual speedup", 5L))
                         {
                             _virtual_speedups.emplace_back(std::to_string(nitr));
@@ -852,7 +713,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
     // duplicate for the number of iterations
     _causal_envs.clear();
     _causal_envs.reserve(_niterations * _causal_envs_tmp.size());
-    for(int64_t i = 0; i < _niterations; ++i)
+    for(std::int64_t i = 0; i < _niterations; ++i)
     {
         for(const auto& itr : _causal_envs_tmp)
             _causal_envs.emplace_back(itr);
@@ -868,19 +729,21 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
         };
 
         auto _omni_env_m = std::map<std::string, std::string>{};
-        for(auto* itr : _env)
+        for(const auto& itr : _env)
         {
             if(_is_omni_cfg(itr))
             {
-                auto _env_var = std::string{ itr };
-                auto _pos     = _env_var.find('=');
-                auto _env_val = _env_var.substr(_pos + 1);
-                _env_var      = _env_var.substr(0, _pos);
-                _omni_env_m.emplace(_env_var, _env_val);
+                auto _pos     = itr.find('=');
+                auto _env_var = itr.substr(0, _pos);
+                auto _env_val = itr.substr(_pos + 1);
+                _omni_env_m.emplace(std::move(_env_var), std::move(_env_val));
             }
         }
 
-        _env.erase(std::remove_if(_env.begin(), _env.end(), _is_omni_cfg), _env.end());
+        _env.erase(
+            std::remove_if(_env.begin(), _env.end(),
+                           [&](const std::string& entry) { return _is_omni_cfg(entry); }),
+            _env.end());
 
         auto _omni_env = std::vector<std::pair<std::string, std::string>>{};
         // make sure that ROCPROFSYS_CONFIG_FILE is the first entry
@@ -945,5 +808,5 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
 
 // explicit instantiation for usage in rocprof-sys-causal.cpp
 template void
-update_env(std::vector<char*>&, std::string_view, const std::string& _env_val,
+update_env(std::vector<std::string>&, std::string_view, const std::string& _env_val,
            bool _append, std::string_view);

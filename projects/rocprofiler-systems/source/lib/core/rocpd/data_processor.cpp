@@ -1,40 +1,29 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "data_processor.hpp"
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/rocpd/data_storage/table_insert_query.hpp"
-#include "debug.hpp"
+#include <cstdint>
+
+#include "logger/debug.hpp"
+
+#include <memory>
 
 namespace rocprofsys
 {
 namespace rocpd
 {
-data_processor::data_processor()
+data_processor::data_processor(std::shared_ptr<data_storage::database> database)
+: _database(std::move(database))
 {
-    data_storage::database::get_instance().initialize_schema();
-    _upid = data_storage::database::get_instance().get_upid();
+    if(!_database)
+    {
+        throw std::invalid_argument("Provided pointer to a non-existing database!");
+    }
+    _database->initialize_schema();
+    _upid = _database->get_upid();
 
-    // Initialize event statement
     initialize_event_stmt();
     initialize_pmc_event_stmt();
     initialize_sample_stmt();
@@ -48,22 +37,14 @@ data_processor::data_processor()
     initialize_memory_alloc_stmt();
 }
 
-data_processor&
-data_processor::get_instance()
-{
-    static data_processor _instance;
-    return _instance;
-}
-
 void
 data_processor::initialize_metadata()
 {
     data_storage::queries::table_insert_query query;
-    data_storage::database::get_instance().execute_query(
-        query.set_table_name("rocpd_metadata_" + _upid)
-            .set_columns("tag", "value")
-            .set_values("upid", _upid)
-            .get_query_string());
+    _database->execute_query(query.set_table_name("rocpd_metadata_" + _upid)
+                                 .set_columns("tag", "value")
+                                 .set_values("upid", _upid)
+                                 .get_query_string());
 }
 
 size_t
@@ -73,13 +54,12 @@ data_processor::insert_string(const char* str)
     if(it != _string_map.end()) return _string_map.at(str);
 
     data_storage::queries::table_insert_query query;
-    data_storage::database::get_instance().execute_query(
-        query.set_table_name("rocpd_string_" + _upid)
-            .set_columns("guid", "string")
-            .set_values(_upid, str)
-            .get_query_string());
+    _database->execute_query(query.set_table_name("rocpd_string_" + _upid)
+                                 .set_columns("guid", "string")
+                                 .set_values(_upid, str)
+                                 .get_query_string());
 
-    const auto string_id = data_storage::database::get_instance().get_last_insert_id();
+    const auto string_id = _database->get_last_insert_id();
     _string_map.emplace(str, string_id);
     return string_id;
 }
@@ -91,7 +71,7 @@ data_processor::insert_node_info(size_t node_id, size_t hash, const char* machin
                                  const char* hardware_name, const char* domain_name)
 {
     data_storage::queries::table_insert_query query;
-    data_storage::database::get_instance().execute_query(
+    _database->execute_query(
         query.set_table_name("rocpd_info_node_" + _upid)
             .set_columns("id", "guid", "hash", "machine_id", "system_name", "hostname",
                          "release", "version", "hardware_name", "domain_name")
@@ -107,35 +87,41 @@ data_processor::insert_process_info(size_t nid, size_t ppid, size_t pid, size_t 
                                     const char* extdata)
 {
     data_storage::queries::table_insert_query query;
-    data_storage::database::get_instance().execute_query(
-        query.set_table_name("rocpd_info_process_" + _upid)
-            .set_columns("id", "guid", "nid", "ppid", "pid", "init", "fini", "start",
-                         "end", "command", "environment", "extdata")
-            .set_values(pid, _upid, nid, ppid, pid, init, fini, start, end, command,
-                        environment, extdata)
-            .get_query_string());
+    _database->execute_query(query.set_table_name("rocpd_info_process_" + _upid)
+                                 .set_columns("id", "guid", "nid", "ppid", "pid", "init",
+                                              "fini", "start", "end", "command",
+                                              "environment", "extdata")
+                                 .set_values(pid, _upid, nid, ppid, pid, init, fini,
+                                             start, end, command, environment, extdata)
+                                 .get_query_string());
 }
 
 size_t
 data_processor::insert_agent(size_t node_id, size_t pid, const char* agent_type,
                              size_t absolute_index, size_t logical_index,
-                             size_t type_index, uint64_t uuid, const char* name,
+                             size_t type_index, std::uint64_t uuid, const char* name,
                              const char* model_name, const char* vendor_name,
                              const char* product_name, const char* user_name,
                              const char* extdata)
 {
+    std::optional<const char*> agent_type_opt = std::nullopt;
+    if(agent_type != nullptr)
+    {
+        agent_type_opt = agent_type;
+    }
+
     data_storage::queries::table_insert_query query;
-    data_storage::database::get_instance().execute_query(
+    _database->execute_query(
         query.set_table_name("rocpd_info_agent_" + _upid)
             .set_columns("guid", "nid", "pid", "type", "absolute_index", "logical_index",
                          "type_index", "uuid", "name", "model_name", "vendor_name",
                          "product_name", "user_name", "extdata")
-            .set_values(_upid, node_id, pid, agent_type, absolute_index, logical_index,
-                        type_index, uuid, name, model_name, vendor_name, product_name,
-                        user_name, extdata)
+            .set_values(_upid, node_id, pid, agent_type_opt, absolute_index,
+                        logical_index, type_index, uuid, name, model_name, vendor_name,
+                        product_name, user_name, extdata)
             .get_query_string());
 
-    return data_storage::database::get_instance().get_last_insert_id();
+    return _database->get_last_insert_id();
 }
 
 void
@@ -144,20 +130,20 @@ data_processor::insert_track(const char* track_name, size_t node_id, size_t proc
 {
     if(_tracks.find(track_name) != _tracks.end())
     {
-        ROCPROFSYS_WARNING(2, "Fail to add track %s, already exist!\n", track_name);
+        LOG_WARNING("Fail to add track {}, already exist!", track_name);
         return;
     }
 
     auto name_id = insert_string(track_name);
 
     data_storage::queries::table_insert_query query;
-    data_storage::database::get_instance().execute_query(
+    _database->execute_query(
         query.set_table_name("rocpd_track_" + _upid)
             .set_columns("guid", "nid", "pid", "tid", "name_id", "extdata")
             .set_values(_upid, node_id, process_id, thread_id, name_id, extdata)
             .get_query_string());
 
-    auto track_id       = data_storage::database::get_instance().get_last_insert_id();
+    auto track_id       = _database->get_last_insert_id();
     _tracks[track_name] = track_name_map{ track_id, name_id };
 }
 
@@ -167,18 +153,23 @@ data_processor::insert_pmc_description(
     size_t event_code, size_t instance_id, const char* name, const char* symbol,
     const char* description, const char* long_description, const char* component,
     const char* units, const char* value_type, const char* block, const char* expression,
-    uint32_t is_constant, uint32_t is_derived, const char* extdata)
+    std::uint32_t is_constant, std::uint32_t is_derived, const char* extdata)
 {
     auto it = _pmc_descriptor_map.find({ agent_id, name });
     if(it != _pmc_descriptor_map.end())
     {
-        ROCPROFSYS_WARNING(0,
-                           "Insert PMC description failed! Error: PMC descriptor "
-                           "(name:%s) (ID:%lu) already exist!\n",
-                           name, agent_id);
-        return;
+        throw std::runtime_error(
+            fmt::format("Insert PMC description failed! Error: PMC descriptor "
+                        "(name: {}) (ID: {}) already exist!",
+                        name, agent_id));
     }
     data_storage::queries::table_insert_query query_builder;
+
+    std::optional<const char*> target_arch_opt = std::nullopt;
+    if(target_arch != nullptr)
+    {
+        target_arch_opt = target_arch;
+    }
 
     auto query =
         query_builder.set_table_name("rocpd_info_pmc_" + _upid)
@@ -186,14 +177,14 @@ data_processor::insert_pmc_description(
                          "instance_id", "name", "symbol", "description",
                          "long_description", "component", "units", "value_type", "block",
                          "expression", "is_constant", "is_derived", "extdata")
-            .set_values(_upid, node_id, process_id, agent_id, target_arch, event_code,
+            .set_values(_upid, node_id, process_id, agent_id, target_arch_opt, event_code,
                         instance_id, name, symbol, description, long_description,
                         component, units, value_type, block, expression, is_constant,
                         is_derived, extdata)
             .get_query_string();
-    data_storage::database::get_instance().execute_query(query);
+    _database->execute_query(query);
 
-    auto pmc_id = data_storage::database::get_instance().get_last_insert_id();
+    auto pmc_id = _database->get_last_insert_id();
     _pmc_descriptor_map.emplace(
         std::pair<pmc_identifier, size_t>{ { agent_id, name }, pmc_id });
 }
@@ -202,17 +193,15 @@ void
 data_processor::insert_pmc_event(size_t event_id, size_t agent_id, const char* pmc_name,
                                  double value, const char* extdata)
 {
-    ROCPROFSYS_VERBOSE(2,
-                       "Insert PMC event: id %ld, agent id: %ld, pmc name: %s, value: "
-                       "%lf, extdata: %s\n",
-                       event_id, agent_id, pmc_name, value, extdata);
+    LOG_TRACE(
+        "Insert PMC event: id {}, agent id: {}, pmc name: {}, value: {}, extdata: {}",
+        event_id, agent_id, pmc_name, value, extdata);
     auto it = _pmc_descriptor_map.find({ agent_id, pmc_name });
     if(it == _pmc_descriptor_map.end())
     {
-        ROCPROFSYS_WARNING(0,
-                           "Insert PMC event failed! Error: non-existing PMC description "
-                           "agent id: %ld, pmc name: %s !\n",
-                           agent_id, pmc_name);
+        LOG_WARNING("Insert PMC event failed! Error: non-existing PMC description "
+                    "agent id: {}, pmc name: {} !",
+                    agent_id, pmc_name);
         return;
     }
 
@@ -222,17 +211,15 @@ data_processor::insert_pmc_event(size_t event_id, size_t agent_id, const char* p
 }
 
 void
-data_processor::insert_sample(const char* track, uint64_t timestamp, size_t event_id,
+data_processor::insert_sample(const char* track, std::uint64_t timestamp, size_t event_id,
                               const char* extdata)
 {
-    ROCPROFSYS_VERBOSE(
-        3, "Insert sample: track: %s, timestamp: %lu, event id: %ld, extdata: %s\n",
-        track, timestamp, event_id, extdata);
+    LOG_TRACE("Insert sample: track: {}, timestamp: {}, event id: {}, extdata: {}", track,
+              timestamp, event_id, extdata);
     auto it = _tracks.find(track);
     if(it == _tracks.end())
     {
-        ROCPROFSYS_WARNING(0, "Insert sample failed! Error: Unexisting track %s!\n",
-                           track);
+        LOG_WARNING("Insert sample failed! Error: Unexisting track {}!", track);
         return;
     }
     auto track_info = it->second;
@@ -248,7 +235,7 @@ data_processor::insert_event(size_t string_primary_key, size_t stack_id,
 {
     _insert_event_statement(_upid.c_str(), string_primary_key, stack_id, parent_stack_id,
                             correlation_id, call_stack, line_info, extdata);
-    return data_storage::database::get_instance().get_last_insert_id();
+    return _database->get_last_insert_id();
 }
 
 void
@@ -261,9 +248,10 @@ data_processor::initialize_event_stmt()
                      .set_values('?', '?', '?', '?', '?', '?', '?', '?')
                      .get_query_string();
     _insert_event_statement =
-        data_storage::database::get_instance()
-            .create_statement_executor<const char*, size_t, size_t, size_t, size_t,
-                                       const char*, const char*, const char*>(query);
+        data_storage::database::create_statement_executor<const char*, size_t, size_t,
+                                                          size_t, size_t, const char*,
+                                                          const char*, const char*>(
+            query, _database);
 }
 
 void
@@ -275,9 +263,9 @@ data_processor::initialize_pmc_event_stmt()
                      .set_values('?', '?', '?', '?', '?')
                      .get_query_string();
     _insert_pmc_event_statement =
-        data_storage::database::get_instance()
-            .create_statement_executor<const char*, size_t, size_t, double, const char*>(
-                query);
+        data_storage::database::create_statement_executor<const char*, size_t, size_t,
+                                                          double, const char*>(query,
+                                                                               _database);
 }
 
 void
@@ -288,10 +276,8 @@ data_processor::initialize_sample_stmt()
                      .set_columns("guid", "track_id", "timestamp", "event_id", "extdata")
                      .set_values('?', '?', '?', '?', '?')
                      .get_query_string();
-    _insert_sample_statement =
-        data_storage::database::get_instance()
-            .create_statement_executor<const char*, size_t, uint64_t, size_t,
-                                       const char*>(query);
+    _insert_sample_statement = data_storage::database::create_statement_executor<
+        const char*, size_t, std::uint64_t, size_t, const char*>(query, _database);
 }
 
 void
@@ -303,10 +289,9 @@ data_processor::initialize_region_stmt()
                                   "event_id", "extdata")
                      .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?')
                      .get_query_string();
-    _insert_region_statement =
-        data_storage::database::get_instance()
-            .create_statement_executor<const char*, size_t, size_t, size_t, uint64_t,
-                                       uint64_t, size_t, size_t, const char*>(query);
+    _insert_region_statement = data_storage::database::create_statement_executor<
+        const char*, size_t, size_t, size_t, std::uint64_t, std::uint64_t, size_t, size_t,
+        const char*>(query, _database);
 }
 
 void
@@ -323,13 +308,10 @@ data_processor::initialize_kernel_dispatch_stmt()
                      .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?',
                                  '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?')
                      .get_query_string();
-    _insert_kernel_dispatch_statement =
-        data_storage::database::get_instance()
-            .create_statement_executor<const char*, size_t, size_t, size_t, size_t,
-                                       size_t, size_t, size_t, size_t, uint64_t, uint64_t,
-                                       size_t, size_t, size_t, size_t, size_t, size_t,
-                                       size_t, size_t, size_t, size_t, const char*>(
-                query);
+    _insert_kernel_dispatch_statement = data_storage::database::create_statement_executor<
+        const char*, size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t,
+        std::uint64_t, std::uint64_t, size_t, size_t, size_t, size_t, size_t, size_t,
+        size_t, size_t, size_t, size_t, const char*>(query, _database);
 }
 
 void
@@ -344,12 +326,10 @@ data_processor::initialize_memory_copy_stmt()
                      .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?',
                                  '?', '?', '?', '?', '?', '?')
                      .get_query_string();
-    _insert_memory_copy_statement =
-        data_storage::database::get_instance()
-            .create_statement_executor<const char*, size_t, size_t, size_t, uint64_t,
-                                       uint64_t, size_t, size_t, size_t, size_t, size_t,
-                                       size_t, size_t, size_t, size_t, size_t,
-                                       const char*>(query);
+    _insert_memory_copy_statement = data_storage::database::create_statement_executor<
+        const char*, size_t, size_t, size_t, std::uint64_t, std::uint64_t, size_t, size_t,
+        size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t, const char*>(
+        query, _database);
 }
 
 void
@@ -366,12 +346,10 @@ data_processor::initialize_kernel_symbol_stmt()
             .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?',
                         '?', '?', '?')
             .get_query_string();
-    _insert_kernel_symbol_statement =
-        data_storage::database::get_instance()
-            .create_statement_executor<size_t, const char*, size_t, size_t, uint64_t,
-                                       const char*, const char*, uint64_t, uint32_t,
-                                       uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                                       uint32_t, const char*>(query);
+    _insert_kernel_symbol_statement = data_storage::database::create_statement_executor<
+        size_t, const char*, size_t, size_t, std::uint64_t, const char*, const char*,
+        std::uint64_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t,
+        std::uint32_t, std::uint32_t, std::uint32_t, const char*>(query, _database);
 }
 
 void
@@ -384,11 +362,9 @@ data_processor::initialize_code_object_stmt()
                          "load_size", "load_delta", "storage_type", "extdata")
             .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?')
             .get_query_string();
-    _insert_code_object_statement =
-        data_storage::database::get_instance()
-            .create_statement_executor<size_t, const char*, size_t, size_t, size_t,
-                                       const char*, uint64_t, uint64_t, uint64_t,
-                                       const char*, const char*>(query);
+    _insert_code_object_statement = data_storage::database::create_statement_executor<
+        size_t, const char*, size_t, size_t, size_t, const char*, std::uint64_t,
+        std::uint64_t, std::uint64_t, const char*, const char*>(query, _database);
 }
 
 void
@@ -400,10 +376,9 @@ data_processor::initialize_args_stmt()
                                   "extdata")
                      .set_values('?', '?', '?', '?', '?', '?', '?')
                      .get_query_string();
-    _insert_args_statement =
-        data_storage::database::get_instance()
-            .create_statement_executor<const char*, size_t, size_t, const char*,
-                                       const char*, const char*, const char*>(query);
+    _insert_args_statement = data_storage::database::create_statement_executor<
+        const char*, size_t, size_t, const char*, const char*, const char*, const char*>(
+        query, _database);
 }
 
 void
@@ -417,12 +392,10 @@ data_processor::initialize_memory_alloc_stmt()
                      .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?',
                                  '?', '?', '?', '?')
                      .get_query_string();
-    _insert_memory_alloc_statement =
-        data_storage::database::get_instance()
-            .create_statement_executor<
-                const char*, size_t, size_t, size_t, size_t, const char*, const char*,
-                uint64_t, uint64_t, size_t, size_t, size_t, size_t, size_t, const char*>(
-                query);
+    _insert_memory_alloc_statement = data_storage::database::create_statement_executor<
+        const char*, size_t, size_t, size_t, size_t, const char*, const char*,
+        std::uint64_t, std::uint64_t, size_t, size_t, size_t, size_t, size_t,
+        const char*>(query, _database);
 
     // Statement without agent_id
     query = query_builder.set_table_name("rocpd_memory_allocate_" + _upid)
@@ -433,10 +406,10 @@ data_processor::initialize_memory_alloc_stmt()
                             '?', '?')
                 .get_query_string();
     _insert_memory_alloc_no_agent_statement =
-        data_storage::database::get_instance()
-            .create_statement_executor<const char*, size_t, size_t, size_t, const char*,
-                                       const char*, uint64_t, uint64_t, size_t, size_t,
-                                       size_t, size_t, size_t, const char*>(query);
+        data_storage::database::create_statement_executor<
+            const char*, size_t, size_t, size_t, const char*, const char*, std::uint64_t,
+            std::uint64_t, size_t, size_t, size_t, size_t, size_t, const char*>(
+            query, _database);
 }
 
 void
@@ -451,7 +424,7 @@ data_processor::insert_stream_info(size_t stream_id, size_t node_id, size_t proc
                                    const char* name, const char* extdata)
 {
     data_storage::queries::table_insert_query query;
-    data_storage::database::get_instance().execute_query(
+    _database->execute_query(
         query.set_table_name("rocpd_info_stream_" + _upid)
             .set_columns("id", "guid", "nid", "pid", "name", "extdata")
             .set_values(stream_id, _upid, node_id, process_id, name, extdata)
@@ -463,7 +436,7 @@ data_processor::insert_queue_info(size_t queue_id, size_t node_id, size_t proces
                                   const char* name, const char* extdata)
 {
     data_storage::queries::table_insert_query query;
-    data_storage::database::get_instance().execute_query(
+    _database->execute_query(
         query.set_table_name("rocpd_info_queue_" + _upid)
             .set_columns("id", "guid", "nid", "pid", "name", "extdata")
             .set_values(queue_id, _upid, node_id, process_id, name, extdata)
@@ -472,24 +445,26 @@ data_processor::insert_queue_info(size_t queue_id, size_t node_id, size_t proces
 
 void
 data_processor::insert_code_object(size_t id, size_t node_id, size_t process_id,
-                                   size_t agent_id, const char* uri, uint64_t ld_base,
-                                   uint64_t ld_size, uint64_t ld_delta,
-                                   const char* storage_type, const char* extdata)
+                                   size_t agent_id, const char* uri,
+                                   std::uint64_t ld_base, std::uint64_t ld_size,
+                                   std::uint64_t ld_delta, const char* storage_type,
+                                   const char* extdata)
 {
-    ROCPROFSYS_VERBOSE(2, "Insert code object with ID: %ld\n", id);
+    LOG_TRACE("Insert code object with ID: {}", id);
     _insert_code_object_statement(id, _upid.c_str(), node_id, process_id, agent_id, uri,
                                   ld_base, ld_size, ld_delta, storage_type, extdata);
 }
 
 void
 data_processor::insert_kernel_symbol(
-    size_t id, size_t node_id, size_t process_id, uint64_t code_obj_id, const char* name,
-    const char* display_name, uint32_t kernel_obj, uint32_t kernarg_segmnt_size,
-    uint32_t kernarg_segment_alignment, uint32_t group_segment_size,
-    uint32_t private_segment_size, uint32_t sgrp_count, uint32_t arch_vgrp_count,
-    uint32_t accum_vgrp_count, const char* extdata)
+    size_t id, size_t node_id, size_t process_id, std::uint64_t code_obj_id,
+    const char* name, const char* display_name, std::uint32_t kernel_obj,
+    std::uint32_t kernarg_segmnt_size, std::uint32_t kernarg_segment_alignment,
+    std::uint32_t group_segment_size, std::uint32_t private_segment_size,
+    std::uint32_t sgrp_count, std::uint32_t arch_vgrp_count,
+    std::uint32_t accum_vgrp_count, const char* extdata)
 {
-    ROCPROFSYS_VERBOSE(2, "Insert kernel symbol: %s with ID: %ld\n", name, id);
+    LOG_TRACE("Insert kernel symbol: {} with ID: {}", name, id);
     _insert_kernel_symbol_statement(
         id, _upid.c_str(), node_id, process_id, code_obj_id, name, display_name,
         kernel_obj, kernarg_segmnt_size, kernarg_segment_alignment, group_segment_size,
@@ -498,10 +473,10 @@ data_processor::insert_kernel_symbol(
 
 void
 data_processor::insert_region(size_t node_id, size_t process_id, size_t thread_id,
-                              uint64_t start, uint64_t end, size_t name_id,
+                              std::uint64_t start, std::uint64_t end, size_t name_id,
                               size_t event_id, const char* extdata)
 {
-    ROCPROFSYS_VERBOSE(2, "Insert region for event id: %ld\n", event_id);
+    LOG_TRACE("Insert region for event id: {}", event_id);
 
     _insert_region_statement(_upid.c_str(), node_id, process_id, thread_id, start, end,
                              name_id, event_id, extdata);
@@ -511,12 +486,12 @@ void
 data_processor::insert_kernel_dispatch(
     size_t node_id, size_t process_id, size_t thread_id, size_t agent_id,
     size_t kernel_id, size_t dispatch_id, size_t queue_id, size_t stream_id,
-    uint64_t start, uint64_t end, size_t private_segment_size, size_t group_segment_size,
-    size_t workgroup_size_x, size_t workgroup_size_y, size_t workgroup_size_z,
-    size_t grid_size_x, size_t grid_size_y, size_t grid_size_z, size_t region_name_id,
-    size_t event_id, const char* extdata)
+    std::uint64_t start, std::uint64_t end, size_t private_segment_size,
+    size_t group_segment_size, size_t workgroup_size_x, size_t workgroup_size_y,
+    size_t workgroup_size_z, size_t grid_size_x, size_t grid_size_y, size_t grid_size_z,
+    size_t region_name_id, size_t event_id, const char* extdata)
 {
-    ROCPROFSYS_VERBOSE(2, "Insert kernel dispatch for event id: %ld\n", event_id);
+    LOG_TRACE("Insert kernel dispatch for event id: {}", event_id);
 
     _insert_kernel_dispatch_statement(
         _upid.c_str(), node_id, process_id, thread_id, agent_id, kernel_id, dispatch_id,
@@ -527,7 +502,7 @@ data_processor::insert_kernel_dispatch(
 
 void
 data_processor::insert_memory_copy(size_t node_id, size_t process_id, size_t thread_id,
-                                   uint64_t start, uint64_t end, size_t name_id,
+                                   std::uint64_t start, std::uint64_t end, size_t name_id,
                                    size_t dst_agent_id, size_t dst_addr,
                                    size_t src_agent_id, size_t src_addr, size_t size,
                                    size_t queue_id, size_t stream_id,
@@ -543,9 +518,9 @@ data_processor::insert_memory_copy(size_t node_id, size_t process_id, size_t thr
 void
 data_processor::insert_memory_alloc(size_t node_id, size_t process_id, size_t thread_id,
                                     std::optional<size_t> agent_id, const char* type,
-                                    const char* level, uint64_t start, uint64_t end,
-                                    size_t address, size_t size, size_t queue_id,
-                                    size_t stream_id, size_t event_id,
+                                    const char* level, std::uint64_t start,
+                                    std::uint64_t end, size_t address, size_t size,
+                                    size_t queue_id, size_t stream_id, size_t event_id,
                                     const char* extdata)
 {
     if(agent_id.has_value())
@@ -565,7 +540,8 @@ data_processor::insert_memory_alloc(size_t node_id, size_t process_id, size_t th
 size_t
 data_processor::insert_thread_info(size_t node_id, size_t parent_process_id,
                                    size_t process_id, size_t thread_id, const char* name,
-                                   uint64_t start, uint64_t end, const char* extdata)
+                                   std::uint64_t start, std::uint64_t end,
+                                   const char* extdata)
 {
     auto it = _thread_id_map.find(thread_id);
 
@@ -575,15 +551,15 @@ data_processor::insert_thread_info(size_t node_id, size_t parent_process_id,
     }
 
     data_storage::queries::table_insert_query query;
-    data_storage::database::get_instance().execute_query(
-        query.set_table_name("rocpd_info_thread_" + _upid)
-            .set_columns("guid", "nid", "ppid", "pid", "tid", "name", "start", "end",
-                         "extdata")
-            .set_values(_upid.c_str(), node_id, parent_process_id, process_id, thread_id,
-                        name, start, end, extdata)
-            .get_query_string());
+    _database->execute_query(query.set_table_name("rocpd_info_thread_" + _upid)
+                                 .set_columns("guid", "nid", "ppid", "pid", "tid", "name",
+                                              "start", "end", "extdata")
+                                 .set_values(_upid.c_str(), node_id, parent_process_id,
+                                             process_id, thread_id, name, start, end,
+                                             extdata)
+                                 .get_query_string());
 
-    auto thread_idx = data_storage::database::get_instance().get_last_insert_id();
+    auto thread_idx = _database->get_last_insert_id();
     _thread_id_map.emplace(thread_id, thread_idx);
     return thread_idx;
 }
@@ -604,7 +580,7 @@ void
 data_processor::flush()
 {
     // Flush all pending data to the database
-    data_storage::database::get_instance().flush();
+    _database->flush();
 }
 
 }  // namespace rocpd

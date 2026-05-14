@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 namespace amd::device {
 
@@ -41,13 +27,15 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
 
     extern void __amd_streamOpsWrite(__global uint*, __global ulong*, ulong);
 
+    extern void __amd_streamOpsIncrement(__global uint*, __global ulong*, ulong);
+
+    extern void __amd_streamOpsDecrement(__global uint*, __global ulong*, ulong);
+
     extern void __amd_streamOpsWait(__global uint*, __global ulong*, ulong, ulong, ulong);
 
     extern void __amd_batchMemOp(__global void*, uint count);
 
     extern void __ockl_dm_init_v1(ulong, ulong, uint, uint);
-
-    extern void __ockl_gws_init(uint nwm1, uint rid);
 
     __kernel void __amd_rocclr_fillBufferAligned(__global void* buf, __constant uchar* pattern,
                                                  uint pattern_size, uint alignment, ulong end_ptr,
@@ -172,6 +160,16 @@ const char* HipExtraSourceCode = BLIT_KERNELS(
       __amd_streamOpsWrite(ptrInt, ptrUlong, value);
     }
 
+    __kernel void __amd_rocclr_streamOpsIncrement(__global uint* ptrInt, __global ulong* ptrUlong,
+                                                  ulong value) {
+      __amd_streamOpsIncrement(ptrInt, ptrUlong, value);
+    }
+
+    __kernel void __amd_rocclr_streamOpsDecrement(__global uint* ptrInt, __global ulong* ptrUlong,
+                                                  ulong value) {
+      __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
+    }
+
     __kernel void __amd_rocclr_streamOpsWait(__global uint* ptrInt, __global ulong* ptrUlong,
                                              ulong value, ulong flags, ulong mask) {
       __amd_streamOpsWait(ptrInt, ptrUlong, value, flags, mask);
@@ -182,12 +180,22 @@ const char* HipExtraSourceCode = BLIT_KERNELS(
       __ockl_dm_init_v1(heap_to_initialize, initial_blocks, heap_size, number_of_initial_blocks);
     }
 
-    __kernel void __amd_rocclr_gwsInit(uint value) { __ockl_gws_init(value, 0); });
+    __kernel void __amd_rocclr_gwsInit(uint value) { __builtin_amdgcn_ds_gws_init(value, 0); });
 
 const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
     __kernel void __amd_rocclr_streamOpsWrite(__global uint* ptrInt, __global ulong* ptrUlong,
                                               ulong value) {
       __amd_streamOpsWrite(ptrInt, ptrUlong, value);
+    }
+
+    __kernel void __amd_rocclr_streamOpsIncrement(__global uint* ptrInt, __global ulong* ptrUlong,
+                                                  ulong value) {
+      __amd_streamOpsIncrement(ptrInt, ptrUlong, value);
+    }
+
+    __kernel void __amd_rocclr_streamOpsDecrement(__global uint* ptrInt, __global ulong* ptrUlong,
+                                                  ulong value) {
+      __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
     }
 
     __kernel void __amd_rocclr_streamOpsWait(__global uint* ptrInt, __global ulong* ptrUlong,

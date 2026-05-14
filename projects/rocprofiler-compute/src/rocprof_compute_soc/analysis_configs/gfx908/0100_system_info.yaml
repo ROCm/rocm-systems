@@ -2,10 +2,10 @@
 Panel Config:
   id: 100
   title: System Info
-  metrics_description: {}
   data source:
   - raw_csv_table:
       id: 101
       title: System Info
       source: sysinfo.csv
       columnwise: true
+  metrics_description: {}

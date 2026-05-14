@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -217,6 +201,7 @@ class AtomicExchCRTP {
 
     const auto shared_mem_size = use_shared_mem ? mem_alloc_size : 0u;
     for (auto i = 0u; i < p.num_devices; ++i) {
+      HIP_CHECK(hipSetDevice(i));
       const auto device_offset = i * p.kernel_count * thread_count;
       for (auto j = 0u; j < p.kernel_count; ++j) {
         const auto& stream = streams[i * p.kernel_count + j].stream();
@@ -301,12 +286,10 @@ class AtomicExch
   }
 };
 
-inline dim3 GenerateAtomicExchThreadDimensions() { return GENERATE(dim3(16), dim3(1024)); }
+inline dim3 GenerateAtomicExchThreadDimensions() { return dim3(1024); }
 
 inline dim3 GenerateAtomicExchBlockDimensions() {
-  int sm_count = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&sm_count, hipDeviceAttributeMultiprocessorCount, 0));
-  return GENERATE_COPY(dim3(sm_count), dim3(sm_count + sm_count / 2));
+  return dim3(8);
 }
 
 template <typename TestType, AtomicScopes scope, int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
@@ -359,8 +342,7 @@ void AtomicExchSingleDeviceMultipleKernelTest(const unsigned int kernel_count,
   int concurrent_kernels = 0;
   HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, 0));
   if (!concurrent_kernels) {
-    HipTest::HIP_SKIP_TEST("Test requires support for concurrent kernel execution");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentKernelExecutionUnsupported);
   }
 
   AtomicExchParams params;
@@ -389,34 +371,12 @@ void AtomicExchMultipleDeviceMultipleKernelAndHostTest(const unsigned int num_de
                                                        const unsigned int host_thread_count = 0u) {
   if (num_devices > 1) {
     if (HipTest::getDeviceCount() < num_devices) {
-      std::string msg = std::to_string(num_devices) + " devices are required";
-      HipTest::HIP_SKIP_TEST(msg.c_str());
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kRequiredDeviceCountNotMet);
     }
   }
 
-  CHECK_P2P_SUPPORT
-
-  if (kernel_count > 1) {
-    for (auto i = 0u; i < num_devices; ++i) {
-      int canAccess  = 0;
-      for (auto j = 0u; j < num_devices; ++j) {
-        if (i != j) {
-          HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j));
-          if(canAccess == 0) {
-            std::string msg = "P2P access check failed between dev1:" + std::to_string(i) + ",dev2:" + std::to_string(j);
-            HipTest::HIP_SKIP_TEST(msg.c_str());
-            return;
-          }
-        }
-      }
-      int concurrent_kernels = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, i));
-      if (!concurrent_kernels) {
-        HipTest::HIP_SKIP_TEST("Test requires support for concurrent kernel execution");
-        return;
-      }
-    }
+  if (!HipTest::checkConcurrentKernels(num_devices)) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentKernelExecutionUnsupported);
   }
 
   AtomicExchParams params;

@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -961,7 +945,7 @@ inline hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DBatchOp& desc) {
     params.srcArray = desc.src.op.array.array;
     params.srcPos = make_hipPos(desc.src.op.array.offset.x, desc.src.op.array.offset.y,
                                 desc.src.op.array.offset.z);
-    params.srcPtr.ptr = nullptr;
+    params.srcPtr = make_hipPitchedPtr(nullptr, 0, 0, 0);
   }
   // dest
   if (desc.dst.type == hipMemcpyOperandTypePointer) {
@@ -977,7 +961,7 @@ inline hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DBatchOp& desc) {
     params.dstArray = desc.dst.op.array.array;
     params.dstPos = make_hipPos(desc.dst.op.array.offset.x, desc.dst.op.array.offset.y,
                                 desc.dst.op.array.offset.z);
-    params.dstPtr.ptr = nullptr;
+    params.dstPtr = make_hipPitchedPtr(nullptr, 0, 0, 0);
   }
   return params;
 }
@@ -993,5 +977,10 @@ inline hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DPeerParms& desc) {
   params.extent = desc.extent;
   params.kind = hipMemcpyDeviceToDevice;
   return params;
+}
+
+inline hipArrayMemoryRequirements getArrayMemoryRequirements(
+    const hipArrayMemoryRequirements& desc) {
+  return hipArrayMemoryRequirements { desc.alignment, desc.size };
 }
 };  // namespace hip

@@ -1,34 +1,12 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
-##############################################################################
 """Get host/gpu specs."""
 
 from __future__ import annotations
 
 import argparse
 import importlib
-import json
 import os
 import re
 import socket
@@ -39,9 +17,15 @@ from math import ceil
 from pathlib import Path as path
 from typing import Any, Optional, TypeVar
 
-import pandas as pd
-
 import config
+from utils.amdsmi_interface import (
+    amdsmi_ctx,
+    get_amdgpu_driver_version,
+    get_gpu_compute_partition,
+    get_gpu_memory_partition,
+    get_gpu_vbios_part_number,
+    get_gpu_vram_size,
+)
 from utils.logger import (
     console_debug,
     console_error,
@@ -50,10 +34,19 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.tty import get_table_string
-from utils.utils import get_version
+from utils.utils_common import format_table_ascii, get_version
 
 T = TypeVar("T")
+
+
+def canonical_gpu_arch(gpu_arch: Optional[str]) -> Optional[str]:
+    """Map LLVM GPU targets that share one SoC and analysis config tree."""
+    if gpu_arch is None:
+        return None
+    if gpu_arch == "gfx1152":
+        return "gfx1151"
+    return gpu_arch
+
 
 VERSION_LOC: list[str] = [
     "version",
@@ -68,14 +61,31 @@ VERSION_LOC: list[str] = [
 
 
 def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
+    supported_gpu_arch = mi_gpu_specs.get_gpu_series_dict()
+    unsupported_gpu_arch: set[str] = set()
+
     for idx1, line_text in enumerate(rocminfo_lines):
         gpu_arch = search(
             r"^\s*Name\s*:\s* ([Gg][Ff][Xx][a-zA-Z0-9]+).*\s*$", line_text
         )
-        if gpu_arch and gpu_arch in mi_gpu_specs.get_gpu_series_dict():
-            return (gpu_arch, idx1)
+        if not gpu_arch:
+            continue
 
-    console_error("Cannot find a supported arch in rocminfo")
+        arch_for_support = canonical_gpu_arch(gpu_arch)
+        if arch_for_support in supported_gpu_arch:
+            return (arch_for_support, idx1)
+
+        if gpu_arch not in unsupported_gpu_arch:
+            unsupported_gpu_arch.add(gpu_arch)
+            console_warning(
+                "Detected GPU architecture: "
+                f"{gpu_arch} is currently NOT supported by the profile mode."
+            )
+
+    if unsupported_gpu_arch:
+        console_log(f"Supported architectures: {list(supported_gpu_arch.keys())}")
+
+    console_error("Cannot find a supported arch in rocminfo.")
 
 
 def detect_gpu_chip_id(rocminfo_lines: list[str]) -> Optional[str]:
@@ -126,7 +136,11 @@ def generate_machine_specs(
                     "You need to reprofile to update data."
                 )
 
-            return MachineSpecs(**sysinfo)
+            # Normalize arch aliases to canonical config targets
+            sysinfo_norm = dict(sysinfo)
+            gpu_arch = sysinfo_norm.get("gpu_arch")
+            sysinfo_norm["gpu_arch"] = {"gfx1152": "gfx1151"}.get(gpu_arch, gpu_arch)
+            return MachineSpecs(**sysinfo_norm)
         except KeyError:
             console_error(
                 "Detected mismatch in sysinfo versioning. You need to reprofile "
@@ -151,35 +165,36 @@ def generate_machine_specs(
     ##########################################
     machine_info = extract_machine_info()
 
-    # FIXME: use device
-    # Load amd-smi data
-    gpu_info = extract_gpu_info()
-
     ##########################################
     ## B. SoC Specs
     ##########################################
     soc_info = extract_soc_info()
 
+    # FIXME: use device
+    # Load amd-smi data
+    gpu_info = extract_gpu_info(gpu_arch=soc_info["gpu_arch"])
+
     # Combine all specifications
-    specs = MachineSpecs(
-        version=specs_version,
-        timestamp=timestamp,
-        rocminfo_lines=soc_info["rocminfo_lines"],
-        hostname=socket.gethostname(),
-        cpu_model=machine_info["cpu_model"],
-        sbios=machine_info["sbios"],
-        linux_kernel_version=machine_info["linux_kernel_version"],
-        amd_gpu_kernel_version="",
-        cpu_memory=machine_info["cpu_memory"],
-        gpu_memory="",
-        linux_distro=machine_info["linux_distro"],
-        rocm_version=get_rocm_ver().strip(),
-        vbios=gpu_info["vbios"],
-        compute_partition=gpu_info["compute_partition"],
-        memory_partition=gpu_info["memory_partition"],
-        gpu_arch=soc_info["gpu_arch"],
-        gpu_chip_id=soc_info["gpu_chip_id"],
-    )
+    with amdsmi_ctx():
+        specs = MachineSpecs(
+            version=specs_version,
+            timestamp=timestamp,
+            rocminfo_lines=soc_info["rocminfo_lines"],
+            hostname=socket.gethostname(),
+            cpu_model=machine_info["cpu_model"],
+            sbios=machine_info["sbios"],
+            linux_kernel_version=machine_info["linux_kernel_version"],
+            amd_gpu_kernel_version=get_amdgpu_driver_version(),
+            cpu_memory=machine_info["cpu_memory"],
+            gpu_memory=get_gpu_vram_size(),
+            linux_distro=machine_info["linux_distro"],
+            rocm_version=get_rocm_ver().strip(),
+            vbios=gpu_info["vbios"],
+            compute_partition=gpu_info["compute_partition"],
+            memory_partition=gpu_info["memory_partition"],
+            gpu_arch=soc_info["gpu_arch"],
+            gpu_chip_id=soc_info["gpu_chip_id"],
+        )
 
     # Load above SoC specs via module import
     try:
@@ -194,13 +209,17 @@ def generate_machine_specs(
             f"but couldn't find class implementation {e}."
         )
 
-    # Update arch specific specs
-    specs.gpu_model = (
-        mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id) or ""
-    )
+    # Derive SoC-dependent fields
+    if specs.rocminfo_lines is None:
+        # Yaml-only / no rocminfo: skip get_gpu_model (avoids chip-id warnings).
+        specs.gpu_model = specs.gpu_model or ""
+    else:
+        specs.gpu_model = (
+            mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id) or ""
+        )
     specs.num_xcd = str(
         mi_gpu_specs.get_num_xcds(
-            specs.gpu_arch, specs.gpu_model, specs.compute_partition
+            specs.gpu_arch, specs.gpu_model or None, specs.compute_partition
         )
     )
     specs.total_l2_chan = totall2_banks(
@@ -245,65 +264,40 @@ def extract_machine_info() -> dict[str, Any]:
 
 
 @demarcate
-def extract_gpu_info() -> dict[str, Any]:
+def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
+    # Partition is only supported on >= MI 300 series
+    # (gpu_arch should be gfx940 or higher for MI300+)
+    is_partition_supported = False
+    if gpu_arch and gpu_arch.startswith("gfx") and len(gpu_arch) >= 6:
+        try:
+            is_partition_supported = int(gpu_arch[3:6], 16) >= 0x940
+        except ValueError:
+            pass  # Invalid hex string, keep is_partition_supported as False
+
     result: dict[str, Optional[str]] = {
         "vbios": None,
         "compute_partition": None,
         "memory_partition": None,
     }
 
-    # Load amd-smi static data for GPU 0
-    static_output = run(["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True)
-    if static_output is None:
-        return result
-
-    try:
-        static_data = json.loads(static_output)
-    except json.JSONDecodeError as e:
-        console_warning(f"Failed to parse amd-smi static output: {e}")
-        return result
-
-    # Extract GPU data
-    gpu_list = (
-        static_data
-        if isinstance(static_data, list)
-        else static_data.get("gpu_data", [])
-    )
-    gpu_data = gpu_list[0] if gpu_list else {}
-    result["vbios"] = gpu_data.get("vbios", {}).get("part_number")
-
-    # Load amd-smi partition data for GPU 0 (amd-smi >= 26.0.0)
-    partition_output = run(
-        ["amd-smi", "partition", "--gpu=0", "--json"], exit_on_error=False
-    )
-    partition_data = {}
-
-    if partition_output:
-        try:
-            partition_data = json.loads(partition_output)
-        except json.JSONDecodeError:
-            partition_data = {}
-
-    current_partition = partition_data.get("current_partition", [{}])[0]
-
-    # Extract partition values with gpu_data fallback (amd-smi < 26.0.0)
-    result["compute_partition"] = (
-        current_partition.get("accelerator_type")
-        or gpu_data.get("partition", {}).get("accelerator_partition")
-        or gpu_data.get("partition", {}).get("compute_partition")
-    )
-    result["memory_partition"] = current_partition.get("memory") or gpu_data.get(
-        "partition", {}
-    ).get("memory_partition")
+    with amdsmi_ctx():
+        result["vbios"] = get_gpu_vbios_part_number()
+        if is_partition_supported:
+            result["compute_partition"] = get_gpu_compute_partition()
+            result["memory_partition"] = get_gpu_memory_partition()
+        else:
+            result["compute_partition"] = "N/A"
+            result["memory_partition"] = "N/A"
 
     # Apply defaults and warnings
-    if not result["compute_partition"]:
-        console_warning("Cannot detect accelerator partition from amd-smi.")
-        console_warning("Applying default accelerator partition: SPX")
-        result["compute_partition"] = "SPX"
+    if is_partition_supported:
+        if result["compute_partition"] == "N/A" or not result["compute_partition"]:
+            console_warning("Cannot detect accelerator partition from amd-smi.")
+            console_warning("Applying default accelerator partition: SPX")
+            result["compute_partition"] = "SPX"
 
-    if not result["memory_partition"]:
-        console_warning("Cannot detect memory partition from amd-smi.")
+        if result["memory_partition"] == "N/A" or not result["memory_partition"]:
+            console_warning("Cannot detect memory partition from amd-smi.")
 
     console_debug(
         f"vbios is {result['vbios']}, compute partition is "
@@ -354,11 +348,11 @@ class MachineSpecs:
     # _are_ included in profiling/analysis, so we mark them as 'optional'
     # in the metadata to avoid erroring out on missing fields on
     # serialization
-    workload_name: Optional[str] = field(
+    workload_path: Optional[str] = field(
         default=None,
         metadata={
-            "doc": "The name of the workload data was collected for.",
-            "name": "Workload Name",
+            "doc": "Path to the workload data directory.",
+            "name": "Workload Path",
             "optional": True,
             "show_in_table": True,
         },
@@ -454,10 +448,7 @@ class MachineSpecs:
     amd_gpu_kernel_version: Optional[str] = field(
         default=None,
         metadata={
-            "doc": (
-                "[RESERVED] The version of the AMDGPU driver installed on the machine. "
-                "Unimplemented."
-            ),
+            "doc": ("The version of the AMDGPU driver installed on the machine."),
             "name": "AMD GPU Kernel Version",
             "show_in_table": True,
         },
@@ -475,8 +466,8 @@ class MachineSpecs:
         default=None,
         metadata={
             "doc": (
-                "[RESERVED] The total amount of memory available to accelerators/GPUs "
-                "in the system. Unimplemented."
+                "The total amount of memory available to accelerators/GPUs "
+                "in the system."
             ),
             "unit": "KB",
             "name": "GPU Memory",
@@ -783,9 +774,10 @@ class MachineSpecs:
         else:
             return self.total_l2_chan
 
-    def get_class_members(self) -> pd.DataFrame:
-        data = {}
-        missing_required_fields = []
+    def get_class_members(self) -> dict[str, Any]:
+        """Return class members as a dictionary."""
+        data: dict[str, Any] = {}
+        missing_required_fields: list[str] = []
 
         for class_field in fields(self):
             if not class_field.metadata.get("show_in_table", True):
@@ -808,18 +800,21 @@ class MachineSpecs:
                 )
             console_warning(f"Missing specs fields for {self.gpu_arch}")
 
-        return pd.DataFrame(data, index=[0])
+        return data
 
     def __repr__(self) -> str:
         topstr = (
             "Machine Specifications: describing the state of the machine that "
             "ROCm Compute Profiler data was collected on.\n"
         )
-        data = []
+        data: list[dict[str, Any]] = []
+        has_description = False
+        has_unit = False
+
         for class_field in fields(self):
             name = class_field.name
             if class_field.metadata.get("show_in_table", True):
-                _data = {}
+                _data: dict[str, Any] = {}
                 value = getattr(self, name)
                 if class_field.metadata:
                     # check out of table before any re-naming for pretty-printing
@@ -838,20 +833,22 @@ class MachineSpecs:
                         name = class_field.metadata["name"]
                     if "unit" in class_field.metadata:
                         _data["Unit"] = class_field.metadata["unit"]
+                        has_unit = True
                     if "doc" in class_field.metadata:
                         _data["Description"] = class_field.metadata["doc"]
+                        has_description = True
                 _data["Spec"] = name
-                _data["Value"] = value
+                _data["Value"] = value if value is not None else ""
                 data.append(_data)
-        df = pd.DataFrame(data)
+
+        # Build columns list based on what data is present
         columns = ["Spec", "Value"]
-        if "Description" in df.columns:
-            columns += ["Description"]
-        if "Unit" in df.columns:
-            columns += ["Unit"]
-        df = df[columns]
-        df = df.fillna("")
-        return topstr + get_table_string(df, transpose=False, decimal=2)
+        if has_description:
+            columns.append("Description")
+        if has_unit:
+            columns.append("Unit")
+
+        return topstr + format_table_ascii(data, columns, decimal=2)
 
 
 def get_rocm_ver() -> str:
@@ -891,12 +888,8 @@ def run(cmd: list[str], exit_on_error: bool = False) -> str:
             'Try passing a path to an existing workload results in "analyze" mode.'
         )
 
-    if exit_on_error:
-        if cmd[0] == "amd-smi":
-            if p.returncode != 2 and p.returncode != 0:  # type: ignore
-                console_error("No GPU detected. Unable to load amd-smi")
-        elif p.returncode != 0:  # type: ignore
-            console_error(f"Command {cmd} failed with non-zero exit code")
+    if exit_on_error and p.returncode != 0:  # type: ignore
+        console_error(f"Command {cmd} failed with non-zero exit code")
     return p.stdout.decode("utf-8")  # type: ignore
 
 

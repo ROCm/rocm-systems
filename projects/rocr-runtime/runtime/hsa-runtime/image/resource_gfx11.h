@@ -573,7 +573,7 @@ struct sq_img_samp_word2_t {
   unsigned int BLEND_PRT          : SQ_IMG_SAMP_WORD2_BLEND_PTR_SZ;
   unsigned int DERIV_ADJUST_EN    : SQ_IMG_SAMP_WORD2_DERIV_ADJUST_EN_SZ;
 #elif defined(BIGENDIAN_CPU)
-  unsigned int DERIV_ADJUST_EN    : SQ_IMG_SAMP_WORD2_DERIV_ADJUST_EN_SZ 
+  unsigned int DERIV_ADJUST_EN    : SQ_IMG_SAMP_WORD2_DERIV_ADJUST_EN_SZ;
   unsigned int BLEND_PRT          : SQ_IMG_SAMP_WORD2_BLEND_PRT_SZ;
   unsigned int ANISO_OVERRIDE     : SQ_IMG_SAMP_WORD2_ANISO_OVERRIDE_SZ;
   unsigned int                    : 1;

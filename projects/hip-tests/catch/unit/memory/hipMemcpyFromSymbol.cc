@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 
@@ -25,7 +12,7 @@ __constant__ int constSymbol[10];
 /* Test verifies hipMemcpy[From/To]Symbol[Async] API Negative scenarios.
  */
 
-TEST_CASE("Unit_hipMemcpyFromToSymbol_Negative") {
+HIP_TEST_CASE(Unit_hipMemcpyFromToSymbol_Negative) {
   SECTION("Invalid Src Ptr") {
     int result{0};
     HIP_CHECK_ERROR(
@@ -111,7 +98,7 @@ TEST_CASE("Unit_hipMemcpyFromToSymbol_Negative") {
  * For Array Values To and From Symbol
  * For Array Values with offset To and From Symbol
  * For Sync and Async Variants*/
-TEST_CASE("Unit_hipMemcpyToFromSymbol_SyncAndAsync") {
+HIP_TEST_CASE(Unit_hipMemcpyToFromSymbol_SyncAndAsync) {
   enum StreamTestType { NullStream = 0, StreamPerThread, CreatedStream, NoStream };
 
   /* Test type NoStream - Use Sync variants, else use async variants */
@@ -209,52 +196,53 @@ TEST_CASE("Unit_hipMemcpyToFromSymbol_SyncAndAsync") {
       }
     }
   }
+
+  if (streamType == StreamTestType::CreatedStream) {
+    HIP_CHECK(hipStreamDestroy(stream));
+  }
 }
 
 /**
- * Test Description
- * ------------------------
- *  - Basic functional testcase to trigger capturehipMemcpyToSymbolAsync
- *  and capturehipMemcpyFromSymbolAsync internal apis to improve
- *  code coverage.
- * Test source
- * ------------------------
- *  - unit/memory/hipMemcpyFromSymbol.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
- */
-TEST_CASE("Unit_hipMemcpyToFromSymbol_capturehipMemcpyToFromSymbolAsync") {
-  hipGraph_t graph{nullptr};
-  hipGraphExec_t graphExec{nullptr};
-  hipStream_t stream;
+* Test Description
+* ------------------------
+*  - Basic functional testcase to trigger capturehipMemcpyToSymbolAsync
+*  and capturehipMemcpyFromSymbolAsync internal apis to improve
+*  code coverage.
+* Test source
+* ------------------------
+*  - unit/memory/hipMemcpyFromSymbol.cc
+* Test requirements
+* ------------------------
+*  - HIP_VERSION >= 6.0
+*/
+HIP_TEST_CASE(Unit_hipMemcpyToFromSymbol_Capture) {
+  hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  int A_h = 0, B_h = 42;
 
-  // Start Capturing
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  SECTION("__constant__ symbol") {
-    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(constSymbol), &B_h, sizeof(int), 0,
+  constexpr int kExpectedValue = 42;
+  int host_value = 0;
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+
+  SECTION("ConstantSymbolTransfer") {
+    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(constSymbol), &kExpectedValue, sizeof(int), 0,
                                      hipMemcpyHostToDevice, stream));
-    HIP_CHECK(hipMemcpyFromSymbolAsync(&A_h, HIP_SYMBOL(constSymbol), sizeof(int), 0,
+    HIP_CHECK(hipMemcpyFromSymbolAsync(&host_value, HIP_SYMBOL(constSymbol), sizeof(int), 0,
                                        hipMemcpyDeviceToHost, stream));
   }
-  SECTION("__device__ symbol") {
-    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), &B_h, sizeof(int), 0,
+
+  SECTION("DeviceSymbolTransfer") {
+    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), &kExpectedValue, sizeof(int), 0,
                                      hipMemcpyHostToDevice, stream));
-    HIP_CHECK(hipMemcpyFromSymbolAsync(&A_h, HIP_SYMBOL(devSymbol), sizeof(int), 0,
+    HIP_CHECK(hipMemcpyFromSymbolAsync(&host_value, HIP_SYMBOL(devSymbol), sizeof(int), 0,
                                        hipMemcpyDeviceToHost, stream));
   }
-  // End Capture
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
 
-  // Create and Launch Executable Graphs
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
+  END_CAPTURE(stream);
+
   HIP_CHECK(hipStreamSynchronize(stream));
+  REQUIRE(host_value == kExpectedValue);
 
-  REQUIRE(A_h == B_h);
-  HIP_CHECK(hipGraphExecDestroy(graphExec))
-  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
 }

@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #if !defined(_WIN32)
 #include <unistd.h>
@@ -103,7 +89,7 @@ bool Memory::allocateMapMemory(size_t allocationSize) {
 void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& region, uint mapFlags,
                              size_t* rowPitch, size_t* slicePitch) {
   // Map/Unmap must be serialized.
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   incIndMapCount();
   // If the device backing storage is direct accessible, use it.
@@ -122,7 +108,8 @@ void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& reg
   if (indirectMapCount_ == 1) {
     if (!allocateMapMemory(owner()->getSize())) {
       decIndMapCount();
-      DevLogPrintfError("Cannot allocate Map memory for size: %u", owner()->getSize());
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+               "Cannot allocate Map memory for size: %u", owner()->getSize());
       return nullptr;
     }
   } else {
@@ -150,7 +137,7 @@ void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& reg
 
 void Memory::decIndMapCount() {
   // Map/Unmap must be serialized.
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   if (indirectMapCount_ == 0) {
     LogError("decIndMapCount() called when indirectMapCount_ already zero");
@@ -180,7 +167,7 @@ void* Memory::cpuMap(device::VirtualDevice& vDev, uint flags, uint startLayer, u
   if (!isHostMemDirectAccess() && !IsPersistentDirectMap()) {
     if (!vDev.blitMgr().readBuffer(*this, mapTarget, amd::Coord3D(0), amd::Coord3D(size()), true)) {
       decIndMapCount();
-      DevLogError("Cannot read buffer");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Cannot read buffer");
       return nullptr;
     }
   }
@@ -201,19 +188,19 @@ void Memory::cpuUnmap(device::VirtualDevice& vDev) {
 }
 
 // ================================================================================================
-hsa_status_t Memory::interopMapBuffer(amd::Os::FileDesc fdn) {
+hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t flags) {
   hsa_agent_t agent = dev().getBackendDevice();
   size_t size;
   size_t metadata_size = 0;
-  void* metadata;
-#if IS_WINDOWS
-  int fd = 0;
-  assert(!"Unimplemented");
-#else
+  void* metadata = nullptr;
   auto fd = fdn;
+  hsa_status_t status = Hsa::interop_map_buffer(1, &agent, fd, flags, &size, &interop_deviceMemory_,
+#if IS_WINDOWS
+                                                nullptr, nullptr  // Cannot get metadata and metadata_size in Windows
+#else
+                                                &metadata_size, (const void**)&metadata
 #endif
-  hsa_status_t status = Hsa::interop_map_buffer(1, &agent, fd, 0, &size, &interop_deviceMemory_,
-                                                &metadata_size, (const void**)&metadata);
+  );
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Map Interop memory %p, size 0x%zx", interop_deviceMemory_,
           size);
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_);  // + out.buf_offset;
@@ -234,11 +221,47 @@ hsa_status_t Memory::interopMapBuffer(amd::Os::FileDesc fdn) {
 // Setup an interop buffer (dmabuf handle) as an OpenCL buffer
 // ================================================================================================
 bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
-#if IS_WINDOWS
-  return false;
-#else
   assert(owner()->isInterop() && "Object is not an interop object.");
 
+  static constexpr size_t MaxMetadataSizeDwords = 64;
+  static constexpr size_t HeaderSizeDwords =
+      sizeof(hsa_amd_image_descriptor_t) / sizeof(uint32_t) - 1;
+
+  static_assert(alignof(hsa_amd_image_descriptor_t) == alignof(uint32_t),
+                "Unexpected alignment for hsa_amd_image_descriptor_t");
+  amdImageDesc_ = reinterpret_cast<hsa_amd_image_descriptor_t*>(
+      new uint32_t[MaxMetadataSizeDwords + HeaderSizeDwords]());
+
+  if (amdImageDesc_ == nullptr) {
+    return false;
+  }
+
+  hsa_agent_t agent = dev().getBackendDevice();
+  uint32_t id;
+  Hsa::agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID), &id);
+
+  static constexpr uint32_t DeviceIdVendorShift = 16u;
+
+  amdImageDesc_->version = 1;
+  amdImageDesc_->deviceID = (AmdVendor << DeviceIdVendorShift) | id;
+
+#if IS_WINDOWS
+  hsa_handle_t handle, resHandle;
+  int offset;
+
+  if (!GlInterop::Export(owner(), targetType, miplevel, &handle, &resHandle, &offset, amdImageDesc_->data,
+                         MaxMetadataSizeDwords * sizeof(uint32_t))) {
+    return false;
+  }
+
+  if (interopMapBuffer(handle, HSA_INTEROP_MAP_FLAG_KMT_HANDLE) != HSA_STATUS_SUCCESS) return false;
+
+  deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + offset;
+  if(!GlInterop::Detach(owner(), resHandle)) {
+    LogPrintfError("GlInterop::Detach(handle %p) failed", resHandle);
+  }
+  return true;
+#else
   mesa_glinterop_export_in in = {0};
   mesa_glinterop_export_out out = {0};
 
@@ -252,18 +275,7 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
   else
     in.access = MESA_GLINTEROP_ACCESS_READ_WRITE;
 
-  hsa_agent_t agent = dev().getBackendDevice();
-  uint32_t id;
-  Hsa::agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID), &id);
-
-  static constexpr int MaxMetadataSizeDwords = 64;
   static constexpr int MaxMetadataSizeBytes = MaxMetadataSizeDwords * sizeof(int);
-  amdImageDesc_ = reinterpret_cast<hsa_amd_image_descriptor_t*>(new int[MaxMetadataSizeDwords + 2]);
-  if (amdImageDesc_ == nullptr) {
-    return false;
-  }
-  amdImageDesc_->version = 1;
-  amdImageDesc_->deviceID = AmdVendor << 16 | id;
 
   in.target = targetType;
   in.obj = owner()->getInteropObj()->asGLObject()->getGLName();
@@ -273,11 +285,11 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 
   const auto& glenv = owner()->getContext().glenv();
   if (glenv->isEGL()) {
-    if (!MesaInterop::Export(in, out, MesaInterop::MESA_INTEROP_EGL, glenv->getEglDpy(),
+    if (!GlInterop::Export(in, out, GlInterop::MESA_INTEROP_EGL, glenv->getEglDpy(),
                              glenv->getEglOrigCtx()))
       return false;
   } else {
-    if (!MesaInterop::Export(in, out, MesaInterop::MESA_INTEROP_GLX, glenv->getDpy(),
+    if (!GlInterop::Export(in, out, GlInterop::MESA_INTEROP_GLX, glenv->getDpy(),
                              glenv->getOrigCtx()))
       return false;
   }
@@ -354,7 +366,7 @@ bool Memory::pinSystemMemory(void* hostPtr, size_t size) {
 }
 
 void Memory::syncCacheFromHost(VirtualGPU& gpu, device::Memory::SyncFlags syncFlags) {
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
   // If the last writer was another GPU, then make a writeback
   if (!isHostMemDirectAccess() && (owner()->getLastWriter() != nullptr) &&
       (&dev() != owner()->getLastWriter())) {
@@ -382,7 +394,7 @@ void Memory::syncCacheFromHost(VirtualGPU& gpu, device::Memory::SyncFlags syncFl
       // Make sure the parent sync is an unique operation.
       // If the app uses multiple subbuffers from multiple queues,
       // then the parent sync can be called from multiple threads
-      amd::ScopedLock lock(owner()->parent()->lockMemoryOps());
+      std::scoped_lock lock(owner()->parent()->lockMemoryOps());
       gpuMemory->syncCacheFromHost(gpu, syncFlagsTmp);
       //! \note Don't do early exit here, since we still have to sync
       //! this view, if the parent sync operation was a NOP.
@@ -495,7 +507,7 @@ void Memory::syncHostFromCache(device::VirtualDevice* vDev, device::Memory::Sync
       // Make sure the parent sync is an unique operation.
       // If the app uses multiple subbuffers from multiple queues,
       // then the parent sync can be called from multiple threads
-      amd::ScopedLock lock(owner()->parent()->lockMemoryOps());
+      std::scoped_lock lock(owner()->parent()->lockMemoryOps());
       m->syncHostFromCache(gpu, syncFlagsTmp);
       //! \note Don't do early exit here, since we still have to sync
       //! this view, if the parent sync operation was a NOP.
@@ -523,7 +535,7 @@ void Memory::syncHostFromCache(device::VirtualDevice* vDev, device::Memory::Sync
         syncFlagsTmp.skipEntire_ = syncFlags.skipEntire_;
       }
 
-      amd::ScopedLock lock(owner()->lockMemoryOps());
+      std::scoped_lock lock(owner()->lockMemoryOps());
       for (auto& sub : owner()->subBuffers()) {
         //! \note Don't allow subbuffer's allocation in the worker thread.
         //! It may cause a system lock, because possible resource
@@ -588,7 +600,7 @@ void Memory::syncHostFromCache(device::VirtualDevice* vDev, device::Memory::Sync
 
 void Memory::mgpuCacheWriteBack(VirtualGPU& gpu) {
   // Lock memory object, so only one write back can occur
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   // Attempt to allocate a staging buffer if don't have any
   if (owner()->getHostMem() == nullptr) {
@@ -783,8 +795,9 @@ bool Buffer::create(bool alloc_local) {
         return false;
       }
     } else {
-      // If this is physical memory request, then get an handle and store it in user data
-      owner()->getUserData().hsa_handle = dev().deviceVmemAlloc(owner()->getSize(), 0);
+      owner()->getUserData().hsa_handle = dev().deviceVmemAlloc(owner()->getSize(),
+                                          memFlags & ROCCLR_MEM_HSA_UNCACHED
+                                          ? HSA_AMD_MEMORY_POOL_UNCACHED_FLAG : 0);
     }
 
     if (owner()->getUserData().hsa_handle == 0) {
@@ -857,6 +870,7 @@ bool Buffer::create(bool alloc_local) {
         flags.atomics_ = (memFlags & CL_MEM_SVM_ATOMICS) != 0;
         flags.pseudo_fine_grain_ = (memFlags & ROCCLR_MEM_HSA_UNCACHED) != 0;
         flags.contiguous_ = (memFlags & ROCCLR_MEM_HSA_CONTIGUOUS) != 0;
+        flags.uncached_ = (memFlags & ROCCLR_MEM_HSA_UNCACHED) != 0;
         deviceMemory_ = dev().deviceLocalAlloc(size(), flags);
       }
       owner()->setSvmPtr(deviceMemory_);
@@ -898,9 +912,7 @@ bool Buffer::create(bool alloc_local) {
     auto ext_memory = interop->asExternalMemory();
     amd::GLObject* glObject = interop->asGLObject();
     if (ext_memory != nullptr) {
-      hsa_status_t status = interopMapBuffer(ext_memory->Handle());
-      if (status != HSA_STATUS_SUCCESS) return false;
-      return true;
+      return interopMapBuffer(ext_memory->Handle()) == HSA_STATUS_SUCCESS;
     } else if (glObject != nullptr) {
       return createInteropBuffer(GL_ARRAY_BUFFER, 0);
     }
@@ -1173,6 +1185,7 @@ void Image::populateImageDescriptor() {
   imageDescriptor_.height = image->getHeight();
   imageDescriptor_.depth = image->getDepth();
   imageDescriptor_.array_size = 0;
+  imageDescriptor_.mipmap_levels = image->getMipLevels() == 0 ? 1 : image->getMipLevels();
 
   switch (image->getType()) {
     case CL_MEM_OBJECT_IMAGE1D:
@@ -1438,8 +1451,31 @@ bool Image::createView(const Memory& parent) {
     status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, amdImageDesc_,
                                deviceMemory_, permission_, &hsaImageObject_);
   } else {
-    status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
-                               permission_, &hsaImageObject_);
+    if (ancestor->asImage()->getMipLevels() > 1 && imageDescriptor_.mipmap_levels == 1) {
+      // This is on leveled image of mipmap image ancestor
+      amd::Memory* parentOwner = parent.owner();
+      auto* ancestor_image = static_cast<Image*>(ancestor->getDeviceMemory(dev()));
+      if (ancestor == parentOwner) {
+        // This is leveled image
+        status = Hsa::image_get_mipmap_level(dev().getBackendDevice(),
+                                           &ancestor_image->hsaImageObject_,
+                                           owner()->asImage()->getBaseMipLevel(),
+                                           nullptr, &hsaImageObject_);
+      } else if (ancestor == parentOwner->parent()) {
+        // This is format changed view on leveled image
+        status = Hsa::image_get_mipmap_level(dev().getBackendDevice(),
+                                           &ancestor_image->hsaImageObject_,
+                                           parentOwner->asImage()->getBaseMipLevel(),
+                                           &imageDescriptor_, &hsaImageObject_);
+      } else {
+        // This is an impossible view on leveled image
+        status = HSA_STATUS_ERROR_INVALID_REGION;
+      }
+    } else {
+      // This is a view on regular image or mipmap image.
+      status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
+                                 permission_, &hsaImageObject_);
+    }
   }
 
   if (status != HSA_STATUS_SUCCESS) {
@@ -1461,7 +1497,7 @@ bool Image::createView(const Memory& parent) {
 
 void* Image::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& region, uint mapFlags,
                             size_t* rowPitch, size_t* slicePitch) {
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   incIndMapCount();
 
@@ -1481,7 +1517,7 @@ void* Image::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& regi
     } else {
       // Did the map resource allocation fail?
       if (mapMemory_ == nullptr) {
-        DevLogError("Could not map target resource");
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Could not map target resource");
         return nullptr;
       }
     }
@@ -1544,7 +1580,7 @@ void Image::destroy() {
     return;
   }
 
-  delete[] amdImageDesc_;
+  delete[] reinterpret_cast<uint32_t*>(amdImageDesc_);
   amdImageDesc_ = nullptr;
 
   if (kind_ == MEMORY_KIND_INTEROP) {
@@ -1581,7 +1617,7 @@ bool Image::ValidateMemory() {
 
 // ================================================================================================
 bool Image::AddView(amd::Image* image) {
-  amd::ScopedLock l(owner()->lockMemoryOps());
+  std::scoped_lock l(owner()->lockMemoryOps());
   for (auto it : view_cache_) {
     if ((it->getImageFormat().image_channel_data_type ==
          image->getImageFormat().image_channel_data_type) &&
@@ -1598,7 +1634,7 @@ bool Image::AddView(amd::Image* image) {
 
 // ================================================================================================
 amd::Image* Image::FindView(cl_image_format format) const {
-  amd::ScopedLock l(owner()->lockMemoryOps());
+  std::scoped_lock l(owner()->lockMemoryOps());
   for (auto it : view_cache_) {
     if ((it->getImageFormat().image_channel_data_type == format.image_channel_data_type) &&
         (it->getImageFormat().image_channel_order == format.image_channel_order)) {
@@ -1609,4 +1645,3 @@ amd::Image* Image::FindView(cl_image_format format) const {
 }
 
 }  // namespace amd::roc
-

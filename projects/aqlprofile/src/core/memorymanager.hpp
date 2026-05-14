@@ -21,6 +21,13 @@
 // THE SOFTWARE.
 
 #pragma once
+// Undefine Windows macros that conflict with class method names
+#ifdef _WIN32
+#undef CopyMemory
+#undef FillMemory
+#undef ZeroMemory
+#undef MoveMemory
+#endif
 #include <vector>
 #include <atomic>
 #include <mutex>
@@ -64,6 +71,13 @@ struct EventRequest : public aqlprofile_pmc_event_t {
     auto idx2 = other.GetOrder();
     return idx1.first == idx2.first && event_id == other.event_id;
   }
+};
+
+struct MemoryDeleter
+{
+    aqlprofile_memory_dealloc_callback_t free_fn;
+    void* userdata;
+    void operator()(void* ptr) const { if (ptr && free_fn) free_fn(ptr, userdata); };
 };
 
 class MemoryManager {
@@ -129,14 +143,6 @@ class MemoryManager {
   }
 
  protected:
-  struct MemoryDeleter {
-    aqlprofile_memory_dealloc_callback_t free_fn;
-    void* userdata;
-    void operator()(void* ptr) const {
-      if (ptr && free_fn) free_fn(ptr, userdata);
-    };
-  };
-
   std::unique_ptr<void, MemoryDeleter> AllocMemory(size_t size,
                                                    aqlprofile_buffer_desc_flags_t flags) const {
     void* ptr;
@@ -196,6 +202,25 @@ class TraceMemoryManager : public MemoryManager {
                      aqlprofile_memory_dealloc_callback_t dealloc, void* data)
       : MemoryManager(agent, alloc, dealloc, data) {}
 
+  void* AddExtraOutputBuf()
+  {
+    aqlprofile_buffer_desc_flags_t flags{};
+    flags.device_access = true;
+    flags.memory_hint = AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT;
+    extra_output_buffers.emplace_back(AllocMemory(outputbuf_size, flags));
+    return extra_output_buffers.back().get();
+  }
+  
+  void* AddExtraCmdBuf(size_t size)
+  {
+    aqlprofile_buffer_desc_flags_t flags{};
+    flags.host_access = true;
+    flags.device_access = true;
+    flags.memory_hint = AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT;
+    extra_cmd_buffers.emplace_back(AllocMemory(size, flags));
+    return extra_cmd_buffers.back().get();
+  }
+
   void CreateOutputBuf(size_t size) override {
     aqlprofile_buffer_desc_flags_t flags{};
     flags.device_access = true;
@@ -232,8 +257,10 @@ class TraceMemoryManager : public MemoryManager {
   }
 
   int GetSimdMask() const { return simd_mask; }
+  bool isDoubleBuffer() const { return !extra_cmd_buffers.empty() && !extra_output_buffers.empty(); }
 
   pm4_builder::TraceConfig config{};
+  std::atomic<size_t> buffer_swaps{0};
 
  protected:
   int target_cu = -1;
@@ -241,6 +268,9 @@ class TraceMemoryManager : public MemoryManager {
   aqlprofile_memory_copy_t copy_fn;
   std::vector<hsa_ven_amd_aqlprofile_parameter_t> att_params;
   std::unique_ptr<void, MemoryDeleter> trace_control_buf = nullptr;
+  
+  std::vector<std::unique_ptr<void, MemoryDeleter>> extra_output_buffers{};
+  std::vector<std::unique_ptr<void, MemoryDeleter>> extra_cmd_buffers{};
 };
 
 class CodeobjMemoryManager : public MemoryManager {
@@ -255,4 +285,21 @@ class CodeobjMemoryManager : public MemoryManager {
 
   void CreateOutputBuf(size_t size) override{};
   std::unique_ptr<void, MemoryDeleter> cmd_buffer;
+};
+
+class SPMMemoryManager : public MemoryManager {
+ public:
+  SPMMemoryManager(aqlprofile_agent_handle_t aql_agent, hsa_agent_t hsa_agent,
+                   aqlprofile_memory_alloc_callback_t alloc,
+                   aqlprofile_memory_dealloc_callback_t dealloc, void* data)
+      : MemoryManager(agent, alloc, dealloc, data) { this->agent_handle = aql_agent; }
+
+  void CreateOutputBuf(size_t size) override {
+    aqlprofile_buffer_desc_flags_t flags{};
+    flags.host_access = true;  // flags.device_access = true;
+    this->outputbuf = AllocMemory(size, flags);
+    outputbuf_size = size;
+  }
+
+  pm4_builder::TraceConfig config{};
 };

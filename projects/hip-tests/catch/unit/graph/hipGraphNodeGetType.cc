@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
 Testcase Scenarios :
 Functional ::
@@ -62,7 +50,7 @@ static void callbackfunc(void* A_h) {
   }
 }
 
-TEST_CASE("Unit_hipGraphNodeGetType_Negative") {
+HIP_TEST_CASE(Unit_hipGraphNodeGetType_Negative) {
   SECTION("Pass nullptr to graph node") {
     hipGraphNodeType nodeType;
     REQUIRE(hipGraphNodeGetType(nullptr, &nodeType) == hipErrorInvalidValue);
@@ -74,6 +62,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_Negative") {
     HIP_CHECK(hipGraphCreate(&graph, 0));
     HIP_CHECK(hipGraphAddEmptyNode(&memcpyNode, graph, nullptr, 0));
     REQUIRE(hipGraphNodeGetType(memcpyNode, nullptr) == hipErrorInvalidValue);
+    HIP_CHECK(hipGraphDestroy(graph));
   }
 
   SECTION("Pass invalid node") {
@@ -83,7 +72,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_Negative") {
   }
 }
 
-TEST_CASE("Unit_hipGraphNodeGetType_Functional") {
+HIP_TEST_CASE(Unit_hipGraphNodeGetType_Functional) {
   constexpr size_t N = 1024;
   hipGraphNodeType nodeType;
   hipGraph_t graph;
@@ -114,8 +103,11 @@ TEST_CASE("Unit_hipGraphNodeGetType_Functional") {
     HIP_CHECK(hipGraphNodeGetType(waiteventNode, &nodeType));
     REQUIRE(nodeType == hipGraphNodeTypeEmpty);
   }
+
+  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipEventDestroy(event));
+  HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 /**
  * Functional Test for hipGraphNodeGetType API
@@ -127,7 +119,7 @@ constexpr size_t Nbytes = N * sizeof(int);
 constexpr auto blocksPerCU = 6;  // to hide latency
 constexpr auto threadsPerBlock = 256;
 
-TEST_CASE("Unit_hipGraphNodeGetType_NodeType") {
+HIP_TEST_CASE(Unit_hipGraphNodeGetType_NodeType) {
   hipGraph_t graph;
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
@@ -180,6 +172,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_NodeType") {
     // Verify node type
     HIP_CHECK(hipGraphNodeGetType(childGraphNode, &nodeType));
     REQUIRE(nodeType == hipGraphNodeTypeGraph);
+    HIP_CHECK(hipGraphDestroy(childgraph));
   }
 
   SECTION("Get Memcpy NodeType") {
@@ -299,7 +292,7 @@ static void thread_func(hipGraph_t graph, std::map<hipGraphNodeType, int>* numNo
  * 2.Create a graph with different types of nodes. Pass the graph to a thread. In the
  * thread, verify node types of all the nodes in the graph
  */
-TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfClonedGraph_NodeTypeInThread") {
+HIP_TEST_CASE(Unit_hipGraphNodeGetType_NodeTypeOfClonedGraph_NodeTypeInThread) {
   hipGraph_t graph, childGraph, clonedGraph;
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
@@ -397,6 +390,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfClonedGraph_NodeTypeInThread") {
   SECTION("Cloned Graph Node Type") {
     HIP_CHECK(hipGraphClone(&clonedGraph, graph));
     ChkNodeType(clonedGraph, &numNode);
+    HIP_CHECK(hipGraphDestroy(clonedGraph));
   }
   // Thread
   SECTION("Node Type In The Thread") {
@@ -417,7 +411,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfClonedGraph_NodeTypeInThread") {
  * few nodes and X as child graph. Now verify each of nodes of Y including
  * the nodes inside child graph using hipGraphNodeGetType()
  */
-TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfChildGraph") {
+HIP_TEST_CASE(Unit_hipGraphNodeGetType_NodeTypeOfChildGraph) {
   hipGraph_t graph, childGraph, getGraph;
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
@@ -515,6 +509,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfChildGraph") {
   HIP_CHECK(hipGraphChildGraphNodeGetGraph(childGraphNode, &getGraph));
   ChkNodeType(getGraph, &numNodeChild);
 
+  HIP_CHECK(hipStreamSynchronize(stream2));
   HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipEventDestroy(event1));
   HIP_CHECK(hipStreamDestroy(stream2));
@@ -563,7 +558,7 @@ static void thread_func1(hipGraph_t graph, enum graphType type) {
  * graph using hipGraphNodeGetType.
  * 2.Pass the graph to thread and verify each type of node in the graph
  * */
-TEST_CASE("Unit_hipGraphNodeGetType_ClonedGraph_InThread_WithDependencies") {
+HIP_TEST_CASE(Unit_hipGraphNodeGetType_ClonedGraph_InThread_WithDependencies) {
   hipGraph_t graph, childGraph, clonedGraph;
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
@@ -638,6 +633,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_ClonedGraph_InThread_WithDependencies") {
   SECTION("Cloned Graph Node Type") {
     HIP_CHECK(hipGraphClone(&clonedGraph, graph));
     ChkNodeTypeWithDependency(clonedGraph, Parent);
+    HIP_CHECK(hipGraphDestroy(clonedGraph));
   }
   // Thread
   SECTION("Node Type In The Thread") {
@@ -658,7 +654,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_ClonedGraph_InThread_WithDependencies") {
  * Now verify each of nodes of Y including the nodes inside child graph using
  * hipGraphNodeGetType()
  */
-TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfChildGraph_WithDependency") {
+HIP_TEST_CASE(Unit_hipGraphNodeGetType_NodeTypeOfChildGraph_WithDependency) {
   hipGraph_t graph, childGraph, getGraph;
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;

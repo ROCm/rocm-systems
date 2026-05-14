@@ -1,20 +1,7 @@
 /*
-   Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /* Test Case Description:
@@ -49,8 +36,7 @@ hipError_t Test() {
   HIP_CHECK_LT(hipMemGetInfo(&free, &total));
   if (free < 30_GB) {
     std::cout << "Free memory is too low: " << free / 1_MB << " MiB" << std::endl;
-    HipTest::HIP_SKIP_TEST("HIP test requires >30 GiB of free memory!");
-    return hipSuccess;
+    HIP_SKIP_TEST("test requires more than 30 GiB of free memory.");
   }
 
   uint64_t threshold = std::numeric_limits<uint64_t>::max();
@@ -448,6 +434,8 @@ hipError_t Test() {
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0de3a00000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f07b8000000, 1369910892, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f07b8000000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f0714800000, 2739821784, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
@@ -949,6 +937,14 @@ hipError_t Test() {
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f05bca00000, 137851152, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0630400000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0c38400000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0cdb600000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f05de600000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f05b8600000, 68925576, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f05b8600000, stream));
@@ -962,6 +958,10 @@ hipError_t Test() {
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f0581c00000, 68925576, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0581c00000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f05c5000000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0d9a000000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f054f600000, 913273928, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
@@ -1009,9 +1009,7 @@ hipError_t Test() {
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0c38a00000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
-  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0c38400000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
-  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0682200000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f068e800000, 206776728, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
@@ -1037,7 +1035,11 @@ hipError_t Test() {
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f0597200000, 206776728, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0c38a00000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f05a3a00000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0bc9400000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0597200000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
@@ -1064,6 +1066,8 @@ hipError_t Test() {
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0536600000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0529e00000, stream));
+  HIP_CHECK_LT(hipStreamSynchronize(stream));
+  HIP_CHECK_LT(hipFreeAsync(ptr_0x7f0c39400000, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
   HIP_CHECK_LT(hipMallocAsync(&ptr_0x7f0687e00000, 68925576, stream));
   HIP_CHECK_LT(hipStreamSynchronize(stream));
@@ -7382,4 +7386,4 @@ hipError_t Test() {
 }
 
 
-TEST_CASE("Unit_hipMemPoolMaxAlloc") { HIP_CHECK(Test()); }
+HIP_TEST_CASE(Unit_hipMemPoolMaxAlloc) { HIP_CHECK(Test()); }

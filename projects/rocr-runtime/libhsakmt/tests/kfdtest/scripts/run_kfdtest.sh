@@ -78,7 +78,8 @@ fi
 PLATFORM=""
 GDB=""
 NODE=""
-FORCE_HIGH=""
+CONCURRENTNODES=""
+TESTNODENUM=""
 RUN_IN_DOCKER=""
 ADDITIONAL_EXCLUDE=""
 
@@ -95,8 +96,16 @@ printUsage() {
                                "quoted, space-separated string as an argument"\
                                "(e.g. -n 1 OR -n \"1 2 3\")"\
                                "NOTE: Node numbers come from /sys/class/kfd/kfd/topology/nodes/#"
+    echo "  -c            , --concurrentnodes        Concurrent nodes string for multi-gpu testing."\
+                               "Takes a string comma-separated as an argument"\
+                               "(e.g. -c \"1,2,3\" or --concurrentnodes \"1,2,3\")"\
+                               "use -c \"all\" or --concurrentnodes \"all\" to test on all available nodes"\
+                               "NOTE: Node numbers come from /sys/class/kfd/kfd/topology/nodes/#"
+    echo "  -t            , --testnodenum            Number of concurrent nodes for multi-gpu testing."\
+                               "Takes an integer as argument"\
+                               "(e.g. -t 2 or --testnodenum 2)"
     echo "  -l            , --list                   List available nodes"
-    echo "  --high                                   Force clocks to high for test execution"
+    echo "  --high                                   Force clocks to high for test execution (non-functional)"
     echo "  -d            , --docker                 Run in docker container"
     echo "  -e <list>     , --exclude <list>         Additional tests to exclude, in addition to kfdtest.exclude."\
                                "Takes a colon-separated string as an argument"\
@@ -130,13 +139,24 @@ getFilter() {
     esac
 
     # Check if the loaded driver is upstream (in-box) or DKMS
-    rdma_get_pages_func=$(cat /proc/kallsyms | grep rdma_get_pages)
+    rdma_get_pages_func=$(cat /proc/kallsyms | grep rdma_get_pages || true)
     if [ -z "$rdma_get_pages_func" ]; then
-	    gtestFilter="$gtestFilter:${FILTER[upstream]}"
+        # If the filter is a blacklist (test list starts with -), we want to add to the list
+        # If the filter is a whitelist (test list starts with the test name), we don't want to add
+        # known-unsupported tests to the list, so don't add anything
+        if [[ "$gtestFilter" == --gtest_filter=-* ]]; then
+            gtestFilter="$gtestFilter:${FILTER[upstream]}"
+        fi
     fi
 
     if [ -n "$ADDITIONAL_EXCLUDE" ]; then
-	    gtestFilter="$gtestFilter:$ADDITIONAL_EXCLUDE"
+        # If the filter is a blacklist (test list starts with -), we want to add to the list
+	# If the filter is a whitelist (test list starts with the test name), we don't want to add
+	# excluded tests to the list, so don't add anything
+	# TODO: Add parsing so we can use --gtest_filter and -e together.
+        if [[ "$gtestFilter" == --gtest_filter=-* ]]; then
+            gtestFilter="$gtestFilter:$ADDITIONAL_EXCLUDE"
+        fi
     fi
 }
 
@@ -195,9 +215,9 @@ runKfdTest() {
         PKG_ROOT="$(getPackageRoot)"
     fi
 
-    if [ -n "$GTEST_ARGS" ] && [ -n "$ADDITIONAL_EXCLUDE" ]; then
-	    echo "Cannot use -e and --gtest_filter flags together"
-	    exit 0
+    if [[ "$GTEST_ARGS" =~ "--gtest_filter" && -n "$ADDITIONAL_EXCLUDE" ]]; then
+        echo "Cannot use -e and --gtest_filter flags together"
+        exit 0
     fi
 
     if [ "$NODE" == "" ]; then
@@ -241,10 +261,15 @@ runKfdTest() {
             fi
             sudo docker rm kfdtest_docker
         else
-            if [ "$HSA_TEST_GPUS_NUM" != "" ]; then
-                echo "++++ Starting parallel testing on $HSA_TEST_GPUS_NUM gpu(s) ++++"
-                $GDB $KFDTEST $gtestFilter $GTEST_ARGS
-                echo "++++ Finished parallel testing on $HSA_TEST_GPUS_NUM gpu(s) ++++"
+            if [ -n "$CONCURRENTNODES" ]; then
+                echo "++++ Starting parallel testing on node(s) $CONCURRENTNODES  ++++"
+                $GDB $KFDTEST "--concurrentnodes=$CONCURRENTNODES" $gtestFilter $GTEST_ARGS
+                echo "++++ Finished parallel testing on node(s) $CONCURRENTNODES  ++++"
+                exit 0;
+            elif [ -n "$TESTNODENUM" ]; then
+                echo "++++ Starting parallel testing on $TESTNODENUM node(s) ++++"
+                $GDB $KFDTEST "--testnodenum=$TESTNODENUM" $gtestFilter $GTEST_ARGS
+                echo "++++ Finished parallel testing on $TESTNODENUM node(s) ++++"
                 exit 0;
             else
                 echo ""
@@ -278,8 +303,12 @@ while [ "$1" != "" ]; do
             printGpuNodelist; exit 0 ;;
         -n  | --node )
             shift 1; NODE=$1 ;;
+        -c  | --concurrentnodes )
+            shift 1; CONCURRENTNODES="$1" ;;
+        -t  | --testnodenum )
+            shift 1; TESTNODENUM="$1" ;;
         --high)
-            FORCE_HIGH="true" ;;
+            echo "--high flag is no longer functional. Flag kept for backwards-compatibility" ;;
         -d  | --docker )
             RUN_IN_DOCKER="true" ;;
         -e  | --exclude )
@@ -292,34 +321,23 @@ while [ "$1" != "" ]; do
     shift 1
 done
 
-# If the SMI is missing, try to find it
-SMI="$(find /opt/rocm* -type l -name rocm-smi 2>/dev/null | tail -1)"
-if [ -z ${SMI} ]; then
-    if [ -x ${BIN_DIR}/rocm-smi ]; then
-	SMI=${BIN_DIR}/rocm-smi
-    else
-	SMI=`which rocm-smi`
-    fi
-fi
-# If the SMI is still missing, just report and continue
-if [ "$FORCE_HIGH" == "true" ]; then
-    if [ -e "$SMI" ]; then
-        OLDPERF=$($SMI -p | awk '/Performance Level:/ {print $NF; exit}')
-	$($SMI --setperflevel high &> /dev/null)
-	if [ $? != 0 ]; then
-            echo "SMI failed to set perf level"
-	    OLDPERF=""
+if [ "$CONCURRENTNODES" == "all" ]; then
+    validNodes=$(getHsaNodes)
+    CONCURRENTNODES=$(echo $validNodes | tr ' ' ',') 
+else
+    validNodes=$(getHsaNodes)
+    validNodesArray=($validNodes)
+    IFS=',' read -ra concurrentNodesArray <<< "$CONCURRENTNODES"
+
+    for concurrentNode in "${concurrentNodesArray[@]}"; do
+        if [[ ! " ${validNodesArray[@]} " =~ " $concurrentNode " ]]; then
+            echo "Error: Invalid node $concurrentNode specified in --concurrentnodes."
+            echo "Valid nodes are: $validNodes"
+            exit 1
         fi
-    else
-        echo "Unable to set clocks to high, cannot find rocm-smi"
-    fi
+    done
 fi
 
 # Set HSA_DEBUG env to run KFDMemoryTest.PtraceAccessInvisibleVram
 export HSA_DEBUG=1
 runKfdTest
-
-# OLDPERF is only set if FORCE_HIGH and SMI both exist
-if [ -n "$OLDPERF" ]; then
-    $SMI --setperflevel $OLDPERF &> /dev/null
-fi

@@ -1,28 +1,15 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hip_module_common.hh"
 
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
+
+#if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 
 static hipModule_t GetModule() {
   HIP_CHECK(hipFree(nullptr));
@@ -30,14 +17,14 @@ static hipModule_t GetModule() {
   return mg.module();
 }
 
-TEST_CASE("Unit_hipModuleGetTexRef_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipModuleGetTexRef_Positive_Basic) {
   CHECK_IMAGE_SUPPORT
   hipTexRef tex_ref = nullptr;
   HIP_CHECK(hipModuleGetTexRef(&tex_ref, GetModule(), "tex"));
   REQUIRE(tex_ref != nullptr);
 }
 
-TEST_CASE("Unit_hipModuleGetTexRef_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipModuleGetTexRef_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
   hipModule_t module = GetModule();
   hipTexRef tex_ref = nullptr;
@@ -55,17 +42,21 @@ TEST_CASE("Unit_hipModuleGetTexRef_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipModuleGetTexRef_Negative_Hmod_Is_Nullptr") {
+HIP_TEST_CASE(Unit_hipModuleGetTexRef_Negative_Hmod_Is_Nullptr) {
   CHECK_IMAGE_SUPPORT
   hipTexRef tex_ref = nullptr;
 
+  CTX_CREATE();
   HIP_CHECK_ERROR(hipModuleGetTexRef(&tex_ref, nullptr, "tex"), hipErrorInvalidResourceHandle);
+  CTX_DESTROY();
 }
 
-TEST_CASE("Unit_hipModuleGetTexRef_Negative_Name_Is_Empty_String") {
+HIP_TEST_CASE(Unit_hipModuleGetTexRef_Negative_Name_Is_Empty_String) {
   CHECK_IMAGE_SUPPORT
   hipModule_t module = GetModule();
   hipTexRef tex_ref = nullptr;
 
   HIP_CHECK_ERROR(hipModuleGetTexRef(&tex_ref, module, ""), hipErrorInvalidValue);
 }
+
+#endif

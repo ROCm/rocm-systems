@@ -21,13 +21,12 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/aqlprofile/aqlprofile.hpp"
+#include "lib/common/static_object.hpp"
+#include "lib/common/utility.hpp"
 
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 #include <unordered_map>
-
-#include "lib/common/static_object.hpp"
-#include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
 
 namespace rocprofiler
 {
@@ -87,6 +86,21 @@ aqlprofile_id_to_rocprof_instance()
         }());
 
     return *aql_to_rocprof_dims;
+}
+
+// Counter ID encoding/decoding implementations
+void
+set_base_metric_in_counter_id(rocprofiler_counter_id_t& id, uint16_t metric_id)
+{
+    CHECK(metric_id <= BASE_METRIC_MASK) << "Base metric ID exceeds 16-bit limit";
+    // Clear base metric bits and set new value
+    id.handle = (id.handle & ~BASE_METRIC_MASK) | metric_id;
+}
+
+uint16_t
+get_base_metric_from_counter_id(rocprofiler_counter_id_t id)
+{
+    return static_cast<uint16_t>(id.handle & BASE_METRIC_MASK);
 }
 
 }  // namespace counters

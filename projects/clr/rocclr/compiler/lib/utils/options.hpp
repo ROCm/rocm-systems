@@ -1,22 +1,8 @@
-/* Copyright (c) 2009 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef _UTILS_OPTIONS_HPP_
 #define _UTILS_OPTIONS_HPP_
@@ -25,7 +11,6 @@
 #include <vector>
 #include <cstdio>
 #include "top.hpp"
-#include "library.hpp"
 #include <cassert>
 #include <sstream>
 #ifdef __linux__
@@ -312,20 +297,19 @@ class Options {
             (f & DUMP_ENCRYPT));
   }
 
-  std::string getStringFromStringVec(std::vector<std::string>& stringVec);
+  std::string getStringFromStringVec(const std::vector<std::string>& stringVec);
   void setDumpFileName(const char* val);
 
  public:
-  LibrarySelector libraryType_;
   std::string sourceFileName_;
 };
 
 OptionDescriptor* getOptDescTable();
 bool init();
 bool teardown();
-bool parseAllOptions(std::string& options, Options& Opts, bool linkOptsOnly, bool isLC);
-inline bool parseLinkOptions(std::string& options, Options& Opts, bool isLC) {
-  return parseAllOptions(options, Opts, true /*linkOptsOnly*/, isLC);
+bool parseAllOptions(std::string& options, Options& Opts, bool linkOptsOnly);
+inline bool parseLinkOptions(std::string& options, Options& Opts) {
+  return parseAllOptions(options, Opts, true /*linkOptsOnly*/);
 }
 
 

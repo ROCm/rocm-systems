@@ -49,14 +49,17 @@ kernel_symbol::operator=(kernel_symbol&& rhs) noexcept
 {
     if(this != &rhs)
     {
-        beg_notified          = rhs.beg_notified;
-        end_notified          = rhs.end_notified;
-        name                  = rhs.name;
-        hsa_executable        = rhs.hsa_executable;
-        hsa_agent             = rhs.hsa_agent;
-        hsa_symbol            = rhs.hsa_symbol;
-        rocp_data             = rhs.rocp_data;
-        user_data             = std::move(rhs.user_data);
+        beg_notified.store(rhs.beg_notified.load());
+        end_notified.store(rhs.end_notified.load());
+        name           = rhs.name;
+        hsa_executable = rhs.hsa_executable;
+        hsa_agent      = rhs.hsa_agent;
+        hsa_symbol     = rhs.hsa_symbol;
+        rocp_data      = rhs.rocp_data;
+        // Manually move user_data by extracting and inserting under locks
+        rhs.user_data.wlock([this](auto& rhs_map) {
+            this->user_data.wlock([&rhs_map](auto& lhs_map) { lhs_map = std::move(rhs_map); });
+        });
         rocp_data.kernel_name = (name) ? name->c_str() : nullptr;
     }
 

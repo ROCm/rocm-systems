@@ -39,6 +39,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <fmt/core.h>
+#include <fmt/ranges.h>
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
@@ -61,22 +62,28 @@ check_dim_pos(rocprofiler_counter_instance_id_t                                 
 }
 
 void
-check_counter_id(rocprofiler_counter_instance_id_t id, uint64_t expected_handle)
+check_counter_id(rocprofiler_counter_instance_id_t id, uint64_t expected_base_metric)
 {
+    using namespace rocprofiler::counters;
+
     rocprofiler_counter_id_t api_id = {.handle = 0};
     rocprofiler_query_record_counter_id(id, &api_id);
-    EXPECT_EQ(rocprofiler::counters::rec_to_counter_id(id).handle, expected_handle);
-    EXPECT_EQ(rocprofiler::counters::rec_to_counter_id(id).handle, api_id.handle);
+
+    auto reconstructed_id = rec_to_counter_id(id);
+
+    EXPECT_EQ(reconstructed_id.handle, expected_base_metric);
+    EXPECT_EQ(api_id.handle, expected_base_metric);
+
+    // Both methods should return the same counter ID
+    EXPECT_EQ(reconstructed_id.handle, api_id.handle);
 }
 }  // namespace
 
 TEST(dimension, set_get)
 {
     using namespace rocprofiler::counters;
-    int64_t                           max_counter_val = (std::numeric_limits<uint64_t>::max() >>
-                               (64 - (DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST)));
-    rocprofiler_counter_instance_id_t test_id         = 0;
-    rocprofiler_counter_id_t          test_counter{.handle = 123};
+    auto test_id      = rocprofiler_counter_instance_id_t{0};
+    auto test_counter = rocprofiler_counter_id_t{.handle = 123};
 
     set_counter_in_rec(test_id, test_counter);
     // 0x007B000000000000 = decimal counter id 123 << DIM_BIT_LENGTH
@@ -95,29 +102,27 @@ TEST(dimension, set_get)
         for(size_t i = 1; i < static_cast<size_t>(ROCPROFILER_DIMENSION_LAST); i++)
         {
             auto dim = static_cast<rocprofiler_profile_counter_instance_types>(i);
+
             set_dim_in_rec(test_id, dim, i);
             check_dim_pos(test_id, dim, i);
             set_dim_in_rec(test_id, dim, i * multi_factor);
             for(size_t j = 1; j < static_cast<size_t>(ROCPROFILER_DIMENSION_LAST); j++)
             {
                 if(i == j) continue;
-                set_dim_in_rec(test_id,
-                               static_cast<rocprofiler_profile_counter_instance_types>(j),
-                               max_counter_val);
-                check_dim_pos(test_id,
-                              static_cast<rocprofiler_profile_counter_instance_types>(j),
-                              max_counter_val);
+                auto     other_dim     = static_cast<rocprofiler_profile_counter_instance_types>(j);
+                uint64_t other_max_val = (1ULL << get_dim_bit_length(other_dim)) - 1;
+                set_dim_in_rec(test_id, other_dim, other_max_val);
+                check_dim_pos(test_id, other_dim, other_max_val);
                 check_dim_pos(test_id, dim, i * multi_factor);
             }
 
             for(size_t j = static_cast<size_t>(ROCPROFILER_DIMENSION_LAST - 1); j > 0; j--)
             {
                 if(i == j) continue;
-                set_dim_in_rec(test_id,
-                               static_cast<rocprofiler_profile_counter_instance_types>(j),
-                               max_counter_val);
-                check_dim_pos(
-                    test_id, (rocprofiler_profile_counter_instance_types) j, max_counter_val);
+                auto     other_dim     = static_cast<rocprofiler_profile_counter_instance_types>(j);
+                uint64_t other_max_val = (1ULL << get_dim_bit_length(other_dim)) - 1;
+                set_dim_in_rec(test_id, other_dim, other_max_val);
+                check_dim_pos(test_id, other_dim, other_max_val);
                 check_dim_pos(test_id, dim, i * multi_factor);
             }
 
@@ -130,12 +135,15 @@ TEST(dimension, set_get)
 
     for(size_t i = static_cast<size_t>(ROCPROFILER_DIMENSION_LAST - 1); i > 0; i--)
     {
-        auto dim = static_cast<rocprofiler_profile_counter_instance_types>(i);
+        auto     dim         = static_cast<rocprofiler_profile_counter_instance_types>(i);
+        uint64_t dim_max_val = (1ULL << get_dim_bit_length(dim)) - 1;
+
         set_dim_in_rec(test_id, dim, i * 5);
         check_dim_pos(test_id, dim, i * 5);
         set_dim_in_rec(test_id, dim, i * 3);
         check_dim_pos(test_id, dim, i * 3);
-        for(size_t j = 1; j < 64; j++)
+        // Test all values up to the max for this dimension
+        for(size_t j = 1; j <= dim_max_val; j++)
         {
             test_id = 0;
             set_dim_in_rec(test_id, dim, j);
@@ -251,7 +259,7 @@ TEST(dimension, block_dim_test)
             /**
              * Compare with actual
              */
-            auto dims = getBlockDimensions(agent.name(), metric);
+            auto dims = getBlockDimensions(agent.get_rocp_agent()->id, metric);
             EXPECT_FALSE(dims.empty());
             EXPECT_EQ(dims.size(), rocp_dims.size());
             for(const auto& dim : dims)
@@ -266,7 +274,7 @@ TEST(dimension, block_dim_test)
             /**
              * Check this value exists in the dimension cache
              */
-            auto        dim_ptr   = counters::get_dimension_cache();
+            auto        dim_ptr   = counters::get_dimension_cache(agent.get_rocp_agent()->id);
             const auto* dim_cache = rocprofiler::common::get_val(dim_ptr->id_to_dim, metric.id());
             ASSERT_TRUE(dim_cache);
             EXPECT_EQ(fmt::format("{}", fmt::join(dims, "|")),
@@ -289,7 +297,7 @@ TEST(dimension, block_dim_test)
             EXPECT_EQ(instance_count, calculated_instance_count);
 
             /**
-             * Check the public API returns this value
+             * Check the public API returns this value.
              */
             rocprofiler_iterate_counter_dimensions(
                 {.handle = metric.id()},

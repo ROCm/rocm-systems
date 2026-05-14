@@ -1,22 +1,8 @@
-/* Copyright (c) 2024 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "device/pal/palubercapturemgr.hpp"
 #include "device/pal/paldevice.hpp"
@@ -57,6 +43,38 @@ UberTraceCaptureMgr* UberTraceCaptureMgr::Create(Pal::IPlatform* platform, const
   return mgr;
 }
 
+static void PAL_STDCALL UberTraceStateChangeCallback(const GpuUtil::TraceSession& pTraceSession,
+                                                     GpuUtil::TraceSessionState newState,
+                                                     void* pPrivateData)
+{
+    UberTraceCaptureMgr* mgr = static_cast<UberTraceCaptureMgr*>(pPrivateData);
+
+    switch (newState)
+    {
+        // boundary for prepare-phase dispatches
+        case GpuUtil::TraceSessionState::Preparing:
+        // boundary for detailed capture
+        case GpuUtil::TraceSessionState::Running:
+        // boundary for end of detailed trace
+#if (PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939)
+        case GpuUtil::TraceSessionState::Postamble:
+#else
+        // boundary for end of trace
+        case GpuUtil::TraceSessionState::Waiting:
+#endif
+        {
+            VirtualGPU* current_gpu = mgr->GetCurrentGPU();
+            if (current_gpu != nullptr) {
+                bool flush_success = current_gpu->queue(MainEngine).flush();
+                assert(flush_success);
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
 // ================================================================================================
 UberTraceCaptureMgr::UberTraceCaptureMgr(Pal::IPlatform* platform, const Device& device)
     : device_(device),
@@ -67,7 +85,8 @@ UberTraceCaptureMgr::UberTraceCaptureMgr(Pal::IPlatform* platform, const Device&
       trace_session_(platform->GetTraceSession()),
       trace_controller_(nullptr),
       code_object_trace_source_(nullptr),
-      queue_timings_trace_source_(nullptr) {}
+      queue_timings_trace_source_(nullptr),
+      registered_trace_state_callback_(false) {}
 
 // ================================================================================================
 UberTraceCaptureMgr::~UberTraceCaptureMgr() { DestroyUberTraceResources(); }
@@ -116,6 +135,13 @@ bool UberTraceCaptureMgr::CreateUberTraceResources(Pal::IPlatform* platform) {
       break;
     }
 
+    result = trace_session_->RegisterTraceStateChangeCallback(UberTraceStateChangeCallback, this);
+    if (result != Pal::Result::Success) {
+      break;
+    }
+
+    registered_trace_state_callback_ = true;
+
     success = true;
   } while (false);
 
@@ -150,6 +176,11 @@ void UberTraceCaptureMgr::DestroyUberTraceResources() {
     delete queue_timings_trace_source_;
     queue_timings_trace_source_ = nullptr;
   }
+
+  if (registered_trace_state_callback_) {
+    trace_session_->UnregisterTraceStateChangeCallback(UberTraceStateChangeCallback, this);
+    registered_trace_state_callback_ = false;
+  }
 }
 
 // ================================================================================================
@@ -172,7 +203,7 @@ bool UberTraceCaptureMgr::Init(Pal::IPlatform* platform) {
 }
 
 // ================================================================================================
-void UberTraceCaptureMgr::PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel, size_t x,
+void UberTraceCaptureMgr::PreDispatch(VirtualGPU* gpu, const pal::Kernel& kernel, size_t x,
                                       size_t y, size_t z) {
   // Wait for the driver to be resumed in case it's been paused.
   WaitForDriverResume();
@@ -182,7 +213,9 @@ void UberTraceCaptureMgr::PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel
   GpuUtil::RenderOpCounts opCounts = {
       .dispatchCount = 1u,
   };
+  current_gpu_ = gpu;
   trace_controller_->RecordRenderOps(pQueue, opCounts);
+  current_gpu_ = nullptr;
 
   if (trace_session_->GetTraceSessionState() == GpuUtil::TraceSessionState::Running) {
     RgpSqttMarkerEventType apiEvent = RgpSqttMarkerEventType::CmdNDRangeKernel;
@@ -283,11 +316,10 @@ Pal::Result UberTraceCaptureMgr::TimedQueueSubmit(Pal::IQueue* queue, uint64_t c
   timedSubmitInfo.pSqttCmdBufIds = &sqttCmdBufIds;
   timedSubmitInfo.frameIndex = 0;
 
-  // Do a timed submit of all the command buffers
-  Pal::Result result = queue_timings_trace_source_->TimedSubmit(queue, submitInfo, timedSubmitInfo);
-
-  // Punt to non-timed submit if a timed submit fails (or is not supported)
-  if (result != Pal::Result::Success) {
+  Pal::Result result = Pal::Result::Success;
+  if (IsQueueTimingActive()) {
+    result = queue_timings_trace_source_->TimedSubmit(queue, submitInfo, timedSubmitInfo);
+  } else {
     result = queue->Submit(submitInfo);
   }
 

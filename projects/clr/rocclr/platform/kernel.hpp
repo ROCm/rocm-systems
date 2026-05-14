@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef KERNEL_HPP_
 #define KERNEL_HPP_
@@ -49,7 +35,7 @@ class Program;
  *  @{
  */
 
-class KernelSignature : public HeapObject {
+class KernelSignature {
  private:
   std::vector<KernelParameterDescriptor> params_;
   std::string attributes_;  //!< The kernel attributes
@@ -63,9 +49,8 @@ class KernelSignature : public HeapObject {
 
  public:
   enum {
-    ABIVersion_0 = 0,  //! ABI constructed based on the OCL semantics
-    ABIVersion_1 = 1,  //! ABI constructed based on the HW ABI returned from HSAIL
-    ABIVersion_2 = 2   //! ABI constructed based on the HW ABI returned from LC
+    ABIVersion_OCL = 0,  //! ABI constructed based on the OCL semantics
+    ABIVersion_LC  = 1   //! ABI constructed based on the HW ABI returned from LC
   };
 
   //! Default constructor
@@ -75,7 +60,7 @@ class KernelSignature : public HeapObject {
         numMemories_(0),
         numSamplers_(0),
         numQueues_(0),
-        version_(ABIVersion_0) {}
+        version_(ABIVersion_OCL) {}
 
   //! Construct a new signature.
   KernelSignature(const std::vector<KernelParameterDescriptor>& params, const std::string& attrib,
@@ -118,13 +103,12 @@ class KernelSignature : public HeapObject {
 
 // @todo: look into a copy-on-write model instead of copy-on-read.
 //
-class KernelParameters : protected HeapObject {
+class KernelParameters {
  private:
   //! The signature describing these parameters.
   KernelSignature& signature_;
 
   address values_;                      //!< pointer to the base of the values stack.
-  uint32_t execInfoOffset_;             //!< The offset of execInfo
   std::vector<void*> execSvmPtr_;       //!< The non argument svm pointers for kernel
   FGSStatus svmSystemPointersSupport_;  //!< The flag for the status of the kernel
                                         //   support of fine-grain system sharing.
@@ -149,7 +133,6 @@ class KernelParameters : protected HeapObject {
   //! Construct a new instance of parameters for the given signature.
   KernelParameters(KernelSignature& signature)
       : signature_(signature),
-        execInfoOffset_(0),
         svmSystemPointersSupport_(FGS_DEFAULT),
         memoryObjects_(nullptr),
         samplerObjects_(nullptr),
@@ -175,7 +158,6 @@ class KernelParameters : protected HeapObject {
 
   explicit KernelParameters(const KernelParameters& rhs)
       : signature_(rhs.signature_),
-        execInfoOffset_(rhs.execInfoOffset_),
         execSvmPtr_(rhs.execSvmPtr_),
         svmSystemPointersSupport_(rhs.svmSystemPointersSupport_),
         memoryObjects_(nullptr),
@@ -217,7 +199,11 @@ class KernelParameters : protected HeapObject {
   size_t localMemSize(size_t minDataTypeAlignment) const;
 
   //! Capture the state of the parameters and return the stack base pointer.
-  address capture(device::VirtualDevice& vDev, uint64_t lclMemSize, int32_t* error);
+  address captureOpenCLArgs(device::VirtualDevice& vDev, uint64_t lclMemSize, int32_t* error);
+
+  //! Capture the arguments from signature and set.
+  bool captureHIPArgs(void** kernelParams, address kernArgs, size_t kernArgsSize, address mem);
+
   //! Release the captured state of the parameters.
   void release(address parameters) const;
 
@@ -247,15 +233,13 @@ class KernelParameters : protected HeapObject {
   //! add the svmPtr execInfo into container
   void addSvmPtr(void* const* execInfoArray, size_t count) {
     execSvmPtr_.clear();
-    for (size_t i = 0; i < count; i++) {
-      execSvmPtr_.push_back(execInfoArray[i]);
-    }
+    execSvmPtr_.insert(execSvmPtr_.end(), execInfoArray, execInfoArray + count);
   }
   //! get the number of svmPtr in the execInfo container
   size_t getNumberOfSvmPtr() const { return execSvmPtr_.size(); }
 
-  //! get the offset of svmPtr in the parameters
-  uint32_t getExecInfoOffset() const { return execInfoOffset_; }
+  //! Get the total size of parameters / offset where execInfo (SVM pointers) are stored
+  uint32_t getTotalSize() const { return totalSize_; }
 
   //! get the offset of memory objects in the parameters
   uint32_t memoryObjOffset() const { return memoryObjOffset_; }
@@ -291,9 +275,6 @@ class KernelParameters : protected HeapObject {
 
   //! Allocate memory for kernel arguments to be set.
   address alloc(device::VirtualDevice& vDev);
-
-  //! Capture the arguments from signature and set.
-  bool captureAndSet(void** kernelParams, address kernArgs, size_t kernArgsSize, address mem);
 };
 
 /*! \brief Encapsulates a __kernel function and the argument values
@@ -339,7 +320,6 @@ class Kernel : public RuntimeObject {
 
   virtual ObjectType objectType() const { return ObjectTypeKernel; }
 
-#if defined(USE_COMGR_LIBRARY)
   // Templated find function to retrieve the right value based on string
   template <typename V, typename T, size_t N>
   static V FindValue(const T (&structure)[N], const std::string& name);
@@ -416,8 +396,7 @@ class Kernel : public RuntimeObject {
   static const KernelFieldMapV3Type kKernelFieldMapV3[];
   static const ArgValueKindV3Type kArgValueKindV3[];
   static const ArgFieldMapV3Type kArgFieldMapV3[];
-#endif
-};  // defined(USE_COMGR_LIBRARY)
+};
 
 
 /*! @}

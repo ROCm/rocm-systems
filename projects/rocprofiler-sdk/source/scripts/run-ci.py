@@ -116,15 +116,39 @@ def generate_custom(args, cmake_args, ctest_args):
     MEMCHECK_SUPPRESSION_FILE = ""
 
     if MEMCHECK_TYPE == "AddressSanitizer":
-        MEMCHECK_SANITIZER_OPTIONS = "detect_leaks=0 use_sigaltstack=0"
+        # print_suppressions=1 shows which suppressions matched during the run
+        MEMCHECK_SANITIZER_OPTIONS = (
+            "detect_leaks=0 use_sigaltstack=0 print_suppressions=1"
+        )
         MEMCHECK_SUPPRESSION_FILE = (
             f"{SOURCE_DIR}/source/scripts/address-sanitizer-suppr.txt"
         )
+        os.environ["ASAN_OPTIONS"] = " ".join(
+            [
+                "detect_leaks=0",
+                "use_sigaltstack=0",
+                "print_suppressions=1",
+                f"suppressions={SOURCE_DIR}/source/scripts/address-sanitizer-suppr.txt",
+                os.environ.get("ASAN_OPTIONS", ""),
+            ]
+        )
     elif MEMCHECK_TYPE == "LeakSanitizer":
+        # fast_unwind_on_malloc=1 avoids deadlock in libgcc unwinder during early init
+        # print_suppressions=1 shows which suppressions matched during the run
+        MEMCHECK_SANITIZER_OPTIONS = "fast_unwind_on_malloc=1 print_suppressions=1"
         MEMCHECK_SUPPRESSION_FILE = (
             f"{SOURCE_DIR}/source/scripts/leak-sanitizer-suppr.txt"
         )
+        os.environ["LSAN_OPTIONS"] = " ".join(
+            [
+                f"suppressions={SOURCE_DIR}/source/scripts/leak-sanitizer-suppr.txt",
+                "fast_unwind_on_malloc=1",
+                "print_suppressions=1",
+                os.environ.get("LSAN_OPTIONS", ""),
+            ]
+        )
     elif MEMCHECK_TYPE == "ThreadSanitizer":
+        # print_suppressions=1 shows which suppressions matched during the run
         external_symbolizer_path = ""
         for version in range(8, 20):
             _symbolizer = shutil.which(f"llvm-symbolizer-{version}")
@@ -134,6 +158,7 @@ def generate_custom(args, cmake_args, ctest_args):
             [
                 "history_size=5",
                 "detect_deadlocks=0",
+                "print_suppressions=1",
                 f"suppressions={SOURCE_DIR}/source/scripts/thread-sanitizer-suppr.txt",
                 external_symbolizer_path,
                 os.environ.get("TSAN_OPTIONS", ""),
@@ -150,6 +175,20 @@ def generate_custom(args, cmake_args, ctest_args):
                 os.environ.get("UBSAN_OPTIONS", ""),
             ]
         )
+
+    # Print suppression file contents for debugging
+    if MEMCHECK_TYPE:
+        print(f"\n{'=' * 60}")
+        print(f"Sanitizer: {MEMCHECK_TYPE}")
+        print(f"{'=' * 60}")
+
+        # Print environment variables for sanitizers that use them
+        for env_var in ["TSAN_OPTIONS", "UBSAN_OPTIONS", "ASAN_OPTIONS", "LSAN_OPTIONS"]:
+            if env_var in os.environ:
+                print(f"\n{env_var}:")
+                print(f"  {os.environ[env_var]}")
+
+        print(f"\n{'=' * 60}\n")
 
     codecov_exclude = [
         "/usr/.*",

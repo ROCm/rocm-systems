@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 #[=======================================================================[.rst:
 FindLibDebuginfod
 -----------------
@@ -79,8 +82,7 @@ else()
 
     if(EXISTS "${LibDebuginfod_INCLUDE_DIRS}/version.h")
         file(
-            STRINGS
-            "${LibDebuginfod_INCLUDE_DIRS}/version.h"
+            STRINGS "${LibDebuginfod_INCLUDE_DIRS}/version.h"
             _version_line
             REGEX "^#define _ELFUTILS_VERSION[ \t]+[0-9]+"
         )

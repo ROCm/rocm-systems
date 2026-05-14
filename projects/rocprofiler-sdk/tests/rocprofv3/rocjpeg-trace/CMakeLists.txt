@@ -51,46 +51,35 @@ endif()
 
 # CI Sanitizer run gives the following error: No target "rocjpeg-demo" Adding if-statement
 # to avoid tests for now to stop error
-add_test(
-    NAME rocprofv3-test-rocjpeg-tracing-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocjpeg-tracing
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocjpeg-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json csv
         --log-level env --
-        $<IF:$<TARGET_EXISTS:rocjpeg-demo>,$<$<TARGET_EXISTS:rocjpeg-demo>:$<TARGET_FILE:rocjpeg-demo>>,rocjpeg-demo>
-        -i ${rocJPEG_IMAGE_DIR})
+        $<IF:$<TARGET_EXISTS:rocjpeg-demo>,$<TARGET_FILE:rocjpeg-demo>,rocjpeg-demo> -i
+        ${rocJPEG_IMAGE_DIR}
+    DEPENDS rocjpeg-demo
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-rocjpeg-tracing
+    DISABLED "${IS_DISABLED}")
 
-set_tests_properties(
-    rocprofv3-test-rocjpeg-tracing-execute
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${rocjpeg-tracing-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${IS_DISABLED}")
-
-add_test(
-    NAME rocprofv3-test-rocjpeg-tracing-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-demo-trace/out_results.json --otf2-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-demo-trace/out_results.otf2 --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-demo-trace/out_results.pftrace --csv-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-demo-trace/out_rocjpeg_api_trace.csv)
-
-set_tests_properties(
-    rocprofv3-test-rocjpeg-tracing-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               rocprofv3-test-rocjpeg-tracing-execute
-               FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               DISABLED
-               "${IS_DISABLED}")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocjpeg-tracing
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-demo-trace/out_results.json
+         --otf2-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-demo-trace/out_results.otf2
+         --pftrace-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-demo-trace/out_results.pftrace
+         --csv-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-demo-trace/out_rocjpeg_api_trace.csv
+    TIMEOUT 45
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-rocjpeg-tracing
+    DISABLED "${IS_DISABLED}")

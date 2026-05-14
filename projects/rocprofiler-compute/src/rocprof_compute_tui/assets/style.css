@@ -46,12 +46,12 @@ Collapsible {
     width: 100%;
 }
 
-Collapsible>.collapsible--title {
+Collapsible >.collapsible--title {
     background: $surface-darken-2;
     text-style: bold;
 }
 
-Collapsible>.collapsible--content {
+Collapsible >.collapsible--content {
     background: $surface;
 }
 
@@ -197,26 +197,27 @@ RocprofTUIApp {
     }
 }
 
-Button {
-    background: $surface;
-    color: $text;
-    min-width: 10;
-    height: 1;
-    margin: 0;
-    padding: 0 1;
+Button.menu-item {
+    background: $accent;
+    width: 25;
+    height: 2;
+    padding: 0 2;
     border: none;
-    width: auto;
+    align: center middle;
+    content-align: center middle;
 }
 
-Button:hover {
-    background: $primary-background-lighten-1;
+Button.menu-item:hover {
+    background: $accent-lighten-1;
     color: $text-accent;
 }
 
-Button.selected {
-    background: $primary-background;
-    color: $text-accent;
-    text-style: bold;
+Button.menu-item:focus {
+    background: $accent-darken-1;
+}
+
+Button.menu-item.-active {
+    background: $accent-darken-2;
 }
 
 MenuBar {
@@ -236,9 +237,12 @@ MenuButton {
     background: $surface;
     color: $text;
     min-width: 10;
-    height: 1;
+    height: auto;
+    padding: 0 1;
     border: none;
     width: auto;
+    align: center middle;
+    content-align: center middle;
 }
 
 MenuButton:hover {
@@ -246,9 +250,41 @@ MenuButton:hover {
     color: $text-accent;
 }
 
+MenuButton:focus {
+    background: $primary-background;
+}
+
+MenuButton.-active {
+    background: $primary-background-darken-1;
+}
+
 MenuButton.selected {
     background: $primary-background;
     color: $text-accent;
+}
+
+/* InstantButton replacements for menu items */
+InstantButton.menu-item {
+    background: $accent;
+    width: 25;
+    height: 2;
+    padding: 0 2;
+    border: none;
+    align: center middle;
+    content-align: center middle;
+}
+
+InstantButton.menu-item:hover {
+    background: $accent-lighten-1;
+    color: $text-accent;
+}
+
+InstantButton.menu-item:focus {
+    background: $accent-darken-1;
+}
+
+InstantButton.menu-item.-active {
+    background: $accent-darken-2;
 }
 
 #dropdown-container {
@@ -260,28 +296,29 @@ DropdownMenu {
     background: $accent;
     width: auto;
     min-width: 20;
-    padding-top: 1;
+    padding: 0;
     height: auto;
+    overflow: hidden;
+    layout: grid;
+    grid-size: 1 3;
+}
+
+DropdownMenu > * {
+    width: 1fr;
+    height: 2;                /* makes the widget claim vertical space */
+    align: center middle;     /* makes the widget fill that space */
+    content-align: center middle; /* centers the label inside the widget */
 }
 
 #file-dropdown {
     margin-left: 0;
 }
 
-.menu-item {
-    background: $accent;
-}
-
-.menu-item:hover {
-    background: $primary-background-lighten-1;
-    color: $text-accent;
-}
-
 .hidden {
     display: none;
 }
 
-Terimnal {
+Terminal {
     layout: vertical;
     width: 100%;
     height: 100%;

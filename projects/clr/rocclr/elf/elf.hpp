@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef ELF_HPP_
 #define ELF_HPP_
@@ -36,12 +22,6 @@ using amd::ELFIO::Elf64_Shdr;
 // These two definitions need to stay in sync with
 // the definitions elfdefinitions.h until they get
 // properly upstreamed to gcc/libelf.
-#ifndef EM_HSAIL
-#define EM_HSAIL 0xAF5A
-#endif
-#ifndef EM_HSAIL_64
-#define EM_HSAIL_64 0xAF5B
-#endif
 #ifndef EM_AMDIL
 #define EM_AMDIL 0x4154
 #endif
@@ -56,9 +36,6 @@ using amd::ELFIO::Elf64_Shdr;
 #endif
 #ifndef ELFOSABI_AMD_OPENCL
 #define ELFOSABI_AMD_OPENCL 201
-#endif
-#ifndef ELFOSABI_HSAIL
-#define ELFOSABI_HSAIL 202
 #endif
 #ifndef ELFOSABI_AMDIL
 #define ELFOSABI_AMDIL 203
@@ -88,14 +65,6 @@ class Elf {
 
     OCL_TARGETS_LAST,
   } ElfTargets;
-
-  typedef enum {
-    CAL_PLATFORM = 0,
-    CPU_PLATFORM = 1,
-    COMPLIB_PLATFORM = 2,
-    LC_PLATFORM = 3,
-    LAST_PLATFORM = 4
-  } ElfPlatform;
 
   typedef enum {
     LLVMIR = 0,
@@ -301,9 +270,8 @@ class Elf {
   bool getNote(const char* noteName, char** noteDesc, size_t* descSize);
 
 
-  /* Get/set machine and platform (target) for which elf is built */
-  bool getTarget(uint16_t& machine, ElfPlatform& platform) const;
-  bool setTarget(uint16_t machine, ElfPlatform platform);
+  /* Set machine and platform (target) for which elf is built */
+  bool setTarget(uint16_t machine);
 
   /* Get/set elf type field from header */
   bool getType(uint16_t& type) const;

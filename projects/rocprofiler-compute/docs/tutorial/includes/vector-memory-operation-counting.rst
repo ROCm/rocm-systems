@@ -201,7 +201,7 @@ space, regardless of other optimizations that may be possible.
 Also note that the ``filter`` parameter passed in as a kernel argument (see
 :dev-sample:`example <vmem.hip>` and
 :ref:`design note <flat-experiment-design>`) is set to zero on the host, such
-that we always write to the :doc:`local </conceptual/local-data-share>` (LDS)
+that we always write to the :doc:`local </conceptual/cdna/local-data-share>` (LDS)
 memory allocation ``lds``.
 
 Examining this kernel in the VMEM Instruction Mix table yields:
@@ -623,7 +623,7 @@ manner. See
 for further reading on this instruction type.
 
 We develop a `simple
-kernel <https://github.com/ROCm/rocprofiler-compute/blob/amd-mainline/sample/stack.hip>`__
+kernel <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/sample/stack.hip>`__
 that uses stack memory:
 
 .. code-block:: cpp

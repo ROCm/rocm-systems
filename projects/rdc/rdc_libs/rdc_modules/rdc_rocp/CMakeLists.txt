@@ -29,7 +29,7 @@ if(BUILD_PROFILER)
 
     message("RDC_ROCP_LIB_INC_LIST=${RDC_ROCP_LIB_INC_LIST}")
 
-    find_package(rocprofiler-sdk 1.0.0 HINTS ${ROCM_DIR}/lib/cmake CONFIG REQUIRED)
+    find_package(rocprofiler-sdk 1.1.0 HINTS ${ROCM_DIR}/lib/cmake CONFIG REQUIRED)
     find_package(hsa-runtime64 NAMES hsa-runtime64 HINTS ${ROCM_DIR}/lib/cmake CONFIG REQUIRED)
     set(RDC_LIB_MODULES ${RDC_LIB_MODULES} ${RDC_ROCP_LIB} PARENT_SCOPE)
     add_library(${RDC_ROCP_LIB} SHARED ${RDC_ROCP_LIB_SRC_LIST} ${RDC_ROCP_LIB_INC_LIST})
@@ -59,13 +59,4 @@ if(BUILD_PROFILER)
     # Set the VERSION and SOVERSION values
     set_property(TARGET ${RDC_ROCP_LIB} PROPERTY SOVERSION "${VERSION_MAJOR}")
     set_property(TARGET ${RDC_ROCP_LIB} PROPERTY VERSION "${SO_VERSION_STRING}")
-
-    # If the library is a release, strip the target library
-    if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-        add_custom_command(
-            TARGET ${RDC_ROCP_LIB}
-            POST_BUILD
-            COMMAND ${CMAKE_STRIP} ${RDC_ROCP_LIB_COMPONENT}.so
-        )
-    endif()
 endif()

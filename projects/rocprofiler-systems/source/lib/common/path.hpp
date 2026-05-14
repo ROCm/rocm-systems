@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -123,6 +104,18 @@ is_link(const std::string& _path) ROCPROFSYS_INTERNAL_API;
 
 inline std::string
 readlink(const std::string& _path) ROCPROFSYS_INTERNAL_API;
+
+inline std::string
+get_rocprofsys_root() ROCPROFSYS_INTERNAL_API;
+
+inline std::string
+get_internal_libpath(const std::string& _lib) ROCPROFSYS_INTERNAL_API;
+
+inline std::string
+get_internal_script_path() ROCPROFSYS_INTERNAL_API;
+
+inline std::string
+get_internal_libdir() ROCPROFSYS_INTERNAL_API;
 
 struct ROCPROFSYS_INTERNAL_API path_type
 {
@@ -411,6 +404,41 @@ get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
 
     return std::string{};
 }
+
+std::string
+get_rocprofsys_root()
+{
+    auto _exe_rp  = realpath("/proc/self/exe");
+    auto _exe_dir = dirname(_exe_rp);
+    if(_exe_dir.empty()) _exe_dir = "./";
+    return rocprofsys::common::join('/', _exe_dir, "..");
+}
+
+std::string
+get_internal_libpath(const std::string& _lib)
+{
+    auto _root = get_rocprofsys_root();
+    for(const auto* libdir : { "lib", "lib64" })
+    {
+        auto _candidate = rocprofsys::common::join('/', _root, libdir, _lib);
+        if(exists(_candidate)) return _candidate;
+    }
+    return rocprofsys::common::join('/', _root, "lib", _lib);
+}
+
+std::string
+get_internal_script_path()
+{
+    auto _root = get_rocprofsys_root();
+    return rocprofsys::common::join('/', _root, "libexec", "rocprofiler-systems");
+}
+
+std::string
+get_internal_libdir()
+{
+    return rocprofsys::common::join('/', get_rocprofsys_root(), "lib");
+}
+
 }  // namespace path
 }  // namespace common
 }  // namespace rocprofsys

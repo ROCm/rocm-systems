@@ -7,6 +7,8 @@ set ( AQLPROFILE_NAME "hsa-amd-aqlprofile" )
 set ( AQLPROFILE_TARGET "${AQLPROFILE_NAME}64" )
 set ( AQLPROFILE_LIBRARY "lib${AQLPROFILE_TARGET}" )
 project ( ${AQLPROFILE_NAME} )
+set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
 
 include(GNUInstallDirs)
 ## Adding default path cmake modules
@@ -50,10 +52,12 @@ include ( ${LIB_DIR}/CMakeLists.txt )
 
 ## Set the VERSION and SOVERSION values
 set_property ( TARGET ${TARGET_NAME} PROPERTY VERSION "${LIB_VERSION_STRING}" )
-set_property ( TARGET ${TARGET_NAME} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
+if ( NOT WIN32 )
+  set_property ( TARGET ${TARGET_NAME} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
+endif ()
 
-## If the library is a release, strip the target library
-if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
+## If the library is a release, strip the target library (Linux only)
+if ( NOT WIN32 AND "${CMAKE_BUILD_TYPE}" STREQUAL release )
   add_custom_command ( TARGET ${AQLPROFILE_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} *aqlprofile*.so )
 endif ()
 
@@ -64,8 +68,37 @@ option(AQLPROFILE_BUILD_TESTS "Build tests for AQLProfile" OFF)
 if(AQLPROFILE_BUILD_TESTS)
 enable_testing()
 include(CTest)
-set ( TEST_BINARY_DIR ${PROJECT_BINARY_DIR}/test )
-add_subdirectory ( ${TEST_DIR} ${TEST_BINARY_DIR} )
+
+# Locate or fetch GoogleTest
+find_package(GTest QUIET)
+if(NOT GTest_FOUND)
+    message(STATUS "GTest not found on system -- fetching via FetchContent")
+    include(FetchContent)
+    set(BUILD_GMOCK ON CACHE BOOL "Build GMock" FORCE)
+    set(INSTALL_GTEST OFF CACHE BOOL "Disable GTest installation" FORCE)
+    if(MSVC)
+        set(gtest_force_shared_crt ON CACHE BOOL "Use shared CRT for GTest" FORCE)
+    endif()
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG        v1.17.0
+    )
+    FetchContent_MakeAvailable(googletest)
+    # Suppress MSVC warnings in GTest itself
+    if(MSVC)
+        foreach(_t gtest gtest_main gmock gmock_main)
+            if(TARGET ${_t})
+                target_compile_options(${_t} PRIVATE /W0)
+            endif()
+        endforeach()
+    endif()
+endif()
+
+if(NOT WIN32)
+  set ( TEST_BINARY_DIR ${PROJECT_BINARY_DIR}/test )
+  add_subdirectory ( ${TEST_DIR} ${TEST_BINARY_DIR} )
+endif()
 endif()
 
 if(AQLPROFILE_INSTALL_TESTS)
@@ -85,19 +118,25 @@ if ( ENABLE_ASAN_PACKAGING )
   set (CPACK_PACKAGE_NAME ${AQLPROFILE_NAME}-asan)
   # ASAN Package requires only asan component with libraries and license file
   set (CPACK_COMPONENTS_ALL asan )
+  set( COMP_TYPE "asan" )
+  install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan )
 else()
   set (CPACK_PACKAGE_NAME ${AQLPROFILE_NAME})
   set (CPACK_COMPONENTS_ALL runtime)
+  set( COMP_TYPE "runtime" )
+  install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT runtime )
   # Add tests component if INSTALL_TESTS is enabled
   if(AQLPROFILE_INSTALL_TESTS)
     list(APPEND CPACK_COMPONENTS_ALL tests)
   endif()
 endif()
+set(PKG_MAINTAINER_NM  "ROCm Profiler Support")
+set(PKG_MAINTAINER_EMAIL  "dl.rocm-profiler.support@amd.com")
 set ( CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." )
 set ( CPACK_PACKAGE_VERSION_MAJOR ${BUILD_VERSION_MAJOR} )
 set ( CPACK_PACKAGE_VERSION_MINOR ${BUILD_VERSION_MINOR} )
 set ( CPACK_PACKAGE_VERSION_PATCH ${BUILD_VERSION_PATCH} )
-set ( CPACK_PACKAGE_CONTACT "ROCm Profiler Support <dl.rocm-profiler.support@amd.com>" )
+set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
 set ( CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}" )
 set ( CPACK_PACKAGE_DESCRIPTION_SUMMARY "AQLPROFILE library for AMD HSA runtime API extension support" )
 set ( ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
@@ -137,7 +176,7 @@ if ( DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE} )
 else()
   set ( CPACK_RPM_PACKAGE_RELEASE "local" )
 endif()
-set( CPACK_RPM_PACKAGE_LICENSE "AMD Proprietary" )
+set( CPACK_RPM_PACKAGE_LICENSE "MIT" )
 
 #Disable build id for rocprofiler as its creating transaction error
 set ( CPACK_RPM_SPEC_MORE_DEFINE "%define _build_id_links none
@@ -174,8 +213,8 @@ set(AQLPROFILE_DEBIAN_DEPENDS "hsa-rocr")
 set(AQLPROFILE_RPM_REQUIRES "hsa-rocr")
 set(AQLPROFILE_DEBIAN_ASAN_DEPENDS "hsa-rocr-asan")
 set(AQLPROFILE_RPM_ASAN_REQUIRES "hsa-rocr-asan")
-set(AQLPROFILE_DEBIAN_TESTS_DEPENDS "${AQLPROFILE_NAME}")
-set(AQLPROFILE_RPM_TESTS_REQUIRES "${AQLPROFILE_NAME}")
+set(AQLPROFILE_DEBIAN_TESTS_DEPENDS "hip-dev" "${AQLPROFILE_NAME}")
+set(AQLPROFILE_RPM_TESTS_REQUIRES "hip-dev" "${AQLPROFILE_NAME}")
 # Add dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON
 if(ROCM_DEP_ROCMCORE)
     list(APPEND AQLPROFILE_DEBIAN_DEPENDS "rocm-core")
@@ -194,6 +233,8 @@ string(JOIN ", " CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${AQLPROFILE_DEBIAN_ASAN_DEPE
 string(JOIN ", " CPACK_RPM_ASAN_PACKAGE_REQUIRES ${AQLPROFILE_RPM_ASAN_REQUIRES})
 string(JOIN ", " CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS ${AQLPROFILE_DEBIAN_TESTS_DEPENDS})
 string(JOIN ", " CPACK_RPM_TESTS_PACKAGE_REQUIRES ${AQLPROFILE_RPM_TESTS_REQUIRES})
+
+configure_pkg( ${AQLPROFILE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
 
 include ( CPack )
 

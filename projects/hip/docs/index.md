@@ -1,14 +1,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="description" content="HIP documentation and programming guide.">
-  <meta name="keywords" content="HIP, Heterogeneous-computing Interface for Portability, HIP programming guide">
+  <meta name="keywords" content="HIP, ROCm, AMD, HIP programming guide">
 </head>
 
 # HIP documentation
 
-The Heterogeneous-computing Interface for Portability (HIP) is a C++ runtime API
-and kernel language that lets you create portable applications for AMD and
-NVIDIA GPUs from a single source code. For more information, see [What is HIP?](./what_is_hip)
+HIP is a C++ runtime API and kernel programming language designed for AMD GPUs. By providing an interface closely aligned with NVIDIA CUDA, HIP allows developers to write portable applications and efficiently migrate existing CUDA code to AMD platforms. Additional information is available in [What is HIP?](./what_is_hip)
+
+Developers who require a unified, book‑style reference for ROCm and HIP can consult the AMD ROCm Programming Guide. It aggregates documentation from the ROCm portal and organizes it into a structured format optimized for in‑depth study and offline access in both PDF and HTML. Additional details are available in the [AMD ROCm Programming Guide](https://rocm-handbook.amd.com/projects/amd-rocm-programming-guide/en/latest/).
+
+```{note}
+HIP API 7.0 introduces changes to make it align more closely with NVIDIA CUDA.
+These changes are incompatible with prior releases, and might require recompiling
+existing HIP applications for use with the ROCm 7.0 release. For more information,
+see [HIP API 7.0 changes](./hip-7-changes).
+```
 
 Installation instructions are available from:
 
@@ -23,6 +30,7 @@ The HIP documentation is organized into the following categories:
 :::{grid-item-card} Programming guide
 
 * {doc}`./understand/programming_model`
+* {doc}`./understand/performance_optimization`
 * {doc}`./understand/hardware_implementation`
 * {doc}`./understand/compilers`
 * {doc}`./how-to/performance_guidelines`
@@ -31,8 +39,7 @@ The HIP documentation is organized into the following categories:
 * {doc}`./how-to/hip_runtime_api`
 * {doc}`./how-to/hip_cpp_language_extensions`
 * {doc}`./how-to/kernel_language_cpp_support`
-* [HIP porting guide](./how-to/hip_porting_guide)
-* [HIP porting: driver API guide](./how-to/hip_porting_driver_api)
+* {doc}`./how-to/hip_porting_guide`
 * {doc}`./how-to/hip_rtc`
 * {doc}`./understand/amd_clr`
 
@@ -45,7 +52,7 @@ The HIP documentation is organized into the following categories:
 * [HIP complex math API](./reference/complex_math_api)
 * [HIP environment variables](./reference/env_variables)
 * [HIP error codes](./reference/error_codes)
-* [CUDA to HIP API Function Comparison](./reference/api_syntax)
+* [NVIDIA CUDA to HIP API Function Comparison](./reference/api_syntax)
 * [List of deprecated APIs](./reference/deprecated_api_list)
 * [Low Precision Floating Point Types](./reference/low_fp_types)
 * {doc}`./reference/hardware_features`
@@ -57,8 +64,10 @@ The HIP documentation is organized into the following categories:
 * [HIP basic examples](https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic)
 * [HIP examples](https://github.com/ROCm/rocm-examples)
 * [SAXPY tutorial](./tutorial/saxpy)
+* [GPU programming patterns](./tutorial/programming-patterns)
 * [Reduction tutorial](./tutorial/reduction)
 * [Cooperative groups tutorial](./tutorial/cooperative_groups_tutorial)
+* [HIP Graph API tutorial](./tutorial/graph_api)
 
 :::
 

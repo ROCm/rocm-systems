@@ -1,4 +1,4 @@
-mock
-pytest
-pytest-cov
-pytest-xdist
+pytest==8.0.2
+pytest-cov==5.0.0
+pytest-xdist==3.5.0
+scipy==1.11.4

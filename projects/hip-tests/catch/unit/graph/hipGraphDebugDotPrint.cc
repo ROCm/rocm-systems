@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @addtogroup hipGraphDebugDotPrint hipGraphDebugDotPrint
@@ -29,13 +16,14 @@ THE SOFTWARE.
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
+#include <numeric>
+
 #define N 1024
 
 #ifdef __linux__
 #include <unistd.h>
 #include <fstream>
 #include <iterator>
-#include <algorithm>
 #include <string>
 
 __device__ int globalIn[N];
@@ -281,9 +269,8 @@ static void hipGraphDebugDotPrint_Functional(const char* fName, unsigned int fla
    Call hipGraphDebugDotPrint and provice path where to write the DOT file.
    Verify that DOT file get created or not for each flag passed. */
 
-TEST_CASE("Unit_hipGraphDebugDotPrint_Functional") {
+HIP_TEST_CASE(Unit_hipGraphDebugDotPrint_Functional) {
   CHECK_IMAGE_SUPPORT
-
   SECTION("Call with hipGraphDebugDotFlagsVerbose flag") {
     hipGraphDebugDotPrint_Functional("./graphDotFileFuncVerbose.dot", hipGraphDebugDotFlagsVerbose);
   }
@@ -342,7 +329,7 @@ TEST_CASE("Unit_hipGraphDebugDotPrint_Functional") {
 
 #define DOT_FILE_PATH_NEG "./graphDotFileNeg.dot"
 
-TEST_CASE("Unit_hipGraphDebugDotPrint_Argument_Check") {
+HIP_TEST_CASE(Unit_hipGraphDebugDotPrint_Argument_Check) {
   hipGraph_t graph;
   hipError_t ret;
 

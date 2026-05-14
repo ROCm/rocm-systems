@@ -41,6 +41,10 @@ namespace rocprofiler
 {
 namespace tool
 {
+// Environment variable names for MPI rank and size configuration
+inline constexpr std::string_view mpi_rank_env_var_name = "ROCPROF_MPI_RANK_VAR";
+inline constexpr std::string_view mpi_size_env_var_name = "ROCPROF_MPI_SIZE_VAR";
+
 int
 get_mpi_size();
 

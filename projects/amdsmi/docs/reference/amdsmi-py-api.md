@@ -1,0 +1,9260 @@
+---
+myst:
+  html_meta:
+    "description lang=en": "Explore the AMD SMI Python API."
+    "keywords": "api, smi, lib, py, system, management, interface, ROCm"
+---
+
+# AMD SMI Python API reference
+
+The AMD SMI Python interface provides a convenient way to interact with AMD
+hardware through a simple and accessible API. Compatible with Python 3.6 and
+higher, this library requires the AMD driver to be loaded for initialization --
+review the [prerequisites](#install_reqs).
+
+This section provides comprehensive documentation for the AMD SMI Python API.
+Explore these sections to understand the full scope of available functionalities
+and how to implement them in your applications.
+
+## API
+
+### amdsmi_init
+
+Description: Initialize amdsmi with AmdSmiInitFlags
+
+Input parameters: AmdSmiInitFlags
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_init` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiTimeoutException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Initialize GPUs only example:
+
+```python
+import amdsmi
+try:
+    # by default we initialize with AmdSmiInitFlags.INIT_AMD_GPUS
+    amdsmi.amdsmi_init()
+    # continue with amdsmi
+except amdsmi.AmdSmiException as e:
+    print("Init GPUs failed")
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+Initialize CPUs only example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    # continue with amdsmi
+except amdsmi.AmdSmiException as e:
+    print("Init CPUs failed")
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+Initialize both GPUs and CPUs example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_APUS)
+    # continue with amdsmi
+except amdsmi.AmdSmiException as e:
+    print("Init both GPUs & CPUs failed")
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_shut_down
+
+Description: Finalize and close connection to driver
+
+Input parameters: `None`
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_shut_down` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiTimeoutException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    # continue with amdsmi
+except amdsmi.AmdSmiException as e:
+    print("AMD SMI operation failed")
+    print(e)
+finally:
+    try:
+        amdsmi.amdsmi_shut_down()
+    except amdsmi.AmdSmiException as e:
+        print("Shut down failed")
+        print(e)
+```
+
+### amdsmi_get_processor_type
+
+Description: Checks the type of device with provided handle.
+
+Input parameters: device handle as an instance of `amdsmi_processor_handle`
+
+Output: Dictionary with fields
+
+Field | Content
+---|---
+`processor_type` | A string representing the processor type name.
+
+* Possible `processor_type` values include:
+  * `"AMD_GPU"` - AMD GPU processor
+  * `"AMD_CPU"` - AMD CPU processor
+  * `"AMD_CPU_CORE"` - AMD CPU core processor
+  * `"UNKNOWN"` - Unknown processor type
+
+Exceptions that can be thrown by `amdsmi_get_processor_type` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi.amdsmi_get_processor_type(device)
+            processor_type = info["processor_type"]
+            if processor_type == amdsmi.AmdSmiProcessorType.AMD_GPU.name:
+                print("This is an AMD GPU")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_processor_info
+
+**Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
+
+Description: Return processor name. Available regardless of whether the library
+was built with ESMI support.
+
+Input parameters:
+`processor_handle` processor handle
+
+Output: Processor name
+
+Exceptions that can be thrown by `amdsmi_get_processor_info` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No processors on machine")
+    else:
+        for device in devices:
+            print(amdsmi.amdsmi_get_processor_info(device))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_processor_handles
+
+Description: Returns list of GPU device handle objects on current machine
+
+Input parameters: `None`
+
+Output: List of GPU device handle objects
+
+Exceptions that can be thrown by `amdsmi_get_processor_handles` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_INIT` - Device not initialized
+- `AMDSMI_STATUS_DRIVER_NOT_LOADED` - Driver not loaded
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            print(amdsmi.amdsmi_get_gpu_device_uuid(device))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_socket_handles
+
+**Note: CURRENTLY HARDCODED TO RETURN DUMMY DATA**
+
+Description: Returns list of socket device handle objects on current machine
+
+Input parameters: `None`
+
+Output: List of socket device handle objects
+
+Exceptions that can be thrown by `amdsmi_get_socket_handles` function:
+
+* `AmdSmiLibraryException`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    sockets = amdsmi.amdsmi_get_socket_handles()
+    print('Socket numbers: {}'.format(len(sockets)))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_socket_info
+
+**Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
+
+Description: Return socket name
+
+Input parameters:
+`socket_handle` socket handle
+
+Output: Socket name
+
+Exceptions that can be thrown by `amdsmi_get_socket_info` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    socket_handles = amdsmi.amdsmi_get_socket_handles()
+    if len(socket_handles) == 0:
+        print("No sockets on machine")
+    else:
+        for socket in socket_handles:
+            print(amdsmi.amdsmi_get_socket_info(socket))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_processor_handle_from_bdf
+
+Description: Returns device handle from the given BDF
+
+Input parameters: bdf string in form of either `<domain>:<bus>:<device>.<function>` or `<bus>:<device>.<function>` in hexcode format.
+Where:
+
+* `<domain>` is 4 hex digits long from 0000-FFFF interval
+* `<bus>` is 2 hex digits long from 00-FF interval
+* `<device>` is 2 hex digits long from 00-1F interval
+* `<function>` is 1 hex digit long from 0-7 interval
+
+Output: device handle object
+
+Exceptions that can be thrown by `amdsmi_get_processor_handle_from_bdf` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiBdfFormatException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    device = amdsmi.amdsmi_get_processor_handle_from_bdf("0000:23:00.0")
+    print(amdsmi.amdsmi_get_gpu_device_uuid(device))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_device_bdf
+
+Description: Returns BDF of the given device
+
+Input parameters:
+
+* `processor_handle` device for which to query
+
+Output: BDF string in form of `<domain>:<bus>:<device>.<function>` in hexcode format.
+Where:
+
+* `<domain>` is 4 hex digits long from 0000-FFFF interval
+* `<bus>` is 2 hex digits long from 00-FF interval
+* `<device>` is 2 hex digits long from 00-1F interval
+* `<function>` is 1 hex digit long from 0-7 interval
+
+Exceptions that can be thrown by `amdsmi_get_gpu_device_bdf` function:
+
+* `AmdSmiParameterException`
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            print("Device's bdf:", amdsmi.amdsmi_get_gpu_device_bdf(device))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_device_uuid
+
+Description: Returns the UUID of the device
+
+Input parameters:
+
+* `processor_handle` device for which to query
+
+Output: UUID string unique to the device
+
+Exceptions that can be thrown by `amdsmi_get_gpu_device_uuid` function:
+
+* `AmdSmiParameterException`
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            print("Device UUID: ", amdsmi.amdsmi_get_gpu_device_uuid(device))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_enumeration_info
+
+Description: Returns enumeration information for the given GPU
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Content
+---|---
+`drm_render` | DRM render ID
+`drm_card` | DRM card ID
+`hsa_id` | HSA ID
+`hip_id` | HIP ID
+`hip_uuid` | HIP UUID
+`oam_id` | OAM ID
+
+Exceptions that can be thrown by `amdsmi_get_gpu_enumeration_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi.amdsmi_get_gpu_enumeration_info(device)
+            print("DRM Render ID:", info['drm_render'])
+            print("DRM Card ID:", info['drm_card'])
+            print("HSA ID:", info['hsa_id'])
+            print("HIP ID:", info['hip_id'])
+            print("HIP UUID:", info['hip_uuid'])
+            print("OAM ID:", info['oam_id'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_driver_info
+
+Description: Returns the info of the driver
+
+Input parameters:
+
+* `processor_handle` device for which to query
+
+Output: Dictionary with fields
+
+Field | Content
+---|---
+`driver_name` |  driver name
+`driver_version` |  driver_version
+`driver_date` |  driver_date
+
+Exceptions that can be thrown by `amdsmi_get_gpu_driver_info` function:
+
+* `AmdSmiParameterException`
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_DRIVER_NOT_LOADED` - Driver not loaded
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            print("Driver info: ", amdsmi.amdsmi_get_gpu_driver_info(device))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_asic_info
+
+Description: Returns asic information for the given GPU
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Content
+---|---
+`market_name` |  market name
+`vendor_id` |  vendor id
+`vendor_name` |  vendor name
+`device_id` |  device id
+`rev_id` |  revision id
+`asic_serial` | asic serial
+`oam_id` | oam id
+`num_of_compute_units` | number of compute units on asic
+`target_graphics_version` | hardware graphics version
+`subsystem_id` |  subsystem id
+
+Exceptions that can be thrown by `amdsmi_get_gpu_asic_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_FILE_ERROR` - Problem accessing a file
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            asic_info = amdsmi.amdsmi_get_gpu_asic_info(device)
+            print(asic_info)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_kfd_info
+
+Description: Returns KFD (kernel driver) information for the given GPU
+This correlates to GUID in rocm-smi
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Content
+---|---
+`kfd_id` | KFD's unique GPU identifier
+`node_id` | KFD's internal GPU index
+
+Exceptions that can be thrown by `amdsmi_get_gpu_kfd_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            kfd_info = amdsmi.amdsmi_get_gpu_kfd_info(device)
+            print(kfd_info)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_power_cap_info
+
+Description: Returns dictionary of power capabilities as currently configured
+on the given GPU. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Description | Units
+---|---|---
+`power_cap` |  power capability | uW
+`dpm_cap` |  dynamic power management capability | MHz
+`default_power_cap` |  default power capability | uW
+`min_power_cap` | min power capability | uW
+`max_power_cap` | max power capability | uW
+
+Exceptions that can be thrown by `amdsmi_get_power_cap_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            power_cap_info = amdsmi.amdsmi_get_power_cap_info(device)
+            print(power_cap_info['power_cap'])
+            print(power_cap_info['dpm_cap'])
+            print(power_cap_info['default_power_cap'])
+            print(power_cap_info['min_power_cap'])
+            print(power_cap_info['max_power_cap'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_supported_power_cap
+
+Description: Returns dictionary of Package Power Tracking (PPT) types as currently
+configured on the given GPU. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`sensor_inds` | List of integer indices of the supported ppt types. 0 indicates PPT0 and 1 indicates PPT1. Should be used as input for `amdsmi_get_power_cap_info` and `amdsmi_set_power_cap_info`
+`sensor_types` | Enum `AmdSmiPowerCapType` that corresponds to the ppt types that are supported on the device
+
+Exceptions that can be thrown by `amdsmi_get_supported_power_cap` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            power_cap_types = amdsmi.amdsmi_get_supported_power_cap(device)
+            print(power_cap_types['sensor_inds'])
+            print(power_cap_types['sensor_types'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_vram_info
+
+Description: Returns dictionary of vram information for the given GPU.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`vram_type` |  vram type
+`vram_vendor` |  vram vendor
+`vram_size` |  vram size in mb
+`vram_bit_width` | vram bit width
+
+Exceptions that can be thrown by `amdsmi_get_gpu_vram_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            vram_info = amdsmi.amdsmi_get_gpu_vram_info(device)
+            print(vram_info['vram_type'])
+            print(vram_info['vram_vendor'])
+            print(vram_info['vram_size'])
+            print(vram_info['vram_bit_width'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_board_info
+
+Description: Returns board info for the given GPU
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output:  Dictionary with fields correctable and uncorrectable
+
+Field | Description
+---|---
+`model_number` | Board serial number
+`product_serial` | Product serial
+`fru_id` | FRU ID
+`product_name` | Product name
+`manufacturer_name` | Manufacturer name
+
+Exceptions that can be thrown by `amdsmi_get_gpu_board_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_BUSY` - Processor busy
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    device = amdsmi.amdsmi_get_processor_handle_from_bdf("0000:23:00.0")
+    board_info = amdsmi.amdsmi_get_gpu_board_info(device)
+    print(board_info["model_number"])
+    print(board_info["product_serial"])
+    print(board_info["fru_id"])
+    print(board_info["product_name"])
+    print(board_info["manufacturer_name"])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_revision
+
+Description: Returns the GPU revision for a given processor handle.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: string hex value
+
+Field | Description
+---|---
+`revision` | 16 bit integer value returned as hex string.
+
+Exceptions that can be thrown by `amdsmi_get_gpu_revision` function:
+
+* `AmdSmiLibraryException` If the processor handle is invalid.
+* `AmdSmiParameterException` If the underlying library call fails.
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            revision = amdsmi.amdsmi_get_gpu_revision(device)
+            print(revision)
+except amdsmi.AmdSmiLibraryException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_cache_info
+
+Description: Returns a list of dictionaries containing cache information for the given GPU.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: List of Dictionaries containing cache information following the schema below:
+Schema:
+
+```json
+{
+    "cache_properties":
+        {
+            "type" : "array",
+            "items" : {"type" : "string"}
+        },
+    "cache_size": {"type" : "number"},
+    "cache_level": {"type" : "number"},
+    "max_num_cu_shared": {"type" : "number"},
+    "num_cache_instance": {"type" : "number"}
+}
+```
+
+Field | Description
+---|---
+`cache_properties` | list of up to 4 cache property type strings. Ex. data ("DATA_CACHE"), instruction ("INST_CACHE"), CPU ("CPU_CACHE"), or SIMD ("SIMD_CACHE").
+`cache_size` | size of cache in KB
+`cache_level` | level of cache
+`max_num_cu_shared` |  max number of compute units shared
+`num_cache_instance` | number of cache instances
+
+Exceptions that can be thrown by `amdsmi_get_gpu_cache_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            cache_info = amdsmi.amdsmi_get_gpu_cache_info(device)
+            for cache_values in cache_info.values():
+                for cache_value in cache_values:
+                    print(cache_value['cache_properties'])
+                    print(cache_value['cache_level'])
+                    print(cache_value['max_num_cu_shared'])
+                    print(cache_value['num_cache_instance'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_vbios_info
+
+Description:  Returns the static information for the VBIOS/IFWI on the device.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`name` | VBIOS/IFWI name
+`build_date` | VBIOS/IFWI build date
+`part_number` | VBIOS/IFWI part number
+`version` | VBIOS/IFWI version string
+`boot_firmware` | Unified BootLoader version if available; N/A otherwise
+
+Exceptions that can be thrown by `amdsmi_get_gpu_vbios_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_FILE_ERROR` - Problem accessing a file
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            vbios_info = amdsmi.amdsmi_get_gpu_vbios_info(device)
+            print(vbios_info['name'])
+            print(vbios_info['build_date'])
+            print(vbios_info['part_number'])
+            print(vbios_info['version'])
+            print(vbios_info['boot_firmware'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_fw_info
+
+Description:  Returns GPU firmware related information.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`fw_list` | List of dictionaries that contain information about a certain firmware block
+
+Exceptions that can be thrown by `amdsmi_get_fw_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            firmware_list = amdsmi.amdsmi_get_fw_info(device)['fw_list']
+            for firmware_block in firmware_list:
+                print(firmware_block['fw_name'])
+                # String formatted hex or decimal value ie: 21.00.00.AC or 130
+                print(firmware_block['fw_version'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_activity
+
+Description: Returns the engine usage for the given GPU.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary of activities to their respective usage percentage or 'N/A' if not supported
+
+Field | Description
+---|---
+`gfx_activity` | graphics engine usage percentage (0 - 100)
+`umc_activity` | memory engine usage percentage (0 - 100)
+`mm_activity` | average multimedia engine usages in percentage (0 - 100)
+
+Exceptions that can be thrown by `amdsmi_get_gpu_activity` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            engine_usage = amdsmi.amdsmi_get_gpu_activity(device)
+            print(engine_usage['gfx_activity'])
+            print(engine_usage['umc_activity'])
+            print(engine_usage['mm_activity'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_power_info
+
+Description: Returns the current power and voltage for the given GPU.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Description | Units
+---|---|---
+`socket_power` | socket power; matches current or average socket power | W
+`current_socket_power` | current socket power; Mi300+ Series Cards | W
+`average_socket_power` | average socket power; Navi + Mi 200 and earlier Series cards | W
+`gfx_voltage` | voltage gfx | mV
+`soc_voltage` | voltage soc | mV
+`mem_voltage` | voltage mem | mV
+`power_limit` | power limit | W
+`ubb_power` | UBB (baseboard) node power | W
+
+Exceptions that can be thrown by `amdsmi_get_power_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            power_info = amdsmi.amdsmi_get_power_info(device)
+            print(power_info['current_socket_power'])
+            print(power_info['average_socket_power'])
+            print(power_info['gfx_voltage'])
+            print(power_info['soc_voltage'])
+            print(power_info['mem_voltage'])
+            print(power_info['power_limit'])
+            print(power_info['ubb_power'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_vram_usage
+
+Description: Returns total VRAM and VRAM in use
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`vram_total` | VRAM total
+`vram_used` | VRAM currently in use
+
+Exceptions that can be thrown by `amdsmi_get_gpu_vram_usage` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            vram_usage = amdsmi.amdsmi_get_gpu_vram_usage(device)
+            print(vram_usage['vram_used'])
+            print(vram_usage['vram_total'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_violation_status
+
+Description: Returns dictionary of violation status information for the given GPU.
+
+Input parameters:
+
+* `processor_handle` The identifier of the given device as an instance of `amdsmi_processor_handle`.
+*  `*violation_status` pointer to object of type amdsmi_violation_status_t to get the violation status information
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`reference_timestamp` |  CPU Time Since Epoch in Microseconds
+`violation_timestamp` |  Time of Violation in Nanoseconds
+`acc_counter` |  Current Accumulated Counter
+`acc_prochot_thrm` |  Current Accumulated Processor Hot Violation Count
+`acc_ppt_pwr` |  Current Accumulated Package Power Tracking (PPT) PVIOL
+`acc_socket_thrm` |  Current Accumulated Socket Thermal Count  #TVIOL
+`acc_vr_thrm` |  Current Accumulated Voltage Regulator Count
+`acc_hbm_thrm` |  Current Accumulated High Bandwidth Memory (HBM) Thermal Count
+`acc_gfx_clk_below_host_limit` |  Current Graphic Clock Below Host Limit Count. UPDATED in new driver 1.8: use new acc_gfx_clk_below_host_limit_pwr, acc_gfx_clk_below_host_limit_thm, acc_gfx_clk_below_host_limit_total values
+`acc_gfx_clk_below_host_limit_pwr` | 2D array with Accumulated GFX Clk Below Host Limit (Power) per XCP/XCC
+`acc_gfx_clk_below_host_limit_thm` | 2D array with Accumulated GFX Clk Below Host Limit (Thermal) per XCP/XCC
+`acc_low_utilization` | 2D array with Accumulated Low Utilization per XCP/XCC
+`acc_gfx_clk_below_host_limit_total` | 2D array with Accumulated GFX Clk Below Host Limit (Total) per XCP/XCC
+`per_prochot_thrm` |  Processor hot violation % (greater than 0% is a violation)
+`per_ppt_pwr` |  PVIOL Package Power Tracking (PPT) violation % (greater than 0% is a violation)
+`per_socket_thrm` |  TVIOL; Socket thermal violation % (greater than 0% is a violation)
+`per_vr_thrm` |  Voltage regulator violation % (greater than 0% is a violation)
+`per_hbm_thrm` |  High Bandwidth Memory (HBM) thermal violation % (greater than 0% is a violation)
+`per_gfx_clk_below_host_limit` |   Graphics clock below host limit violation % (greater than 0% is a violation). UPDATED in new driver 1.8: use new per_gfx_clk_below_host_limit_pwr, per_gfx_clk_below_host_limit_thm, per_gfx_clk_below_host_limit_total values
+`per_gfx_clk_below_host_limit_pwr` | 2D array with GFX Clk Below Host Limit Violation % (Power) per XCP/XCC
+`per_gfx_clk_below_host_limit_thm` | 2D array with GFX Clk Below Host Limit Violation % (Thermal) per XCP/XCC
+`per_low_utilization` | 2D array with Low Utilization Violation % per XCP/XCC
+`per_gfx_clk_below_host_limit_total` | 2D array with GFX Clk Below Host Limit Violation % (Total) per XCP/XCC
+`active_prochot_thrm` |  Processor hot violation; 1 = active 0 = not active
+`active_ppt_pwr` |  Package Power Tracking (PPT) violation; 1 = active 0 = not active
+`active_socket_thrm` |  Socket thermal violation; 1 = active 0 = not active
+`active_vr_thrm` |  Voltage regulator violation; 1 = active 0 = not active
+`active_hbm_thrm` |  High Bandwidth Memory (HBM) thermal violation; 1 = active 0 = not active
+`active_gfx_clk_below_host_limit` |  Graphics Clock Below Host Limit Violation; 1 = Active 0 = Not Active. UPDATED in new driver 1.8: use new active_gfx_clk_below_host_limit_pwr, active_gfx_clk_below_host_limit_thm, active_gfx_clk_below_host_limit_total values
+`active_gfx_clk_below_host_limit_pwr` | 2D array with GFX Clk Below Host Limit Violation Active (Power) per XCP/XCC
+`active_gfx_clk_below_host_limit_thm` | 2D array with GFX Clk Below Host Limit Violation Active (Thermal) per XCP/XCC
+`active_low_utilization` | 2D array with Low Utilization Violation Active per XCP/XCC
+`active_gfx_clk_below_host_limit_total` | 2D array with GFX Clk Below Host Limit Violation Active (Total) per XCP/XCC
+
+Exceptions that can be thrown by `amdsmi_get_violation_status` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+* `AmdSmiTimeoutException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            violation_status = amdsmi.amdsmi_get_violation_status(device)
+            print(violation_status)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+Refer to [amd_smi_violation_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_violation_example.py) for a complete example.
+
+### amdsmi_get_clock_info
+
+Description: Returns the clock measure for the given GPU.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+* `clock_type` one of `AmdSmiClkType` enum values:
+
+Field | Description
+---|---
+`SYS` | SYS clock type
+`GFX` | GFX clock type
+`DF` | DF clock type
+`DCEF` | DCEF clock type
+`SOC` | SOC clock type
+`MEM` | MEM clock type
+`PCIE` | PCIE clock type
+`VCLK0` | VCLK0 clock type
+`VCLK1` | VCLK1 clock type
+`DCLK0` | DCLK0 clock type
+`DCLK1` | DCLK1 clock type
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`clk` | Current clock for given clock type
+`min_clk` | Minimum clock for given clock type
+`max_clk` | Maximum clock for given clock type
+`clk_locked` | flag only supported on GFX clock domain
+`clk_deep_sleep` | clock deep sleep mode flag
+
+Exceptions that can be thrown by `amdsmi_get_clock_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            clock_measure = amdsmi.amdsmi_get_clock_info(device, amdsmi.AmdSmiClkType.GFX)
+            print(clock_measure['clk'])
+            print(clock_measure['min_clk'])
+            print(clock_measure['max_clk'])
+            print(clock_measure['clk_locked'])
+            print(clock_measure['clk_deep_sleep'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_pcie_info
+
+Description: Returns the pcie metric and static information for the given GPU. For accurate PCIe Bandwidth measurements it is recommended to use this function once per 1000ms
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with 2 fields `pcie_static` and `pcie_metric`
+
+Fields | Description
+---|---
+`pcie_static` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`max_pcie_width`</td><td>Maximum number of pcie lanes available</td></tr><tr><td>`max_pcie_speed`</td><td>Maximum capable pcie speed in MT/s</td></tr><tr><td>`pcie_interface_version`</td><td>PCIe generation ie. 3,4,5...</td></tr><tr><td>`slot_type`</td><td>The type of form factor of the slot: OAM, PCIE, CEM, or Unknown</td></tr></tbody></table>
+`pcie_metric` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`pcie_width`</td><td>Current number of pcie lanes available</td></tr><tr><td>`pcie_speed`</td><td>Current pcie speed in MT/s</td></tr><tr><td>`pcie_bandwidth`</td><td>Current instantaneous bandwidth usage in Mb/s</td></tr><tr><td>`pcie_replay_count`</td><td>Total number of PCIe replays (NAKs)</td></tr><tr><td>`pcie_l0_to_recovery_count`</td><td>PCIE L0 to recovery state transition accumulated count</td></tr><tr><td>`pcie_replay_roll_over_count`</td><td>PCIe Replay accumulated count</td></tr><tr><td>`pcie_nak_sent_count`</td><td>PCIe NAK sent accumulated count</td></tr><tr><td>`pcie_nak_received_count`</td><td>PCIe NAK received accumulated count</td></tr></tbody></table>
+
+Exceptions that can be thrown by `amdsmi_get_pcie_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            pcie_info = amdsmi.amdsmi_get_pcie_info(device)
+            print(pcie_info["pcie_static"])
+            print(pcie_info["pcie_metric"])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_bad_page_info
+
+Description:  Returns bad page info for the given GPU.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: List consisting of dictionaries with fields for each bad page found; can be an empty list
+
+Field | Description
+---|---
+`value` | Value of page
+`page_address` | Address of bad page
+`page_size` | Size of bad page
+`status` | Status of bad page
+
+Exceptions that can be thrown by `amdsmi_get_gpu_bad_page_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            bad_page_info = amdsmi.amdsmi_get_gpu_bad_page_info(device)
+            if not bad_page_info: # Can be empty list
+                print("No bad pages found")
+                continue
+            for bad_page in bad_page_info:
+                print(bad_page["value"])
+                print(bad_page["page_address"])
+                print(bad_page["page_size"])
+                print(bad_page["status"])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_bad_page_threshold
+
+Description:  Returns bad page threshold for the given GPU; Requires root level access to display bad page threshold count; otherwise will return "N/A".
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Bad page threshold value
+
+Exceptions that can be thrown by `amdsmi_get_gpu_bad_page_threshold` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            bad_page = amdsmi.amdsmi_get_gpu_bad_page_threshold(device)
+            print(bad_page)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_memory_reserved_pages
+
+Description: Returns reserved memory page info for the given GPU.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: List consisting of dictionaries with fields for each reserved memory page found; can be an empty list
+
+Field | Description
+---|---
+`value` | Value of memory reserved page
+`page_address` | Address of memory reserved page
+`page_size` | Size of memory reserved page
+`status` | Status of memory reserved page
+
+Exceptions that can be thrown by `amdsmi_get_gpu_memory_reserved_pages` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            reserved_memory_page_info = amdsmi.amdsmi_get_gpu_memory_reserved_pages(device)
+            if not reserved_memory_page_info: # Can be empty list
+                print("No memory reserved pages found")
+                continue
+            for reserved_memory_page in reserved_memory_page_info:
+                print(reserved_memory_page["value"])
+                print(reserved_memory_page["page_address"])
+                print(reserved_memory_page["page_size"])
+                print(reserved_memory_page["status"])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_process_list
+
+Description: Returns the list of processes running on the target GPU; Requires root level access to display root process names; otherwise will return "N/A"
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: List of Dictionaries with the corresponding fields; empty list if no running process are detected
+
+Field | Description
+---|---
+`name` | Name of process. If user does not have permission this will be "N/A"
+`pid` | Process ID
+`mem` | Total memory usage by GPU during process in Bytes (sum of the process memory is not expected to be the total memory usage.)
+`engine_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
+`memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage in Bytes</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage in Bytes</td></tr><tr><td>`vram_mem`</td><td>Process VRAM memory usage in Bytes</td></tr> </tbody></table>
+`cu_occupancy` | Number of Compute Units utilized
+`evicted_time` | Time that queues are evicted on a GPU in milliseconds
+`sdma_usage`   | SDMA usage in microseconds
+
+Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            processes = amdsmi.amdsmi_get_gpu_process_list(device)
+            if len(processes) == 0:
+                print("No processes running on this GPU")
+            else:
+                for process in processes:
+                    print(process)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_total_ecc_count
+
+Description: Returns the ECC error count for the given GPU.
+It is not supported on virtual machine guest
+
+See [RAS Error Count sysfs Interface (AMDGPU RAS Support - Linux Kernel
+documentation)](https://docs.kernel.org/gpu/amdgpu/ras.html#ras-error-count-sysfs-interface)
+to learn how these error counts are accessed.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`correctable_count` | Correctable ECC error count
+`uncorrectable_count` | Uncorrectable ECC error count
+`deferred_count` | Deferred ECC error count
+
+Exceptions that can be thrown by `amdsmi_get_gpu_total_ecc_count` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            ecc_error_count = amdsmi.amdsmi_get_gpu_total_ecc_count(device)
+            print(ecc_error_count["correctable_count"])
+            print(ecc_error_count["uncorrectable_count"])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_cper_entries
+
+Description: Dump CPER entries for a given GPU in a file using from CPER header file from RAS tool.
+
+Input parameters:
+
+* `processor_handle` device which to query
+* `severity_mask`    the severity mask of the entries to be retrieved:
+                        1:'nonfatal-uncorrected',
+                        2: 'fatal',
+                        4: 'nonfatal-corrected', 'corrected',
+                        7: 'all'
+* `buffer_size`      number of bytes that will be used to create a buffer for copying cper entries into; default is 1048576 bytes
+* `cursor`           the zero based index at which to start retrieving cper entries; default value is 0; for example, if there are 10 cper entries available, then with a cursor value of 8, it will retrieve the last two cper entries only
+
+Output: Dictionary with fields, updated cursor, and a dictionary of the cper_data, status_code
+    status_code: 
+        AMDSMI_STATUS_SUCCESS: If all entries were retrieved successfully
+        AMDSMI_STATUS_MORE_DATA: If some of the entries were retrieved and: 
+            * A subsequent call to the API with the updated cursor will result in the fetching the next batch of entries, or
+            * Increasing the input buffer_size will allow more entries to be fetched with the same cursor
+
+Field | Description
+---|---
+`error_severity`   | The severity of the CPER error ex: `non_fatal_uncorrected`, `fatal`, `non_fatal_corrected`. |
+`notify_type`      | The notification type associated with the CPER entry. |
+`timestamp`        | The time when the CPER entry was recorded, formatted as `YYYY/MM/DD HH:MM:SS`. |
+`signature`        | A 4-byte signature identifying the entry, typically `CPER`. |
+`revision`         | The revision number of the CPER record format. |
+`signature_end`    | A marker value (typically `0xFFFFFFFF`) confirming the integrity of the signature. |
+`sec_cnt`          | The count of sections included in the CPER entry. |
+`record_length`    | The total length in bytes of the CPER entry. |
+`platform_id`      | A character array identifying the GPU or platform. |
+`creator_id`       | A character array indicating the creator of the CPER entry. |
+`record_id`        | A unique identifier for the CPER entry. |
+`flags`            | Reserved flags related to the CPER entry. |
+`persistence_info` | Reserved information related to persistence. |
+
+Output2: Updated cursor (int type)
+* Cursor is the index of the next cper entry in the GPU ring buffer. For example, if 10 entries were fetched successfully, the value of cursor will be 11 upon return from the API. Subsequent call to the API with cursor value of 11 should fetch the next entry
+
+Output3: A list of dictionaries, each dictionary containing the CPER record and its size:
+* {"bytes": <raw bytes>, "size": <number of bytes>}
+
+Output4: status_code
+    AMDSMI_STATUS_SUCCESS: If all entries were retrieved successfully
+    AMDSMI_STATUS_MORE_DATA: If some of the entries were retrieved and:
+        * A subsequent call to the API with the updated cursor will result in the fetching the next batch of entries, or
+        * Increasing the input buffer_size will allow more entries to be fetched with the same cursor
+
+Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+- `AMDSMI_STATUS_FILE_NOT_FOUND` - File or directory not found
+- `AMDSMI_STATUS_FILE_ERROR` - Problem accessing a file
+
+Example:
+
+```python
+import amdsmi
+severity_mask = 7
+buffer_size = 1048576
+cursor = 0
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            entries, new_cursor, cper_data, status_code = amdsmi.amdsmi_get_gpu_cper_entries(
+                device, severity_mask, buffer_size, cursor)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+Refer to [amd_smi_cper_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_cper_example.py) for a complete example.
+
+### amdsmi_get_afids_from_cper
+
+Description: Get the AFIDs from CPER buffer
+
+Input parameters:
+
+* `cper_afid_data`: raw bytes of a single CPER record.
+
+Output: Tuple[List[int], int]: A tuple containing:
+          - A list of extracted AFIDs.
+          - The total count of AFIDs.
+
+Exceptions that can be thrown by `amdsmi_get_afids_from_cper` function:
+
+* `AmdSmiParameterException`
+* `AmdSmiLibraryException` 
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_UNEXPECTED_SIZE` - unexpected size of data was read
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - The data read or provided was unexpected
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+
+Example 1: Using a single CPER record as bytes
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cper_bytes = b'\x43\x50\x45\x52...'  # Replace with actual bytes
+    afids, num_afids = amdsmi.amdsmi_get_afids_from_cper(cper_bytes)
+    print(f"AFIDs: {afids}\nTotal count: {num_afids}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+Example 2: Using a list of dicts
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cper_record = {
+    'bytes': [67, 80, 69, 82, ...],  # Replace with actual byte values
+    'size': 376}
+    afids, num_afids = amdsmi.amdsmi_get_afids_from_cper([cper_record])
+    print(f"AFIDs: {afids}\nTotal count: {num_afids}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+Example 3: General Usage
+
+```python
+import amdsmi
+import os
+try:
+    amdsmi.amdsmi_init()
+    directory_path = "/tmp/cper_dump/"
+    if os.path.exists(directory_path):
+        with os.scandir(directory_path) as cper_files:
+            for cper_file in cper_files:
+                with open(cper_file.path, "rb") as file:
+                    afids, num_afids = amdsmi.amdsmi_get_afids_from_cper(file.read())
+                    print(f"AFIDs: {afids}\nTotal count: {num_afids}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+Refer to [amd_smi_afid_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_afid_example.py) for a complete example.
+
+### amdsmi_get_gpu_ras_feature_info
+
+Description: Returns RAS version and schema information
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: List containing dictionaries with fields
+
+Field | Description
+---|---
+`eeprom_version` | eeprom version
+`parity_schema` | parity schema
+`single_bit_schema` | single bit schema
+`double_bit_schema` | double bit schema
+`poison_schema` | poison schema
+
+Exceptions that can be thrown by `amdsmi_get_gpu_ras_feature_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+import os
+amdsmi.amdsmi_init()
+try:
+    directory_path = "/tmp/cper_dump/"
+    if os.path.exists(directory_path):
+        print(f"Searching for cper file in {directory_path}")
+        with os.scandir(directory_path) as cper_files:
+            for cper_file in cper_files:
+                if cper_file.is_file():
+                    if ".bin" in cper_file.path:
+                        print(f"Found {cper_file.path}")
+                        with open(cper_file.path, "rb") as file:
+                            raw = file.read()
+                            afids, num_afids = amdsmi.amdsmi_get_afids_from_cper(raw)
+                            print(f"afids: {afids}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+
+```
+Output:
+```
+sudo python3 afid.py
+Searching for cper file in /tmp/cper_dump/
+Found /tmp/cper_dump/cper_entry_0.bin
+afids: [17]
+Found /tmp/cper_dump/cper_entry_1.bin
+afids: [17]
+```
+
+### amdsmi_get_gpu_ras_block_features_enabled
+
+Description: Returns status of each RAS block for the given GPU.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: List containing dictionaries with fields for each RAS block
+
+Field | Description
+---|---
+`block` | RAS block
+`status` | RAS block status
+
+Exceptions that can be thrown by `amdsmi_get_gpu_ras_block_features_enabled` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_API_FAILED` - API call failed
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            ras_block_features = amdsmi.amdsmi_get_gpu_ras_block_features_enabled(device)
+            print(ras_block_features)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### AmdSmiEventReader class
+
+Description: Providing methods for event monitoring. This is context manager class.
+Can be used with `with` statement for automatic cleanup.
+
+Methods:
+
+#### Constructor
+
+Description: Allocates a new event reader notifier to monitor different types of events for the given GPU
+
+Input parameters:
+
+* `processor_handle` device handle corresponding to the device on which to listen for events
+* `event_types` list of event types from AmdSmiEvtNotificationType enum. Specifying which events to collect for the given device.
+
+Event Type | Description
+---|------
+`VMFAULT` | VM page fault
+`THERMAL_THROTTLE` | thermal throttle
+`GPU_PRE_RESET` | gpu pre reset; this event includes a message which indicates the cause of the reset. They are as follows: `job hang`, `RAS error`, `MES hang`, `HWS hang`, `user trigger`, and `unknown`
+`GPU_POST_RESET` | gpu post reset
+`MIGRATE_START` | migrate start
+`MIGRATE_END` | migrate end
+`PAGE_FAULT_START` | page fault start
+`PAGE_FAULT_END` | page fault end
+`QUEUE_EVICTION` | queue eviction
+`QUEUE_RESTORE` | queue restore
+`UNMAP_FROM_GPU` | unmap from GPU
+`PROCESS_START` | KFD process start
+`PROCESS_END` | KFD process end
+
+#### read
+
+Description: Reads events on the given device. When event is caught, device handle, message and event type are returned. Reading events stops when timestamp passes without event reading.
+
+Input parameters:
+
+* `timestamp` number of milliseconds to wait for an event to occur. If event does not happen monitoring is finished
+* `num_elem` number of events. This is optional parameter. Default value is 10.
+
+#### stop
+
+Description: Any resources used by event notification for the the given device will be freed with this function. This can be used explicitly or
+automatically using `with` statement, like in the examples below. This should be called either manually or automatically for every created AmdSmiEventReader object.
+
+Input parameters: `None`
+
+Example with manual cleanup of AmdSmiEventReader:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        event = amdsmi.AmdSmiEventReader(devices[0], [amdsmi.AmdSmiEvtNotificationType.GPU_PRE_RESET, amdsmi.AmdSmiEvtNotificationType.GPU_POST_RESET])
+        event.read(10000)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    event.stop()
+    amdsmi.amdsmi_shut_down()
+```
+
+Example with automatic cleanup using `with` statement:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        with amdsmi.AmdSmiEventReader(devices[0], [amdsmi.AmdSmiEvtNotificationType.GPU_PRE_RESET, amdsmi.AmdSmiEvtNotificationType.GPU_POST_RESET]) as event:
+            event.read(10000)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+
+```
+
+### amdsmi_set_gpu_pci_bandwidth
+
+Description: Control the set of allowed PCIe bandwidths that can be used
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `bw_bitmask` A bitmask indicating the indices of the bandwidths that are
+to be enabled (1) and disabled (0)
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_pci_bandwidth` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_gpu_pci_bandwidth(device, 0)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_power_cap
+
+Description: Set the power cap value. It is not supported on virtual machine
+guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `sensor_ind` a 0-based sensor index. Normally, this will be 0. If a
+device has more than one sensor, it could be greater than 0
+* `cap` int that indicates the desired power cap, in microwatts
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_power_cap` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            power_cap = 250 * 1000000
+            amdsmi.amdsmi_set_power_cap(device, 0, power_cap)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_gpu_power_profile
+
+Description: Set the power profile. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `reserved` Not currently used, set to 0
+* `profile` a amdsmi_power_profile_preset_masks_t that hold the mask of
+the desired new power profile
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_power_profile` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            profile = amdsmi.AmdSmiPowerProfilePresetMasks.BOOTUP_DEFAULT
+            amdsmi.amdsmi_set_gpu_power_profile(device, 0, profile)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_gpu_clk_range
+
+Description: This function sets the clock range information.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `min_clk_value` minimum clock value for desired clock range
+* `max_clk_value` maximum clock value for desired clock range
+* `clk_type` SYS | MEM range type
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_clk_range` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_gpu_clk_range(device, 0, 1000, amdsmi.AmdSmiClkType.SYS)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_bdf_id
+
+Description: Get the unique PCI device identifier associated for a device
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: device bdf
+The format of bdfid will be as follows:
+
+BDFID = ((DOMAIN & 0xffffffff) << 32) | ((BUS & 0xff) << 8) |
+                       ((DEVICE & 0x1f) <<3 ) | (FUNCTION & 0x7)
+
+| Name     | Field   |
+---------- | ------- |
+| Domain   | [64:32] |
+| Reserved | [31:16] |
+| Bus      | [15: 8] |
+| Device   | [ 7: 3] |
+| Function | [ 2: 0] |
+
+Exceptions that can be thrown by `amdsmi_get_gpu_bdf_id` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            bdfid = amdsmi.amdsmi_get_gpu_bdf_id(device)
+            print(bdfid)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_pci_bandwidth
+
+Description: Get the list of possible PCIe bandwidths that are available.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with the possible T/s values and associated number of lanes
+
+Field | Content
+---|---
+`transfer_rate` |  transfer_rate dictionary
+`lanes` | lanes
+
+transfer_rate dictionary
+
+Field | Content
+---|---
+`num_supported` |  num_supported
+`current` | current
+`frequency` | list of frequency
+
+Exceptions that can be thrown by `amdsmi_get_gpu_pci_bandwidth` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            bandwidth = amdsmi.amdsmi_get_gpu_pci_bandwidth(device)
+            print(bandwidth)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_pci_throughput
+
+Description: Get PCIe traffic information. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with the fields
+
+Field | Content
+---|---
+`sent` | number of bytes sent in 1 second
+`received` | the number of bytes received
+`max_pkt_sz` | maximum packet size
+
+Exceptions that can be thrown by `amdsmi_get_gpu_pci_throughput` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            pci = amdsmi.amdsmi_get_gpu_pci_throughput(device)
+            print(pci)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_pci_replay_counter
+
+Description: Get PCIe replay counter
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: counter value
+The sum of the NAK's received and generated by the GPU
+
+Exceptions that can be thrown by `amdsmi_get_gpu_pci_replay_counter` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            counter =  amdsmi.amdsmi_get_gpu_pci_replay_counter(device)
+            print(counter)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_topo_numa_affinity
+
+Description: Get the NUMA node associated with a device
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: NUMA node value
+
+Exceptions that can be thrown by `amdsmi_get_gpu_topo_numa_affinity` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_FOUND` - Device Not found
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            numa_node = amdsmi.amdsmi_get_gpu_topo_numa_affinity(device)
+            print(numa_node)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_energy_count
+
+Description: Get the energy accumulator counter information of the device.
+energy_accumulator * counter_resolution = total_energy_consumption in micro-Joules
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Content
+---|---
+`power` |  counter for energy accumulation since last restart/gpu rest (Deprecated in ROCm 6.4)
+`energy_accumulator` |  counter for energy accumulation since last restart/gpu rest
+`counter_resolution` |  counter resolution
+`timestamp` |  timestamp
+
+Exceptions that can be thrown by `amdsmi_get_energy_count` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            energy_dict = amdsmi.amdsmi_get_energy_count(device)
+            print(energy_dict)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_memory_total
+
+Description: Get the total amount of memory that exists
+
+Input parameters:
+
+* `processor_handle` device which to query
+* `mem_type` enum AmdSmiMemoryType
+
+Output: total amount of memory
+
+Exceptions that can be thrown by `amdsmi_get_gpu_memory_total` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            vram_memory_total = amdsmi.amdsmi_get_gpu_memory_total(device, amdsmi.AmdSmiMemoryType.VRAM)
+            print(vram_memory_total)
+            vis_vram_memory_total = amdsmi.amdsmi_get_gpu_memory_total(device, amdsmi.AmdSmiMemoryType.VIS_VRAM)
+            print(vis_vram_memory_total)
+            gtt_memory_total = amdsmi.amdsmi_get_gpu_memory_total(device, amdsmi.AmdSmiMemoryType.GTT)
+            print(gtt_memory_total)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_gpu_od_clk_info
+
+Description: This function sets the clock frequency information.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `level` MIN | MAX to set the minimum (0)
+or maximum (1) speed
+* `clk_value` value to apply to the clock range
+* `clk_type` SYS | MEM range type
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_od_clk_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_gpu_od_clk_info(
+                device,
+                amdsmi.AmdSmiFreqInd.MAX,
+                1000,
+                amdsmi.AmdSmiClkType.SYS
+            )
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_memory_usage
+
+Description: Get the current memory usage
+
+Input parameters:
+
+* `processor_handle` device which to query
+* `mem_type` enum AmdSmiMemoryType
+
+Output: the amount of memory currently being used
+
+Exceptions that can be thrown by `amdsmi_get_gpu_memory_usage` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_FILE_ERROR` - Problem accessing a file
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            vram_memory_usage = amdsmi.amdsmi_get_gpu_memory_usage(device, amdsmi.AmdSmiMemoryType.VRAM)
+            print(vram_memory_usage)
+            vis_vram_memory_usage = amdsmi.amdsmi_get_gpu_memory_usage(device, amdsmi.AmdSmiMemoryType.VIS_VRAM)
+            print(vis_vram_memory_usage)
+            gtt_memory_usage = amdsmi.amdsmi_get_gpu_memory_usage(device, amdsmi.AmdSmiMemoryType.GTT)
+            print(gtt_memory_usage)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_gpu_od_volt_info
+
+Description: This function sets  1 of the 3 voltage curve points.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `vpoint` voltage point [0|1|2] on the voltage curve
+* `clk_value` clock value component of voltage curve point
+* `volt_value` voltage value component of voltage curve point
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_od_volt_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_gpu_od_volt_info(device, 1, 1000, 980)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_fan_rpms
+
+Description: Get the fan speed in RPMs of the device with the specified device
+handle and 0-based sensor index. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `sensor_idx` a 0-based sensor index. Normally, this will be 0. If a device has
+more than one sensor, it could be greater than 0.
+
+Output: Fan speed in rpms as integer
+
+Exceptions that can be thrown by `amdsmi_get_gpu_fan_rpms` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            fan_rpm = amdsmi.amdsmi_get_gpu_fan_rpms(device, 0)
+            print(fan_rpm)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_fan_speed
+
+Description: Get the fan speed for the specified device as a value relative to
+the maximum fan speed. For legacy hwmon GPUs the maximum is AMDSMI_MAX_FAN_SPEED (255).
+For GPUs with the gpu_od sysfs interface, use `amdsmi_get_gpu_fan_speed_max()` to
+query the actual maximum. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `sensor_idx` a 0-based sensor index. Normally, this will be 0. If a device has
+more than one sensor, it could be greater than 0.
+
+Output: Fan speed as integer (relative to per-device maximum)
+
+Exceptions that can be thrown by `amdsmi_get_gpu_fan_speed` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            fan_speed = amdsmi.amdsmi_get_gpu_fan_speed(device, 0)
+            print(fan_speed)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_fan_speed_max
+
+Description: Get the max fan speed of the device with provided device handle.
+For legacy hwmon GPUs this returns 255. For GPUs with the gpu_od sysfs interface,
+the maximum is read from the OD_RANGE (e.g. 100).
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `sensor_idx` a 0-based sensor index. Normally, this will be 0. If a device has
+more than one sensor, it could be greater than 0.
+
+Output: Max fan speed as integer
+
+Exceptions that can be thrown by `amdsmi_get_gpu_fan_speed_max` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            max_fan_speed = amdsmi.amdsmi_get_gpu_fan_speed_max(device, 0)
+            print(max_fan_speed)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_is_gpu_power_management_enabled
+
+Description: Returns is power management enabled
+
+Input parameters:
+
+* `processor_handle` GPU device which to query
+
+Output: Bool true if power management enabled else false
+
+Exceptions that can be thrown by `amdsmi_is_gpu_power_management_enabled` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for processor in devices:
+            is_power_management_enabled = amdsmi.amdsmi_is_gpu_power_management_enabled(processor)
+            print(is_power_management_enabled)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_npm_info
+
+Description: Returns Node Power Management (NPM) information including status,
+power limit, and UBB power threshold.
+
+Input parameters:
+
+* `node_handle` node handle obtained from `amdsmi_get_node_handle`
+
+Output: Dictionary with fields
+
+Field | Description | Units
+---|---|---
+`status` | NPM status (AMDSMI_NPM_STATUS_ENABLED or AMDSMI_NPM_STATUS_DISABLED) | -
+`limit` | Node-level power limit | W
+`ubb_power_threshold` | UBB node power threshold | W
+
+Exceptions that can be thrown by `amdsmi_get_npm_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        node_handle = amdsmi.amdsmi_get_node_handle(devices[0])
+        npm_info = amdsmi.amdsmi_get_npm_info(node_handle)
+        print(npm_info['status'])
+        print(npm_info['limit'])
+        print(npm_info['ubb_power_threshold'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_temp_metric
+
+Description: Get the temperature metric value for the specified metric, from the
+specified temperature sensor on the specified device. It is not supported on virtual
+machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `sensor_type` part of device from which temperature should be obtained
+* `metric` enum indicated which temperature value should be retrieved
+
+Output: Temperature as integer in millidegrees Celsius
+
+Exceptions that can be thrown by `amdsmi_get_temp_metric` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            temp_metric =  amdsmi.amdsmi_get_temp_metric(device, amdsmi.AmdSmiTemperatureType.EDGE,
+                            amdsmi.AmdSmiTemperatureMetric.CURRENT)
+            print(temp_metric)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_volt_metric
+
+Description: Get the voltage metric value for the specified metric, from the
+specified voltage sensor on the specified device. It is not supported on virtual
+machine guest
+
+Input parameters:
+
+Parameters | Description
+---|---
+`processor_handle` |  Handle for the given device
+`sensor_type` | <table><thead><tr><th> Possible Values </th><th> Description </th></tr></thead><tbody><tr><td>`AmdSmiVoltageType.VDDGFX`</td><td>Represents the voltage supplied to the GPU's graphics core.</td></tr><tr><td>`AmdSmiVoltageType.VDDBOARD`</td><td>Represents the voltage supplied to the entire GPU board, including auxiliary components. Intended for Mi300+</td></tr></tbody></table>
+`metric` | <table><thead><tr><th> Possible Values </th><th> Description </th></tr></thead><tbody><tr><td>`AmdSmiVoltageMetric.CURRENT`</td><td>Represents the current voltage value measured at the specified sensor.</td></tr><tr><td>`AmdSmiVoltageMetric.MAX`</td><td>Represents the maximum voltage value recorded at the specified sensor.</td></tr><tr><td>`AmdSmiVoltageMetric.MIN`</td><td>Represents the minimum voltage value recorded at the specified sensor.</td></tr><tr><td>`AmdSmiVoltageMetric.AVERAGE`</td><td>Represents the average voltage value calculated over a period of time at the specified sensor.</td></tr><tr><td>`AmdSmiVoltageMetric.MAX_CRIT`</td><td>Represents the critical maximum voltage value that should not be exceeded.</td></tr><tr><td>`AmdSmiVoltageMetric.MIN_CRIT`</td><td>Represents the critical minimum voltage value that should not be dropped below.</td></tr><tr><td>`AmdSmiVoltageMetric.LOWEST`</td><td>Represents the lowest voltage value recorded during the monitoring period.</td></tr><tr><td>`AmdSmiVoltageMetric.HIGHEST`</td><td>Represents the highest voltage value recorded during the monitoring period.</td></tr></tbody></table>
+
+Output: Voltage as integer in millivolts
+
+Exceptions that can be thrown by `amdsmi_get_gpu_volt_metric` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            voltage = amdsmi.amdsmi_get_gpu_volt_metric(
+                device,
+                amdsmi.AmdSmiVoltageType.VDDBOARD,
+                amdsmi.AmdSmiVoltageMetric.AVERAGE
+            )
+            print(voltage)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_utilization_count
+
+Description: Get coarse/fine grain utilization counter of the specified device
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `counter_types` List of AmdSmiUtilizationCounterType counters requested
+
+Output: List containing dictionaries with fields
+
+Field | Description
+---|---
+`timestamp` | The timestamp when the counter is retrieved - Resolution: 1 ns
+`Dictionary for each counter` | <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`type`</td><td>Counter that was requested</td></tr><tr><td>`value`</td><td>Value gotten for utilization counter</td></tr></tbody></table>
+
+Exceptions that can be thrown by `amdsmi_get_utilization_count` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            utilization = amdsmi.amdsmi_get_utilization_count(
+                            device,
+                            amdsmi.AmdSmiUtilizationCounterType.COARSE_GRAIN_GFX_ACTIVITY
+                        )
+            print(utilization)
+            utilization = amdsmi.amdsmi_get_utilization_count(
+                            device,
+                            [amdsmi.AmdSmiUtilizationCounterType.COARSE_GRAIN_GFX_ACTIVITY,
+                            amdsmi.AmdSmiUtilizationCounterType.COARSE_GRAIN_MEM_ACTIVITY,
+                            amdsmi.AmdSmiUtilizationCounterType.COARSE_DECODER_ACTIVITY,
+                            amdsmi.AmdSmiUtilizationCounterType.FINE_GRAIN_GFX_ACTIVITY,
+                            amdsmi.AmdSmiUtilizationCounterType.FINE_GRAIN_MEM_ACTIVITY,
+                            amdsmi.AmdSmiUtilizationCounterType.FINE_DECODER_ACTIVITY]
+                        )
+            print(utilization)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_perf_level
+
+Description: Get the performance level of the device with provided device handle.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: Performance level as enum value of dev_perf_level_t
+
+Exceptions that can be thrown by `amdsmi_get_gpu_perf_level` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            perf_level = amdsmi.amdsmi_get_gpu_perf_level(device)
+            print(perf_level)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_gpu_perf_determinism_mode
+
+Description: Enter performance determinism mode with provided device handle.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `clkvalue` softmax value for GFXCLK in MHz
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_perf_determinism_mode` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_gpu_perf_determinism_mode(device, 1333)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_process_isolation
+
+Description: Get the status of the Process Isolation
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: integer corresponding to isolation_status; 0 - disabled, 1 - enabled
+
+Exceptions that can be thrown by `amdsmi_get_gpu_process_isolation` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            isolate = amdsmi.amdsmi_get_gpu_process_isolation(device)
+            print("Process Isolation Status: ", isolate)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_gpu_process_isolation
+
+Description: Enable/disable the system Process Isolation for the given device handle.
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `pisolate` the process isolation status to set. 0 is the process isolation disabled, and 1 is the process isolation enabled.
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_process_isolation` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_gpu_process_isolation(device, 1)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_clean_gpu_local_data
+
+Description: Clear the SRAM data of the given device. This can be called between user logins to prevent information leak.
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_clean_gpu_local_data` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_clean_gpu_local_data(device)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_overdrive_level
+
+Description: Get the overdrive percent associated with the device with provided
+device handle. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: Overdrive percentage as integer
+
+Exceptions that can be thrown by `amdsmi_get_gpu_overdrive_level` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            od_level = amdsmi.amdsmi_get_gpu_overdrive_level(device)
+            print(od_level)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_mem_overdrive_level
+
+Description: Get the GPU memory clock overdrive percent associated with the device with provided
+device handle. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: Overdrive percentage as integer
+
+Exceptions that can be thrown by `amdsmi_get_gpu_mem_overdrive_level` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            od_level = amdsmi.amdsmi_get_gpu_mem_overdrive_level(device)
+            print(od_level)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_clk_freq
+
+Description: Get the list of possible system clock speeds of device for a
+specified clock type. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `clk_type` the type of clock for which the frequency is desired
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`num_supported` | The number of supported frequencies
+`current` | The current frequency index
+`frequency` | List of frequencies, only the first num_supported frequencies are valid
+
+Exceptions that can be thrown by `amdsmi_get_clk_freq` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_get_clk_freq(device, amdsmi.AmdSmiClkType.SYS)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_od_volt_info
+
+Description: This function retrieves the voltage/frequency curve information.
+If the num_regions is 0 then the voltage curve is not supported.
+It is not supported on virtual machine guest.
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`curr_sclk_range` | <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound sclk range</td></tr><tr><td>`upper_bound`</td><td>upper bound sclk range</td></tr></tbody></table>
+`curr_mclk_range` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound mclk range</td></tr><tr><td>`upper_bound`</td><td>upper bound mclk range</td></tr></tbody></table>
+`sclk_freq_limits` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound sclk range limit</td></tr><tr><td>`upper_bound`</td><td>upper bound sclk range limit</td></tr></tbody></table>
+`mclk_freq_limits` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound mclk range limit</td></tr><tr><td>`upper_bound`</td><td>upper bound mclk range limit</td></tr></tbody></table>
+`curve.vc_points` | List of voltage curve points
+`num_regions` | The number of voltage curve regions
+
+Exceptions that can be thrown by `amdsmi_get_gpu_od_volt_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_get_gpu_od_volt_info(device)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_metrics_info
+
+Description: This function retrieves the gpu metrics information. It is not
+supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: Dictionary with fields
+
+| Field | Description |Unit|
+|-------|-------------|----|
+`temperature_edge` | Edge temperature value | Celsius (C)
+`temperature_hotspot` | Hotspot (aka junction) temperature value | Celsius (C)
+`temperature_mem` | Memory temperature value | Celsius (C)
+`temperature_vrgfx` | vrgfx temperature value | Celsius (C)
+`temperature_vrsoc` | vrsoc temperature value | Celsius (C)
+`temperature_vrmem` | vrmem temperature value | Celsius (C)
+`average_gfx_activity` | Average gfx activity | %
+`average_umc_activity` | Average umc (Universal Memory Controller) activity | %
+`average_mm_activity` | Average mm (multimedia) engine activity | %
+`average_socket_power` | Average socket power | W
+`energy_accumulator` | Energy accumulated with a 15.3 uJ resolution over 1ns | uJ
+`system_clock_counter` | System clock counter | ns
+`average_gfxclk_frequency` | Average gfx clock frequency | MHz
+`average_socclk_frequency` | Average soc clock frequency | MHz
+`average_uclk_frequency` | Average uclk frequency | MHz
+`average_vclk0_frequency` | Average vclk0 frequency | MHz
+`average_dclk0_frequency` | Average dclk0 frequency | MHz
+`average_vclk1_frequency` | Average vclk1 frequency | MHz
+`average_dclk1_frequency` | Average dclk1 frequency | MHz
+`current_gfxclk` | Current gfx clock | MHz
+`current_socclk` | Current soc clock | MHz
+`current_uclk` | Current uclk | MHz
+`current_vclk0` | Current vclk0 | MHz
+`current_dclk0` | Current dclk0 | MHz
+`current_vclk1` | Current vclk1 | MHz
+`current_dclk1` | Current dclk1 | MHz
+`throttle_status` | Current throttle status | bool
+`current_fan_speed` | Current fan speed | RPM
+`pcie_link_width` | PCIe link width (number of lanes) | lanes
+`pcie_link_speed` | PCIe link speed in 0.1 GT/s (Giga Transfers per second) | GT/s
+`padding` | padding
+`gfx_activity_acc` | gfx activity accumulated | %
+`mem_activity_acc` | Memory activity accumulated | %
+`temperature_hbm` | list of hbm temperatures | Celsius (C)
+`firmware_timestamp` | timestamp from PMFW (10ns resolution) | ns
+`voltage_soc` | soc voltage | mV
+`voltage_gfx` | gfx voltage | mV
+`voltage_mem` | mem voltage | mV
+`indep_throttle_status` | ASIC independent throttle status (see drivers/gpu/drm/amd/pm/swsmu/inc/amdgpu_smu.h for bit flags) |
+`current_socket_power` | Current socket power (also known as instant socket power) | W
+`vcn_activity` | List of VCN encode/decode engine utilization per AID | %
+`gfxclk_lock_status` | Clock lock status. Bits 0:7 correspond to each gfx clock engine instance. Bits 0:5 for APU/AID devices |
+`xgmi_link_width` | XGMI bus width | lanes
+`xgmi_link_speed` | XGMI bitrate | GB/s
+`pcie_bandwidth_acc` | PCIe accumulated bandwidth | GB/s
+`pcie_bandwidth_inst` | PCIe instantaneous bandwidth | GB/s
+`pcie_l0_to_recov_count_acc` | PCIe L0 to recovery state transition accumulated count |
+`pcie_replay_count_acc` | PCIe replay accumulated count |
+`pcie_replay_rover_count_acc` | PCIe replay rollover accumulated count |
+`xgmi_read_data_acc` | XGMI accumulated read data transfer size (KiloBytes) | KB
+`xgmi_write_data_acc` | XGMI accumulated write data transfer size (KiloBytes) | KB
+`current_gfxclks` | List of current gfx clock frequencies | MHz
+`current_socclks` | List of current soc clock frequencies | MHz
+`current_vclk0s` | List of current v0 clock frequencies | MHz
+`current_dclk0s` | List of current d0 clock frequencies | MHz
+`pcie_nak_sent_count_acc` | PCIe NAC sent count accumulated |
+`pcie_nak_rcvd_count_acc` | PCIe NAC received count accumulated |
+`jpeg_activity` | List of JPEG engine activity | %
+
+Exceptions that can be thrown by `amdsmi_get_gpu_metrics_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_get_gpu_metrics_info(device)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_pm_metrics_info
+
+Description: This function will retrieve the name and value for each
+item in the pm metrics table with the given processor handle.
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: List containing dictionaries of pm metrics and their values
+
+Field | Description
+---|---
+`name` | name of PM metric
+`value` | value of pm metric
+
+Exceptions that can be thrown by `amdsmi_get_gpu_pm_metrics_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            print(amdsmi.amdsmi_get_gpu_pm_metrics_info(device))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_reg_table_info
+
+Description: This function will retrieve register metrics table with provided device index and register type.
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `reg_type` register type
+
+Output: List containing dictionaries of register metrics and their values
+
+Field | Description
+---|---
+`name` | name of register metric
+`value` | value of register metric
+
+Exceptions that can be thrown by `amdsmi_get_gpu_reg_table_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            print(amdsmi.amdsmi_get_gpu_reg_table_info(device, amdsmi.AmdSmiRegType.PCIE))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_od_volt_curve_regions
+
+Description: This function will retrieve the current valid regions in the
+frequency/voltage space. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `num_regions` number of freq volt regions
+
+Output: List containing a dictionary with fields for each freq volt region
+
+Field | Description
+---|---
+`freq_range` | <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound freq range</td></tr><tr><td>`upper_bound`</td><td>upper bound freq range</td></tr></tbody></table>
+`volt_range` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound volt range</td></tr><tr><td>`upper_bound`</td><td>upper bound volt range</td></tr></tbody></table>
+
+Exceptions that can be thrown by `amdsmi_get_gpu_od_volt_curve_regions` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_UNEXPECTED_SIZE` - unexpected size of data was read
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - The data read or provided was unexpected
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_get_gpu_od_volt_curve_regions(device, 3)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_power_profile_presets
+
+Description: Get the list of available preset power profiles and an indication of
+which profile is currently active. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `sensor_idx` number of freq volt regions
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`available_profiles` | Which profiles are supported by this system
+`current` | Which power profile is currently active
+`num_profiles` | How many power profiles are available
+
+Exceptions that can be thrown by `amdsmi_get_gpu_power_profile_presets` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_get_gpu_power_profile_presets(device, 0)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_gpu_counter_group_supported
+
+Description: Tell if an event group is supported by a given device.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+* `event_group` event group being checked for support
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_gpu_counter_group_supported` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_gpu_counter_group_supported(device, amdsmi.AmdSmiEventGroup.XGMI)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_gpu_create_counter
+
+Description: Creates a performance counter object
+
+Input parameters:
+
+* `processor_handle` device which to query
+* `event_type` event group being checked for support
+
+Output: An event handle of the newly created performance counter object
+
+Exceptions that can be thrown by `amdsmi_gpu_create_counter` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            event_handle = amdsmi.amdsmi_gpu_create_counter(device, amdsmi.AmdSmiEventType.XGMI_0_REQUEST_TX)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_gpu_destroy_counter
+
+Description: Destroys a performance counter object
+
+Input parameters:
+
+* `event_handle` event handle of the performance counter object
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_gpu_destroy_counter` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            event_handle = amdsmi.amdsmi_gpu_create_counter(device, amdsmi.AmdSmiEventType.XGMI_0_REQUEST_TX)
+            amdsmi.amdsmi_gpu_destroy_counter(event_handle)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_gpu_control_counter
+
+Description: Issue performance counter control commands. It is not supported
+on virtual machine guest
+
+Input parameters:
+
+* `event_handle` event handle of the performance counter object
+* `counter_command` command being passed to counter as AmdSmiCounterCommand
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_gpu_control_counter` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            event_handle = amdsmi.amdsmi_gpu_create_counter(device, amdsmi.AmdSmiEventType.XGMI_1_REQUEST_TX)
+            amdsmi.amdsmi_gpu_control_counter(event_handle, amdsmi.AmdSmiCounterCommand.CMD_START)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_gpu_read_counter
+
+Description: Read the current value of a performance counter
+
+Input parameters:
+
+* `event_handle` event handle of the performance counter object
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`value` | Counter value
+`time_enabled` | Time that the counter was enabled in nanoseconds
+`time_running` | Time that the counter was running in nanoseconds
+
+Exceptions that can be thrown by `amdsmi_gpu_read_counter` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            event_handle = amdsmi.amdsmi_gpu_create_counter(device, amdsmi.AmdSmiEventType.XGMI_1_REQUEST_TX)
+            amdsmi.amdsmi_gpu_control_counter(event_handle, amdsmi.AmdSmiCounterCommand.CMD_START)
+            amdsmi.amdsmi_gpu_read_counter(event_handle)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_available_counters
+
+Description: Get the number of currently available counters. It is not supported
+on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `event_group` event group being checked as AmdSmiEventGroup
+
+Output: Number of available counters for the given device of the inputted event group
+
+Exceptions that can be thrown by `amdsmi_get_gpu_available_counters` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            available_counters =  amdsmi.amdsmi_get_gpu_available_counters(device, amdsmi.AmdSmiEventGroup.XGMI)
+            print(available_counters)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_gpu_perf_level
+
+Description: Set a desired performance level for given device. It is not
+supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `perf_level` performance level being set as AmdSmiDevPerfLevel
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_perf_level` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_gpu_perf_level(device, amdsmi.AmdSmiDevPerfLevel.STABLE_PEAK)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_reset_gpu
+
+Description: Reset the gpu associated with the device with provided device handle
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_reset_gpu` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_reset_gpu(device)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_gpu_fan_speed
+
+Description: Set the fan speed for the specified device with the provided speed.
+For legacy hwmon GPUs the valid range is 0-255. For GPUs with the gpu_od sysfs
+interface, the valid range is determined from the OD_RANGE (e.g. 20-100).
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `sensor_idx` sensor index as integer
+* `fan_speed` the speed to which the function will attempt to set the fan
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_fan_speed` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_gpu_fan_speed(device, 0, 1333)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_reset_gpu_fan
+
+Description: Reset the fan to automatic driver control. For GPUs with the gpu_od
+sysfs interface, this writes the OD_RANGE minimum value and commits the change.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `sensor_idx` sensor index as integer
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_reset_gpu_fan` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_reset_gpu_fan(device, 0)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_clk_freq
+
+Description: Control the set of allowed frequencies that can be used for the
+specified clock. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `clk_type` the type of clock for which the set of frequencies will be modified
+as a string of AmdSmiClkType. Example AmdSmiClkType.SCLK becomes "SCLK".
+* `freq_bitmask`  bitmask indicating the indices of the frequencies that are to
+be enabled (1) and disabled (0). Only the lowest ::amdsmi_frequencies_t.num_supported
+bits of this mask are relevant.
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_clk_freq` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            freq_bitmask = 0
+            amdsmi.amdsmi_set_clk_freq(device, "SCLK", freq_bitmask)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_soc_pstate
+
+Description: Get dpm policy information.
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `policy_id` the policy id to set.
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`num_supported` | total number of supported policies
+`current_id` | current policy id
+`policies` | list of dictionaries containing possible policies
+
+Exceptions that can be thrown by `amdsmi_get_soc_pstate` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_INIT` - Device not initialized
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            dpm_policies = amdsmi.amdsmi_get_soc_pstate(device)
+            print(dpm_policies)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_soc_pstate
+
+Description: Set the dpm policy to corresponding policy_id. Typically following: 0(default),1,2,3
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `policy_id` the policy id to set.
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_soc_pstate` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_soc_pstate(device, 0)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_xgmi_plpd
+
+Description: Set the xgmi per-link power down policy parameter for the processor
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `policy_id` the xgmi plpd id to set.
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_xgmi_plpd` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_xgmi_plpd(device, 0)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_xgmi_plpd
+
+Description: Get the xgmi per-link power down policy parameter for the processor
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: Dict containing information about xgmi per-link power down policy
+
+Field | Description
+---|---
+`num_supported` | The number of supported policies
+`current_id` | The current policy index
+`policies` | List of policies. (`plpds` marked for deprecation in next major release)
+
+Exceptions that can be thrown by `amdsmi_get_xgmi_plpd` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            xgmi_plpd =  amdsmi.amdsmi_get_xgmi_plpd(device)
+            print(xgmi_plpd)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_gpu_overdrive_level
+
+Description: **deprecated** Set the overdrive percent associated with the
+device with provided device handle with the provided value. It is not
+supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `overdrive_value` value to which the overdrive level should be set
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_overdrive_level` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_gpu_overdrive_level(device, 0)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_ecc_count
+
+Description: Retrieve the error counts for a GPU block. It is not supported
+on virtual machine guest
+
+See [RAS Error Count sysfs Interface (AMDGPU RAS Support - Linux Kernel
+documentation)](https://docs.kernel.org/gpu/amdgpu/ras.html#ras-error-count-sysfs-interface)
+to learn how these error counts are accessed.
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `block` The block for which error counts should be retrieved
+
+Output: Dict containing information about error counts
+
+Field | Description
+---|---
+`correctable_count` | Count of correctable errors
+`uncorrectable_count` | Count of uncorrectable errors
+`deferred_count` | Count of deferred errors
+
+Exceptions that can be thrown by `amdsmi_get_gpu_ecc_count` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            ecc_count =  amdsmi.amdsmi_get_gpu_ecc_count(device, amdsmi.AmdSmiGpuBlock.UMC)
+            print(ecc_count)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_ecc_enabled
+
+Description: Retrieve the enabled ECC bit-mask. It is not supported on virtual
+machine guest
+
+See [RAS Error Count sysfs Interface (AMDGPU RAS Support - Linux Kernel
+documentation)](https://docs.kernel.org/gpu/amdgpu/ras.html#ras-error-count-sysfs-interface)
+to learn how these error counts are accessed.
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: Enabled ECC bit-mask
+
+Exceptions that can be thrown by `amdsmi_get_gpu_ecc_enabled` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            enabled =  amdsmi.amdsmi_get_gpu_ecc_enabled(device)
+            print(enabled)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_ecc_status
+
+Description: Retrieve the ECC status for a GPU block. It is not supported
+on virtual machine guest
+
+See [RAS Error Count sysfs Interface (AMDGPU RAS Support - Linux Kernel
+documentation)](https://docs.kernel.org/gpu/amdgpu/ras.html#ras-error-count-sysfs-interface)
+to learn how these error counts are accessed.
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `block` The block for which ECC status should be retrieved
+
+Output: ECC status for a requested GPU block
+
+Exceptions that can be thrown by `amdsmi_get_gpu_ecc_status` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            status =  amdsmi.amdsmi_get_gpu_ecc_status(device, amdsmi.AmdSmiGpuBlock.UMC)
+            print(status)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_status_code_to_string
+
+Description: Get a description of a provided AMDSMI error status
+
+Input parameters:
+
+* `status` The error status for which a description is desired
+
+Output: String description of the provided error code
+
+Exceptions that can be thrown by `amdsmi_status_code_to_string` function:
+
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    status_str = amdsmi.amdsmi_status_code_to_string(int(0))
+    print(status_str)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_compute_process_info
+
+Description: Get process information about processes currently using GPU
+
+Input parameters: None
+
+Output: List of python dicts each containing a process information
+
+Field | Description
+---|---
+`process_id` | Process ID
+`pasid` | PASID (Not working in ROCm 6.4+, Deprecated in 7.0)
+`vram_usage` | VRAM usage
+`sdma_usage` | SDMA usage in microseconds
+`cu_occupancy` | Compute Unit usage in percents
+`evicted_time` | Time that queues are evicted on a GPU in milliseconds
+
+note: Sum of the process memory is not expected to be the total memory usage.
+
+Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INSUFFICIENT_SIZE` - Insufficient size for operation
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    procs = amdsmi.amdsmi_get_gpu_compute_process_info()
+    for proc in procs:
+        print(proc)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_compute_process_info_by_pid
+
+Description: Get process information about processes currently using GPU
+
+Input parameters:
+
+* `pid` The process ID for which process information is being requested
+
+Output: Dict containing a process information
+
+Field | Description
+---|---
+`process_id` | Process ID
+`pasid` | PASID (Not working in ROCm 6.4+, deprecating in 7.0)
+`vram_usage` | VRAM usage
+`sdma_usage` | SDMA usage in microseconds
+`cu_occupancy` | Compute Unit usage in percents
+`evicted_time` | Time that queues are evicted on a GPU in milliseconds
+
+Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info_by_pid` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_FOUND` - Device Not found
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    pid = 0 # << valid pid here
+    proc = amdsmi.amdsmi_get_gpu_compute_process_info_by_pid(pid)
+    print(proc)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_compute_process_gpus
+
+Description: Get the device indices currently being used by a process
+
+Input parameters:
+
+* `pid` The process id of the process for which the number of gpus currently being used is requested
+
+Output: List of indices of devices currently being used by the process
+
+Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_gpus` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_NOT_FOUND` - Device Not found
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    pid = 0 # << valid pid here
+    indices = amdsmi.amdsmi_get_gpu_compute_process_gpus(pid)
+    print(indices)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_gpu_xgmi_error_status
+
+Description: Retrieve the XGMI error status for a device. It is not supported on
+virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: XGMI error status for a requested device
+
+Exceptions that can be thrown by `amdsmi_gpu_xgmi_error_status` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            status = amdsmi.amdsmi_gpu_xgmi_error_status(device)
+            print(status)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_reset_gpu_xgmi_error
+
+Description: Reset the XGMI error status for a device. It is not supported
+on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_reset_gpu_xgmi_error` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_reset_gpu_xgmi_error(device)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_vendor_name
+
+Description: Returns the device vendor name
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: device vendor name
+
+Exceptions that can be thrown by `amdsmi_get_gpu_vendor_name` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            vendor_name = amdsmi.amdsmi_get_gpu_vendor_name(device)
+            print(vendor_name)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_id
+
+Description: Get the device id associated with the device with provided device handler
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: device id
+
+Exceptions that can be thrown by `amdsmi_get_gpu_id` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            dev_id = amdsmi.amdsmi_get_gpu_id(device)
+            print(dev_id)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_vram_vendor
+
+Description: Get the vram vendor string of a gpu device.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: vram vendor
+
+Exceptions that can be thrown by `amdsmi_get_gpu_vram_vendor` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            vram_vendor = amdsmi.amdsmi_get_gpu_vram_vendor(device)
+            print(vram_vendor)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_subsystem_id
+
+Description: Get the subsystem device id associated with the device with provided device handle.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: subsystem device id
+
+Exceptions that can be thrown by `amdsmi_get_gpu_subsystem_id` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            id = amdsmi.amdsmi_get_gpu_subsystem_id(device)
+            print(id)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_subsystem_name
+
+Description: Get the name string for the device subsystem
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: device subsystem
+
+Exceptions that can be thrown by `amdsmi_get_gpu_subsystem_name` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            subsystem_nam = amdsmi.amdsmi_get_gpu_subsystem_name(device)
+            print(subsystem_nam)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_topo_get_numa_node_number
+
+Description: Retrieve the NUMA CPU node number for a device
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: node number of NUMA CPU for the device
+
+Exceptions that can be thrown by `amdsmi_topo_get_numa_node_number` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            node_number = amdsmi.amdsmi_topo_get_numa_node_number(device)
+            print(node_number)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_topo_get_link_weight
+
+Description: Retrieve the weight for a connection between 2 GPUs.
+
+Input parameters:
+
+* `processor_handle_src` the source device handle
+* `processor_handle_dest` the destination device handle
+
+Output: the weight for a connection between 2 GPUs
+
+Exceptions that can be thrown by `amdsmi_topo_get_link_weight` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    elif len(devices) == 1:
+        print("Only 1 GPU on machine")
+    else:
+        processor_handle_src = devices[0]
+        processor_handle_dest = devices[1]
+        weight = amdsmi.amdsmi_topo_get_link_weight(processor_handle_src, processor_handle_dest)
+        print(weight)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_minmax_bandwidth_between_processors
+
+Description: Retrieve minimal and maximal io link bandwidth between 2 GPUs.
+
+Input parameters:
+
+* `processor_handle_src` the source device handle
+* `processor_handle_dest` the destination device handle
+
+Output:  Dictionary with fields:
+
+Field | Description
+---|---
+`min_bandwidth` | minimal bandwidth for the connection
+`max_bandwidth` | maximal bandwidth for the connection
+
+Exceptions that can be thrown by `amdsmi_get_minmax_bandwidth_between_processors` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    elif len(devices) == 1:
+        print("Only 1 GPU on machine")
+    else:
+        processor_handle_src = devices[0]
+        processor_handle_dest = devices[1]
+        bandwidth =  amdsmi.amdsmi_get_minmax_bandwidth_between_processors(processor_handle_src, processor_handle_dest)
+        print(bandwidth['min_bandwidth'])
+        print(bandwidth['max_bandwidth'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_link_metrics
+
+Description: Returns XGMI link metrics information for the given GPU.
+
+Input parameters:
+
+* `processor_handle` — The device handle for which to query link metrics.
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`num_links` | Number of XGMI links reported
+`bit_rate` | XGMI link bit rate (in appropriate units, e.g., Gbps)
+`max_bandwidth` | Maximum XGMI bandwidth (in appropriate units, e.g., GB/s)
+`links` | List of dictionaries, one per XGMI link, each with:
+`bdf` | BDF string for the destination
+`link_type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
+`read` | Accumulated read data for this link (e.g., KB)
+`write` | Accumulated write data for this link (e.g., KB)
+
+Exceptions that can be thrown by `amdsmi_get_link_metrics` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device_num, device in enumerate(devices):
+            link_metrics = amdsmi.amdsmi_get_link_metrics(device)
+            print(link_metrics['num_links'])
+            for idx, links in enumerate(link_metrics['links']):
+                print(f"{idx}: {links['bdf']}, {links['read']} KB, {links['write']} KB")
+                if links['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
+                    print('internal')
+                if links['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+                    print('pcie')
+                if links['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+                    print('xgmi')
+                if links['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
+                    print('not applicable')
+                if links['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
+                    print('unknown')
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_topo_get_link_type
+
+Description: Retrieve the hops and the connection type between 2 GPUs
+
+Input parameters:
+
+* `processor_handle_src` the source device handle
+* `processor_handle_dest` the destination device handle
+
+Output:  Dictionary with fields:
+
+Field | Description
+---|---
+`hops` | Number of hops
+`type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
+
+Exceptions that can be thrown by `amdsmi_topo_get_link_type` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    elif len(devices) == 1:
+        print("Only 1 GPU on machine")
+    else:
+        processor_handle_src = devices[0]
+        processor_handle_dest = devices[1]
+        link_type = amdsmi.amdsmi_topo_get_link_type(processor_handle_src, processor_handle_dest)
+        print(link_type['hops'])
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
+            print('internal')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+            print('pcie')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+            print('xgmi')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
+            print('not applicable')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
+            print('unknown')
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_topo_get_p2p_status
+
+Description: Retrieve the connection type and P2P capabilities between 2 GPUs
+
+Input parameters:
+
+* `processor_handle_src` the source device handle
+* `processor_handle_dest` the destination device handle
+
+Output:  Dictionary with fields:
+
+Fields | Description
+---|---
+`type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
+`cap` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`is_iolink_coherent`</td><td>1 == True; 0 == False; Uint_max = Undefined</td></tr><tr><td>`is_iolink_atomics_32bit`</td><td>Supports 32bit atomics</td></tr><tr><td>`is_iolink_atomics_64bit`</td><td>Supports 64bit atomics</td></tr><tr><td>`is_iolink_dma`</td><td>Supports DMA</td></tr><tr><td>`is_iolink_bi_directional`</td><td>Is the IOLink Bidirectional</td></tr></tbody></table>
+
+Exceptions that can be thrown by `amdsmi_topo_get_p2p_status` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    elif len(devices) == 1:
+        print("Only 1 GPU on machine")
+    else:
+        processor_handle_src = devices[0]
+        processor_handle_dest = devices[1]
+        link_type = amdsmi.amdsmi_topo_get_p2p_status(processor_handle_src, processor_handle_dest)
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
+            print('internal')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+            print('pcie')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+            print('xgmi')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
+            print('not applicable')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
+            print('unknown')
+        print(link_type['caps'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_is_P2P_accessible
+
+Description: Return P2P availability status between 2 GPUs
+
+Input parameters:
+
+* `processor_handle_src` the source device handle
+* `processor_handle_dest` the destination device handle
+
+Output: P2P availability status between 2 GPUs
+
+Exceptions that can be thrown by `amdsmi_is_P2P_accessible` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    elif len(devices) == 1:
+        print("Only 1 GPU on machine")
+    else:
+        processor_handle_src = devices[0]
+        processor_handle_dest = devices[1]
+        accessible = amdsmi.amdsmi_is_P2P_accessible(processor_handle_src, processor_handle_dest)
+        print(accessible)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_compute_partition
+
+Description: Get the compute partition from the given GPU
+
+Input parameters:
+
+* `processor_handle` the device handle
+
+Output: String of the partition type
+
+Exceptions that can be thrown by `amdsmi_get_gpu_compute_partition` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_COMPUTE_PARTITION_INVALID` - Invalid compute partition type
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            compute_partition_type = amdsmi.amdsmi_get_gpu_compute_partition(device)
+            print(compute_partition_type)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_gpu_compute_partition
+
+Description: Set the compute partition to the given GPU. This function does not allow any concurrent operations. Device must be idle and have no workloads when performing set partition operations.
+
+Input parameters:
+
+* `processor_handle` the device handle
+* `compute_partition` the type of compute_partition to set
+
+Output: String of the partition type
+
+Exceptions that can be thrown by `amdsmi_set_gpu_compute_partition` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+- `AMDSMI_STATUS_SETTING_UNAVAILABLE` - Setting is not available
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    compute_partition = amdsmi.AmdSmiComputePartitionType.SPX
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_gpu_compute_partition(device, compute_partition)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+
+### amdsmi_get_gpu_memory_partition
+
+Description: Get the memory partition from the given GPU
+
+Input parameters:
+
+* `processor_handle` the device handle
+
+Output: String of the partition type
+
+Exceptions that can be thrown by `amdsmi_get_gpu_memory_partition` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            memory_partition_type = amdsmi.amdsmi_get_gpu_memory_partition(device)
+            print(memory_partition_type)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_gpu_memory_partition
+
+Description: Set the memory partition to the given GPU. This function does not allow any concurrent operations. Devices must be idle and have no workloads when performing set partition operations.
+
+Input parameters:
+
+* `processor_handle` the device handle
+* `memory_partition` the type of memory_partition to set
+
+Output: String of the partition type
+
+Exceptions that can be thrown by `amdsmi_set_gpu_memory_partition` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    memory_partition = amdsmi.AmdSmiMemoryPartitionType.NPS1
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_gpu_memory_partition(device, memory_partition)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_uma_carveout_info
+
+**Note:** This is a kernel UAPI feature (sysfs), not libdrm.
+
+**Supported ASICs and prerequisites:**
+
+- Only available on APU parts whose VBIOS exposes ATCS function 0xA
+  ("Set UMA Allocation Size") and an `integrated_system_info` table of
+  at least v2.3. In practice this covers Strix and later APUs
+  (gfx1150/gfx1151/gfx1152).
+- **Not available** on dedicated GPUs or Instinct MI-series accelerators
+  (including MI300A); the call returns `AMDSMI_STATUS_NOT_SUPPORTED` and
+  `amd-smi static --mem-carveout` prints
+  `MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)`.
+- Requires Linux kernel >= 7.0 (upstream commit
+  [`685b711`](https://github.com/torvalds/linux/commit/685b711); some
+  distros backport it to earlier kernels) and read access to
+  `/sys/class/drm/<card>/device/uma/carveout`.
+
+Description: Get UMA carveout (VRAM) configuration information for a GPU. Returns the current carveout index, total number of available options, and a list of option descriptions.
+
+Input parameters:
+
+* `processor_handle` the device handle
+
+Output: Dictionary with fields:
+
+Field | Description
+---|---
+`current_index` | Index of the currently selected carveout option
+`num_options` | Total number of available carveout options
+`options` | List of dicts, each with `index` (int) and `description` (str)
+
+Exceptions that can be thrown by `amdsmi_get_gpu_uma_carveout_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi.amdsmi_get_gpu_uma_carveout_info(device)
+            print(f"Current index: {info['current_index']}")
+            print(f"Number of options: {info['num_options']}")
+            for opt in info['options']:
+                print(f"  Option {opt['index']}: {opt['description']}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_gpu_uma_carveout
+
+**Note:** This is a kernel UAPI feature (sysfs), not libdrm.
+
+Description: Set the UMA carveout (VRAM) size for a GPU by selecting one of the available option indices. A system reboot is required for the change to take effect.
+
+Input parameters:
+
+* `processor_handle` the device handle
+* `option_index` index of the carveout option to set (from `amdsmi_get_gpu_uma_carveout_info`)
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_uma_carveout` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            # Set carveout to option index 2
+            amdsmi.amdsmi_set_gpu_uma_carveout(device, 2)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### GTT (TTM `pages_limit`) APIs
+
+**Supported ASICs and prerequisites:**
+
+- Supported on every system running the amdgpu stack, including Ryzen
+  APUs (in-kernel amdgpu), Radeon dGPUs, and Instinct MI-series
+  accelerators with amdgpu-dkms (MI100 / MI200 / MI300 / MI300A).
+- The kernel TTM module may be named `ttm` (upstream), `amdttm` (older
+  amdgpu-dkms), or `amd-ttm` (newer amdgpu-dkms). amd-smi detects the
+  loaded module automatically by inspecting `/sys/module/` and writes the
+  corresponding `/etc/modprobe.d/<module>.conf`.
+- Writing `pages_limit` requires root and a reboot to take effect.
+  `dracut -f` is invoked automatically when available so that the change
+  is picked up by the initramfs.
+
+### amdsmi_get_ttm_info
+
+**Note:** This is a kernel UAPI feature (modprobe.d), not libdrm.
+
+Description: Get Translation Table Manager (TTM) memory information. TTM manages shared memory (GTT) between CPU and GPU. This is a system-wide setting, not per-GPU.
+
+Input parameters: None
+
+Output: Dictionary with fields:
+
+Field | Description
+---|---
+`current_pages` | Current TTM pages limit
+
+Exceptions that can be thrown by `amdsmi_get_ttm_info` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    info = amdsmi.amdsmi_get_ttm_info()
+    print(f"Current TTM pages limit: {info['current_pages']}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_ttm_pages_limit
+
+**Note:** This is a kernel UAPI feature (modprobe.d), not libdrm.
+
+Description: Set the TTM memory limit in pages. TTM manages shared memory (GTT) between CPU and GPU. This is a system-wide setting. A system reboot is required for the change to take effect.
+
+Input parameters:
+
+* `pages` number of pages to set as TTM limit
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_ttm_pages_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    # Set TTM limit to 1048576 pages (4 GB with 4K pages)
+    amdsmi.amdsmi_set_ttm_pages_limit(1048576)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_reset_ttm_pages_limit
+
+**Note:** This is a kernel UAPI feature (modprobe.d), not libdrm.
+
+Description: Reset the TTM memory limit to the system default. This is a system-wide setting. A system reboot is required for the change to take effect.
+
+Input parameters: None
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_reset_ttm_pages_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    amdsmi.amdsmi_reset_ttm_pages_limit()
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_accelerator_partition_profile
+
+**Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
+
+Description: Get partition information for target device
+
+Input parameters:
+
+* `processor_handle` the device handle
+
+Output:  Dictionary with fields:
+
+Field | Description
+---|---
+`partition_id` | ID of the partition on the GPU provided
+`partition_profile` | Dict containing partition data (TBD)
+
+Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_profile` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            partition_id = amdsmi.amdsmi_get_gpu_accelerator_partition_profile(device)["partition_id"]
+            print(partition_id)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_xgmi_info
+
+Description: Returns XGMI information for the GPU.
+
+Input parameters:
+
+* `processor_handle`  device handle
+
+Output:  Dictionary with fields:
+
+Field | Description
+---|---
+`xgmi_lanes` |  xgmi lanes
+`xgmi_hive_id` | xgmi hive id
+`xgmi_node_id` | xgmi node id
+`index` | index
+
+Exceptions that can be thrown by `amdsmi_get_xgmi_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            xgmi_info = amdsmi.amdsmi_get_xgmi_info(device)
+            print(xgmi_info['xgmi_lanes'])
+            print(xgmi_info['xgmi_hive_id'])
+            print(xgmi_info['xgmi_node_id'])
+            print(xgmi_info['index'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_link_topology_nearest
+
+Description: Retrieve the set of GPUs that are nearest to a given device
+             at a specific interconnectivity level.
+
+Input parameters:
+* `processor_handle` The identifier of the given device.
+* `link_type` The AmdSmiLinkType level to search for nearest devices
+
+Output: Dictionary holding the following fields.
+* `processor_list` list of all nearest device handlers found
+
+
+Exceptions that can be thrown by `amdsmi_get_link_topology_nearest` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs found on machine")
+        exit()
+    else:
+        print(amdsmi.amdsmi_get_gpu_device_uuid(devices[0]))
+
+    nearest_gpus = amdsmi.amdsmi_get_link_topology_nearest(devices[0], amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE)
+    if (len(nearest_gpus['processor_list'])) == 0:
+        print("No nearest GPUs found on machine")
+    else:
+        print("Nearest GPUs")
+        for gpu in nearest_gpus['processor_list']:
+            print(amdsmi.amdsmi_get_gpu_device_uuid(gpu))
+
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+
+### amdsmi_get_gpu_virtualization_mode
+
+Description: Retrieve the virtualization mode for the selected GPU.
+
+Input parameters:
+* `processor_handle` The identifier of the given device.
+
+Output: Dictionary holding the following fields.
+* `mode` AmdSmiVirtualizationMode; an IntEnum denoting the possible virtualization modes
+Field | Description
+---|---
+`UNKNOWN` | Virtualization mode not detected
+`BAREMETAL` | Baremetal platform detected
+`HOST` | Host/Hypervisor platform detected
+`GUEST` | Guest/Virtual Machine detected
+`PASSTHROUGH` | GPU Passthrough mode detected
+
+Exceptions that can be thrown by `amdsmi_get_gpu_virtualization_mode` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    device_handles = amdsmi.amdsmi_get_processor_handles()
+    for device in device_handles:
+        virtualization_info = amdsmi.amdsmi_get_gpu_virtualization_mode(device)
+        print(virtualization_info['mode'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_affinity_with_scope
+
+Description: Returns list of bitmask information for the given GPU.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: List with fields
+
+Field | Description
+---|---
+`array_size` |  array size = (num of sockets * num of cores)/ size of 64-bit
+`scope` | enum value for numa or socket affinity
+
+Exceptions that can be thrown by `amdsmi_get_gpu_vram_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_FOUND` - Device Not found
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        scope = amdsmi.AmdSmiAffinityScope.NUMA_SCOPE
+        scope = amdsmi.AmdSmiAffinityScope.SOCKET_SCOPE
+        for device in devices:
+            bitmask = amdsmi.amdsmi_get_cpu_affinity_with_scope(device, scope)
+            print(bitmask['size'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+## CPU APIs
+
+### amdsmi_get_cpu_hsmp_proto_ver
+
+Description: Get the hsmp protocol version.
+
+Output: amdsmi hsmp protocol version
+
+Exceptions that can be thrown by `amdsmi_get_cpu_hsmp_proto_ver` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            version = amdsmi.amdsmi_get_cpu_hsmp_proto_ver(processor)
+            print(version)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_threads_per_core
+
+Description: Get number of threads per core.
+
+Output: cpu family
+
+Exceptions that can be thrown by `amdsmi_get_cpu_family` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    threads_per_core = amdsmi.amdsmi_get_threads_per_core()
+    print(threads_per_core)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_hsmp_driver_version
+
+Description: Get the HSMP Driver version.
+
+Output: amdsmi HSMP Driver version
+
+Exceptions that can be thrown by `amdsmi_get_cpu_hsmp_driver_version` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            version = amdsmi.amdsmi_get_cpu_hsmp_driver_version(processor)
+            print(version)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_smu_fw_version
+
+Description: Get the SMU Firmware version.
+
+Output: amdsmi SMU Firmware version
+
+Exceptions that can be thrown by `amdsmi_get_cpu_smu_fw_version` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            version = amdsmi.amdsmi_get_cpu_smu_fw_version(processor)
+            print(version)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_prochot_status
+
+Description: Get the CPU's prochot status.
+
+Output: amdsmi cpu prochot status
+
+Exceptions that can be thrown by `amdsmi_get_cpu_prochot_status` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            prochot = amdsmi.amdsmi_get_cpu_prochot_status(processor)
+            print(prochot)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_fclk_mclk
+
+Description: Get the Data fabric clock and Memory clock in MHz.
+
+Output: amdsmi data fabric clock and memory clock
+
+Exceptions that can be thrown by `amdsmi_get_cpu_fclk_mclk` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            clk = amdsmi.amdsmi_get_cpu_fclk_mclk(processor)
+            for fclk, mclk in clk.items():
+                print(fclk)
+                print(mclk)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_cclk_limit
+
+Description: Get the core clock in MHz.
+
+Output: amdsmi core clock
+
+Exceptions that can be thrown by `amdsmi_get_cpu_cclk_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            cclk_limit = amdsmi.amdsmi_get_cpu_cclk_limit(processor)
+            print(cclk_limit)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_socket_current_active_freq_limit
+
+Description: Get current active frequency limit of the socket.
+
+Output: amdsmi frequency value in MHz and frequency source name
+
+Exceptions that can be thrown by `amdsmi_get_cpu_socket_current_active_freq_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            freq_limit = amdsmi.amdsmi_get_cpu_socket_current_active_freq_limit(processor)
+            for freq, src in freq_limit.items():
+                print(freq)
+                print(src)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_socket_freq_range
+
+Description: Get socket frequency range
+
+Output: amdsmi maximum frequency and minimum frequency
+
+Exceptions that can be thrown by `amdsmi_get_cpu_socket_freq_range` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            freq_range = amdsmi.amdsmi_get_cpu_socket_freq_range(processor)
+            for fmax, fmin in freq_range.items():
+                print(fmax)
+                print(fmin)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_core_current_freq_limit
+
+Description: Get socket frequency limit of the core
+
+Output: amdsmi frequency
+
+Exceptions that can be thrown by `amdsmi_get_cpu_core_current_freq_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    processor_handles = amdsmi.amdsmi_get_cpucore_handles()
+    if len(processor_handles) == 0:
+        print("No CPU cores on machine")
+    else:
+        for processor in processor_handles:
+            freq_limit = amdsmi.amdsmi_get_cpu_core_current_freq_limit(processor)
+            print(freq_limit)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_socket_power
+
+Description: Get the socket power.
+
+Output: amdsmi socket power
+
+Exceptions that can be thrown by `amdsmi_get_cpu_socket_power` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            sock_power = amdsmi.amdsmi_get_cpu_socket_power(processor)
+            print(sock_power)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_socket_power_cap
+
+Description: Get the socket power cap.
+
+Output: amdsmi socket power cap
+
+Exceptions that can be thrown by `amdsmi_get_cpu_socket_power_cap` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            sock_power = amdsmi.amdsmi_get_cpu_socket_power_cap(processor)
+            print(sock_power)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_socket_power_cap_max
+
+Description: Get the socket power cap max.
+
+Output: amdsmi socket power cap max
+
+Exceptions that can be thrown by `amdsmi_get_cpu_socket_power_cap_max` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            sock_power = amdsmi.amdsmi_get_cpu_socket_power_cap_max(processor)
+            print(sock_power)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_pwr_svi_telemetry_all_rails
+
+Description: Get the SVI based power telemetry for all rails.
+
+Output: amdsmi svi based power value
+
+Exceptions that can be thrown by `amdsmi_get_cpu_pwr_svi_telemetry_all_rails` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            power = amdsmi.amdsmi_get_cpu_pwr_svi_telemetry_all_rails(processor)
+            print(power)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_socket_power_cap
+
+Description: Set the power cap value for a given socket.
+
+Input: amdsmi socket power cap value
+
+Exceptions that can be thrown by `amdsmi_set_cpu_socket_power_cap` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            power = amdsmi.amdsmi_set_cpu_socket_power_cap(processor, 1000)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_pwr_efficiency_mode
+
+Description: Set the power efficiency profile policy.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to configure
+- `power_efficiency_mode` (int): Power efficiency mode to be set (0-5):
+- `utilization` (int, optional): Utilization for balanced core modes (0-100)(%).
+                          Valid only if mode is 4 or 5 and Family 1Ah Models 50h-57h onwards
+- `ppt_limit` (int, optional): PPT limit in mW. Valid only if mode is 4 or 5 and Family 1Ah Models 50h-57h onwards
+
+Output: Dictionary containing the power efficiency mode information:
+- `power_efficiency_mode` (int): Mode value
+- `utilization` (int): Utilization point for balanced core modes (0-100)(%), if applicable
+- `ppt_limit` (int): PPT Limit value in Watts if applicable
+
+Exceptions that can be thrown by `amdsmi_set_cpu_pwr_efficiency_mode` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                # This has been tested on CPU family 0x1A model 0x50, so with power efficiency mode 4 , utilization and ppt limit are valid
+                power_efficiency_mode = 4    # Use mode
+                utilization = 100      # Use Util 100%
+                ppt_limit = 1000  # Use PPT Limit 1000 mW
+                updated_util, updated_ppt_limit = amdsmi.amdsmi_set_cpu_pwr_efficiency_mode(processor, power_efficiency_mode, utilization, ppt_limit)
+                ppt_limit_watts = updated_ppt_limit/1000.0  # Convert milliwatts to watts
+                print(f"CPU: {i}")
+                print(f"    PWR_EFF_MODE:")
+                print(f"        MODE: {power_efficiency_mode}")
+                # Only show utilization and ppt_limit for modes 4 and 5
+                if power_efficiency_mode in [4, 5]:
+                    print(f"        UTIL: {updated_util}%")
+                    print(f"        PPT_LIMIT: {ppt_limit_watts:.3f} Watts")
+                    print()
+                else:
+                    # For power efficiency mode 0-3, utilization and ppt_limit are not displayed
+                    pass
+                print(f"        RESPONSE: Set power efficiency mode operation successful")
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to set power efficiency mode for CPU {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_pwr_efficiency_mode
+
+Description: Get the power efficiency profile policy. This function retrieves the CPU Power efficiency mode.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to configure
+
+Output: Dictionary containing the power efficiency mode information:
+- `power_efficiency_mode` (int): Power efficiency mode (0-5):
+- `utilization` (int, optional): Utilization point for balanced core modes (0-100)(%).
+                          Valid only if mode is set as 4 or 5 and Family 1Ah Models 50h-57h onwards
+- `ppt_limit` (int, optional): PPT limit in Watts. Valid only if mode is set as 4 or 5 and Family 1Ah Models 50h-57h onwards
+
+Exceptions that can be thrown by `amdsmi_get_cpu_pwr_efficiency_mode` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                # This has been tested on CPU family 0x1A model 0x50, so with mode 4 , utilization and ppt limit are valid
+                power_efficiency_mode, utilization, ppt_limit = amdsmi.amdsmi_get_cpu_pwr_efficiency_mode(processor)
+                print(f"CPU: {i}")
+                print(f"    PWR_EFF_MODE:")
+                print(f"        MODE: {power_efficiency_mode}")
+                # Only show utilization and ppt_limit for modes 4 and 5
+                if power_efficiency_mode in [4, 5]:
+                    print(f"        UTIL: {utilization}%")
+                    print(f"        PPT_LIMIT: {ppt_limit} Watts")
+                    print()
+                else:
+                    # For modes 0-3, utilization and ppt_limit are not displayed
+                    pass
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to get power efficiency mode for CPU {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_core_boostlimit
+
+Description: Get boost limit of the cpu core
+
+Output: amdsmi frequency
+
+Exceptions that can be thrown by `amdsmi_get_cpu_core_boostlimit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    processor_handles = amdsmi.amdsmi_get_cpucore_handles()
+    if len(processor_handles) == 0:
+        print("No CPU cores on machine")
+    else:
+        for processor in processor_handles:
+            boost_limit = amdsmi.amdsmi_get_cpu_core_boostlimit(processor)
+            print(boost_limit)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_socket_c0_residency
+
+Description: Get the cpu socket C0 residency.
+
+Output: amdsmi C0 residency value
+
+Exceptions that can be thrown by `amdsmi_get_cpu_socket_c0_residency` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            c0_residency = amdsmi.amdsmi_get_cpu_socket_c0_residency(processor)
+            print(c0_residency)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_core_boostlimit
+
+Description: Set the cpu core boost limit.
+
+Output: amdsmi boostlimit value
+
+Exceptions that can be thrown by `amdsmi_set_cpu_core_boostlimit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    processor_handles = amdsmi.amdsmi_get_cpucore_handles()
+    if len(processor_handles) == 0:
+        print("No CPU cores on machine")
+    else:
+        for processor in processor_handles:
+            boost_limit = amdsmi.amdsmi_set_cpu_core_boostlimit(processor, 1000)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_socket_boostlimit
+
+Description: Set the cpu socket boost limit.
+
+Input: amdsmi boostlimit value
+
+Exceptions that can be thrown by `amdsmi_set_cpu_socket_boostlimit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            boost_limit = amdsmi.amdsmi_set_cpu_socket_boostlimit(processor, 1000)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_ddr_bw
+
+Description: Get the CPU DDR Bandwidth.
+
+Output: amdsmi ddr bandwidth data
+
+Exceptions that can be thrown by `amdsmi_get_cpu_ddr_bw` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            ddr_bw = amdsmi.amdsmi_get_cpu_ddr_bw(processor)
+            print(ddr_bw['max_bw'])
+            print(ddr_bw['utilized_bw'])
+            print(ddr_bw['utilized_pct'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_socket_temperature
+
+Description: Get the socket temperature.
+
+Output: amdsmi temperature value
+
+Exceptions that can be thrown by `amdsmi_get_cpu_socket_temperature` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            ptmon = amdsmi.amdsmi_get_cpu_socket_temperature(processor)
+            print(ptmon)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_dimm_temp_range_and_refresh_rate
+
+Description: Get DIMM temperature range and refresh rate.
+
+Output: amdsmi dimm metric data
+
+Exceptions that can be thrown by `amdsmi_get_cpu_dimm_temp_range_and_refresh_rate` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    dimm_addr =0
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            dimm = amdsmi.amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(processor, dimm_addr)
+            print(dimm)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_dimm_power_consumption
+
+Description: amdsmi_get_cpu_dimm_power_consumption.
+
+Output: amdsmi dimm power consumption value
+
+Exceptions that can be thrown by `amdsmi_get_cpu_dimm_power_consumption` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    dimm_addr = 0
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            dimm = amdsmi.amdsmi_get_cpu_dimm_power_consumption(processor, dimm_addr)
+            print(dimm['power'])
+            print(dimm['update_rate'])
+            print(dimm['dimm_addr'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_dimm_thermal_sensor
+
+Description: Get DIMM thermal sensor value.
+
+Output: amdsmi dimm temperature data
+
+Exceptions that can be thrown by `amdsmi_get_cpu_dimm_thermal_sensor` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    dimm_addr = 0
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            dimm = amdsmi.amdsmi_get_cpu_dimm_thermal_sensor(processor,dimm_addr)
+            print(dimm['sensor'])
+            print(dimm['update_rate'])
+            print(dimm['dimm_addr'])
+            print(dimm['temp'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_xgmi_width
+
+Description:  Set xgmi width.
+
+Input: amdsmi xgmi width
+
+Exceptions that can be thrown by `amdsmi_set_cpu_xgmi_width` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            xgmi_width = amdsmi.amdsmi_set_cpu_xgmi_width(processor, 0, 100)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_gmi3_link_width_range
+
+Description:  Set gmi3 link width range.
+
+Input: minimum & maximum link width to be set.
+
+Exceptions that can be thrown by `amdsmi_set_cpu_gmi3_link_width_range` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            gmi_link_width = amdsmi.amdsmi_set_cpu_gmi3_link_width_range(processor, 0, 100)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_cpu_apb_enable
+
+Description:  Enable APB.
+
+Input: amdsmi processor handle
+
+Exceptions that can be thrown by `amdsmi_cpu_apb_enable` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            apb_enable = amdsmi.amdsmi_cpu_apb_enable(processor)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_cpu_apb_disable
+
+Description:  Disable APB.
+
+Input: pstate value
+
+Exceptions that can be thrown by `amdsmi_cpu_apb_disable` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            apb_disable = amdsmi.amdsmi_cpu_apb_disable(processor, 0)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_socket_lclk_dpm_level
+
+Description:  Set NBIO lclk dpm level value.
+
+Input: nbio id, min value, max value
+
+Exceptions that can be thrown by `amdsmi_set_cpu_socket_lclk_dpm_level` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for socket in socket_handles:
+            nbio = amdsmi.amdsmi_set_cpu_socket_lclk_dpm_level(socket, 0, 0, 2)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_socket_lclk_dpm_level
+
+Description: Get NBIO LCLK dpm level.
+
+Output: nbio id
+
+Exceptions that can be thrown by `amdsmi_get_cpu_socket_lclk_dpm_level` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            nbio = amdsmi.amdsmi_get_cpu_socket_lclk_dpm_level(processor, 0)
+            print(nbio['nbio_max_dpm_level'])
+            print(nbio['nbio_max_dpm_level'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_pcie_link_rate
+
+Description:  Set pcie link rate.
+
+Input: rate control value
+
+Exceptions that can be thrown by `amdsmi_set_cpu_pcie_link_rate` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            link_rate = amdsmi.amdsmi_set_cpu_pcie_link_rate(processor, 0)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_df_pstate_range
+
+Description:  Set df pstate range.
+
+Input: max pstate, min pstate
+
+Exceptions that can be thrown by `amdsmi_set_cpu_df_pstate_range` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            pstate_range = amdsmi.amdsmi_set_cpu_df_pstate_range(processor, 0, 2)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_current_io_bandwidth
+
+Description: Get current input output bandwidth.
+
+Output: link id and bw type to which io bandwidth to be obtained
+
+Exceptions that can be thrown by `amdsmi_get_cpu_current_io_bandwidth` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            io_bw = amdsmi.amdsmi_get_cpu_current_io_bandwidth(processor)
+            print(io_bw)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_current_xgmi_bw
+
+Description: Get current xgmi bandwidth.
+
+Output: amdsmi link id and bw type to which xgmi bandwidth to be obtained
+
+Exceptions that can be thrown by `amdsmi_get_cpu_current_xgmi_bw` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        encoding = 0
+        link_name = "P0"
+        for processor in processor_handles:
+            xgmi_bw = amdsmi.amdsmi_get_cpu_current_xgmi_bw(processor, encoding, link_name)
+            print(xgmi_bw)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_hsmp_metrics_table_version
+
+Description: Get HSMP metrics table version.
+
+Output: amdsmi HSMP metrics table version
+
+Exceptions that can be thrown by `amdsmi_get_hsmp_metrics_table_version` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            met_ver = amdsmi.amdsmi_get_hsmp_metrics_table_version(processor)
+            print(met_ver)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_hsmp_metrics_table
+
+Description: Get HSMP metrics table
+
+Output: HSMP metric table data
+
+Exceptions that can be thrown by `amdsmi_get_hsmp_metrics_table` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            mtbl = amdsmi.amdsmi_get_hsmp_metrics_table(processor)
+            print(mtbl['accumulation_counter'])
+            print(mtbl['max_socket_temperature'])
+            print(mtbl['max_vr_temperature'])
+            print(mtbl['max_hbm_temperature'])
+            print(mtbl['socket_power_limit'])
+            print(mtbl['max_socket_power_limit'])
+            print(mtbl['socket_power'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_first_online_core_on_cpu_socket
+
+Description: Get first online core on cpu socket.
+
+Output: first online core on cpu socket
+
+Exceptions that can be thrown by `amdsmi_first_online_core_on_cpu_socket` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            pcore_ind = amdsmi.amdsmi_first_online_core_on_cpu_socket(processor)
+            print(pcore_ind)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_family
+
+Description: Get cpu family.
+
+Output: cpu family
+
+Exceptions that can be thrown by `amdsmi_get_cpu_family` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_family = amdsmi.amdsmi_get_cpu_family()
+    print(cpu_family)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_model
+
+Description: Get cpu model.
+
+Output: cpu model
+
+Exceptions that can be thrown by `amdsmi_get_cpu_model` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_model = amdsmi.amdsmi_get_cpu_model()
+    print(cpu_model)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_model_name
+
+Description: Get cpu model name.
+
+Output: cpu model name
+
+Exceptions that can be thrown by `amdsmi_get_cpu_model_name` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles: 
+            cpu_model_name = amdsmi.amdsmi_get_cpu_model_name(processor)
+            print(cpu_model_name)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+## No amdsmi_init APIs
+
+### amdsmi_get_lib_version
+
+Description: Get the build version information for the currently running build of AMDSMI. This function doesn't require amdsmi library init.
+
+Output: amdsmi build version
+
+Exceptions that can be thrown by `amdsmi_get_lib_version` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    version = amdsmi.amdsmi_get_lib_version()
+    print(version)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_rocm_version
+
+Description: This function attempts to retrieve the ROCm version by loading the `librocm-core.so` shared library. This function doesn't require amdsmi library init.
+
+Output: Tuple (bool, str) containing rocm_load_status and version_message
+
+Exceptions that can be thrown by `amdsmi_get_rocm_version` function:
+
+* `AmdSmiLibraryException`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    rocm_load_status, version_message = amdsmi.amdsmi_get_rocm_version()
+    print(f"ROCm load status: {rocm_load_status}")
+    print(f"ROCm version msg: {version_message}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_xgmi_pstate_range
+
+Description: Set the Min and Max XGMI PState Range. This API configures the XGMI P-State frequency range for the specified processor socket.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to configure
+- `min_pstate` (int): Minimum XGMI P-State value
+- `max_pstate` (int): Maximum XGMI P-State value
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_cpu_xgmi_pstate_range` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- 'AMDSMI_STATUS_NO_PERM' - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                min_pstate = 1
+                max_pstate = 1
+                amdsmi.amdsmi_set_cpu_xgmi_pstate_range(processor, min_pstate, max_pstate)
+                print(f"CPU: {i}")
+                print(f"    XGMI_PSTATE_RANGE:")
+                print(f"        RESPONSE: Set, MIN_PSTATE: {min_pstate}, MAX_PSTATE: {max_pstate}, successful")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to set xgmi pstate range for cpu {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_xgmi_pstate_range
+
+Description: Get the Min and Max XGMI PState Range. This API retrieves the current XGMI P-State range configuration for the specified processor socket.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Dictionary containing XGMI PState range values:
+    - `min_pstate`: Current minimum XGMI P-State setting
+    - `max_pstate`: Current maximum XGMI P-State setting
+
+Exceptions that can be thrown by `amdsmi_get_cpu_xgmi_pstate_range` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                pstate_range = amdsmi.amdsmi_get_cpu_xgmi_pstate_range(processor)
+
+                print(f"CPU: {i}")
+                print(f"    XGMI_PSTATE_RANGE:")
+                print(f"        MIN_PSTATE: {pstate_range['min_pstate']}")
+                print(f"        MAX_PSTATE: {pstate_range['max_pstate']}")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to get XGMI PState range for CPU {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_rail_isofreq_policy
+
+Description: Set the CPU Rail Isofrequency Policy. This function configures the frequency policy for CPU power rails.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `value` (int): Input policy value indicating the isofrequency setting:
+    - 0: Independent control enabled (each rail has an independent frequency limit)
+    - 1: Independent control disabled (all cores on both rails or each rail - have the same frequency limit)
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_cpu_rail_isofreq_policy` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- 'AMDSMI_STATUS_NO_PERM' - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                value = 1
+                amdsmi.amdsmi_set_cpu_rail_isofreq_policy(processor, value)
+                print(f"CPU: {i}")
+                print(f"    RAILISOFREQ_POLICY:")
+                print(f"        RESPONSE: Set, VALUE: {value}, successful")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to set cpurailiso frequency policy for cpu {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_rail_isofreq_policy
+
+Description: Get the CPU Rail Isofrequency Policy. This function retrieves the current frequency policy configuration for CPU power rails.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the CPU rail isofrequency policy:
+    - 0: Independent control enabled (each rail has an independent frequency limit)
+    - 1: Independent control disabled (all cores on both rails or each rail - have the same frequency limit)
+
+Exceptions that can be thrown by `amdsmi_get_cpu_rail_isofreq_policy` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                cpurailisofreq_policy = amdsmi.amdsmi_get_cpu_rail_isofreq_policy(processor)
+                print(f"CPU: {i}")
+                print(f"    RAILISOFREQ_POLICY:")
+                print(f"        VALUE: {cpurailisofreq_policy}")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to get cpurailiso frequency policy for cpu {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_dfc_ctrl
+
+Description: Set the DFCState enabling control. DFCState is a low power state used for I/O Die (IOD).
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `value` (int): DFCState control value:
+  - 0: Disable DFCState control
+  - 1: Enable DFCState control
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_cpu_dfc_ctrl` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- 'AMDSMI_STATUS_NO_PERM' - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                value = 1
+                amdsmi.amdsmi_set_cpu_dfc_ctrl(processor, value)
+                print(f"CPU: {i}")
+                print(f"    DFCSTATE_CTRL:")
+                print(f"        RESPONSE: Set, VALUE: {value}, successful")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to set dfcstate control status for cpu {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_dfc_ctrl
+
+Description: Get the current DFCState enabling control status. DFCState is a low power state used for I/O Die (IOD).
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the DFCState control status:
+    - 0: DFCState control is disabled
+    - 1: DFCState control is enabled
+
+Exceptions that can be thrown by `amdsmi_get_cpu_dfc_ctrl` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                dfcstatectrl_status = amdsmi.amdsmi_get_cpu_dfc_ctrl(processor)
+
+                print(f"CPU: {i}")
+                print(f"    DFCSTATE_CTRL:")
+                print(f"        VALUE: {dfcstatectrl_status}")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to get dfcstate control status for cpu {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_pc6_enable
+
+Description: Set the PC6 (Package C6) enable state. PC6 is a low power state used for package-level power management.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `value` (int): PC6 enable state value:
+  - 0: Disable PC6 state
+  - 1: Enable PC6 state
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_cpu_pc6_enable` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- 'AMDSMI_STATUS_NO_PERM' - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                value = 1
+                amdsmi.amdsmi_set_cpu_pc6_enable(processor, value)
+                print(f"CPU: {i}")
+                print(f"    PC6_ENABLE:")
+                print(f"        RESPONSE: Set, VALUE: {value}, successful")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to set PC6 enable status for cpu {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_pc6_enable
+
+Description: Get the current PC6 (Package C6) enable state. PC6 is a low power state used for package-level power management.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the PC6 enable state:
+    - 0: PC6 state is disabled
+    - 1: PC6 state is enabled
+
+Exceptions that can be thrown by `amdsmi_get_cpu_pc6_enable` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                pc6_enable_status = amdsmi.amdsmi_get_cpu_pc6_enable(processor)
+
+                print(f"CPU: {i}")
+                print(f"    PC6_ENABLE:")
+                print(f"        VALUE: {pc6_enable_status}")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to get PC6 enable status for cpu {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_cc6_enable
+
+Description: Set the CC6 (Core C6) enable state. CC6 is a low power state used for CPU core-level power management.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `value` (int): CC6 enable state value:
+  - 0: Disable CC6 state
+  - 1: Enable CC6 state
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_cpu_cc6_enable` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- 'AMDSMI_STATUS_NO_PERM' - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                value = 1
+                amdsmi.amdsmi_set_cpu_cc6_enable(processor, value)
+                print(f"CPU: {i}")
+                print(f"    CC6_ENABLE:")
+                print(f"        RESPONSE: Set, VALUE: {value}, successful")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to set CC6 enable status for cpu {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_cc6_enable
+
+Description: Get the current CC6 (Core C6) enable state. CC6 is a low power state used for CPU core-level power management.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the CC6 enable state:
+    - 0: CC6 state is disabled
+    - 1: CC6 state is enabled
+
+Exceptions that can be thrown by `amdsmi_get_cpu_cc6_enable` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                cc6_enable_status = amdsmi.amdsmi_get_cpu_cc6_enable(processor)
+                print(f"CPU: {i}")
+                print(f"    CC6_ENABLE:")
+                print(f"        VALUE: {cc6_enable_status}")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to get CC6 enable status for cpu {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_dimm_sb_reg
+
+Description: Read data from DIMM sideband register using JEDEC Sideband Bus protocol. This API executes a four-byte read transaction at a specified register offset in a designated device on the target DIMM.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `dimm_addr` (int): DIMM address identifier
+- `lid` (int): Local Identifier (LID) for the device on DIMM:
+  - 0x2: TS0 (Thermal Sensor 0)
+  - 0x6: TS1 (Thermal Sensor 1)
+  - 0xA: SPD Hub
+- `reg_offset` (int): Register offset within the specified register space (hexadecimal)
+- `reg_space` (int): Register space selector:
+  - 0: Volatile register space
+  - 1: Non-volatile memory (NVM) register space
+
+Output: Integer representing the 4-byte data read from the register
+
+Exceptions that can be thrown by `amdsmi_get_cpu_dimm_sb_reg` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                # Read from DIMM sideband register (SPD Hub, volatile space)
+                dimm_addr = 0x87  # Example DIMM address
+                lid = 0xA         # SPD Hub
+                reg_offset = 0x00 # Register offset
+                reg_space = 1     # Volatile register space
+                data = amdsmi.amdsmi_get_cpu_dimm_sb_reg(processor, dimm_addr, lid, reg_offset, reg_space)
+                print(f"CPU: {i}")
+                print(f"    DIMM_SB_REG:")
+                print(f"        DIMMADDRESS: 0x{dimm_addr:X}")
+                print(f"        LID: 0x{lid:X}")
+                print(f"        OFFSET: 0x{reg_offset:X}")
+                print(f"        REGSPACE: 0x{reg_space:X}")
+                print(f"        DATA: 0x{data:X}")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to read DIMM sideband register for cpu {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_dimm_sb_reg
+
+Description: Write data to DIMM sideband register using JEDEC Sideband Bus protocol. This API executes a four-byte write transaction at a specified register offset in a designated device on the target DIMM.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `dimm_addr` (int): DIMM address identifier
+- `lid` (int): Local Identifier (LID) for the device on DIMM:
+  - 0x2: TS0 (Thermal Sensor 0)
+  - 0x6: TS1 (Thermal Sensor 1)
+  - 0xA: SPD Hub
+- `reg_offset` (int): Register offset within the specified register space (hexadecimal)
+- `reg_space` (int): Register space selector:
+  - 0: Volatile register space
+  - 1: Non-volatile memory (NVM) register space
+- `write_data` (int): 4-byte data value to write to the target register (hexadecimal)
+
+Output: `True` on successful write operation
+
+Exceptions that can be thrown by `amdsmi_set_cpu_dimm_sb_reg` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- 'AMDSMI_STATUS_NO_PERM' - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                # Write to DIMM sideband register (SPD Hub, volatile space)
+                dimm_addr = 0x87  # Example DIMM address
+                lid = 0xA         # SPD Hub
+                reg_offset = 0x00 # Register offset
+                reg_space = 1     # Volatile register space
+                data = 0x12345678
+                amdsmi.amdsmi_set_cpu_dimm_sb_reg(processor, dimm_addr, lid, reg_offset, reg_space, data)
+                print(f"CPU: {i}")
+                print(f"    DIMM_SB_REG:")
+                print(f"        RESPONSE: Set, VALUE: 0x{data:X}, successful")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to write DIMM sideband register for cpu {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_core_ccd_power
+
+Description: Get the power consumption of a specific CCD (Core Complex Die) within a CPU socket. This function reads the average power consumed by the specified CCD.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `core0` (int): Core 0 CCD power to query
+
+Output: Integer representing the CCD power consumption in watts (W)
+
+Exceptions that can be thrown by `amdsmi_get_cpu_core_ccd_power` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    core_handles = amdsmi.amdsmi_get_cpucore_handles()
+    if len(core_handles) == 0:
+        print("No CPU cores on machine")
+    else:
+        core0 = core_handles[0]   # <-- pick core 0 explicitly
+        power = amdsmi.amdsmi_get_cpu_core_ccd_power(core0)
+        print("CPU: 0")
+        print("    CCD_POWER:")
+        print(f"        VALUE: {power} Watts")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_tdelta
+
+Description: Read the TDELTA value for a CPU socket.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the TDELTA value
+
+Exceptions that can be thrown by `amdsmi_get_cpu_tdelta` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                # Read TDELTA value
+                tdelta_value = amdsmi.amdsmi_get_cpu_tdelta(processor)
+                print(f"CPU: {i}")
+                print(f"    TDELTA:")
+                print(f"        VALUE: {tdelta_value}")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to read TDELTA for CPU {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_svi3_vr_controller_temp
+
+Description: Get the SVI3 VR temperature for a specific rail and index within a CPU socket. This function retrieves the SVI3 VR temperature for the CPU.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `rail_selection` (int): SVI3 Rail selection type:
+  - 0: HottestRail - Get temperature from the hottest rail
+  - 1: IndividualRail - Get temperature from a specific rail (requires rail_index)
+- `rail_index` (int, optional): Rail index (0-7) - Required only when rail_selection=1. Defaults to 0.
+
+Output: Dictionary containing the SVI3 VR controller temperature information:
+- `rail_selection` (int): SVI3 rail selection used
+- `rail_index` (int): SVI3 rail index used
+- `temperature` (float): Temperature value in degrees Celsius
+
+Exceptions that can be thrown by `amdsmi_get_cpu_svi3_vr_controller_temp` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                # Get SVI3 VR controller temperature with hardcoded values
+                rail_selection = 1  # Use rail selection 1
+                rail_index = 1      # Use rail index 1
+                vr_temp_info = amdsmi.amdsmi_get_cpu_svi3_vr_controller_temp(processor, rail_selection, rail_index)
+                print(f"CPU: {i}")
+                print(f"    SVI3_VR_CONTROLLER_TEMP:")
+                print(f"        RAIL_SELECTION: {vr_temp_info['rail_selection']}")
+                print(f"        RAIL_INDEX: {vr_temp_info['rail_index']}")
+                print(f"        TEMPERATURE: {vr_temp_info['temperature']:.1f} 'C")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to get SVI3 VR controller temperature for CPU {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_enabled_commands
+
+Description: Get the enabled HSMP commands bitmasks for a specific CPU socket. This function retrieves both read and write HSMP enabled commands.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Dictionary containing the following keys:
+- `ReadEnabledCommandsBitMask0` (int): Bitmask of enabled read commands (bits 0-31)
+- `ReadEnabledCommandsBitMask1` (int): Bitmask of enabled read commands (bits 32-63)
+- `ReadEnabledCommandsBitMask2` (int): Bitmask of enabled read commands (bits 64-95)
+- `WriteEnabledCommandsBitMask0` (int): Bitmask of enabled write commands (bits 0-31)
+- `WriteEnabledCommandsBitMask1` (int): Bitmask of enabled write commands (bits 32-63)
+- `WriteEnabledCommandsBitMask2` (int): Bitmask of enabled write commands (bits 64-95)
+
+Exceptions that can be thrown by `amdsmi_get_cpu_enabled_commands` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                # Get enabled commands bitmasks
+                enabled_cmds = amdsmi.amdsmi_get_cpu_enabled_commands(processor)
+                print(f"CPU: {i}")
+                print(f"    ENABLED_COMMANDS:")
+                print(f"        READ_ENABLED_COMMANDS_BITMASK0: 0x{enabled_cmds['ReadEnabledCommandsBitMask0']:08X}")
+                print(f"        READ_ENABLED_COMMANDS_BITMASK1: 0x{enabled_cmds['ReadEnabledCommandsBitMask1']:08X}")
+                print(f"        READ_ENABLED_COMMANDS_BITMASK2: 0x{enabled_cmds['ReadEnabledCommandsBitMask2']:08X}")
+                print(f"        WRITE_ENABLED_COMMANDS_BITMASK0: 0x{enabled_cmds['WriteEnabledCommandsBitMask0']:08X}")
+                print(f"        WRITE_ENABLED_COMMANDS_BITMASK1: 0x{enabled_cmds['WriteEnabledCommandsBitMask1']:08X}")
+                print(f"        WRITE_ENABLED_COMMANDS_BITMASK2: 0x{enabled_cmds['WriteEnabledCommandsBitMask2']:08X}")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to get enabled commands for CPU {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_core_floor_freq_limit
+
+Description: Get the floor limit frequency for CPU cores.
+
+Input parameters:
+- `core0` (int): Core 0 index to query
+
+Output: Integer representing the core floor limit frequency in MHz for core 0
+
+Exceptions that can be thrown by `amdsmi_get_cpu_core_floor_freq_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    core_handles = amdsmi.amdsmi_get_cpucore_handles()
+    if len(core_handles) == 0:
+        print("No CPU Cores on machine")
+    else:
+        core0 = core_handles[0]   # <-- pick core 0 explicitly
+        # Get core floor limit for core 0
+        floor_limit = amdsmi.amdsmi_get_cpu_core_floor_freq_limit(core0)
+        print(f"CORE: 0")
+        print(f"    FLOOR_LIMIT:")
+        print(f"        VALUE: {floor_limit} MHz")
+        print()
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_core_eff_floor_freq_limit
+
+Description: Get the effective floor limit frequency for CPU core.
+
+Input parameters:
+- `core0` (amdsmi_processor_handle): CPU core handle to query
+
+Output: Integer representing the effective core floor limit frequency in MHz for core 0
+
+Exceptions that can be thrown by `amdsmi_get_cpu_core_eff_floor_freq_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    core_handles = amdsmi.amdsmi_get_cpucore_handles()
+    if len(core_handles) == 0:
+        print("No CPU cores on machine")
+    else:
+        core0 = core_handles[0]   # <-- pick core 0 explicitly
+        # Get core effective floor limit for core 0
+        eff_floor_limit = amdsmi.amdsmi_get_cpu_core_eff_floor_freq_limit(core0)
+        print(f"CORE: 0")
+        print(f"    EFF_FLOOR_LIMIT:")
+        print(f"        VALUE: {eff_floor_limit} MHz")
+        print()
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_floor_freq_limit
+
+Description: Get the floor limit frequency for a CPU socket.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the socket floor limit frequency in MHz
+
+Exceptions that can be thrown by `amdsmi_get_cpu_floor_freq_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            floor_limit = amdsmi.amdsmi_get_cpu_floor_freq_limit(processor)
+            print(f"CPU: {i}")
+            print(f"    FLOOR_LIMIT:")
+            print(f"        VALUE: {floor_limit} MHz")
+            print()
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_eff_floor_freq_limit
+
+Description: Get the effective floor limit frequency for a CPU socket.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the effective socket floor limit frequency in MHz
+
+Exceptions that can be thrown by `amdsmi_get_cpu_eff_floor_freq_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            eff_floor_limit = amdsmi.amdsmi_get_cpu_eff_floor_freq_limit(processor)
+            print(f"CPU: {i}")
+            print(f"    EFF_FLOOR_LIMIT:")
+            print(f"        VALUE: {eff_floor_limit} MHz")
+            print()
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_freq_range
+
+Description: Get the CPU socket frequency range. Returns the minimum and maximum frequency limits for CPU socket 0.
+
+Input parameters: None
+
+Output: Dictionary containing frequency range values:
+- `fmax` (int): Maximum frequency in MHz
+- `fmin` (int): Minimum frequency in MHz
+
+Exceptions that can be thrown by `amdsmi_get_cpu_freq_range` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    freq_range = amdsmi.amdsmi_get_cpu_freq_range()
+    print(f"CPU Frequency Range:")
+    print(f"    FMAX: {freq_range['fmax']} MHz")
+    print(f"    FMIN: {freq_range['fmin']} MHz")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_core_floor_freq_limit
+
+Description: Set the floor limit frequency for a specific CPU core.
+
+Input parameters:
+- `core0` (int): Core index to configure
+- `floor_limit` (int): Floor limit frequency value in MHz
+
+Exceptions that can be thrown by `amdsmi_set_cpu_core_floor_freq_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- 'AMDSMI_STATUS_NO_PERM' - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    core_handles = amdsmi.amdsmi_get_cpucore_handles()
+    if len(core_handles) == 0:
+        print("No CPU cores on machine")
+    else:
+        core0 = core_handles[0]   # <-- pick core 0 explicitly
+        floor_limit_value = 1200  # Set floor limit to 1200 MHz
+        amdsmi.amdsmi_set_cpu_core_floor_freq_limit(core0, floor_limit_value)
+        print(f"CORE: 0")
+        print(f"    FLOOR_LIMIT:")
+        print(f"        RESPONSE: Set, VALUE: {floor_limit_value} MHz, successful")
+        print()
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_floor_freq_limit
+
+Description: Set the CPU floor limit frequency for a CPU socket.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to configure
+- `floor_limit_value` (int): Floor limit frequency value in MHz
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_cpu_floor_freq_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- 'AMDSMI_STATUS_NO_PERM' - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                # Set CPU floor limit from 600 MHz to  4000 MHz
+                floor_limit_value = 1200
+                amdsmi.amdsmi_set_cpu_floor_freq_limit(processor, floor_limit_value)
+                print(f"CPU: {i}")
+                print(f"    FLOOR_LIMIT:")
+                print(f"        RESPONSE: Set, VALUE: {floor_limit_value} MHz, successful")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to set CPU floor limit for CPU {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_msr_floor_freq_limit
+
+Description: Set the CPU MSR floor limit frequency for a CPU socket.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to configure
+- `floor_limit` (int): MSR floor limit frequency value in MHz
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_cpu_msr_floor_freq_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- 'AMDSMI_STATUS_NO_PERM' - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                # Set CPU MSR floor limit to 1200 MHz
+                msr_floor_limit_value = 1200
+                amdsmi.amdsmi_set_cpu_msr_floor_freq_limit(processor, msr_floor_limit_value)
+                print(f"CPU: {i}")
+                print(f"    MSR_FLOOR_LIMIT:")
+                print(f"        RESPONSE: Set, VALUE: {msr_floor_limit_value} MHz, successful")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to set CPU MSR floor limit for CPU {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_core_msr_floor_freq_limit
+
+Description: Set the CPU core MSR floor limit frequency for a specific CPU core.
+
+Input parameters:
+- `core0` (int): Core 0 index to configure
+- `msr_floor_limit_value` (int): MSR floor limit frequency value in MHz
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_cpu_core_msr_floor_freq_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- 'AMDSMI_STATUS_NO_PERM' - Permission Denied
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    core_handles = amdsmi.amdsmi_get_cpucore_handles()
+    if len(core_handles) == 0:
+        print("No CPU cores on machine")
+    else:
+        core0 = core_handles[0]   # <-- pick core 0 explicitly
+        # Set MSR floor limit for core 0 only
+        msr_floor_limit_value = 1200  # Set MSR floor limit to 1200 MHz
+        amdsmi.amdsmi_set_cpu_core_msr_floor_freq_limit(core0, msr_floor_limit_value)
+        print(f"CORE: 0")
+        print(f"    MSR_FLOOR_LIMIT:")
+        print(f"        RESPONSE: Set, VALUE: {msr_floor_limit_value} MHz, successful")
+        print()
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_cpu_sdps_limit
+
+Description: Set the SDPS limit for a CPU socket. This function sets the socket SDPS power limit for the CPU socket.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to configure
+- `sdps_limit` (int): SDPS limit value in Watts
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_cpu_sdps_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                # Set CPU socket SDPS limit to 1000 mWatts
+                sdps_limit_value_mW = 1000
+                sdps_limit_watts = float(sdps_limit_value_mW) / 1000
+                amdsmi.amdsmi_set_cpu_sdps_limit(processor, sdps_limit_value_mW)
+                print(f"CPU: {i}")
+                print(f"    SDPS_LIMIT:")
+                print(f"        RESPONSE: Set, VALUE: {sdps_limit_watts} Watts, successful")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to set CPU socket SDPS limit for CPU {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_sdps_limit
+
+Description: Get the SDPS limit for a CPU socket. This function retrieves the current socket SDPS power limit for the CPU socket.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: int representing the SDPS limit value in Watts
+
+Exceptions that can be thrown by `amdsmi_get_cpu_sdps_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init(amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            try:
+                # Get CPU socket SDPS limit
+                sdps_limit = amdsmi.amdsmi_get_cpu_sdps_limit(processor)
+                print(f"CPU: {i}")
+                print(f"    SDPS_LIMIT:")
+                print(f"        VALUE: {sdps_limit}")
+                print()
+            except amdsmi.AmdSmiException as e:
+                print(f"Failed to get CPU socket SDPS limit for CPU {i}: {e}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```

@@ -1,7 +1,7 @@
 ################################################################################
 ##
-## Copyright (c) Advanced Micro Devices, Inc., or its affiliates. 
-## 
+## Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+##
 ## SPDX-License-Identifier: MIT
 ##
 ################################################################################
@@ -68,4 +68,3 @@ if len(sys.argv) > 1:
 
 else:
   print("Empty arguments!")
-  

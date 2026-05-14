@@ -59,7 +59,7 @@ set( PACKAGE_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}.
 set ( CPACK_GENERATOR "DEB;RPM" CACHE STRING "Package types to build")
 
 set ( PACKAGE_DIRECTORIES "hsa/lib")
-add_custom_command ( OUTPUT ${PACKAGE_DIRECTORIES} WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} COMMAND ${CMAKE_COMMAND} -E make_directory "hsa/lib" ) 
+add_custom_command ( OUTPUT ${PACKAGE_DIRECTORIES} WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} COMMAND ${CMAKE_COMMAND} -E make_directory "hsa/lib" )
 add_custom_target (create_dirs DEPENDS ${PACKAGE_DIRECTORIES} )
 
 set ( TOOLS_NAME     "libhsa-runtime-tools64" )

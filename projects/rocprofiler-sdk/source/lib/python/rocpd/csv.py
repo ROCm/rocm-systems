@@ -28,7 +28,6 @@ import re
 
 from .importer import RocpdImportData
 from .query import export_sqlite_query
-from .time_window import apply_time_window
 from . import output_config
 from . import libpyrocpd
 
@@ -214,8 +213,7 @@ def build_agent_id_string(agent_index_value, prefix=""):
         return ""
 
 
-def write_kernel_csv(importData, config) -> None:
-
+def get_kernel_csv_query(config) -> str:
     agent_id = build_agent_id_string(config.agent_index_value)
 
     if config.kernel_rename:
@@ -236,6 +234,7 @@ def write_kernel_csv(importData, config) -> None:
         "stack_id AS Correlation_Id",
         "start AS Start_Timestamp",
         "end AS End_Timestamp",
+        "(end - start) AS Duration",
         "lds_size AS Lds_Block_Size",
         "scratch_size",
         "vgpr_count",
@@ -249,19 +248,19 @@ def write_kernel_csv(importData, config) -> None:
         "grid_z AS Grid_Size_Z",
     ]
 
-    aliased_headers = []
-    for column in select_columns:
-        aliased_headers.append(column)
+    select_clause = ",\n".join(select_columns)
 
-    select_clause = ",\n".join(aliased_headers)
-
-    query = f"""
+    return f"""
         SELECT
             {select_clause}
         FROM "kernels"
         ORDER BY
             guid ASC, start ASC, end DESC
     """
+
+
+def write_kernel_csv(importData, config) -> None:
+    query = get_kernel_csv_query(config)
     write_sql_query_to_csv(importData, config, query, "kernel")
 
 
@@ -413,11 +412,7 @@ def write_csv(importData, config):
     write_scratch_memory_csv(importData, config)
 
 
-def execute(input, config=None, window_args=None, **kwargs):
-
-    importData = RocpdImportData(input)
-
-    apply_time_window(importData, **window_args)
+def execute(input, config=None, **kwargs):
 
     config = (
         output_config.output_config(**kwargs)
@@ -425,27 +420,23 @@ def execute(input, config=None, window_args=None, **kwargs):
         else config.update(**kwargs)
     )
 
-    write_csv(importData, config)
+    write_csv(input, config)
 
 
 def add_args(parser):
     """Add csv arguments."""
 
-    return []
+    def process_args(input, args):
+        ret = {}
+        return ret
 
-
-def process_args(args, valid_args):
-    ret = {}
-    return ret
+    return process_args
 
 
 def main(argv=None):
     import argparse
-    from .time_window import add_args as add_args_time_window
-    from .time_window import process_args as process_args_time_window
-    from .output_config import add_args as add_args_output_config
-    from .output_config import process_args as process_args_output_config
-    from .output_config import add_generic_args, process_generic_args
+    from . import time_window
+    from . import output_config
 
     parser = argparse.ArgumentParser(
         description="Convert rocPD to CSV files",
@@ -464,17 +455,21 @@ def main(argv=None):
         help="Input path and filename to one or more database(s), separated by spaces",
     )
 
-    valid_out_config_args = add_args_output_config(parser)
-    valid_generic_args = add_generic_args(parser)
-    valid_time_window_args = add_args_time_window(parser)
-    valid_csv_args = add_args(parser)
+    process_out_config_args = output_config.add_args(parser)
+    process_generic_args = output_config.add_generic_args(parser)
+    process_time_window_args = time_window.add_args(parser)
+    process_csv_args = add_args(parser)
 
     args = parser.parse_args(argv)
 
-    out_cfg_args = process_args_output_config(args, valid_out_config_args)
-    generic_out_cfg_args = process_generic_args(args, valid_generic_args)
-    window_args = process_args_time_window(args, valid_time_window_args)
-    csv_args = process_args(args, valid_csv_args)
+    input = RocpdImportData(
+        args.input, automerge_limit=getattr(args, "automerge_limit", None)
+    )
+
+    out_cfg_args = process_out_config_args(input, args)
+    generic_out_cfg_args = process_generic_args(input, args)
+    csv_args = process_csv_args(input, args)
+    process_time_window_args(input, args)
 
     all_args = {
         **out_cfg_args,
@@ -482,7 +477,7 @@ def main(argv=None):
         **csv_args,
     }
 
-    execute(args.input, window_args=window_args, **all_args)
+    execute(input, **all_args)
 
 
 if __name__ == "__main__":

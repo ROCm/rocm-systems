@@ -35,8 +35,8 @@ find_package(rocprofiler-sdk REQUIRED)
 # Checking whether stochastic PC sampling is disabled. If so, skip the tests.
 rocprofiler_sdk_pc_sampling_stochastic_disabled(IS_PC_SAMPLING_STOCHASTIC_DISABLED)
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
-                                                          input.json input.yml)
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 # To ensure we sample all agents, use 16 threads each assigned to one agent in a round
 # robin manner. To keep the job per device reasonable, each thread offloads 100 instances
@@ -44,165 +44,115 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 set(TRANSPOSE_NUM_THREADS 16)
 set(TRANSPOSE_NUM_ITERATIONS 100)
 
-add_test(
-    NAME rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-cmd-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-cmd
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-trace --pc-sampling-unit
-        cycles --pc-sampling-method stochastic --pc-sampling-interval 1048576 -d
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-trace --pc-sampling-unit cycles
+        --pc-sampling-method stochastic --pc-sampling-interval 1048576 -d
         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input -o out --output-format csv json
-        -- $<TARGET_FILE:transpose> ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS})
+        -- $<TARGET_FILE:transpose> ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS}
+    DEPENDS transpose
+    TIMEOUT 90
+    LABELS "integration-tests;pc-sampling;stochastic"
+    ENVIRONMENT "${PRELOAD_ENV}"
+    SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
+    FIXTURES_SETUP
+        rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-cmd
+    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-cmd
+    TEST_PATHS validate.py
+    COPY conftest.py input.json input.yml
+    CONFIG pytest.ini
+    ARGS -k
+         test_
+         --input-samples-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_pc_sampling_stochastic.csv
+         --input-samples-json
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_results.json
+         --input-kernel-trace-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_kernel_trace.csv
+         --input-agent-info-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_agent_info.csv
+    TIMEOUT 60
+    LABELS "integration-tests;pc-sampling;stochastic"
+    FIXTURES_REQUIRED
+        rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-cmd
+    SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
+    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
-set(pc-sampling-env-stochastic-transpose-multiple-agents "${PRELOAD_ENV}")
-
-set_tests_properties(
-    rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-cmd-execute
-    PROPERTIES TIMEOUT
-               90
-               LABELS
-               "integration-tests;pc-sampling;stochastic"
-               ENVIRONMENT
-               "${pc-sampling-env-stochastic-transpose-multiple-agents}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               SKIP_REGULAR_EXPRESSION
-               "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
-               DISABLED
-               "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
-
-add_test(
-    NAME rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-json-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-json
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.json -d
         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input -- $<TARGET_FILE:transpose>
-        ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS})
+        ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS}
+    DEPENDS transpose
+    TIMEOUT 90
+    LABELS "integration-tests;pc-sampling;stochastic"
+    ENVIRONMENT "${PRELOAD_ENV}"
+    SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
+    FIXTURES_SETUP
+        rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-json
+    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
-set_tests_properties(
-    rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-json-execute
-    PROPERTIES TIMEOUT
-               90
-               LABELS
-               "integration-tests;pc-sampling;stochastic"
-               ENVIRONMENT
-               "${pc-sampling-env-stochastic-transpose-multiple-agents}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               SKIP_REGULAR_EXPRESSION
-               "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
-               DISABLED
-               "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-json
+    TEST_PATHS validate.py
+    COPY conftest.py input.json input.yml
+    CONFIG pytest.ini
+    ARGS -k
+         test_
+         --input-samples-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_pc_sampling_stochastic.csv
+         --input-samples-json
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_results.json
+         --input-kernel-trace-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_kernel_trace.csv
+         --input-agent-info-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_agent_info.csv
+    TIMEOUT 60
+    LABELS "integration-tests;pc-sampling;stochastic"
+    FIXTURES_REQUIRED
+        rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-json
+    SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
+    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
-add_test(
-    NAME rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-yaml-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-yaml
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input.yml -d
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input -- $<TARGET_FILE:transpose>
-        ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS})
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.yml
+        -d ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input -- $<TARGET_FILE:transpose>
+        ${TRANSPOSE_NUM_THREADS} ${TRANSPOSE_NUM_ITERATIONS}
+    DEPENDS transpose
+    TIMEOUT 90
+    LABELS "integration-tests;pc-sampling;stochastic"
+    ENVIRONMENT "${PRELOAD_ENV}"
+    SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
+    FIXTURES_SETUP
+        rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-yaml
+    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
-set_tests_properties(
-    rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-yaml-execute
-    PROPERTIES TIMEOUT
-               90
-               LABELS
-               "integration-tests;pc-sampling;stochastic"
-               ENVIRONMENT
-               "${pc-sampling-env-stochastic-transpose-multiple-agents}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               SKIP_REGULAR_EXPRESSION
-               "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
-               DISABLED
-               "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
-
-# ========================= Validation tests
-
-add_test(
-    NAME rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-cmd-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py -k test_
-        --input-samples-csv
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_pc_sampling_stochastic.csv
-        --input-samples-json
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_results.json
-        --input-kernel-trace-csv
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_kernel_trace.csv
-        --input-agent-info-csv
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_agent_info.csv)
-
-set_tests_properties(
-    rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-cmd-validate
-    PROPERTIES
-        TIMEOUT
-        60
-        LABELS
-        "integration-tests;pc-sampling;stochastic"
-        DEPENDS
-        "rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-cmd-execute"
-        FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-        SKIP_REGULAR_EXPRESSION
-        "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
-        DISABLED
-        "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
-
-add_test(
-    NAME rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-json-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py -k test_
-        --input-samples-csv
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_pc_sampling_stochastic.csv
-        --input-samples-json
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_results.json
-        --input-kernel-trace-csv
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_kernel_trace.csv
-        --input-agent-info-csv
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_agent_info.csv)
-
-set_tests_properties(
-    rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-json-validate
-    PROPERTIES
-        TIMEOUT
-        60
-        LABELS
-        "integration-tests;pc-sampling;stochastic"
-        DEPENDS
-        "rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-json-execute"
-        FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-        SKIP_REGULAR_EXPRESSION
-        "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
-        DISABLED
-        "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
-
-add_test(
-    NAME rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-yaml-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py -k test_
-        --input-samples-csv
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_pc_sampling_stochastic.csv
-        --input-samples-json
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_results.json
-        --input-kernel-trace-csv
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_kernel_trace.csv
-        --input-agent-info-csv
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_agent_info.csv)
-
-set_tests_properties(
-    rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-yaml-validate
-    PROPERTIES
-        TIMEOUT
-        60
-        LABELS
-        "integration-tests;pc-sampling;stochastic"
-        DEPENDS
-        "rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-yaml-execute"
-        FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-        SKIP_REGULAR_EXPRESSION
-        "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
-        DISABLED
-        "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-yaml
+    TEST_PATHS validate.py
+    COPY conftest.py input.json input.yml
+    CONFIG pytest.ini
+    ARGS -k
+         test_
+         --input-samples-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_pc_sampling_stochastic.csv
+         --input-samples-json
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_results.json
+         --input-kernel-trace-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_kernel_trace.csv
+         --input-agent-info-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_agent_info.csv
+    TIMEOUT 60
+    LABELS "integration-tests;pc-sampling;stochastic"
+    FIXTURES_REQUIRED
+        rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-yaml
+    SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
+    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")

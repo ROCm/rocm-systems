@@ -112,7 +112,7 @@ bool InterceptQueue::IsPendingRetryPoint(uint64_t wrapped_current_read_index) co
 }
 
 InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
-    : QueueWrapper(std::move(queue)),
+    : QueueProxy(std::move(queue)),
       LocalSignal(0, false),
       DoorbellSignal(signal()),
       next_packet_(0),
@@ -126,6 +126,9 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
          "Packet intercept error: initial retry index is incompatible with IsPendingRetryPoint.\n");
   buffer_ = SharedArray<AqlPacket, 4096>(wrapped->amd_queue_.hsa_queue.size);
   amd_queue_.hsa_queue.base_address = reinterpret_cast<void*>(&buffer_[0]);
+
+  // Pre-allocate staging buffer with queue size
+  staging_buffer_.resize(wrapped->amd_queue_.hsa_queue.size);
 
   // Fill the ring buffer with invalid packet headers.
   // Leave packet content uninitialized to help trigger application errors.
@@ -337,7 +340,7 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     return;
   }
 
-  ScopedAcquire<KernelMutex> lock(&lock_);
+  std::lock_guard<std::mutex> lock(lock_);
 
   // Submit overflow packets.
   if (!overflow_.empty()) {
@@ -369,27 +372,18 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     end = next_packet_ + amd_queue_.hsa_queue.size;
 
   uint64_t i = next_packet_;
+  uint64_t invalid_header_i = end;
+
   while (i < end) {
     // Load the packet header as atomic acquire as it may have been written by
     // another thread as atomic release. This ensures the rest of the packet
     // fields are visible. Once loaded and proven not to be INVALID, further
     // loads by this thread can be non-atomic.
     uint16_t header = atomic::Load(&ring[i & mask].packet.header, std::memory_order_acquire);
-    if (!AqlPacket::IsValid(header)) break;
-
-    // Process callbacks.
-    Cursor.interceptor_index = interceptors.size() - 1;
-    Cursor.pkt_index = i;
-    auto& handler = interceptors[Cursor.interceptor_index];
-    handler.first(&ring[i & mask], 1, i, handler.second, PacketWriter);
-    if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
-      // Ensure the packet body is written as header may get reordered when writing over PCIE
-      _mm_sfence();
+    if (!AqlPacket::IsValid(header)) {
+      invalid_header_i = i;
+      break;
     }
-    // Invalidate consumed packet.
-    atomic::Store(&ring[i & mask].packet.header, kInvalidHeader, std::memory_order_release);
-
-    // Packet has now been processed so advance the read index.
     ++i;
 
     // Only allow the rewrite of one packet to be on the overflow queue. When
@@ -401,6 +395,41 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     if (!overflow_.empty()) break;
   }
 
+  // Process callbacks.
+  uint64_t packet_count = i - next_packet_;
+  if (packet_count) {
+    Cursor.interceptor_index = interceptors.size() - 1;
+    Cursor.pkt_index = next_packet_;
+    auto& handler = interceptors[Cursor.interceptor_index];
+
+    // Check if packets wrap around the ring buffer boundary using unmasked indices.
+    // The interceptor callback expects packets to be contiguous in memory.
+    if ((next_packet_ + packet_count) > ((next_packet_ & ~mask) + amd_queue_.hsa_queue.size)) {
+      // Packets wrap around - use pre-allocated staging buffer
+      for (uint64_t j = 0; j < packet_count; ++j) {
+        staging_buffer_[j] = ring[(next_packet_ + j) & mask];
+      }
+      handler.first(staging_buffer_.data(), packet_count, next_packet_,
+                    handler.second, PacketWriter);
+    } else {
+      // Packets are contiguous in the ring buffer
+      handler.first(&ring[next_packet_ & mask], packet_count, next_packet_,
+                                                 handler.second, PacketWriter);
+    }
+
+    if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
+      // Ensure the packet body is written as header may get reordered when writing over PCIE
+      _mm_sfence();
+    }
+  }
+  i = next_packet_;
+  while (i < std::min(end, invalid_header_i)) {
+    // Invalidate consumed packets.
+    atomic::Store(&ring[i & mask].packet.header, kInvalidHeader, std::memory_order_release);
+    // Packet has now been processed so advance the read index.
+    ++i;
+  }
+
   next_packet_ = i;
   Cursor.queue = nullptr;
   atomic::Store(&amd_queue_.read_dispatch_id, next_packet_, std::memory_order_release);
@@ -409,7 +438,9 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
 hsa_status_t InterceptQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value) {
   switch (attribute) {
     case HSA_AMD_QUEUE_INFO_AGENT:
-    case HSA_AMD_QUEUE_INFO_DOORBELL_ID: {
+    case HSA_AMD_QUEUE_INFO_DOORBELL_ID: 
+    case HSA_QUEUE_INFO_USE_COUNT:
+    case HSA_QUEUE_INFO_HW_ID: {
       if (!AMD::AqlQueue::IsType(wrapped.get())) return HSA_STATUS_ERROR_INVALID_QUEUE;
 
       AMD::AqlQueue* aqlQueue = static_cast<AMD::AqlQueue*>(wrapped.get());

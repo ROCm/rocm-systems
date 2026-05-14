@@ -43,29 +43,30 @@
  *
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include "rocm_smi_test/functional/frequencies_read_write.h"
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include <algorithm>
+#include <bitset>
 #include <iostream>
 #include <map>
-#include <bitset>
 #include <string>
-#include <algorithm>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/frequencies_read_write.h"
+#include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi_test/test_common.h"
-
 
 TestFrequenciesReadWrite::TestFrequenciesReadWrite() : TestBase() {
   set_title("RSMI Frequencies Read/Write Test");
-  set_description("The Frequencies tests verify that the frequency "
-                       "settings can be read and controlled properly.");
+  set_description(
+      "The Frequencies tests verify that the frequency "
+      "settings can be read and controlled properly.");
 }
 
-TestFrequenciesReadWrite::~TestFrequenciesReadWrite(void) {
-}
+TestFrequenciesReadWrite::~TestFrequenciesReadWrite(void) {}
 
 void TestFrequenciesReadWrite::SetUp(void) {
   TestBase::SetUp();
@@ -73,9 +74,7 @@ void TestFrequenciesReadWrite::SetUp(void) {
   return;
 }
 
-void TestFrequenciesReadWrite::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestFrequenciesReadWrite::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestFrequenciesReadWrite::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -87,7 +86,6 @@ void TestFrequenciesReadWrite::Close() {
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
 
 void TestFrequenciesReadWrite::Run(void) {
   rsmi_status_t ret;
@@ -104,27 +102,39 @@ void TestFrequenciesReadWrite::Run(void) {
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(dv_ind);
 
+    // Check and wake the device in runtime suspend
+    bool is_suspended = false;
+    ret = amd::smi::check_runtime_pm_status(dv_ind, &is_suspended);
+    if (ret == RSMI_STATUS_SUCCESS && is_suspended) {
+      ret = amd::smi::wake_device(dv_ind);
+      if (ret != RSMI_STATUS_SUCCESS) {
+        std::cout << "Failed to wake device, cannot read clock frequencies" << std::endl;
+        CHK_ERR_ASRT(ret)
+      }
+    }
+
     for (uint32_t clk = RSMI_CLK_TYPE_FIRST; clk <= RSMI_CLK_TYPE_LAST; ++clk) {
       rsmi_clk = (rsmi_clk_type)clk;
 
       auto freq_read = [&]() -> bool {
         ret = rsmi_dev_gpu_clk_freq_get(dv_ind, rsmi_clk, &f);
         if (ret == RSMI_STATUS_NOT_SUPPORTED) {
-          std::cout << "\t**Set " << FreqEnumToStr(rsmi_clk) <<
-                               ": Not supported on this machine" << std::endl;
+          std::cout << "\t**Set " << FreqEnumToStr(rsmi_clk) << ": Not supported on this machine"
+                    << std::endl;
           return false;
         }
 
         // special driver issue, shouldn't normally occur
         if (ret == RSMI_STATUS_UNEXPECTED_DATA) {
-          std::cerr << "WARN: Clock file [" << FreqEnumToStr(rsmi_clk) << "] exists on device [" << dv_ind << "] but empty!" << std::endl;
+          std::cerr << "WARN: Clock file [" << FreqEnumToStr(rsmi_clk) << "] exists on device ["
+                    << dv_ind << "] but empty!" << std::endl;
           std::cerr << "      Likely a driver issue!" << std::endl;
         }
 
         // CHK_ERR_ASRT(ret)
         IF_VERB(STANDARD) {
-          std::cout << "Initial frequency for clock " <<
-              FreqEnumToStr(rsmi_clk) << " is " << f.current << std::endl;
+          std::cout << "Initial frequency for clock " << FreqEnumToStr(rsmi_clk) << " is "
+                    << f.current << std::endl;
         }
         return true;
       };
@@ -134,26 +144,24 @@ void TestFrequenciesReadWrite::Run(void) {
         // frequency.
         freq_bitmask = 0b01100;  // Try the 3rd and 4th clocks
 
-        std::string freq_bm_str =
-              std::bitset<RSMI_MAX_NUM_FREQUENCIES>(freq_bitmask).to_string();
+        std::string freq_bm_str = std::bitset<RSMI_MAX_NUM_FREQUENCIES>(freq_bitmask).to_string();
 
-        freq_bm_str.erase(0, std::min(freq_bm_str.find_first_not_of('0'),
-                                                       freq_bm_str.size()-1));
+        freq_bm_str.erase(0, std::min(freq_bm_str.find_first_not_of('0'), freq_bm_str.size() - 1));
 
         IF_VERB(STANDARD) {
-        std::cout << "Setting frequency mask for " <<
-            FreqEnumToStr(rsmi_clk) << " to 0b" << freq_bm_str << " ..." <<
-                                                                    std::endl;
+          std::cout << "Setting frequency mask for " << FreqEnumToStr(rsmi_clk) << " to 0b"
+                    << freq_bm_str << " ..." << std::endl;
         }
         ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, freq_bitmask);
-        // Certain ASICs does not allow to set particular clocks. If set function for a clock returns
-        // permission error despite root access, manually set ret value to success and return
+        // Certain ASICs does not allow to set particular clocks. If set function for a clock
+        // returns permission error despite root access, manually set ret value to success and
+        // return
         //
         // Sometimes setting clock frequencies is completely not supported
         if ((ret == RSMI_STATUS_PERMISSION && geteuid() == 0) ||
             (ret == RSMI_STATUS_NOT_SUPPORTED)) {
-          std::cout << "\t**Set " << FreqEnumToStr(rsmi_clk) <<
-                              ": Not supported on this machine. Skipping..." << std::endl;
+          std::cout << "\t**Set " << FreqEnumToStr(rsmi_clk)
+                    << ": Not supported on this machine. Skipping..." << std::endl;
           ret = RSMI_STATUS_SUCCESS;
           return;
         }
@@ -171,7 +179,7 @@ void TestFrequenciesReadWrite::Run(void) {
         ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, 0xFFFFFFFF);
         if (ret == RSMI_STATUS_NOT_SUPPORTED) {
           std::cout << "\t**Set " << FreqEnumToStr(rsmi_clk)
-                           << ": Not supported on this machine. Skipping..." << std::endl;
+                    << ": Not supported on this machine. Skipping..." << std::endl;
           ret = RSMI_STATUS_SUCCESS;
           return;
         }
@@ -181,7 +189,8 @@ void TestFrequenciesReadWrite::Run(void) {
 
         ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
         if (ret == RSMI_STATUS_NOT_SUPPORTED) {
-          std::cout << "\t**Setting performance level is not supported on this machine. Skipping..." << std::endl;
+          std::cout << "\t**Setting performance level is not supported on this machine. Skipping..."
+                    << std::endl;
           ret = RSMI_STATUS_SUCCESS;
           return;
         }

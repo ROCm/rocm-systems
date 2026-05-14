@@ -1,26 +1,6 @@
-##############################################################################bl
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 from typing import Any, Optional
 
 from sqlalchemy import (
@@ -44,7 +24,7 @@ from sqlalchemy.sql import Select
 from utils.logger import console_debug, console_error
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.3.0"
 
 
 Base = declarative_base()
@@ -60,18 +40,22 @@ class Workload(Base):
     roofline_bench_extdata = Column(JSON)
     profiling_config_extdata = Column(JSON)
 
-    # Workload can have multiple dispatches
-    dispatches = relationship("Dispatch", back_populates="workload")
-    # Workload can have multiple metrics
-    metrics = relationship("Metric", back_populates="workload")
-    # Workload can have multiple roofline data points
-    roofline_data_points = relationship("RooflineData", back_populates="workload")
-    # Workload can have multiple pc_sampling values
-    pc_sampling_values = relationship("PCsampling", back_populates="workload")
+    # Workload can have multiple kernels
+    kernels = relationship("Kernel", back_populates="workload")
+    # Workload can have multiple metric definitions
+    metric_definitions = relationship("MetricDefinition", back_populates="workload")
+    # Workload can have multiple workload-level metric values
+    workload_metric_values = relationship(
+        "WorkloadMetricValue", back_populates="workload"
+    )
+    # Workload can have multiple workload-level roofline data points
+    workload_roofline_data_points = relationship(
+        "WorkloadRooflineData", back_populates="workload"
+    )
 
 
-class Metric(Base):
-    __tablename__ = f"{PREFIX}metric"
+class MetricDefinition(Base):
+    __tablename__ = f"{PREFIX}metric_definition"
 
     metric_uuid = Column(Integer, primary_key=True)
     workload_id = Column(
@@ -85,76 +69,138 @@ class Metric(Base):
     unit = Column(String)  # e.g. Gbps
 
     # Metric can have one workload
-    workload = relationship("Workload", back_populates="metrics")
-    # Metric can have multiple values
-    values = relationship("Value", back_populates="metric")
+    workload = relationship("Workload", back_populates="metric_definitions")
+    # Metric can have multiple kernel-level metric values
+    kernel_metric_values = relationship("KernelMetricValue", back_populates="metric")
+    # Metric can have multiple workload-level metric values
+    workload_metric_values = relationship(
+        "WorkloadMetricValue", back_populates="metric"
+    )
 
 
-class RooflineData(Base):
-    __tablename__ = f"{PREFIX}roofline_data"
+class KernelRooflineData(Base):
+    __tablename__ = f"{PREFIX}kernel_roofline_data"
 
     roofline_uuid = Column(Integer, primary_key=True)
-    workload_id = Column(
-        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    kernel_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
     )
-    kernel_name = Column(String)
     total_flops = Column(Float)
     l1_cache_data = Column(Float)
     l2_cache_data = Column(Float)
     hbm_cache_data = Column(Float)
 
-    # Roofline data point can have one workload
-    workload = relationship("Workload", back_populates="roofline_data_points")
+    # Roofline data point can have one kernel
+    kernel = relationship("Kernel", back_populates="roofline_data_points")
 
 
 class Dispatch(Base):
     __tablename__ = f"{PREFIX}dispatch"
 
     dispatch_uuid = Column(Integer, primary_key=True)
+    kernel_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
+    )
+    dispatch_id = Column(Integer)
+    gpu_id = Column(Integer)
+    start_timestamp = Column(Integer)
+    end_timestamp = Column(Integer)
+
+    # Dispatch can have one kernel
+    kernel = relationship("Kernel", back_populates="dispatches")
+
+
+class Kernel(Base):
+    __tablename__ = f"{PREFIX}kernel"
+
+    kernel_uuid = Column(Integer, primary_key=True)
     workload_id = Column(
         Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
     )
-    dispatch_id = Column(Integer)
     kernel_name = Column(String)
-    gpu_id = Column(Integer)
-    duration = Column(Integer)
 
-    # Dispatch can have one workload
-    workload = relationship("Workload", back_populates="dispatches")
+    # Kernel can have one workload
+    workload = relationship("Workload", back_populates="kernels")
+    # Kernel can have multiple dispatches
+    dispatches = relationship("Dispatch", back_populates="kernel")
+    # Kernel can have multiple metric values
+    metric_values = relationship("KernelMetricValue", back_populates="kernel")
+    # Kernel can have multiple roofline data points
+    roofline_data_points = relationship("KernelRooflineData", back_populates="kernel")
+    # Kernel can have multiple pc_sampling values
+    pc_sampling_values = relationship("PCsampling", back_populates="kernel")
 
 
 class PCsampling(Base):
     __tablename__ = f"{PREFIX}pcsampling"
 
     pc_sampling_uuid = Column(Integer, primary_key=True)
-    workload_id = Column(
-        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    kernel_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
     )
     source = Column(String)
     instruction = Column(String)
     count = Column(Integer)
-    kernel_name = Column(String)
     offset = Column(Integer)
     count_issue = Column(Integer)
     count_stall = Column(Integer)
     stall_reason = Column(JSON)
 
-    # PCsampling can have one workload
-    workload = relationship("Workload", back_populates="pc_sampling_values")
+    # PCsampling can have one kernel
+    kernel = relationship("Kernel", back_populates="pc_sampling_values")
 
 
-class Value(Base):
-    __tablename__ = f"{PREFIX}value"
+class KernelMetricValue(Base):
+    __tablename__ = f"{PREFIX}kernel_metric_value"
 
     value_uuid = Column(Integer, primary_key=True)
     metric_uuid = Column(
-        Integer, ForeignKey(f"{PREFIX}metric.metric_uuid"), nullable=False
+        Integer, ForeignKey(f"{PREFIX}metric_definition.metric_uuid"), nullable=False
+    )
+    kernel_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
     )
     value_name = Column(String)  # e.g. min, max, avg
     value = Column(Float)  # e.g. 123.45
 
     # Value can have one metric
-    metric = relationship("Metric", back_populates="values")
+    metric = relationship("MetricDefinition", back_populates="kernel_metric_values")
+    # Value can have one kernel
+    kernel = relationship("Kernel", back_populates="metric_values")
+
+
+class WorkloadMetricValue(Base):
+    __tablename__ = f"{PREFIX}workload_metric_value"
+
+    value_uuid = Column(Integer, primary_key=True)
+    metric_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}metric_definition.metric_uuid"), nullable=False
+    )
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
+    value_name = Column(String)  # e.g. min, max, avg
+    value = Column(Float)
+
+    # Relationships
+    metric = relationship("MetricDefinition", back_populates="workload_metric_values")
+    workload = relationship("Workload", back_populates="workload_metric_values")
+
+
+class WorkloadRooflineData(Base):
+    __tablename__ = f"{PREFIX}workload_roofline_data"
+
+    roofline_uuid = Column(Integer, primary_key=True)
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
+    total_flops = Column(Float)
+    l1_cache_data = Column(Float)
+    l2_cache_data = Column(Float)
+    hbm_cache_data = Column(Float)
+
+    # Relationships
+    workload = relationship("Workload", back_populates="workload_roofline_data_points")
 
 
 class Metadata(Base):
@@ -198,24 +244,113 @@ class Database:
 
 
 def get_views() -> list[TextClause]:
+    median_sort_subquery = (
+        select(
+            Kernel.kernel_uuid,
+            (Dispatch.end_timestamp - Dispatch.start_timestamp).label("duration"),
+            func
+            .row_number()
+            .over(
+                partition_by=Kernel.kernel_uuid,
+                order_by=Dispatch.end_timestamp - Dispatch.start_timestamp,
+            )
+            .label("row_num"),
+            func.count().over(partition_by=Kernel.kernel_uuid).label("total_count"),
+        )
+        .select_from(Dispatch)
+        .join(Kernel, Dispatch.kernel_uuid == Kernel.kernel_uuid)
+    ).subquery()
+
+    median_calc_subquery = (
+        select(
+            median_sort_subquery.c.kernel_uuid,
+            func.avg(median_sort_subquery.c.duration).label("duration_ns_median"),
+        )
+        .where(
+            # For odd counts: get the middle row
+            # For even counts: get the two middle rows and average them
+            median_sort_subquery.c.row_num.in_([
+                func.cast((median_sort_subquery.c.total_count + 1) / 2, Integer),
+                func.cast((median_sort_subquery.c.total_count + 2) / 2, Integer),
+            ])
+        )
+        .group_by(median_sort_subquery.c.kernel_uuid)
+    ).subquery()
+
     views: dict[str, Select[Any]] = {
         "kernel_view": select(
-            Dispatch.kernel_name,
+            Kernel.kernel_uuid.label("kernel_uuid"),
+            Kernel.workload_id.label("workload_id"),
+            Workload.name.label("workload_name"),
+            Kernel.kernel_name,
             func.count(Dispatch.dispatch_id).label("dispatch_count"),
-            func.sum(Dispatch.duration).label("duration_sum"),
-            func.avg(Dispatch.duration).label("duration_mean"),
-        ).group_by(Dispatch.kernel_name),
-        "metric_view": select(
-            Metric.workload_id,
-            Metric.name,
-            Metric.metric_id,
-            Metric.description,
-            Metric.table_name,
-            Metric.sub_table_name,
-            Metric.unit,
-            Value.value_name,
-            Value.value,
-        ).join(Value, Metric.metric_uuid == Value.metric_uuid),
+            func.sum(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
+                "duration_ns_sum"
+            ),
+            func.min(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
+                "duration_ns_min"
+            ),
+            func.max(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
+                "duration_ns_max"
+            ),
+            median_calc_subquery.c.duration_ns_median,
+            func.avg(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
+                "duration_ns_mean"
+            ),
+        )
+        .select_from(Dispatch)
+        .join(Kernel, Dispatch.kernel_uuid == Kernel.kernel_uuid)
+        .join(Workload, Kernel.workload_id == Workload.workload_id)
+        .join(
+            median_calc_subquery,
+            Kernel.kernel_uuid == median_calc_subquery.c.kernel_uuid,
+        )
+        .group_by(
+            Kernel.kernel_uuid, Kernel.workload_id, Workload.name, Kernel.kernel_name
+        ),
+        "kernel_metric_view": select(
+            Workload.workload_id.label("workload_id"),
+            Workload.name.label("workload_name"),
+            Kernel.kernel_uuid.label("kernel_uuid"),
+            Kernel.kernel_name,
+            MetricDefinition.metric_uuid.label("metric_uuid"),
+            MetricDefinition.name.label("metric_name"),
+            MetricDefinition.metric_id,
+            MetricDefinition.description,
+            MetricDefinition.table_name,
+            MetricDefinition.sub_table_name,
+            MetricDefinition.unit,
+            KernelMetricValue.value_uuid.label("value_uuid"),
+            KernelMetricValue.value_name,
+            KernelMetricValue.value,
+        )
+        .select_from(MetricDefinition)
+        .join(Workload, MetricDefinition.workload_id == Workload.workload_id)
+        .join(
+            KernelMetricValue,
+            MetricDefinition.metric_uuid == KernelMetricValue.metric_uuid,
+        )
+        .join(Kernel, KernelMetricValue.kernel_uuid == Kernel.kernel_uuid),
+        "workload_metric_view": select(
+            Workload.workload_id.label("workload_id"),
+            Workload.name.label("workload_name"),
+            MetricDefinition.metric_uuid.label("metric_uuid"),
+            MetricDefinition.name.label("metric_name"),
+            MetricDefinition.metric_id,
+            MetricDefinition.description,
+            MetricDefinition.table_name,
+            MetricDefinition.sub_table_name,
+            MetricDefinition.unit,
+            WorkloadMetricValue.value_uuid.label("value_uuid"),
+            WorkloadMetricValue.value_name,
+            WorkloadMetricValue.value,
+        )
+        .select_from(MetricDefinition)
+        .join(Workload, MetricDefinition.workload_id == Workload.workload_id)
+        .join(
+            WorkloadMetricValue,
+            MetricDefinition.metric_uuid == WorkloadMetricValue.metric_uuid,
+        ),
     }
 
     return [

@@ -134,7 +134,7 @@ template <typename Allocator> class SimpleHeap {
     // Find best fit.
     auto free_fragment = free_list_.lower_bound(bytes);
     uintptr_t base;
-    size_t size;
+    size_t size = 0;
 
     if (free_fragment != free_list_.end()) {
       base = free_fragment->second;
@@ -189,8 +189,9 @@ template <typename Allocator> class SimpleHeap {
     // Disallow multiple suballocation from large blocks.
     // Prevents a small allocation from retaining a large block.
     if (bytes > default_block_size()) {
-      bool err = discardBlock(reinterpret_cast<void*>(base));
-      assert(err && "Large block discard failed.");
+      if (!discardBlock(reinterpret_cast<void*>(base))) {
+        assert(false && "Large block discard failed.");
+      }
     }
 
     return reinterpret_cast<void*>(base);

@@ -7,6 +7,7 @@
 
 #include "common.h"
 #include "cuda_runtime.h"
+#include "rccl_compat.h"
 
 void
 AlltoAllGetCollByteCount(size_t* sendcount, size_t* recvcount, size_t* paramcount,
@@ -62,14 +63,17 @@ AlltoAllGetBw(size_t count, int typesize, double sec, double* algBw, double* bus
 
 testResult_t
 AlltoAllRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type,
-                ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream)
+                ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream,
+                void* bias = nullptr)
 {
+    (void) bias;
     NCCLCHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
     return testSuccess;
 }
 
-struct testColl alltoAllTest = { "AlltoAll", AlltoAllGetCollByteCount, AlltoAllInitData,
-                                 AlltoAllGetBw, AlltoAllRunColl };
+struct testColl alltoAllTest = { "AlltoAll",       AlltoAllGetCollByteCount,
+                                 AlltoAllInitData, AlltoAllGetBw,
+                                 AlltoAllRunColl,  nullptr };
 
 void
 AlltoAllGetBuffSize(size_t* sendcount, size_t* recvcount, size_t count, int nranks)

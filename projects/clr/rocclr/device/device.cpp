@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "device/device.hpp"
 #include "thread/monitor.hpp"
@@ -49,12 +35,6 @@ extern void PalDeviceUnload();
 
 #if defined(HAVE_BLOWFISH_H)
 #include "blowfish/oclcrypt.hpp"
-#endif
-
-#if defined(WITH_COMPILER_LIB)
-#include "utils/bif_section_labels.hpp"
-#include "utils/libUtils.h"
-#include "spirv/spirvUtils.h"
 #endif
 
 #include <vector>
@@ -93,7 +73,7 @@ static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessReadWri
 
 namespace amd {
 
-amd::Monitor Device::lockP2P_("Lock P2P ON/OFF");
+std::recursive_mutex Device::lockP2P_;
 std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
   constexpr amd::Isa::Feature NONE = amd::Isa::Feature::Unsupported;
   constexpr amd::Isa::Feature ANY = amd::Isa::Feature::Any;
@@ -113,159 +93,160 @@ std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
       // the ANY value. If the target feature is disabled then use a '-' suffix,
       // and if enabled use a '+' suffix.
       //
-      // If the HSAIL or AMD IL compilers do not support the target, then use
+      // If the AMD IL compilers do not support the target, then use
       // nullptr for the ID.
       //
-      // -------------- Compiler ----------    - Runtime -    ---- IP ----   -- Target -- ----------
-      // Target Properties ----------
-      //                                        Supported        Version       Features
-      //                                                                                    SIMD/
-      //                                                                                    SIMD
-      //                                                                                    Instr
-      //                                                                                    Bank LDS
-      //                                                                                    Mem
-      // Target ID                 HSAIL ID     ROC    PAL      Maj/Min/Stp   SRAMECC XNACK CU Width
-      // Width Width   Size    Banks
-      {"gfx801", nullptr, true, true, 8, 0, 1, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx801:xnack-", nullptr, true, false, 8, 0, 1, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx801:xnack+", "gfx801", true, true, 8, 0, 1, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx802", "gfx802", true, true, 8, 0, 2, NONE, NONE, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx803", "gfx803", true, true, 8, 0, 3, NONE, NONE, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx805", nullptr, true, true, 8, 0, 5, NONE, NONE, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx810", nullptr, true, true, 8, 1, 0, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx810:xnack-", nullptr, true, false, 8, 1, 0, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx810:xnack+", "gfx810", true, true, 8, 1, 0, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx900", "gfx901", true, true, 9, 0, 0, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx900:xnack-", "gfx900", true, true, 9, 0, 0, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx900:xnack+", "gfx901", true, true, 9, 0, 0, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx902", "gfx903", true, true, 9, 0, 2, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx902:xnack-", "gfx902", true, true, 9, 0, 2, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx902:xnack+", "gfx903", true, true, 9, 0, 2, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx904", "gfx905", true, true, 9, 0, 4, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx904:xnack-", "gfx904", true, true, 9, 0, 4, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx904:xnack+", "gfx905", true, true, 9, 0, 4, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx906", "gfx907", true, true, 9, 0, 6, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx906:sramecc-", "gfx907", true, true, 9, 0, 6, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx906:sramecc+", nullptr, true, true, 9, 0, 6, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx906:xnack-", "gfx906", true, true, 9, 0, 6, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx906:xnack+", "gfx907", true, true, 9, 0, 6, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx906:sramecc-:xnack-", "gfx906", true, true, 9, 0, 6, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
-       32},
-      {"gfx906:sramecc-:xnack+", "gfx907", true, true, 9, 0, 6, OFF, ON, 4, 16, 1, 256, 64 * Ki,
-       32},
-      {"gfx906:sramecc+:xnack-", nullptr, true, true, 9, 0, 6, ON, OFF, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx906:sramecc+:xnack+", nullptr, true, true, 9, 0, 6, ON, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx908", nullptr, true, false, 9, 0, 8, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx908:sramecc-", nullptr, true, false, 9, 0, 8, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx908:sramecc+", nullptr, true, false, 9, 0, 8, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx908:xnack-", nullptr, true, false, 9, 0, 8, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx908:xnack+", nullptr, true, false, 9, 0, 8, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx908:sramecc-:xnack-", nullptr, true, false, 9, 0, 8, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
-       32},
-      {"gfx908:sramecc-:xnack+", nullptr, true, false, 9, 0, 8, OFF, ON, 4, 16, 1, 256, 64 * Ki,
-       32},
-      {"gfx908:sramecc+:xnack-", nullptr, true, false, 9, 0, 8, ON, OFF, 4, 16, 1, 256, 64 * Ki,
-       32},
-      {"gfx908:sramecc+:xnack+", nullptr, true, false, 9, 0, 8, ON, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx909", nullptr, false, true, 9, 0, 2, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx909:xnack-", nullptr, false, true, 9, 0, 2, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx909:xnack+", nullptr, false, true, 9, 0, 2, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx90a", nullptr, true, false, 9, 0, 10, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx90a:sramecc-", nullptr, true, false, 9, 0, 10, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx90a:sramecc+", nullptr, true, false, 9, 0, 10, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx90a:xnack-", nullptr, true, false, 9, 0, 10, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx90a:xnack+", nullptr, true, false, 9, 0, 10, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx90a:sramecc-:xnack-", nullptr, true, false, 9, 0, 10, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
-       32},
-      {"gfx90a:sramecc-:xnack+", nullptr, true, false, 9, 0, 10, OFF, ON, 4, 16, 1, 256, 64 * Ki,
-       32},
-      {"gfx90a:sramecc+:xnack-", nullptr, true, false, 9, 0, 10, ON, OFF, 4, 16, 1, 256, 64 * Ki,
-       32},
-      {"gfx90a:sramecc+:xnack+", nullptr, true, false, 9, 0, 10, ON, ON, 4, 16, 1, 256, 64 * Ki,
-       32},
-      {"gfx942", nullptr, true, false, 9, 4, 2, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx942:sramecc-", nullptr, true, false, 9, 4, 2, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx942:sramecc+", nullptr, true, false, 9, 4, 2, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx942:xnack-", nullptr, true, false, 9, 4, 2, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx942:xnack+", nullptr, true, false, 9, 4, 2, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx942:sramecc-:xnack-", nullptr, true, false, 9, 4, 2, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
-       32},
-      {"gfx942:sramecc-:xnack+", nullptr, true, false, 9, 4, 2, OFF, ON, 4, 16, 1, 256, 64 * Ki,
-       32},
-      {"gfx942:sramecc+:xnack-", nullptr, true, false, 9, 4, 2, ON, OFF, 4, 16, 1, 256, 64 * Ki,
-       32},
-      {"gfx942:sramecc+:xnack+", nullptr, true, false, 9, 4, 2, ON, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx90c", nullptr, true, true, 9, 0, 12, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx90c:xnack-", "gfx90c", true, true, 9, 0, 12, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx90c:xnack+", "gfx90d", true, true, 9, 0, 12, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx950", nullptr, true, false, 9, 5, 0, ANY, ANY, 4, 16, 1, 256, 160 * Ki, 64},
-      {"gfx950:sramecc-", nullptr, true, false, 9, 5, 0, OFF, ANY, 4, 16, 1, 256, 160 * Ki, 64},
-      {"gfx950:sramecc+", nullptr, true, false, 9, 5, 0, ON, ANY, 4, 16, 1, 256, 160 * Ki, 64},
-      {"gfx950:xnack-", nullptr, true, false, 9, 5, 0, ANY, OFF, 4, 16, 1, 256, 160 * Ki, 64},
-      {"gfx950:xnack+", nullptr, true, false, 9, 5, 0, ANY, ON, 4, 16, 1, 256, 160 * Ki, 64},
-      {"gfx950:sramecc-:xnack-", nullptr, true, false, 9, 5, 0, OFF, OFF, 4, 16, 1, 256, 160 * Ki,
-       64},
-      {"gfx950:sramecc-:xnack+", nullptr, true, false, 9, 5, 0, OFF, ON, 4, 16, 1, 256, 160 * Ki,
-       64},
-      {"gfx950:sramecc+:xnack-", nullptr, true, false, 9, 5, 0, ON, OFF, 4, 16, 1, 256, 160 * Ki,
-       64},
-      {"gfx950:sramecc+:xnack+", nullptr, true, false, 9, 5, 0, ON, ON, 4, 16, 1, 256, 160 * Ki,
-       64},
-      {"gfx9-generic", nullptr, true, true, 9, 0, 0, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx9-generic:xnack-", nullptr, true, true, 9, 0, 0, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx9-generic:xnack+", nullptr, true, true, 9, 0, 0, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx9-4-generic", nullptr, true, true, 9, 4, 0, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx9-4-generic:sramecc-", nullptr, true, true, 9, 4, 0, OFF, ANY, 4, 16, 1, 256, 64 * Ki,
-       32},
-      {"gfx9-4-generic:sramecc+", nullptr, true, true, 9, 4, 0, ON, ANY, 4, 16, 1, 256, 64 * Ki,
-       32},
-      {"gfx9-4-generic:xnack-", nullptr, true, true, 9, 4, 0, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx9-4-generic:xnack+", nullptr, true, true, 9, 4, 0, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32},
-      {"gfx9-4-generic:sramecc-:xnack-", nullptr, true, true, 9, 4, 0, OFF, OFF, 4, 16, 1, 256,
-       64 * Ki, 32},
-      {"gfx9-4-generic:sramecc-:xnack+", nullptr, true, true, 9, 4, 0, OFF, ON, 4, 16, 1, 256,
-       64 * Ki, 32},
-      {"gfx9-4-generic:sramecc+:xnack-", nullptr, true, true, 9, 4, 0, ON, OFF, 4, 16, 1, 256,
-       64 * Ki, 32},
-      {"gfx9-4-generic:sramecc+:xnack+", nullptr, true, true, 9, 4, 0, ON, ON, 4, 16, 1, 256,
-       64 * Ki, 32},
-      {"gfx1010", "gfx1010", true, true, 10, 1, 0, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1010:xnack-", "gfx1010", true, true, 10, 1, 0, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1010:xnack+", nullptr, true, true, 10, 1, 0, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1011", "gfx1011", true, true, 10, 1, 1, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1011:xnack-", "gfx1011", true, true, 10, 1, 1, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1011:xnack+", nullptr, true, true, 10, 1, 1, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1012", "gfx1012", true, true, 10, 1, 2, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1012:xnack-", "gfx1012", true, true, 10, 1, 2, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1012:xnack+", nullptr, true, true, 10, 1, 2, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1013", "gfx1013", true, false, 10, 1, 3, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1013:xnack-", "gfx1013", true, false, 10, 1, 3, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1013:xnack+", nullptr, true, false, 10, 1, 3, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx10-1-generic", nullptr, true, true, 10, 1, 0, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx10-1-generic:xnack-", nullptr, true, true, 10, 1, 0, NONE, OFF, 2, 32, 1, 256, 64 * Ki,
-       32},
-      {"gfx10-1-generic:xnack+", nullptr, true, true, 10, 1, 0, NONE, ON, 2, 32, 1, 256, 64 * Ki,
-       32},
-      {"gfx1030", "gfx1030", true, true, 10, 3, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1031", "gfx1031", true, true, 10, 3, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1032", "gfx1032", true, true, 10, 3, 2, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1033", "gfx1033", true, false, 10, 3, 3, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1034", "gfx1034", true, true, 10, 3, 4, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1035", "gfx1035", true, true, 10, 3, 5, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1036", "gfx1036", true, true, 10, 3, 6, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx10-3-generic", nullptr, true, true, 10, 3, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1100", "gfx1100", true, true, 11, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1101", "gfx1101", true, true, 11, 0, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1102", "gfx1102", true, true, 11, 0, 2, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1103", "gfx1103", true, true, 11, 0, 3, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1150", "gfx1150", true, true, 11, 5, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1151", "gfx1151", true, true, 11, 5, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1152", "gfx1152", true, true, 11, 5, 2, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1153", "gfx1153", true, true, 11, 5, 3, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx11-generic", nullptr, true, true, 11, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1200", "gfx1200", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx1201", "gfx1201", true, true, 12, 0, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
-      {"gfx12-generic", nullptr, true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32},
+      // -- Compiler --|-- Runtime --|-- IP --|-- Target --|-- Target Properties --
+      //               |  Supported  | Version|  Features  |
+      // --------------|-------------|--------|------------|-----------------------
+      //   Target ID   |   ROC PAL   | Major  |  SRAMECC   | SIMD/CU
+      //               |             |  Minor |   XNACK    |  SIMD Width
+      //               |             |   Step |            |   Instr Width
+      //               |             |        |            |    Bank Width
+      //               |             |        |            |     LDS Size
+      //               |             |        |            |      Mem Banks
+      //               |             |        |            |       LDS Alignment
+      {"gfx801", true, true, 8, 0, 1, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx801:xnack-", true, false, 8, 0, 1, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx801:xnack+", true, true, 8, 0, 1, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx802", true, true, 8, 0, 2, NONE, NONE, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx803", true, true, 8, 0, 3, NONE, NONE, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx805", true, true, 8, 0, 5, NONE, NONE, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx810", true, true, 8, 1, 0, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx810:xnack-", true, false, 8, 1, 0, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx810:xnack+", true, true, 8, 1, 0, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx900", true, true, 9, 0, 0, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx900:xnack-", true, true, 9, 0, 0, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx900:xnack+", true, true, 9, 0, 0, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx902", true, true, 9, 0, 2, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx902:xnack-", true, true, 9, 0, 2, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx902:xnack+", true, true, 9, 0, 2, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx904", true, true, 9, 0, 4, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx904:xnack-", true, true, 9, 0, 4, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx904:xnack+", true, true, 9, 0, 4, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx906", true, true, 9, 0, 6, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx906:sramecc-", true, true, 9, 0, 6, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx906:sramecc+", true, true, 9, 0, 6, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx906:xnack-", true, true, 9, 0, 6, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx906:xnack+", true, true, 9, 0, 6, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx906:sramecc-:xnack-", true, true, 9, 0, 6, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
+       32, 512},
+      {"gfx906:sramecc-:xnack+", true, true, 9, 0, 6, OFF, ON, 4, 16, 1, 256, 64 * Ki,
+       32, 512},
+      {"gfx906:sramecc+:xnack-", true, true, 9, 0, 6, ON, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx906:sramecc+:xnack+", true, true, 9, 0, 6, ON, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx908", true, false, 9, 0, 8, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx908:sramecc-", true, false, 9, 0, 8, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx908:sramecc+", true, false, 9, 0, 8, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx908:xnack-", true, false, 9, 0, 8, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx908:xnack+", true, false, 9, 0, 8, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx908:sramecc-:xnack-", true, false, 9, 0, 8, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
+       32, 512},
+      {"gfx908:sramecc-:xnack+", true, false, 9, 0, 8, OFF, ON, 4, 16, 1, 256, 64 * Ki,
+       32, 512},
+      {"gfx908:sramecc+:xnack-", true, false, 9, 0, 8, ON, OFF, 4, 16, 1, 256, 64 * Ki,
+       32, 512},
+      {"gfx908:sramecc+:xnack+", true, false, 9, 0, 8, ON, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx909", false, true, 9, 0, 2, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx909:xnack-", false, true, 9, 0, 2, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx909:xnack+", false, true, 9, 0, 2, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90a", true, false, 9, 0, 10, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90a:sramecc-", true, false, 9, 0, 10, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90a:sramecc+", true, false, 9, 0, 10, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90a:xnack-", true, false, 9, 0, 10, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90a:xnack+", true, false, 9, 0, 10, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90a:sramecc-:xnack-", true, false, 9, 0, 10, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
+       32, 512},
+      {"gfx90a:sramecc-:xnack+", true, false, 9, 0, 10, OFF, ON, 4, 16, 1, 256, 64 * Ki,
+       32, 512},
+      {"gfx90a:sramecc+:xnack-", true, false, 9, 0, 10, ON, OFF, 4, 16, 1, 256, 64 * Ki,
+       32, 512},
+      {"gfx90a:sramecc+:xnack+", true, false, 9, 0, 10, ON, ON, 4, 16, 1, 256, 64 * Ki,
+       32, 512},
+      {"gfx942", true, false, 9, 4, 2, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx942:sramecc-", true, false, 9, 4, 2, OFF, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx942:sramecc+", true, false, 9, 4, 2, ON, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx942:xnack-", true, false, 9, 4, 2, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx942:xnack+", true, false, 9, 4, 2, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx942:sramecc-:xnack-", true, false, 9, 4, 2, OFF, OFF, 4, 16, 1, 256, 64 * Ki,
+       32, 512},
+      {"gfx942:sramecc-:xnack+", true, false, 9, 4, 2, OFF, ON, 4, 16, 1, 256, 64 * Ki,
+       32, 512},
+      {"gfx942:sramecc+:xnack-", true, false, 9, 4, 2, ON, OFF, 4, 16, 1, 256, 64 * Ki,
+       32, 512},
+      {"gfx942:sramecc+:xnack+", true, false, 9, 4, 2, ON, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90c", true, true, 9, 0, 12, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90c:xnack-", true, true, 9, 0, 12, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx90c:xnack+", true, true, 9, 0, 12, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx950", true, false, 9, 5, 0, ANY, ANY, 4, 16, 1, 256, 160 * Ki, 64, 1280},
+      {"gfx950:sramecc-", true, false, 9, 5, 0, OFF, ANY, 4, 16, 1, 256, 160 * Ki, 64, 1280},
+      {"gfx950:sramecc+", true, false, 9, 5, 0, ON, ANY, 4, 16, 1, 256, 160 * Ki, 64, 1280},
+      {"gfx950:xnack-", true, false, 9, 5, 0, ANY, OFF, 4, 16, 1, 256, 160 * Ki, 64, 1280},
+      {"gfx950:xnack+", true, false, 9, 5, 0, ANY, ON, 4, 16, 1, 256, 160 * Ki, 64, 1280},
+      {"gfx950:sramecc-:xnack-", true, false, 9, 5, 0, OFF, OFF, 4, 16, 1, 256, 160 * Ki,
+       64, 1280},
+      {"gfx950:sramecc-:xnack+", true, false, 9, 5, 0, OFF, ON, 4, 16, 1, 256, 160 * Ki,
+       64, 1280},
+      {"gfx950:sramecc+:xnack-", true, false, 9, 5, 0, ON, OFF, 4, 16, 1, 256, 160 * Ki,
+       64, 1280},
+      {"gfx950:sramecc+:xnack+", true, false, 9, 5, 0, ON, ON, 4, 16, 1, 256, 160 * Ki,
+       64, 1280},
+      {"gfx9-generic", true, true, 9, 0, 0, NONE, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx9-generic:xnack-", true, true, 9, 0, 0, NONE, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx9-generic:xnack+", true, true, 9, 0, 0, NONE, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx9-4-generic", true, true, 9, 4, 0, ANY, ANY, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx9-4-generic:sramecc-", true, true, 9, 4, 0, OFF, ANY, 4, 16, 1, 256, 64 * Ki,
+       32, 512},
+      {"gfx9-4-generic:sramecc+", true, true, 9, 4, 0, ON, ANY, 4, 16, 1, 256, 64 * Ki,
+       32, 512},
+      {"gfx9-4-generic:xnack-", true, true, 9, 4, 0, ANY, OFF, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx9-4-generic:xnack+", true, true, 9, 4, 0, ANY, ON, 4, 16, 1, 256, 64 * Ki, 32, 512},
+      {"gfx9-4-generic:sramecc-:xnack-", true, true, 9, 4, 0, OFF, OFF, 4, 16, 1, 256,
+       64 * Ki, 32, 512},
+      {"gfx9-4-generic:sramecc-:xnack+", true, true, 9, 4, 0, OFF, ON, 4, 16, 1, 256,
+       64 * Ki, 32, 512},
+      {"gfx9-4-generic:sramecc+:xnack-", true, true, 9, 4, 0, ON, OFF, 4, 16, 1, 256,
+       64 * Ki, 32, 512},
+      {"gfx9-4-generic:sramecc+:xnack+", true, true, 9, 4, 0, ON, ON, 4, 16, 1, 256,
+       64 * Ki, 32, 512},
+      {"gfx1010", true, true, 10, 1, 0, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1010:xnack-", true, true, 10, 1, 0, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1010:xnack+", true, true, 10, 1, 0, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1011", true, true, 10, 1, 1, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1011:xnack-", true, true, 10, 1, 1, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1011:xnack+", true, true, 10, 1, 1, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1012", true, true, 10, 1, 2, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1012:xnack-", true, true, 10, 1, 2, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1012:xnack+", true, true, 10, 1, 2, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1013", true, false, 10, 1, 3, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1013:xnack-", true, false, 10, 1, 3, NONE, OFF, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1013:xnack+", true, false, 10, 1, 3, NONE, ON, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx10-1-generic", true, true, 10, 1, 0, NONE, ANY, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx10-1-generic:xnack-", true, true, 10, 1, 0, NONE, OFF, 2, 32, 1, 256, 64 * Ki,
+       32, 1024},
+      {"gfx10-1-generic:xnack+", true, true, 10, 1, 0, NONE, ON, 2, 32, 1, 256, 64 * Ki,
+       32, 1024},
+      {"gfx1030", true, true, 10, 3, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1031", true, true, 10, 3, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1032", true, true, 10, 3, 2, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1033", true, false, 10, 3, 3, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1034", true, true, 10, 3, 4, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1035", true, true, 10, 3, 5, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1036", true, true, 10, 3, 6, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx10-3-generic", true, true, 10, 3, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1100", true, true, 11, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1101", true, true, 11, 0, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1102", true, true, 11, 0, 2, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1103", true, true, 11, 0, 3, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1150", true, true, 11, 5, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1151", true, true, 11, 5, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1152", true, true, 11, 5, 2, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1153", true, true, 11, 5, 3, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx11-generic", true, true, 11, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1200", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1201", true, true, 12, 0, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1250", true, true, 12, 5, 0, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024},
+      {"gfx12-generic", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
   };
   return std::make_pair(std::begin(supportedIsas_), std::end(supportedIsas_));
 }
@@ -352,7 +333,7 @@ AppProfile Device::appProfile_;
 
 Context* Device::glb_ctx_ = nullptr;
 // P2P Staging Lock
-Monitor Device::p2p_stage_ops_(true);
+std::recursive_mutex Device::p2p_stage_ops_;
 Memory* Device::p2p_stage_ = nullptr;
 
 cl_int Device::gpu_error_ = CL_SUCCESS;
@@ -368,7 +349,7 @@ void MemObjMap::AddMemObj(const void* k, amd::Memory* v) {
   std::unique_lock lock(AllocatedLock_);
   auto rval = MemObjMap_.insert({reinterpret_cast<uintptr_t>(k), v});
   if (!rval.second) {
-    DevLogPrintfError("Memobj map already has an entry for ptr: 0x%x",
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Memobj map already has an entry for ptr: 0x%x",
                       reinterpret_cast<uintptr_t>(k));
   }
 }
@@ -379,27 +360,127 @@ void MemObjMap::RemoveMemObj(const void* k) {
   guarantee(rval == 1, "Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
 }
 
-amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset) {
+MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev) {
+  uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
+
+  // First search the global map using upper_bound
+  auto it = MemObjMap_.upper_bound(key);
+  if (it != MemObjMap_.begin()) {
+    --it;
+    amd::Memory* mem = it->second;
+    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                          ? sizeof(mem->getUserData().hsa_handle)
+                          : mem->getSize();
+    if (key >= it->first && key < (it->first + mem_size)) {
+      return {it->second, key - it->first};
+    }
+  }
+
+  // Search per-device va maps on Windows (due to overlapping ranges)
+  if (IS_WINDOWS && dev != nullptr) {
+    size_t offset = 0;
+    amd::Memory* mem = dev->FindDevMemObj(ptr, &offset);
+    return {mem, offset};
+  }
+
+  return {nullptr, 0};
+}
+
+amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
   std::shared_lock lock(AllocatedLock_);
+  auto result = findMemObjNoLock(k, dev);
+  if (offset != nullptr) {
+    *offset = result.offset;
+  }
+  return result.memory;
+}
+
+amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
+  std::unique_lock lock(AllocatedLock_);
   uintptr_t key = reinterpret_cast<uintptr_t>(k);
+
+  // Find the memory object in the map using upper_bound
   auto it = MemObjMap_.upper_bound(key);
   if (it == MemObjMap_.begin()) {
     return nullptr;
   }
-
   --it;
   amd::Memory* mem = it->second;
-  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM) ? sizeof(mem->getUserData().hsa_handle)
-                                                             : mem->getSize();
-  if (key >= it->first && key < (it->first + mem_size)) {
-    if (offset != nullptr) {
-      *offset = key - it->first;
-    }
-    // the k is in the range
-    return mem;
-  } else {
+  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                        ? sizeof(mem->getUserData().hsa_handle)
+                        : mem->getSize();
+  if (key < it->first || key >= (it->first + mem_size)) {
     return nullptr;
   }
+
+  // Found - remove and return
+  MemObjMap_.erase(it);
+  return mem;
+}
+
+void MemObjMap::FindMemObjBatch(const void* const* ptrs, size_t count,
+                                 std::vector<amd::Memory*>& memories,
+                                 std::vector<size_t>& offsets, Device* dev) {
+  if (memories.size() != count) {
+    memories.resize(count);
+  }
+  if (offsets.size() != count) {
+    offsets.resize(count);
+  }
+
+  std::shared_lock lock(AllocatedLock_);
+
+  for (size_t i = 0; i < count; ++i) {
+    auto result = findMemObjNoLock(ptrs[i], dev);
+    memories[i] = result.memory;
+    offsets[i] = result.offset;
+  }
+}
+
+void MemObjMap::FindMemObjBatchPairs(const void* const* srcs, const void* const* dsts,
+                                      size_t count,
+                                      std::vector<amd::Memory*>& src_memories,
+                                      std::vector<amd::Memory*>& dst_memories,
+                                      std::vector<size_t>& src_offsets,
+                                      std::vector<size_t>& dst_offsets, Device* dev) {
+  if (src_memories.size() != count) {
+    src_memories.resize(count);
+  }
+  if (dst_memories.size() != count) {
+    dst_memories.resize(count);
+  }
+  if (src_offsets.size() != count) {
+    src_offsets.resize(count);
+  }
+  if (dst_offsets.size() != count) {
+    dst_offsets.resize(count);
+  }
+
+  std::shared_lock lock(AllocatedLock_);
+
+  for (size_t i = 0; i < count; ++i) {
+    auto src_result = findMemObjNoLock(srcs[i], dev);
+    src_memories[i] = src_result.memory;
+    src_offsets[i] = src_result.offset;
+
+    auto dst_result = findMemObjNoLock(dsts[i], dev);
+    dst_memories[i] = dst_result.memory;
+    dst_offsets[i] = dst_result.offset;
+  }
+}
+
+void MemObjMap::FindMemObjPairs(const void* src, const void* dst,
+                                 amd::Memory*& src_memory, amd::Memory*& dst_memory,
+                                 size_t& src_offset, size_t& dst_offset, Device* dev) {
+  std::shared_lock lock(AllocatedLock_);
+
+  auto src_result = findMemObjNoLock(src, dev);
+  src_memory = src_result.memory;
+  src_offset = src_result.offset;
+
+  auto dst_result = findMemObjNoLock(dst, dev);
+  dst_memory = dst_result.memory;
+  dst_offset = dst_result.offset;
 }
 
 void MemObjMap::UpdateAccess(amd::Device* peerDev) {
@@ -423,17 +504,27 @@ void MemObjMap::UpdateAccess(amd::Device* peerDev) {
 
 void MemObjMap::Purge(amd::Device* dev) {
   assert(dev != nullptr);
-  std::unique_lock lock(AllocatedLock_);
-  for (auto it = MemObjMap_.cbegin(); it != MemObjMap_.cend();) {
-    amd::Memory* memObj = it->second;
-    unsigned int flags = memObj->getMemFlags();
-    const std::vector<Device*>& devices = memObj->getContext().devices();
-    if (devices.size() == 1 && devices[0] == dev && !(flags & ROCCLR_MEM_INTERNAL_MEMORY)) {
-      memObj->release();
-      it = MemObjMap_.erase(it);
-    } else {
-      ++it;
+  std::vector<amd::Memory*> toRelease{};
+  {
+    std::unique_lock lock(AllocatedLock_);
+    for (auto it = MemObjMap_.cbegin(); it != MemObjMap_.cend();) {
+      amd::Memory* memObj = it->second;
+      unsigned int flags = memObj->getMemFlags();
+      const std::vector<Device*>& devices = memObj->getContext().devices();
+      if (devices.size() == 1 && devices[0] == dev && !(flags & ROCCLR_MEM_INTERNAL_MEMORY)) {
+        toRelease.push_back(memObj);
+        it = MemObjMap_.erase(it);
+      } else {
+        ++it;
+      }
     }
+  }
+
+  // Release memObjs outside the locked region
+  // memObj->release() may trigger RemoveIpcHandleMemObj() call if memObj is an IpcBuffer
+  // where the lock would be acquired a second time
+  for (auto* memObj : toRelease) {
+    memObj->release();
   }
 }
 
@@ -441,8 +532,9 @@ void MemObjMap::AddVirtualMemObj(const void* k, amd::Memory* v) {
   std::unique_lock lock(AllocatedLock_);
   auto rval = VirtualMemObjMap_.insert({reinterpret_cast<uintptr_t>(k), v});
   if (!rval.second) {
-    DevLogPrintfError("Virtual Memobj map already has an entry for ptr: 0x%x",
-                      reinterpret_cast<uintptr_t>(k));
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+            "Virtual Memobj map already has an entry for ptr: 0x%x",
+            reinterpret_cast<uintptr_t>(k));
   }
 }
 
@@ -475,7 +567,7 @@ void MemObjMap::AddIpcHandleMemObj(const IpcMemHandle& k, amd::Memory* v) {
   std::unique_lock lock(AllocatedLock_);
   auto rval = IpcHandleMemObjMap_.insert({k, v});
   if (!rval.second) {
-    DevLogPrintfError(
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
         "Error adding entry for Memobj 0x%x in IpcHandle map. The handle already exists.", v);
   }
 }
@@ -551,7 +643,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
     // If not parent, but sub-buffer/child, then validate the address range
     vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(vptr);
     if (vaddr_base_obj == nullptr) {
-      LogPrintfError("Cannot find entry in VirtualMemObjMap: 0x%x \n", vptr);
+      LogPrintfError("Cannot find entry in VirtualMemObjMap: %p ", vptr);
       return nullptr;
     }
     assert(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD);
@@ -593,7 +685,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
 bool Device::DestroyVirtualBuffer(amd::Memory* vaddr_mem_obj) {
   // Argument nullptr check.
   if (vaddr_mem_obj == nullptr || vaddr_mem_obj->getSvmPtr() == nullptr) {
-    LogPrintfError("Mem obj passed is nullptr, vaddr_mem_obj: %p \n", vaddr_mem_obj);
+    LogPrintfError("Mem obj passed is nullptr, vaddr_mem_obj: %p ", vaddr_mem_obj);
     return false;
   }
 
@@ -601,7 +693,7 @@ bool Device::DestroyVirtualBuffer(amd::Memory* vaddr_mem_obj) {
     // If parent is not nullptr, this is the sub-buffer object.
     amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(vaddr_mem_obj->getSvmPtr());
     if (vaddr_base_obj == nullptr) {
-      LogPrintfError("Cannot find mem obj for ptr: 0x%x", vaddr_mem_obj->getSvmPtr());
+      LogPrintfError("Cannot find mem obj for ptr: %p", vaddr_mem_obj->getSvmPtr());
       return false;
     }
     vaddr_base_obj->removeSubBuffer(vaddr_mem_obj);
@@ -618,8 +710,7 @@ Device::BlitProgram::~BlitProgram() {
 
 bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKernels,
                                  const std::string& extraOptions) {
-  std::vector<amd::Device*> devices;
-  devices.push_back(device);
+  std::vector<amd::Device*> devices{device};
   int32_t retval = CL_SUCCESS;
   std::string kernels(device::BlitLinearSourceCode);
   std::string image_kernels(device::BlitImageSourceCode);
@@ -635,16 +726,13 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
   // Create a program with all blit kernels
   program_ = new Program(*context_, kernels.c_str(), Program::OpenCL_C);
   if (program_ == nullptr) {
-    DevLogPrintfError("Program creation for Kernel: %s failed\n", kernels.c_str());
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+             "Program creation for Kernel: %s failed", kernels.c_str());
     return false;
   }
 
   // Build all kernels
   std::string opt = "-cl-internal-kernel ";
-  if (!device->settings().useLightning_) {
-    opt += "-Wf,--force_disable_spir ";
-  }
-
   if (!extraOptions.empty()) {
     opt += extraOptions;
   }
@@ -661,29 +749,37 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
 #endif
   if ((retval = program_->build(devices, opt.c_str(), nullptr, nullptr, GPU_DUMP_BLIT_KERNELS)) !=
       CL_SUCCESS) {
-    DevLogPrintfError("Build failed for Kernel: %s with error code %d\n", kernels.c_str(), retval);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+             "Build failed for Kernel: %s with error code %d", kernels.c_str(), retval);
     return false;
   }
   if (!program_->load()) {
-    DevLogPrintfError("Could not load the kernels: %s \n", kernels.c_str());
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+             "Could not load the kernels: %s", kernels.c_str());
     return false;
   }
 
   return true;
 }
 
+// ================================================================================================
 bool Device::init() {
   assert(!Runtime::initialized() && "initialize only once");
   bool ret = false;
   devices_ = nullptr;
   appProfile_.init();
 
+  if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
+    // On Windows by default keep PAL path for now, until we completely switch to ROCr backend
+    // Without this, roc::Device::init() returns true & disables PAL path in below code
+    GPU_ENABLE_PAL = 1;
+  }
 
 // IMPORTANT: Note that we are initialiing HSA stack first and then
 // GPU stack. The order of initialization is signiicant and if changed
 // amd::Device::registerDevice() must be accordingly modified.
 #if defined(WITH_HSA_DEVICE)
-  if ((GPU_ENABLE_PAL != 1) || flagIsDefault(GPU_ENABLE_PAL)) {
+  if ((GPU_ENABLE_PAL == 0) || (GPU_ENABLE_PAL == 2)) {
     // Return value of roc::Device::init()
     // If returned false, error initializing HSA stack.
     // If returned true, either HSA not installed or HSA stack
@@ -694,7 +790,17 @@ bool Device::init() {
       // that KFD is not installed.
       // Ignore the failure and assume KFD is not installed.
       // abort();
-      DevLogError("KFD is not installed \n");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_INIT, "KFD is not installed");
+      // Disable direct dispatch if ROC initialization wasn't successful
+      if (flagIsDefault(AMD_DIRECT_DISPATCH)) {
+        AMD_DIRECT_DISPATCH = false;
+      }
+      GPU_ENABLE_PAL = 1;
+    } else {
+      // ROC initialization was successful, force direct dispatch
+      AMD_DIRECT_DISPATCH = true;
+      // Disable PAL path
+      GPU_ENABLE_PAL = 0;
     }
     if (!amd::IS_HIP) {
       ret |= roc::NullDevice::init();
@@ -703,12 +809,19 @@ bool Device::init() {
 #endif  // WITH_HSA_DEVICE
 #if defined(WITH_PAL_DEVICE)
   if (GPU_ENABLE_PAL != 0) {
+    if (GPU_ENABLE_PAL == 1) {
+      // PAL path can't support direct dispatch, unless it's forced
+      if (flagIsDefault(AMD_DIRECT_DISPATCH)) {
+        AMD_DIRECT_DISPATCH = false;
+      }
+    }
     ret |= PalDeviceLoad();
   }
 #endif  // WITH_PAL_DEVICE
   return ret;
 }
 
+// ================================================================================================
 void Device::tearDown() {
   if (devices_ != nullptr) {
     for (uint i = 0; i < devices_->size(); ++i) {
@@ -739,7 +852,7 @@ Device::Device()
       vaCacheAccess_(nullptr),
       vaCacheMap_(nullptr),
       index_(0) {
-  memset(&info_, '\0', sizeof(info_));
+  memset(static_cast<void*>(&info_), '\0', sizeof(info_));
   // By default consider just 1 xcc per device
   info_.numberOfXccs_ = 1;
 }
@@ -780,29 +893,8 @@ Device::~Device() {
 }
 
 bool Device::ValidateComgr() {
-#if defined(USE_COMGR_LIBRARY)
-  // Check if Lightning compiler was requested
-  if (settings_->useLightning_) {
-    constexpr bool kComgrVersioned = false;
-    std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
-    // Use Lightning only if it's available
-    settings_->useLightning_ = amd::Comgr::IsReady();
-    return settings_->useLightning_;
-  }
-#endif
-  return true;
-}
-
-bool Device::ValidateHsail() {
-#if defined(WITH_COMPILER_LIB)
-  // Check if HSAIL compiler was requested
-  if (!settings_->useLightning_) {
-    std::call_once(amd::Hsail::initialized, amd::Hsail::LoadLib);
-    // Use Hsail only if it's available
-    return amd::Hsail::IsReady();
-  }
-#endif
-  return true;
+  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib);
+  return amd::Comgr::IsReady();
 }
 
 size_t GetMaxStackSize(const std::string& procName) {
@@ -820,7 +912,7 @@ bool Device::create(const Isa& isa) {
   assert(!vaCacheAccess_ && !vaCacheMap_);
   isa_ = &isa;
   // VA Cache Ops Lock
-  vaCacheAccess_ = new amd::Monitor(true);
+  vaCacheAccess_ = new std::recursive_mutex();
   if (nullptr == vaCacheAccess_) {
     return false;
   }
@@ -864,7 +956,7 @@ void Device::addVACache(device::Memory* memory) const {
   // Make sure system memory has direct access
   if (memory->isHostMemDirectAccess()) {
     // VA cache access must be serialised
-    amd::ScopedLock lk(*vaCacheAccess_);
+    std::scoped_lock lk(*vaCacheAccess_);
     void* start = memory->owner()->getHostMem();
     size_t offset;
     device::Memory* doubleMap = findMemoryFromVA(start, &offset);
@@ -883,7 +975,7 @@ void Device::removeVACache(const device::Memory* memory) const {
   // Make sure system memory has direct access
   if (memory->isHostMemDirectAccess() && memory->owner()) {
     // VA cache access must be serialised
-    amd::ScopedLock lk(*vaCacheAccess_);
+    std::scoped_lock lk(*vaCacheAccess_);
     void* start = memory->owner()->getHostMem();
     vaCacheMap_->erase(reinterpret_cast<uintptr_t>(start));
   }
@@ -891,7 +983,7 @@ void Device::removeVACache(const device::Memory* memory) const {
 
 device::Memory* Device::findMemoryFromVA(const void* ptr, size_t* offset) const {
   // VA cache access must be serialised
-  amd::ScopedLock lk(*vaCacheAccess_);
+  std::scoped_lock lk(*vaCacheAccess_);
 
   uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
   auto it = vaCacheMap_->upper_bound(reinterpret_cast<uintptr_t>(ptr));
@@ -984,7 +1076,7 @@ bool Device::getDeviceIDs(cl_device_type deviceType, uint32_t numEntries, cl_dev
 
 bool Device::enableP2P(amd::Device* ptrDev) {
   assert(ptrDev != nullptr);
-  amd::ScopedLock lock(lockP2P_);
+  std::scoped_lock lock(lockP2P_);
   Device* peerDev = static_cast<Device*>(ptrDev);
   if (std::find(enabled_p2p_devices_.begin(), enabled_p2p_devices_.end(), peerDev) ==
       enabled_p2p_devices_.end()) {
@@ -997,7 +1089,7 @@ bool Device::enableP2P(amd::Device* ptrDev) {
 
 bool Device::disableP2P(amd::Device* ptrDev) {
   assert(ptrDev != nullptr);
-  amd::ScopedLock lock(lockP2P_);
+  std::scoped_lock lock(lockP2P_);
   Device* peerDev = static_cast<Device*>(ptrDev);
   // if device is present then remove
   auto it = std::find(enabled_p2p_devices_.begin(), enabled_p2p_devices_.end(), peerDev);
@@ -1051,7 +1143,15 @@ char* Device::getExtensionString() {
 bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* mem_offset) const {
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(dev_ptr);
   if (amd_mem_obj == nullptr) {
-    DevLogPrintfError("Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+             "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
+    return false;
+  }
+
+  // VMM allocations must use hipMemExportToShareableHandle for IPC.
+  if (amd_mem_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD) {
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+             "IPC is not supported for VMM allocations (dev_ptr: %p)", dev_ptr);
     return false;
   }
 
@@ -1068,8 +1168,8 @@ bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* me
   // Check if the dev_ptr is lesser than original dev_ptr
   if (orig_dev_ptr > dev_ptr) {
     // If this happens, then revisit FindMemObj logic
-    DevLogPrintfError("Original dev_ptr: 0x%x cannot be greater than dev_ptr: 0x%x", orig_dev_ptr,
-                      dev_ptr);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+            "Original dev_ptr: 0x%x cannot be greater than dev_ptr: 0x%x", orig_dev_ptr, dev_ptr);
     return false;
   }
 
@@ -1107,6 +1207,23 @@ bool Device::IpcAttach(const char* handle, size_t mem_size, size_t mem_offset, u
   if (mem_obj_exist == nullptr) {
     // Add the original mem_ptr to the MemObjMap with newly created amd_mem_obj
     amd::MemObjMap::AddMemObj(amd_mem_obj->getSvmPtr(), amd_mem_obj);
+  } else if (mem_obj_exist->ipcShared()) {
+    // Stale IPC import at the same VA. The app freed memory on the
+    // exporter side and reallocated at the same VA without the importer calling
+    // hipIpcCloseMemHandle. Replace the stale object with the new mapping.
+    void* old_ptr = mem_obj_exist->getSvmPtr();
+    void* new_ptr = amd_mem_obj->getSvmPtr();
+    amd::MemObjMap::RemoveIpcHandleMemObj(mem_obj_exist);
+    amd::MemObjMap::RemoveMemObj(old_ptr);
+
+    if (old_ptr == new_ptr) {
+      // Clear ipcShared to prevent the destructor from calling ipc_memory_detach,
+      // which would unmap the new (valid) mapping at this VA.
+      mem_obj_exist->setIpcShared(false);
+    }
+    // Different VA: destructor will call ipc_memory_detach to unmap the old VA.
+    mem_obj_exist->release();
+    amd::MemObjMap::AddMemObj(new_ptr, amd_mem_obj);
   } else {
     amd_mem_obj->release();
     amd_mem_obj = mem_obj_exist;
@@ -1136,19 +1253,29 @@ void Device::IpcDetach(amd::Memory* amd_mem_obj) const {
 }
 
 std::vector<amd::CommandQueue*> Device::getActiveQueues() {
+  std::vector<amd::CommandQueue*> result;
+  result.reserve(activeQueues.size());
+
   amd::ScopedLock lock(activeQueuesLock_);
-  for (auto it = activeQueues.begin(); it != activeQueues.end();) {
-    if ((*it)->referenceCount() == 0) {
+  for (auto it = activeQueues.begin(); it != activeQueues.end(); ++it) {
+    if (!it->second) {
+      // An inactive queue might have been releeased already, so dereferencing
+      // it->first isn't safe
+      continue;
+    }
+    if (it->first->referenceCount() == 0) {
       // It is being terminated in HostQueue::terminate().
       // We should not wait for commands in a queue being terminated.
-      it = activeQueues.erase(it);
+      it->second = false;
     } else {
+      assert(it->second);
       // In case the queue will be destroyed in Stream::Destroy().
-      (*it)->retain();
-      ++it;
+      it->first->retain();
+      result.push_back(it->first);
     }
   }
-  return std::vector<amd::CommandQueue*>(activeQueues.begin(), activeQueues.end());
+
+  return result;
 }
 
 // =================================================================================================
@@ -1161,7 +1288,8 @@ bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle) 
   // make sure the memory is allocated.
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(dev_ptr);
   if (amd_mem_obj == nullptr) {
-    DevLogPrintfError("Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+             "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
     return false;
   }
 
@@ -1181,6 +1309,47 @@ void Device::RemoveHostcallMemory(amd::Memory* memory) {
   if (it != hostcall_allocated_memories_.end()) {
     hostcall_allocated_memories_.erase(it);
   }
+}
+
+void Device::ClearHostcallMemories() { hostcall_allocated_memories_.clear(); }
+
+// ================================================================================================
+void Device::AddDevMemObj(const void* k, amd::Memory* memObj) {
+  std::unique_lock lock(MemObjMap::AllocatedLock_);
+  auto rval = devMemObjMap_.insert({reinterpret_cast<uintptr_t>(k), memObj});
+  if (!rval.second) {
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+            "Device memobj map already has an entry for VA: 0x%llx",
+            reinterpret_cast<uintptr_t>(k));
+  }
+}
+
+// ================================================================================================
+void Device::RemoveDevMemObj(const void* k) {
+  std::unique_lock lock(MemObjMap::AllocatedLock_);
+  devMemObjMap_.erase(reinterpret_cast<uintptr_t>(k));
+}
+
+// ================================================================================================
+amd::Memory* Device::FindDevMemObj(const void* k, size_t* offset) const {
+  uintptr_t key = reinterpret_cast<uintptr_t>(k);
+  auto it = devMemObjMap_.upper_bound(key);
+  if (it == devMemObjMap_.begin()) {
+    return nullptr;
+  }
+
+  --it;
+  amd::Memory* mem = it->second;
+  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                        ? sizeof(mem->getUserData().hsa_handle)
+                        : mem->getSize();
+  if (key >= it->first && key < (it->first + mem_size)) {
+    if (offset != nullptr) {
+      *offset = key - it->first;
+    }
+    return mem;
+  }
+  return nullptr;
 }
 
 }  // namespace amd
@@ -1207,13 +1376,14 @@ Settings::Settings() : value_(0) {
   }
 
   gwsInitSupported_ = true;
+  groupMemCarveout_ = false;
 }
 
 void Memory::saveMapInfo(const void* mapAddress, const amd::Coord3D origin,
                          const amd::Coord3D region, uint mapFlags, bool entire,
                          amd::Image* baseMip) {
   // Map/Unmap must be serialized.
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   WriteMapInfo info = {};
   WriteMapInfo* pInfo = &info;
@@ -1263,45 +1433,8 @@ bool ClBinary::setElfTarget() {
   static const uint32_t Target = 21;
   assert(((0xFFFF8000 & Target) == 0) && "ASIC target ID >= 2^15");
   uint16_t elf_target = static_cast<uint16_t>(0x7FFF & Target);
-  return elfOut()->setTarget(elf_target, amd::Elf::CAL_PLATFORM);
+  return elfOut()->setTarget(elf_target);
 }
-
-#if defined(WITH_COMPILER_LIB)
-std::string ClBinary::getBIFSymbol(unsigned int symbolID) const {
-  size_t nSymbols = 0;
-  // Due to PRE & POST defines in bif_section_labels.hpp conflict with
-  // PRE & POST struct members in sp3-si-chip-registers.h
-  // unable to include bif_section_labels.hpp in device.hpp
-  //! @todo: resolve conflict by renaming defines,
-  // then include bif_section_labels.hpp in device.hpp &
-  // use oclBIFSymbolID instead of unsigned int as a parameter
-  const oclBIFSymbolID symID = static_cast<oclBIFSymbolID>(symbolID);
-  switch (format_) {
-    case BIF_VERSION2: {
-      nSymbols = sizeof(BIF20) / sizeof(oclBIFSymbolStruct);
-      const oclBIFSymbolStruct* symb = findBIFSymbolStruct(BIF20, nSymbols, symID);
-      assert(symb && "BIF20 symbol with symbolID not found");
-      if (symb) {
-        return std::string(symb->str[bif::PRE]) + std::string(symb->str[bif::POST]);
-      }
-      break;
-    }
-    case BIF_VERSION3: {
-      nSymbols = sizeof(BIF30) / sizeof(oclBIFSymbolStruct);
-      const oclBIFSymbolStruct* symb = findBIFSymbolStruct(BIF30, nSymbols, symID);
-      assert(symb && "BIF30 symbol with symbolID not found");
-      if (symb) {
-        return std::string(symb->str[bif::PRE]) + std::string(symb->str[bif::POST]);
-      }
-      break;
-    }
-    default:
-      assert(0 && "unexpected BIF type");
-      return "";
-  }
-  return "";
-}
-#endif
 
 void ClBinary::init(amd::option::Options* optionsObj) {
   // option has higher priority than environment variable.
@@ -1330,37 +1463,6 @@ void ClBinary::init(amd::option::Options* optionsObj) {
     flags_ = (flags_ & (~BinaryASMask));
     flags_ |= ((optionsObj->oVariables->BinAS) ? BinarySaveAS : BinaryNoSaveAS);
   }
-}
-
-bool ClBinary::isRecompilable(std::string& llvmBinary, amd::Elf::ElfPlatform thePlatform) {
-  /* It is recompilable if there is llvmir that was generated for
-     the same platform (CPU or GPU) and with the same bitness.
-
-     Note: the bitness has been checked in initClBinary(), no need
-           to check it here.
-   */
-  if (llvmBinary.empty()) {
-    DevLogError("LLVM Binary string is empty \n");
-    return false;
-  }
-
-  uint16_t elf_target;
-  amd::Elf::ElfPlatform platform;
-  if (elfIn()->getTarget(elf_target, platform)) {
-    if (platform == thePlatform) {
-      return true;
-    }
-    if ((platform == amd::Elf::COMPLIB_PLATFORM) &&
-        (((thePlatform == amd::Elf::CAL_PLATFORM) &&
-          ((elf_target == (uint16_t)EM_HSAIL) || (elf_target == (uint16_t)EM_HSAIL_64))) ||
-         ((thePlatform == amd::Elf::CPU_PLATFORM) &&
-          ((elf_target == (uint16_t)EM_386) || (elf_target == (uint16_t)EM_X86_64))))) {
-      return true;
-    }
-  }
-
-  DevLogPrintfError("LLVM_Binary: %s is not recompilable \n", llvmBinary.c_str());
-  return false;
 }
 
 void ClBinary::release() {
@@ -1428,7 +1530,7 @@ bool ClBinary::createElfBinary(bool doencrypt, Program::type_t type) {
   }
 
   if (!elfOut_->dumpImage(&image, &imageSize)) {
-    DevLogError("Dump Image failed \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Dump Image failed");
     return false;
   }
 
@@ -1451,7 +1553,7 @@ bool ClBinary::createElfBinary(bool doencrypt, Program::type_t type) {
     delete[] image;
     if (!success) {
       delete[] outBuf;
-      DevLogError("Cannot succesfully OCL Encrypt Image");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot succesfully OCL Encrypt Image");
       return false;
     }
     image = outBuf;
@@ -1509,7 +1611,7 @@ bool ClBinary::decryptElf(const char* binaryIn, size_t size, char** decryptBin, 
     int outDataSize = 0;
     if (!amd::oclDecrypt(binaryIn, (int)size, outBuf, outBufSize, &outDataSize)) {
       delete[] outBuf;
-      DevLogError("Cannot Decrypt Image \n");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot Decrypt Image");
       return false;
     }
 
@@ -1578,54 +1680,9 @@ bool ClBinary::loadLlvmBinary(std::string& llvmBinary,
     }
   }
 
-  DevLogPrintfError("Cannot Load LLVM Binary: %s \n", llvmBinary.c_str());
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+           "Cannot Load LLVM Binary: %s", llvmBinary.c_str());
   return false;
-}
-
-bool ClBinary::loadCompileOptions(std::string& compileOptions) const {
-  char* options = nullptr;
-  size_t sz;
-  compileOptions.clear();
-#if defined(WITH_COMPILER_LIB)
-  if (elfIn_->getSymbol(amd::Elf::COMMENT, getBIFSymbol(symOpenclCompilerOptions).c_str(), &options,
-                        &sz)) {
-    if (sz > 0) {
-      compileOptions.append(options, sz);
-    }
-    return true;
-  }
-#endif
-  return false;
-}
-
-bool ClBinary::loadLinkOptions(std::string& linkOptions) const {
-  char* options = nullptr;
-  size_t sz;
-  linkOptions.clear();
-#if defined(WITH_COMPILER_LIB)
-  if (elfIn_->getSymbol(amd::Elf::COMMENT, getBIFSymbol(symOpenclLinkerOptions).c_str(), &options,
-                        &sz)) {
-    if (sz > 0) {
-      linkOptions.append(options, sz);
-    }
-    return true;
-  }
-#endif
-  return false;
-}
-
-void ClBinary::storeCompileOptions(const std::string& compileOptions) {
-#if defined(WITH_COMPILER_LIB)
-  elfOut()->addSymbol(amd::Elf::COMMENT, getBIFSymbol(symOpenclCompilerOptions).c_str(),
-                      compileOptions.c_str(), compileOptions.length());
-#endif
-}
-
-void ClBinary::storeLinkOptions(const std::string& linkOptions) {
-#if defined(WITH_COMPILER_LIB)
-  elfOut()->addSymbol(amd::Elf::COMMENT, getBIFSymbol(symOpenclLinkerOptions).c_str(),
-                      linkOptions.c_str(), linkOptions.length());
-#endif
 }
 
 bool ClBinary::isSPIR() const {

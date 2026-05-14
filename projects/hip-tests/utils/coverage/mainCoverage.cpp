@@ -1,36 +1,39 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "reportGenerators.h"
 
 int main(int argc, char** argv) {
-  if (argc != 2) {
-    std::cout << "Please provide the path to the cloned HIP/include/ directory as an argument! "
-                 "Only one argument supported."
+  if (argc == 2 && std::string(argv[1]) == "--help") {
+    std::cout << "Usage: " << argv[0] << " <hip-include-dir> <catch-test-dir> [work-dir]\n\n"
+              << "Arguments:\n\n"
+              << "  hip-include-dir   Path to the directory containing HIP headers.\n"
+              << "                    Example: <project-root>/projects/hip/include\n"
+              << "  catch-test-dir    Path to the directory containing HIP Catch2 tests.\n"
+              << "                    Example: <project-root>/projects/hip-tests/catch2\n"
+              << "  work-dir          (Optional) Path to the working directory.\n" 
+              << "                    Defaults to the current directory.\n"
               << std::endl;
-    std::cout << "\tExample: ./generateHipAPICoverage /workspace/user1/HIP/include/" << std::endl;
-    return -1;
+    return 0;
   }
+
+  if (argc < 3 || argc > 4) {
+    std::cerr << "Error: Invalid number of arguments. Use --help for usage information.\n";
+    return 1;
+  }
+
   std::string hip_include_path = argv[1];
+  std::string tests_root_directory{argv[2]};
+
+  std::string work_directory = ".";
+
+  if (argc == 4) {
+    work_directory = argv[3];
+  }
+
   /*
   Relative paths to all needed files, as it is expected that the application
   is called from the HIP/tests/catch/coverage directory.
@@ -38,7 +41,7 @@ int main(int argc, char** argv) {
   std::string hip_api_header_file{
       findAbsolutePathOfFile(hip_include_path + "/hip/hip_runtime_api.h")};
   std::string hip_rtc_header_file{findAbsolutePathOfFile(hip_include_path + "/hip/hiprtc.h")};
-  std::string tests_root_directory{findAbsolutePathOfFile("../../catch")};
+  
   std::string device_api_file{"device_api_list.txt"};
 
   std::vector<std::string> api_group_names;
@@ -79,10 +82,10 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "Generating XML report files." << std::endl;
-  generateXMLReportFiles(hip_apis, hip_api_groups);
+  generateXMLReportFiles(hip_apis, hip_api_groups, work_directory);
   std::cout << "Generating HTML report files." << std::endl;
   generateHTMLReportFiles(hip_apis, hip_api_groups, tests_root_directory, hip_api_header_file,
-                          hip_rtc_header_file);
+                          hip_rtc_header_file, work_directory);
 
   return 0;
 }

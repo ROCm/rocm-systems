@@ -19,7 +19,7 @@ git clone https://github.com/ROCm/amdsmi.git
 ### RDC 
 
 ```bash
-git clone https://github.com/ROCm/rdc.git
+git clone https://github.com/ROCm/rocm-systems.git --recursive
 ```
 
 ## Step 2: Build AMDSMI Base Image
@@ -33,7 +33,7 @@ git clone https://github.com/ROCm/rdc.git
 
 ## Step 3: Build RDC Image
 
-1. Navigate to the `rdc` directory on your system.
+1. Navigate to the `rocm-systems/projects/rdc` directory on your system.
 2. Navigate into the `/Docker` directory.
 3. Build the Docker image using the following command:
 

@@ -15,11 +15,13 @@ Command line profiler
 
 Launch and profile the target application using the command line profiler.
 
-The command line profiler launches the target application, calls the
-ROCProfiler API via the ``rocprof`` binary, and collects profile results for
-the specified kernels, dispatches, and hardware components. If not
-specified, ROCm Compute Profiler defaults to collecting all available counters for all
-kernels and dispatches launched by the your executable.
+The command line profiler launches the target application and collects
+hardware performance counter data for the specified kernels, dispatches, and
+hardware components. By default, ROCm Compute Profiler collects all available
+counters for all kernels and dispatches launched by the executable. Profiling
+is performed using :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`; see
+:ref:`core-install-rocprof-var` for details on backend selection and the
+native counter collection tool.
 
 To collect the default set of data for all kernels in the target
 application, launch, for example:
@@ -31,7 +33,15 @@ application, launch, for example:
 This runs the app, launches each kernel, and generates profiling results. By
 default, results are written to a subdirectory with your accelerator's name;
 for example, ``./workloads/vcopy_data/MI200/``, where name is configurable
-via the ``-n`` argument.
+via the ``-n`` argument. When an MPI rank is detected, the default output
+directory appends the rank (``./workloads/vcopy_data/<rank>/``) instead of
+the gpu model. Use ``--output-directory`` to override the output location.
+
+.. note::
+
+   ``--path`` and ``--subpath`` are deprecated for profile mode and will be
+   removed in a future release. Use ``--output-directory`` with parameterized
+   placeholders instead.
 
 .. note::
 
@@ -54,7 +64,7 @@ Common filters to customize data collection include:
    Enables filtering kernels by name.
 
 ``-d``, ``--dispatch``
-   Enables filtering based on dispatch ID.
+   Enables filtering based on dispatch iteration.
 
 ``-b``, ``--block``
    Enables collection metrics for only the specified analysis report blocks.
@@ -69,6 +79,13 @@ to view the metrics for current system architecture:
 
    $ rocprof-compute --list-metrics <sys_arch>
    $ rocprof-compute profile --list-available-metrics
+
+To view available aliases by hardware block, use the ``--list-blocks``
+option with a system architecture argument
+
+.. code-block:: shell
+
+   $ rocprof-compute --list-blocks <sys_arch>
 
 .. _basic-analyze-cli:
 
@@ -92,25 +109,6 @@ workload path.
 
 See :doc:`analyze/cli` for more detailed information.
 
-.. _basic-analyze-grafana:
-
-Analyze in the Grafana GUI
---------------------------
-
-To conduct a more in-depth analysis of profiling results, it's suggested to use
-a Grafana GUI with ROCm Compute Profiler. To interact with profiling results, import your
-data to the MongoDB instance included in the ROCm Compute Profiler Dockerfile. See
-:doc:`/install/grafana-setup`.
-
-To interact with Grafana data, stored in the ROCm Compute Profiler database, enter
-``database`` :ref:`mode <modes-database>`; for example:
-
-.. code-block:: shell
-
-   $ rocprof-compute database --import [CONNECTION OPTIONS]
-
-See :doc:`/how-to/analyze/grafana-gui` for more detailed information.
-
 .. _modes:
 
 Modes
@@ -127,10 +125,10 @@ Profile mode
 
 ``profile``
    Launches the target application on the local system using
-   :doc:`ROCProfiler <rocprofiler:index>`. Depending on the profiling options
+   :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`. Depending on the profiling options
    chosen, selected kernels, dispatches, and or hardware components used by the
    application are profiled. It stores results locally in an output folder:
-   ``./workloads/\<name>``.
+   ``./workloads/\<name>`` (or rank-specific subdirectories when using MPI).
 
    .. code-block:: shell
 
@@ -153,10 +151,6 @@ Analyze mode
    To generate a lightweight GUI interface, you can add the ``--gui`` flag to your
    analysis command.
 
-   This mode is a middle ground to the highly detailed ROCm Compute Profiler Grafana GUI and
-   is great if you want immediate access to a hardware component you’re already
-   familiar with.
-
    .. code-block:: shell
 
       $ rocprof-compute analyze --help
@@ -171,26 +165,6 @@ Analyze mode
 
 See :doc:`analyze/mode` to learn about these modes in depth and to get started
 with analysis using ROCm Compute Profiler.
-
-.. _modes-database:
-
-Database mode
--------------
-
-``database``
-   The Grafana analyzer GUI is built on a MongoDB database. ``--import``
-   profiling results to the DB to interact with the workload in Grafana or
-   ``--remove`` the workload from the DB.
-
-   Connection options need to be specified. See :doc:`/how-to/analyze/grafana-gui` for
-   more details.
-
-   .. code-block:: shell
-
-      $ rocprof-compute database --help
-
-See :doc:`/install/grafana-setup` to learn about setting up a Grafana server and
-database instance to make your profiling data more digestible and shareable.
 
 .. _global-options:
 
@@ -236,19 +210,11 @@ The following table lists ROCm Compute Profiler's basic operations, their
 
    * - :doc:`Profile a workload </how-to/profile/mode>`
      - ``profile``
-     - ``--name``, ``-- <profile_cmd>``
+     - ``--name`` or ``--output-directory``, ``-- <profile_cmd>``
 
    * - :ref:`Standalone roofline analysis <standalone-roofline>`
      - ``profile``
-     - ``--name``, ``--roof-only``, ``--roofline-data-type <data_type>``, ``-- <profile_cmd>``
-
-   * - :ref:`Import a workload to database <grafana-gui-import>`
-     - ``database``
-     - ``--import``, ``--host``, ``--username``, ``--workload``, ``--team``
-
-   * - :ref:`Remove a workload from database <grafana-gui-remove>`
-     - ``database``
-     - ``--remove``, ``--host``, ``--username``, ``--workload``, ``--team``
+     - ``--name`` or ``--output-directory``, ``--roof-only``, ``--roofline-data-type <data_type>``, ``-- <profile_cmd>``
 
    * - :doc:`Launch standalone GUI from CLI </how-to/analyze/standalone-gui>`
      - ``analyze``

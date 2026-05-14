@@ -186,8 +186,8 @@ output_keys(std::string _tag)
     {
         for(size_t i = 0; i < _cmdline.size(); ++i)
         {
-            const auto _l = std::string{(i == 0) ? "" : "_"};
-            auto       _v = _cmdline.at(i);
+            const auto  _l = std::string{(i == 0) ? "" : "_"};
+            const auto& _v = _cmdline.at(i);
             _argv_string += _l + _v;
             if(i > 0)
             {
@@ -237,7 +237,7 @@ output_keys(std::string _tag)
     {
         for(size_t i = 0; i < _cmdline.size(); ++i)
         {
-            auto _v  = _cmdline.at(i);
+            const auto& _v = _cmdline.at(i);
             auto itr = output_key{fmt::format("arg{}", i), _v, fmt::format("Argument #{}", i)};
             _options.emplace_back(fmt::format("%{}%", itr.key), itr.value, itr.description);
             _options.emplace_back(

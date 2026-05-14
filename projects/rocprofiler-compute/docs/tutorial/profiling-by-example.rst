@@ -7,7 +7,7 @@ Profiling by example
 ********************
 
 The following examples refer to sample :doc:`HIP <hip:index>` code located in
-:fab:`github` :dev-sample:`ROCm/rocprofiler-compute/blob/amd-mainline/sample <>`
+:fab:`github` :dev-sample:`ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/sample <>`
 and distributed as part of ROCm Compute Profiler.
 
 .. include:: ./includes/valu-arithmetic-instruction-mix.rst

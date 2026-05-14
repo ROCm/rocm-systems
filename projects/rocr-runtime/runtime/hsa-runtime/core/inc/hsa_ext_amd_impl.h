@@ -70,6 +70,9 @@ hsa_status_t
     hsa_amd_profiling_async_copy_enable(bool enable);
 
 // Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_agent_preload(hsa_agent_t agent, uint64_t flags);
+
+// Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_profiling_get_dispatch_time(
     hsa_agent_t agent, hsa_signal_t signal,
     hsa_amd_profiling_dispatch_time_t* time);
@@ -163,6 +166,13 @@ hsa_status_t
 
 // Mirrors Amd Extension Apis
 hsa_status_t
+    hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* copy_ops,
+                              uint32_t num_copy_ops,
+                              uint32_t num_dep_signals,
+                              const hsa_signal_t* dep_signals);
+
+// Mirrors Amd Extension Apis
+hsa_status_t
     hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
                                       uint32_t *engine_ids_mask);
 
@@ -219,7 +229,7 @@ hsa_status_t
 // Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents,
                                         hsa_agent_t* agents,
-                                        int interop_handle,
+                                        hsa_handle_t interop_handle,
                                         uint32_t flags,
                                         size_t* size,
                                         void** ptr,
@@ -382,7 +392,24 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
                                            uint64_t *size_copied, int32_t *status);
 
 // Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t type,
+                                           hsa_amd_queue_priority_t priority,
+                                           void (*callback)(hsa_status_t status,
+                                                            hsa_queue_t* source, void* data),
+                                           void* data, uint64_t flags, hsa_queue_t** queue);
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue);
+
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes, uint32_t count,
+                                               uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+                                               hsa_signal_t completion_signal);
+
+// Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_enable_logging(uint8_t* flags, void* file);
+
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *event_id);
 
 }  // namespace amd
 }  // namespace rocr

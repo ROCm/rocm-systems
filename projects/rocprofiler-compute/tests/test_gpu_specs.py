@@ -1,41 +1,17 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import re
 import subprocess
 import tempfile
-from importlib.machinery import SourceFileLoader
 from unittest.mock import patch
 
 import pytest
 
-from src.utils.specs import generate_machine_specs
-
-rocprof_compute = SourceFileLoader(
-    "rocprof-compute", "src/rocprof-compute"
-).load_module()
+try:
+    from src.utils.specs import generate_machine_specs
+except Exception:
+    from utils.specs import generate_machine_specs
 
 # NOTE: Only testing gfx942 for now.
 GFX942_CHIP_IDS_TO_NUM_XCDS = {
@@ -65,7 +41,7 @@ def parse_table_dict(output: str) -> dict:
     """
     Parse an ASCII table into a dict mapping Spec -> Value.
     """
-    lines = [line for line in output.splitlines() if line.startswith("│")]
+    lines = [line for line in output.splitlines() if line.startswith("|")]
     # locate header row (the one containing 'Spec' and 'Value')
     header_idx = next(
         (i for i, ln in enumerate(lines) if "Spec" in ln and "Value" in ln), None
@@ -73,16 +49,17 @@ def parse_table_dict(output: str) -> dict:
     if header_idx is None:
         raise ValueError("Header row with Spec and Value not found")
 
-    header_cells = [c.strip() for c in lines[header_idx].strip("│").split("│")]
+    header_cells = [c.strip() for c in lines[header_idx].strip("|").split("|")]
 
     spec_i = header_cells.index("Spec")
     value_i = header_cells.index("Value")
 
     result = {}
-    for ln in lines[header_idx + 2 :]:
-        if ln.startswith("├") or ln.startswith("╘"):
+    for ln in lines[header_idx + 1 :]:
+        # Skip separator lines
+        if ln.startswith("+"):
             continue
-        cells = [c.strip() for c in ln.strip("│").split("│")]
+        cells = [c.strip() for c in ln.strip("|").split("|")]
         if len(cells) <= max(spec_i, value_i):
             continue
         spec = cells[spec_i]
@@ -90,14 +67,6 @@ def parse_table_dict(output: str) -> dict:
         if spec:
             result[spec] = value
     return result
-
-
-def run(cmd):
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if cmd[0] == "amd-smi" and p.returncode == 8:
-        print("ERROR: No GPU detected. Unable to load amd-smi")
-        assert 0
-    return p.stdout.decode("utf-8")
 
 
 def get_num_xcds():
@@ -170,12 +139,20 @@ def test_num_xcds_cli_output():
     num_xcds = get_num_xcds()
 
     # 2. Run rocprof-compute -s and grab rocprof-compute num_xcd
-    proc = subprocess.run(
-        ["src/rocprof-compute", "-s"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    try:
+        proc = subprocess.run(
+            ["src/rocprof-compute", "-s"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except Exception:
+        proc = subprocess.run(
+            ["./rocprof-compute", "-s"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
     assert proc.returncode == 0, (
         f"Non-zero exit ({proc.returncode}), stderr:\n{proc.stderr}"
     )

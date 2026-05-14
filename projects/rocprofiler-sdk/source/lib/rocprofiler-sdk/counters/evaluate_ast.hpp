@@ -102,9 +102,10 @@ public:
      *        of this AST. Can throw if the AST is invalid (i.e. dimension mismatch in
      *        child nodes of this AST). This is done in a recursive fashion.
      *
+     * @param agent_id Agent ID to use for dimension lookup.
      * @return std::vector<MetricDimension> dimension of the output of this AST.
      */
-    std::vector<MetricDimension> set_dimensions();
+    std::vector<MetricDimension> set_dimensions(rocprofiler_agent_id_t agent_id);
 
     bool validate_raw_ast(const std::unordered_map<std::string, Metric>& metrics);
 

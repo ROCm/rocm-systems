@@ -93,11 +93,7 @@ static void GetBlockName(HSA_UUID uuid, char *name, uint32_t name_len,
                  uuid.Data4[6], uuid.Data4[7]);
 }
 
-static void GetCounterProperties(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDPerfCountersTest* pKFDPerfCountersTest =
-                         (KFDPerfCountersTest*)pTestParamters->pTestObject;
+void KFDPerfCountersTest::GetCounterProperties(int gpuNode) {
 
     HsaCounterProperties* pProps = NULL;
     ASSERT_SUCCESS(hsaKmtPmcGetCounterProperties(gpuNode, &pProps));
@@ -141,18 +137,16 @@ static void GetCounterProperties(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDPerfCountersTest, GetCounterProperties) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(GetCounterProperties));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->GetCounterProperties(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void RegisterTrace(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDPerfCountersTest::RegisterTrace(int gpuNode) {
 
     HsaCounterProperties* pProps;
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDPerfCountersTest* pKFDPerfCountersTest =
-                         (KFDPerfCountersTest*)pTestParamters->pTestObject;
 
     HsaPmcTraceRoot root;
 
@@ -189,21 +183,19 @@ static void RegisterTrace(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDPerfCountersTest, RegisterTrace) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(RegisterTrace));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->RegisterTrace(gpuNode);
+    }));
 
     TEST_END
 }
 
 static const unsigned int START_STOP_DELAY = 10000;     // 10 sec tracing
 
-static void StartStopQueryTrace(KFDTEST_PARAMETERS* pTestParamters){
+void KFDPerfCountersTest::StartStopQueryTrace(int gpuNode) {
 
     HsaPmcTraceRoot root;
     HsaCounterProperties* pProps;
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDPerfCountersTest* pKFDPerfCountersTest =
-                         (KFDPerfCountersTest*)pTestParamters->pTestObject;
 
     pProps = NULL;
     ASSERT_SUCCESS(hsaKmtPmcGetCounterProperties(gpuNode, &pProps));
@@ -270,16 +262,14 @@ static void StartStopQueryTrace(KFDTEST_PARAMETERS* pTestParamters){
 TEST_F(KFDPerfCountersTest, StartStopQueryTrace) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(RegisterTrace));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->StartStopQueryTrace(gpuNode); 
+    }));
 
     TEST_END
 }
 
-static void ClockCountersBasicTest(KFDTEST_PARAMETERS* pTestParamters){
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDPerfCountersTest* pKFDPerfCountersTest =
-					  (KFDPerfCountersTest*)pTestParamters->pTestObject;
+void KFDPerfCountersTest::ClockCountersBasicTest(int gpuNode) {
 
     HsaClockCounters counters1;
     HsaClockCounters counters2;
@@ -303,7 +293,9 @@ static void ClockCountersBasicTest(KFDTEST_PARAMETERS* pTestParamters){
 TEST_F(KFDPerfCountersTest, ClockCountersBasicTest) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(ClockCountersBasicTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->ClockCountersBasicTest(gpuNode);
+    }));
 
     TEST_END
 }

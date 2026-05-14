@@ -24,9 +24,39 @@
 #include <rocprofiler-sdk-roctx/roctx.h>
 #include <unistd.h>
 #include <chrono>
+#include <csignal>
+#include <cstdlib>
 #include <iostream>
+#include <sstream>
+#include <string>
 #include <thread>
 #include <vector>
+
+namespace
+{
+// required type for signal handlers
+volatile std::sig_atomic_t signal_received = 0;
+}  // namespace
+
+// signal handler - must have C linkage
+extern "C" void
+attachment_test_signal_handler(int signum)
+{
+    signal_received = signum;
+}
+
+/* Macro for checking GPU API return values */
+#define HIP_ASSERT(call)                                                                           \
+    do                                                                                             \
+    {                                                                                              \
+        hipError_t gpuErr = call;                                                                  \
+        if(hipSuccess != gpuErr)                                                                   \
+        {                                                                                          \
+            printf(                                                                                \
+                "GPU API Error - %s:%d: '%s'\n", __FILE__, __LINE__, hipGetErrorString(gpuErr));   \
+            exit(1);                                                                               \
+        }                                                                                          \
+    } while(0)
 
 __global__ void
 simple_kernel(float* data, int size)
@@ -38,44 +68,23 @@ simple_kernel(float* data, int size)
     }
 }
 
-int
-main(int /*argc*/, char** /*argv*/)
+void
+execute_kernels(const size_t tid, const size_t device_id)
 {
-    std::cout << "Attachment test app started with PID: " << getpid() << std::endl;
-
-    // Initialize HIP
-    int        device_count = 0;
-    hipError_t err          = hipGetDeviceCount(&device_count);
-    if(err != hipSuccess || device_count == 0)
-    {
-        std::cerr << "No HIP devices found or error getting device count" << std::endl;
-        return 1;
-    }
-
-    std::cout << "After first call " << getpid() << std::endl;
-
     // Set device
-    err = hipSetDevice(0);
-    if(err != hipSuccess)
-    {
-        std::cerr << "Failed to set device 0" << std::endl;
-        return 1;
-    }
+    HIP_ASSERT(hipSetDevice(device_id));
+
+    auto* stream = hipStream_t{nullptr};
+    HIP_ASSERT(hipStreamCreate(&stream));
 
     // Allocate memory
     const int    size  = 1024 * 1024;  // 1M elements
     const size_t bytes = size * sizeof(float);
 
     float* h_data = new float[size];
-    float* d_data;
+    float* d_data = nullptr;
 
-    err = hipMalloc(&d_data, bytes);
-    if(err != hipSuccess)
-    {
-        std::cerr << "Failed to allocate device memory" << std::endl;
-        delete[] h_data;
-        return 1;
-    }
+    HIP_ASSERT(hipMalloc(&d_data, bytes));
 
     // Initialize data
     for(int i = 0; i < size; ++i)
@@ -84,7 +93,13 @@ main(int /*argc*/, char** /*argv*/)
     }
 
     // Run kernels in a loop for a while
-    std::cout << "Starting kernel execution loop..." << std::endl;
+    {
+        // compose string first to avoid multithreaded handling of cout << operator
+        auto msg = std::stringstream{};
+        msg << "Starting kernel execution loop for thread " << tid << " on device " << device_id
+            << "...\n";
+        std::cout << msg.str();
+    }
     const int num_iterations = 30;
 
     for(int iter = 0; iter < num_iterations; ++iter)
@@ -95,10 +110,11 @@ main(int /*argc*/, char** /*argv*/)
 
         // Copy data to device
         roctxMark("Start_H2D_Copy");
-        err = hipMemcpy(d_data, h_data, bytes, hipMemcpyHostToDevice);
+        auto err = hipMemcpyAsync(d_data, h_data, bytes, hipMemcpyHostToDevice, stream);
         if(err != hipSuccess)
         {
-            std::cerr << "Failed to copy data to device" << std::endl;
+            std::cerr << "Failed to copy data for thread " << tid << " on device " << device_id
+                      << "...\n";
             roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
@@ -109,47 +125,108 @@ main(int /*argc*/, char** /*argv*/)
         int blocks_per_grid   = (size + threads_per_block - 1) / threads_per_block;
 
         hipLaunchKernelGGL(
-            simple_kernel, dim3(blocks_per_grid), dim3(threads_per_block), 0, 0, d_data, size);
+            simple_kernel, dim3(blocks_per_grid), dim3(threads_per_block), 0, stream, d_data, size);
 
         // Copy data back
         roctxMark("Start_D2H_Copy");
-        err = hipMemcpy(h_data, d_data, bytes, hipMemcpyDeviceToHost);
+        err = hipMemcpyAsync(h_data, d_data, bytes, hipMemcpyDeviceToHost, stream);
         if(err != hipSuccess)
         {
-            std::cerr << "Failed to copy data from device" << std::endl;
+            std::cerr << "Failed to copy data for thread " << tid << " on device " << device_id
+                      << "...\n";
             roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
 
         // Wait for completion
-        roctxMark("Device_Synchronize");
-        err = hipDeviceSynchronize();
+        roctxMark("Stream_Synchronize");
+        err = hipStreamSynchronize(stream);
         if(err != hipSuccess)
         {
-            std::cerr << "Failed to synchronize device" << std::endl;
+            std::cerr << "Failed to synchronize stream " << stream << " with thread " << tid
+                      << " on device " << device_id << "...\n";
             roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
 
         roctxRangePop();  // Removed - ROCTx not linked
 
-        std::cout << "Iteration " << (iter + 1) << "/" << num_iterations << " completed"
-                  << std::endl;
-
         // Small delay between iterations
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 
-    std::cout << "Kernel execution loop completed" << std::endl;
-
-    // Cleanup
-    err = hipFree(d_data);
-    if(err != hipSuccess)
     {
-        std::cerr << "Warning: Failed to free device memory" << std::endl;
+        // compose string first to avoid multithreaded handling of cout << operator
+        auto msg = std::stringstream{};
+        msg << "Kernel execution loop completed for thread " << tid << " on device " << device_id
+            << "...\n";
+        std::cout << msg.str();
     }
-    delete[] h_data;
 
+    HIP_ASSERT(hipStreamDestroy(stream));
+    // Cleanup
+    HIP_ASSERT(hipFree(d_data));
+    delete[] h_data;
+}
+
+int
+main(int argc, char** argv)
+{
+    // Install signal handler for SIGINT
+    std::signal(SIGWINCH, attachment_test_signal_handler);
+
+    size_t nthreads{8};
+    int    ndevices{0};
+    for(int i = 1; i < argc; ++i)
+    {
+        auto _arg = std::string{argv[i]};
+        if(_arg == "?" || _arg == "-h" || _arg == "--help")
+        {
+            fprintf(stderr,
+                    "usage: attachment-test [NUM_THREADS (%zu)] [NUM_DEVICES (%d)]\n",
+                    nthreads,
+                    ndevices);
+            exit(EXIT_SUCCESS);
+        }
+    }
+    if(argc > 1) nthreads = std::atoll(argv[1]);
+    if(argc > 2) ndevices = std::stoi(argv[2]);
+
+    std::cout << "Attachment test app started with PID: " << getpid() << std::endl;
+
+    // Initialize HIP
+    int device_count = 0;
+    HIP_ASSERT(hipGetDeviceCount(&device_count));
+    if(device_count == 0)
+    {
+        std::cerr << "No HIP devices found or error getting device count" << std::endl;
+        return 1;
+    }
+
+    // Default ndevices to device_count. Ensure that we do not use more devices than are available
+    ndevices = ndevices == 0 ? device_count : ndevices;
+    if(ndevices > device_count)
+    {
+        std::cout << "Using " << device_count << " HIP devices instead of the requested "
+                  << ndevices << "\n";
+        ndevices = device_count;
+    }
+
+    std::cout << "After first call " << getpid() << std::endl;
+
+    auto _threads = std::vector<std::thread>{};
+    _threads.reserve(nthreads);
+
+    for(size_t i = 0; i < nthreads; ++i)
+        _threads.emplace_back(execute_kernels, i, i % ndevices);
+    for(auto& itr : _threads)
+        itr.join();
+
+    if(signal_received)
+    {
+        std::cout << "Attachment test process " << getpid() << " received signal "
+                  << signal_received << "\n";
+    }
     std::cout << "Attachment test app finished" << std::endl;
 
     return 0;

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testset>
+    <!-- Typically run with environment variables NCCL_DEBUG=INFO HSA_FORCE_FINE_GRAIN_PCIE=1 -->
+    <var name="GTEST_FILTER">rccl-UnitTests  --gtest_color=yes --gtest_filter=</var>
+    <test sets="psdb">
+        <run name="all-psdb">{GTEST_FILTER}*sum_float32* --gtest_output=xml:output_psdb.xml </run>
+    </test>
+    <test sets="osdb">
+        <run name="all-osdb">{GTEST_FILTER}* --gtest_output=xml:output_osdb.xml </run>
+    </test>
+</testset>

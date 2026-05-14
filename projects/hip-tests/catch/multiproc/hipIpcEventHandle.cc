@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
@@ -238,7 +225,7 @@ void runMultiProcKernel(ipcEventInfo_t* shmEventInfo, int index) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipIpcEventHandle_Functional") {
+HIP_TEST_CASE(Unit_hipIpcEventHandle_Functional) {
   ipcDevices_t* shmDevices;
   ipcEventInfo_t* shmEventInfo;
   shmDevices = reinterpret_cast<ipcDevices_t*>(
@@ -248,8 +235,7 @@ TEST_CASE("Unit_hipIpcEventHandle_Functional") {
   getDevices(shmDevices);
 
   if (shmDevices->count < 2) {
-    WARN("Test requires atleast two GPUs with P2P access. Skipping test.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   g_processCnt = (shmDevices->count > MAX_DEVICES) ? MAX_DEVICES : shmDevices->count;
@@ -333,16 +319,18 @@ TEST_CASE("Unit_hipIpcEventHandle_Functional") {
  *  - Host specific (LINUX)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipIpcEventHandle_ParameterValidation") {
+HIP_TEST_CASE(Unit_hipIpcEventHandle_ParameterValidation) {
   hipEvent_t event;
   hipIpcEventHandle_t eventHandle;
   hipError_t ret;
-  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming | hipEventInterprocess));
+
 #if HT_AMD
   // Test disabled for nvidia due to segfault with cuda api
   SECTION("Get event handle with eventHandle(nullptr)") {
+    HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming | hipEventInterprocess));
     ret = hipIpcGetEventHandle(nullptr, event);
     REQUIRE(ret == hipErrorInvalidValue);
+    HIP_CHECK(hipEventDestroy(event));
   }
 #endif
 
@@ -362,27 +350,24 @@ TEST_CASE("Unit_hipIpcEventHandle_ParameterValidation") {
   }
 
   SECTION("Get event handle for event allocated without Interprocess flag") {
-    hipEvent_t eventNoIpc;
-    HIP_CHECK(hipEventCreateWithFlags(&eventNoIpc, hipEventDisableTiming));
+    HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
 
-    ret = hipIpcGetEventHandle(&eventHandle, eventNoIpc);
+    ret = hipIpcGetEventHandle(&eventHandle, event);
     if ((ret != hipErrorInvalidResourceHandle) && (ret != hipErrorInvalidConfiguration)) {
       INFO("Error returned : " << ret);
       REQUIRE(false);
     }
-    HIP_CHECK(hipEventDestroy(eventNoIpc));
+    HIP_CHECK(hipEventDestroy(event));
   }
 
   SECTION("Open event handle with event(nullptr)") {
-    hipIpcEventHandle_t ipc_handle{};
-    ret = hipIpcOpenEventHandle(nullptr, ipc_handle);
+    ret = hipIpcOpenEventHandle(nullptr, eventHandle);
     REQUIRE(ret == hipErrorInvalidValue);
   }
 
   SECTION("Open event handle with eventHandle as invalid") {
     hipIpcEventHandle_t ipc_handle{};
-    hipEvent_t eventOut;
-    ret = hipIpcOpenEventHandle(&eventOut, ipc_handle);
+    ret = hipIpcOpenEventHandle(&event, ipc_handle);
     if ((ret != hipErrorInvalidValue) && (ret != hipErrorMapFailed)) {
       INFO("Error returned : " << ret);
       REQUIRE(false);
@@ -390,22 +375,18 @@ TEST_CASE("Unit_hipIpcEventHandle_ParameterValidation") {
   }
 
   SECTION("Open handle in process that created it") {
-    hipIpcEventHandle_t event_handle;
     hipEvent_t event1, event2;
     HIP_CHECK(hipEventCreateWithFlags(&event1, hipEventDisableTiming | hipEventInterprocess));
-    HIP_CHECK(hipIpcGetEventHandle(&event_handle, event1));
-    HIP_CHECK_ERROR(hipIpcOpenEventHandle(&event2, event_handle), hipErrorInvalidContext);
+    HIP_CHECK(hipIpcGetEventHandle(&eventHandle, event1));
+    HIP_CHECK_ERROR(hipIpcOpenEventHandle(&event2, eventHandle), hipErrorInvalidContext);
     HIP_CHECK(hipEventDestroy(event1));
   }
 
 // Disabled on AMD because of return value mismatch - EXSWHTEC-41
 #if HT_NVIDIA
   SECTION("Event created with no flags") {
-    hipEvent_t event;
-    hipIpcEventHandle_t event_handle;
-
     HIP_CHECK(hipEventCreate(&event));
-    HIP_CHECK_ERROR(hipIpcGetEventHandle(&event_handle, event), hipErrorInvalidResourceHandle);
+    HIP_CHECK_ERROR(hipIpcGetEventHandle(&eventHandle, event), hipErrorInvalidResourceHandle);
     HIP_CHECK(hipEventDestroy(event));
   }
 #endif

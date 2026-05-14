@@ -280,22 +280,6 @@ static __forceinline uint64_t NextPow2(uint64_t value) {
 
 static __forceinline bool strIsEmpty(const char* str) noexcept { return str[0] == '\0'; }
 
-static __forceinline std::string& ltrim(std::string& s) {
-  auto it = std::find_if(s.begin(), s.end(),
-                         [](char c) { return !std::isspace<char>(c, std::locale::classic()); });
-  s.erase(s.begin(), it);
-  return s;
-}
-
-static __forceinline std::string& rtrim(std::string& s) {
-  auto it = std::find_if(s.rbegin(), s.rend(),
-                         [](char c) { return !std::isspace<char>(c, std::locale::classic()); });
-  s.erase(it.base(), s.end());
-  return s;
-}
-
-static __forceinline std::string& trim(std::string& s) { return ltrim(rtrim(s)); }
-
 template<uint32_t lowBit, uint32_t highBit, typename T>
 static __forceinline uint32_t BitSelect(T p) {
   static_assert(sizeof(T) <= sizeof(uintptr_t), "Type out of range.");

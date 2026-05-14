@@ -20,7 +20,7 @@ The documentation is structured as follows:
   .. grid-item-card:: Install
 
     * :ref:`installation`
-    
+
   .. grid-item-card:: API reference
 
     * :ref:`c-interface-adaptors`

@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 #include "os/os.hpp"
@@ -43,7 +29,11 @@ namespace amd::roc {
 PrintfDbg::PrintfDbg(Device& device, FILE* file)
     : dbgBuffer_(nullptr), dbgBuffer_size_(0), dbgFile_(file), gpuDevice_(device) {}
 
-PrintfDbg::~PrintfDbg() { dev().hostFree(dbgBuffer_, dbgBuffer_size_); }
+PrintfDbg::~PrintfDbg() {
+  if (dbgBuffer_ != nullptr) {
+    dev().hostFree(dbgBuffer_, dbgBuffer_size_);
+  }
+}
 
 bool PrintfDbg::allocate(bool realloc) {
   if (nullptr == dbgBuffer_) {
@@ -65,9 +55,11 @@ bool PrintfDbg::checkFloat(const std::string& fmt) const {
     case 'e':
     case 'E':
     case 'f':
+    case 'F':
     case 'g':
     case 'G':
     case 'a':
+    case 'A':
       return true;
       break;
     default:
@@ -142,17 +134,9 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
   if (checkString(fmt.c_str())) {
     // copiedBytes should be as number of printed chars
     copiedBytes = 0;
-    //(null) should be printed
-    if (*(reinterpret_cast<const unsigned char*>(argument)) == 0) {
-      amd::Os::printf(fmt.data(), 0);
-      // copiedBytes = strlen("(null)")
-      copiedBytes = 6;
-    } else {
-      const unsigned char* argumentStr = reinterpret_cast<const unsigned char*>(argument);
-      amd::Os::printf(fmt.data(), argumentStr);
-      // copiedBytes = strlen(argumentStr)
-      while (argumentStr[copiedBytes++] != 0);
-    }
+    const unsigned char* argumentStr = reinterpret_cast<const unsigned char*>(argument);                                                             
+    amd::Os::printf(fmt.data(), argumentStr);                                                                                               
+    while (argumentStr[copiedBytes++] != 0);
   }
 
   // Print the argument(except for string ), using standard PrintfDbg()
@@ -179,7 +163,7 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
           const float fArg = size == 2
                                  ? amd::half2float(*(reinterpret_cast<const uint16_t*>(argument)))
                                  : *(reinterpret_cast<const float*>(argument));
-          static const char* fSpecifiers = "eEfgGa";
+          static const char* fSpecifiers = "eEfFgGaA";
           std::string fmtF = fmt;
           size_t posS = fmtF.find_first_of("%");
           size_t posE = fmtF.find_first_of(fSpecifiers);
@@ -255,17 +239,16 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
 
 void PrintfDbg::outputDbgBuffer(const device::PrintfInfo& info, const uint32_t* workitemData,
                                 size_t& i) const {
-  static const char* specifiers = "cdieEfgGaosuxXp";
+  static const char* specifiers = "cdieEfFgGaAosuxXp";
   static const char* modifiers = "hl";
-  static const char* special = "%n";
   static const std::string sepStr = "%s";
   const uint32_t* s = workitemData;
   size_t pos = 0;
 
   // Find the format string
   std::string str = info.fmtString_;
-  std::string fmt;
-  size_t posStart, posEnd;
+  std::string fmt = "\0";
+  size_t posStart = 0, posEnd = 0;
 
   // Print all arguments
   // Note: the following code walks through all arguments, provided by the
@@ -279,14 +262,12 @@ void PrintfDbg::outputDbgBuffer(const device::PrintfInfo& info, const uint32_t* 
       posStart = str.find_first_of("%", pos);
       if (posStart != std::string::npos) {
         posStart++;
-        // Erase all spaces after %
+        // Erase all spaces after %cd -
         while (str[posStart] == ' ') {
           str.erase(posStart, 1);
-        }
-        size_t tmp = str.find_first_of(special, posStart);
-        size_t tmp2 = str.find_first_of(specifiers, posStart);
-        // Special cases. Special symbol is located before any specifier
-        if (tmp < tmp2) {
+        }                                                                                               
+        if (posStart < str.size() &&                                                                                                                               
+            (str[posStart] == '%' || str[posStart] == 'n')) {
           posEnd = posStart + 1;
           fmt = str.substr(pos, posEnd - pos);
           fmt.erase(posStart - pos - 1, 1);
@@ -381,7 +362,7 @@ void PrintfDbg::outputDbgBuffer(const device::PrintfInfo& info, const uint32_t* 
 
   if (pos != std::string::npos) {
     fmt = str.substr(pos, str.size() - pos);
-    outputArgument(sepStr, false, ConstStr, reinterpret_cast<const uint32_t*>(fmt.data()));
+    amd::Os::printf(fmt.data());
   }
 }
 
@@ -398,6 +379,7 @@ bool PrintfDbg::init(bool printfEnabled) {
     // Second DWORD = Number of bytes available for printf data
     // = buffer size \96 2*sizeof(uint32_t)
     const uint8_t initSize = 2 * sizeof(uint32_t);
+    memset(dbgBuffer_ + initSize, 0, dbgBuffer_size_ - initSize);
     uint8_t sysMem[initSize];
     memset(sysMem, 0, initSize);
     uint32_t dbgBufferSize = dbgBuffer_size_ - initSize;
@@ -509,18 +491,12 @@ bool PrintfDbg::output(VirtualGPU& gpu, bool printfEnabled,
         return false;
       }
       const device::PrintfInfo& info = printfInfo[(*dbgBufferPtr)];
-      sb += sizeof(uint32_t);
-      for (const auto& ita : info.arguments_) {
-        sb += ita;
-      }
 
       size_t idx = 1;
       // There's something in the debug buffer
       outputDbgBuffer(info, dbgBufferPtr, idx);
-
-      sbt += sb;
-      dbgBufferPtr += sb / sizeof(uint32_t);
-      sb = 0;
+      sbt += idx * sizeof(uint32_t);
+      dbgBufferPtr += idx;
     }
   }
 

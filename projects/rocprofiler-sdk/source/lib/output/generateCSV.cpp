@@ -30,6 +30,8 @@
 #include "statistics.hpp"
 #include "timestamps.hpp"
 
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/cxx/operators.hpp>
@@ -511,6 +513,13 @@ generate_csv(const output_config&                                               
 }
 
 void
+generate_csv(const output_config& /*cfg*/,
+             const metadata& /*tool_metadata*/,
+             const generator<tool_buffer_tracing_kfd_record_t>& /*data*/,
+             const stats_entry_t& /*stats*/)
+{}
+
+void
 generate_csv(const output_config&                                             cfg,
              const metadata&                                                  tool_metadata,
              const generator<rocprofiler_buffer_tracing_marker_api_record_t>& data,
@@ -600,7 +609,10 @@ generate_csv(const output_config&                    cfg,
 
     auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
     for(const auto& itr : tool_metadata.get_counter_info())
+    {
+        // Use counter ID from metadata as the map key
         counter_id_to_name.emplace(itr.id, itr.name);
+    }
 
     for(auto ditr : data)
     {
