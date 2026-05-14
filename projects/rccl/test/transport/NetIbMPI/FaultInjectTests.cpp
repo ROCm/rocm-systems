@@ -17,6 +17,11 @@ static constexpr int kWcRetryExcErr   = 12; // IBV_WC_RETRY_EXC_ERR
 static constexpr int kWcRemAccessErr  = 10; // IBV_WC_REM_ACCESS_ERR
 static constexpr int kWcGeneralErr    = 22; // IBV_WC_GENERAL_ERR
 
+// Resiliency device state constants (from ncclIbResiliencyDevState enum).
+static constexpr int kDevStateOk              = 0;  // ncclIbResiliencyDevStateOk
+static constexpr int kDevStateRecoveryInProgress = 2;  // ncclIbResiliencyDevStateRecoveryInProgress
+static constexpr int kDevStateRecovered       = 4;  // ncclIbResiliencyDevStateRecovered
+
 // Helper: Create a NIC Fusion merged device from physical devices 0 and 1.
 // Returns the merged device index, or -1 if fewer than 2 devices available.
 // Both ranks must call this; result is broadcast from rank 0.
@@ -856,7 +861,7 @@ TEST_F(NetIbMPITest, FailoverCqeErrorRecovered) {
     // Drive sender QP 0 to ERR. The receiver should handle this via
     // negative events accounting (BY_ID matching + resiliency).
     if (rank == 1) {
-        ncclIbCastFaultDriveQpToError(sendComm, 0);
+        ASSERT_EQ(ncclIbCastFaultDriveQpToError(sendComm, 0), ncclSuccess);
 
         // Post the send — WRs on QP 0 will flush, surviving QPs handle the data
         void* sendReq = nullptr;
@@ -1002,7 +1007,7 @@ TEST_F(NetIbMPITest, FailoverSingleDeviceTopology) {
     if (rank == 1) {
         // Drive QP 0 to ERR before sending — with single device,
         // all QPs are on device 0, so failover has no surviving device
-        ncclIbCastFaultDriveQpToError(sendComm, 0);
+        ASSERT_EQ(ncclIbCastFaultDriveQpToError(sendComm, 0), ncclSuccess);
 
         void* sendReq = nullptr;
         ncclResult_t sendRet = ncclSuccess;
@@ -1125,7 +1130,7 @@ TEST_F(NetIbMPITest, FailoverAllDevicesFailed) {
     if (rank == 1) {
         // Drive ALL QPs to ERR — no surviving device
         for (int q = 0; q < actualNqps; q++) {
-            ncclIbCastFaultDriveQpToError(sendComm, q);
+            ASSERT_EQ(ncclIbCastFaultDriveQpToError(sendComm, q), ncclSuccess);
         }
 
         void* sendReq = nullptr;
@@ -1254,7 +1259,7 @@ TEST_F(NetIbMPITest, FailoverLargeMessageDataIntegrity) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     if (rank == 1) {
-        ncclIbCastFaultDriveQpToError(sendComm, 0);
+        ASSERT_EQ(ncclIbCastFaultDriveQpToError(sendComm, 0), ncclSuccess);
 
         void* sendReq = nullptr;
         ncclResult_t sendRet = ncclSuccess;
@@ -1374,7 +1379,7 @@ TEST_F(NetIbMPITest, FailoverDeviceOneFailure) {
     struct {
         int sendRet;
         int fatalCount;
-        int devState0;
+        int devState1;
         int inProgress;
     } fr = {};
     static constexpr int kDev1MpiTag = 9890;
@@ -1392,7 +1397,7 @@ TEST_F(NetIbMPITest, FailoverDeviceOneFailure) {
 
     if (rank == 1) {
         // Fail QP index 1 = device 1 (QPs interleaved: 0=dev0, 1=dev1, 2=dev0...)
-        ncclIbCastFaultDriveQpToError(sendComm, 1);
+        ASSERT_EQ(ncclIbCastFaultDriveQpToError(sendComm, 1), ncclSuccess);
 
         void* sendReq = nullptr;
         ncclResult_t sendRet = ncclSuccess;
@@ -1419,7 +1424,7 @@ TEST_F(NetIbMPITest, FailoverDeviceOneFailure) {
 
         fr.sendRet    = static_cast<int>(sendRet);
         fr.fatalCount = fatalCount;
-        fr.devState0  = resState.devState[1]; // device 1 state
+        fr.devState1  = resState.devState[1];
         fr.inProgress = resState.inProgress ? 1 : 0;
 
         MPI_Send(&fr, sizeof(fr), MPI_BYTE, 0, kDev1MpiTag, MPI_COMM_WORLD);
@@ -1439,7 +1444,7 @@ TEST_F(NetIbMPITest, FailoverDeviceOneFailure) {
         EXPECT_EQ(fr.sendRet, static_cast<int>(ncclSuccess))
             << "Send should complete via device 0 after device 1 failover";
         EXPECT_EQ(fr.fatalCount, 0);
-        EXPECT_NE(fr.devState0, 0) << "Device 1 should not be Ok after failover";
+        EXPECT_NE(fr.devState1, 0) << "Device 1 should not be Ok after failover";
         if (fr.sendRet == static_cast<int>(ncclSuccess)) {
             EXPECT_TRUE(recvDone) << "Send succeeded but receiver lost data";
         }
@@ -1529,7 +1534,7 @@ TEST_F(NetIbMPITest, FailoverMultiRequestInFlight) {
 
     if (rank == 1) {
         // Fault QP 0 before posting any sends
-        ncclIbCastFaultDriveQpToError(sendComm, 0);
+        ASSERT_EQ(ncclIbCastFaultDriveQpToError(sendComm, 0), ncclSuccess);
 
         // Post all 4 sends
         void* sendReqs[kNumReqs] = {};
@@ -1686,8 +1691,8 @@ TEST_F(NetIbMPITest, RecoveryThreadStartedOnlyWithParam) {
 //      both sides to have recovery contexts.
 //   2. Poll ncclIbCastGetResiliencyState on sender until devState[0]
 //      returns to Ok/Recovered (recovery restored the data QP to RTS).
-//   3. Send a new message and verify it completes — confirms restored QPs
-//      carry live traffic.
+//   3. Send 20 messages and verify data integrity — confirms restored QPs
+//      carry sustained live traffic.
 // =============================================================================
 TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
@@ -1721,7 +1726,8 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
     SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 8192;
-    const size_t     kBufSize = kMsgSize * 2;
+    constexpr int    kPostRecoveryMsgs = 20;
+    const size_t     kBufSize = kMsgSize * (kPostRecoveryMsgs + 1);
     std::vector<char> sendBuf(kBufSize), recvBuf(kBufSize);
     for (size_t i = 0; i < kBufSize; i++) sendBuf[i] = static_cast<char>((i * 37 + 19) & 0xFF);
     memset(recvBuf.data(), 0, kBufSize);
@@ -1771,9 +1777,9 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
     // that breaks QPs on both sides. Both must detect the CQE errors and enter
     // recovery for the alive-message handshake to complete.
     if (rank == 0) {
-        ncclIbCastFaultDriveRecvQpToError(recvComm, 0);
+        ASSERT_EQ(ncclIbCastFaultDriveRecvQpToError(recvComm, 0), ncclSuccess);
     } else {
-        ncclIbCastFaultDriveQpToError(sendComm, 0);
+        ASSERT_EQ(ncclIbCastFaultDriveQpToError(sendComm, 0), ncclSuccess);
     }
     MPI_Barrier(MPI_COMM_WORLD);
 
@@ -1842,7 +1848,7 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
         struct ncclIbCastResiliencyState resState = {};
         for (int poll = 0; poll < kRecoveryPollIters; poll++) {
             ncclIbCastGetResiliencyState(sendComm, &resState);
-            if (resState.devState[0] == 0 || resState.devState[0] == 4) break;
+            if (resState.devState[0] == kDevStateOk || resState.devState[0] == kDevStateRecovered) break;
             usleep(10000);  // 10 ms
         }
         rp.devState0AfterRecovery = resState.devState[0];
@@ -1853,91 +1859,65 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
     }
     MPI_Barrier(MPI_COMM_WORLD);
 
-    // ── Phase 3: post a new send to verify traffic flows on restored QP ──
-    bool phase3RecvDone = false;
-    void* recvReq3 = nullptr;
-
+    // ── Phase 3: send 20 messages to verify sustained traffic on restored QPs ──
+    // Recovery assertion first
     if (rank == 0) {
-        void*  bufs[1]    = {regBuf + kMsgSize};
-        size_t sizes[1]   = {kMsgSize};
-        int    tags[1]    = {1302};
-        void*  handles[1] = {mhandle};
-        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq3), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    struct PostRecoveryResult {
-        int sendRet;
-        int fatalCount;
-    };
-    static constexpr int kPhase3MpiTag = 9896;
-    PostRecoveryResult pr = {};
-
-    if (rank == 1) {
-        void* sendReq = nullptr;
-        ncclResult_t sendRet = ncclSuccess;
-        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
-            sendRet = PostSend(sendComm, regBuf + kMsgSize, kMsgSize, 1302, mhandle, &sendReq);
-            if (sendRet != ncclSuccess || sendReq != nullptr) break;
-            usleep(kPollIntervalUs);
-        }
-
-        if (sendRet == ncclSuccess && sendReq != nullptr) {
-            for (int poll = 0; poll < 500; poll++) {
-                int done = 0, sz = 0;
-                ncclResult_t testRet = TestRequest(sendReq, &done, &sz);
-                if (testRet != ncclSuccess) { sendRet = testRet; break; }
-                if (done) break;
-                usleep(kPollIntervalUs);
-            }
-        }
-
-        int fatalCount = 0;
-        ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
-
-        pr.sendRet   = static_cast<int>(sendRet);
-        pr.fatalCount = fatalCount;
-
-        MPI_Send(&pr, sizeof(pr), MPI_BYTE, 0, kPhase3MpiTag, MPI_COMM_WORLD);
-    }
-
-    if (rank == 0) {
-        for (int poll = 0; poll < 500; poll++) {
-            int done = 0, sz = 0;
-            if (TestRequest(recvReq3, &done, &sz) != ncclSuccess) break;
-            if (done) { phase3RecvDone = true; break; }
-            usleep(kPollIntervalUs);
-        }
-
-        MPI_Recv(&pr, sizeof(pr), MPI_BYTE, 1, kPhase3MpiTag, MPI_COMM_WORLD,
-                 MPI_STATUS_IGNORE);
-
-        // Recovery assertion: devState[0] must be Recovered(4) or Ok(0)
-        EXPECT_TRUE(rp.devState0AfterRecovery == 0 || rp.devState0AfterRecovery == 4)
+        EXPECT_TRUE(rp.devState0AfterRecovery == kDevStateOk || rp.devState0AfterRecovery == kDevStateRecovered)
             << "Recovery did not restore device 0 within timeout; "
             << "devState[0]=" << rp.devState0AfterRecovery
             << " (expected Ok=0 or Recovered=4)";
+    }
 
-        // Post-recovery traffic assertion
-        EXPECT_EQ(pr.sendRet, static_cast<int>(ncclSuccess))
-            << "Post-recovery send failed (sendRet=" << pr.sendRet << ")";
-        EXPECT_EQ(pr.fatalCount, 0)
-            << "Fatal error during post-recovery traffic";
-
-        if (pr.sendRet == static_cast<int>(ncclSuccess)) {
-            EXPECT_TRUE(phase3RecvDone)
-                << "Post-recovery send succeeded but receiver did not get data";
+    // Skip sustained traffic if recovery failed
+    if (rp.devState0AfterRecovery != kDevStateOk && rp.devState0AfterRecovery != kDevStateRecovered) {
+        if (rank == 0) {
+            ADD_FAILURE() << "Recovery did not succeed — skipping post-recovery traffic";
         }
-        if (phase3RecvDone) {
-            size_t offset = kMsgSize;
-            EXPECT_EQ(memcmp(recvBuf.data() + offset, sendBuf.data() + offset, kMsgSize), 0)
-                << "Data corruption in post-recovery message";
+        TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+        return;
+    }
+
+    constexpr int    kBaseTag = 1310;
+    for (int m = 0; m < kPostRecoveryMsgs; m++) {
+        char* msgSendBuf = sendBuf.data() + (m + 1) * kMsgSize;
+        char* msgRecvBuf = recvBuf.data() + (m + 1) * kMsgSize;
+        void* req = nullptr;
+
+        if (rank == 0) {
+            void*  bufs[1]    = {msgRecvBuf};
+            size_t sizes[1]   = {kMsgSize};
+            int    tags[1]    = {kBaseTag + m};
+            void*  handles[1] = {mhandle};
+            ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &req), ncclSuccess);
+            int sz = 0;
+            ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess)
+                << "Post-recovery message " << m << " recv failed";
+        } else {
+            PostSendWithRetry(sendComm, msgSendBuf, kMsgSize, kBaseTag + m, mhandle, &req);
+            int sz = 0;
+            ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess)
+                << "Post-recovery message " << m << " send failed";
         }
     }
 
+    int fatalCount = 0;
+    if (rank == 1) {
+        ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
+    }
+    MPI_Bcast(&fatalCount, 1, MPI_INT, /*root=*/1, MPI_COMM_WORLD);
+
     MPI_Barrier(MPI_COMM_WORLD);
-    if (rank == 0 && !phase3RecvDone)
-        DrainRecvRequest(recvReq3);
+
+    if (rank == 0) {
+        for (int m = 0; m < kPostRecoveryMsgs; m++) {
+            size_t offset = (m + 1) * kMsgSize;
+            EXPECT_EQ(memcmp(recvBuf.data() + offset, sendBuf.data() + offset, kMsgSize), 0)
+                << "Data corruption in post-recovery message " << m;
+        }
+        EXPECT_EQ(fatalCount, 0)
+            << "Fatal error during sustained post-recovery traffic";
+    }
+
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
@@ -2018,7 +1998,7 @@ TEST_F(NetIbMPITest, RecoveryPendingWhileLinkDown) {
 
     // Only sender QP — receiver stays healthy (link-down simulation)
     if (rank == 1) {
-        ncclIbCastFaultDriveQpToError(sendComm, 0);
+        ASSERT_EQ(ncclIbCastFaultDriveQpToError(sendComm, 0), ncclSuccess);
     }
     MPI_Barrier(MPI_COMM_WORLD);
 
@@ -2049,14 +2029,17 @@ TEST_F(NetIbMPITest, RecoveryPendingWhileLinkDown) {
             }
         }
 
-        // Brief wait — long enough for recovery to start, short enough to
-        // not waste test time (recovery will wait indefinitely by design).
-        usleep(2000000);  // 2s
+        // Poll until recovery thread starts (devState transitions to
+        // RecoveryInProgress). Much faster than a fixed sleep on fast HW.
+        struct ncclIbCastResiliencyState resState = {};
+        for (int poll = 0; poll < 500; poll++) {
+            ncclIbCastGetResiliencyState(sendComm, &resState);
+            if (resState.devState[0] == kDevStateRecoveryInProgress) break;
+            usleep(10000);  // 10ms
+        }
 
         int fatalCount = 0;
         ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
-
-        struct ncclIbCastResiliencyState resState = {};
         ncclIbCastGetResiliencyState(sendComm, &resState);
 
         pr.sendRet             = static_cast<int>(sendRet);
@@ -2086,7 +2069,7 @@ TEST_F(NetIbMPITest, RecoveryPendingWhileLinkDown) {
 
         // Recovery should be stuck in RecoveryInProgress(2) — by design,
         // the recovery thread waits indefinitely for the link to come back.
-        EXPECT_EQ(pr.devState0, 2)
+        EXPECT_EQ(pr.devState0, kDevStateRecoveryInProgress)
             << "Device 0 should be in RecoveryInProgress(2) while link is down; "
             << "got " << pr.devState0;
         EXPECT_EQ(pr.outstandingRecovery, 1)
@@ -2105,186 +2088,6 @@ TEST_F(NetIbMPITest, RecoveryPendingWhileLinkDown) {
     MPI_Barrier(MPI_COMM_WORLD);
     if (rank == 0 && !phase1RecvDone)
         DrainRecvRequest(recvReq);
-    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
-}
-
-// =============================================================================
-// Test: RecoverySustainedTrafficAfterRecovery
-//
-// Same setup as RecoverySuccessRestoresTraffic (drive both QPs to error,
-// wait for recovery), then send 20 messages with data integrity checks.
-// Validates that the restored connection handles sustained traffic, not
-// just a single post-recovery message.
-// =============================================================================
-TEST_F(NetIbMPITest, RecoverySustainedTrafficAfterRecovery) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
-
-    const char* failoverEnv  = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
-    const char* recoveryEnv  = getenv("NCCL_IB_RESILIENCY_PORT_RECOVERY");
-
-    if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
-        GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_FAILOVER=1";
-    }
-    if (!recoveryEnv || strcmp(recoveryEnv, "1") != 0) {
-        GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_RECOVERY=1";
-    }
-
-    const int rank = MPIEnvironment::world_rank;
-
-    net_ = &netIbCast;
-    int totalDevs = 0;
-    AssertInitAndGetDevices(&totalDevs);
-
-    int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
-    if (mergedDev < 0) {
-        GTEST_SKIP() << "Requires NIC Fusion (ndevs >= 2). Found " << totalDevs << " physical devices.";
-    }
-
-    void* listenComm = nullptr;
-    void* sendComm   = nullptr;
-    void* recvComm   = nullptr;
-    SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
-
-    constexpr size_t kMsgSize = 4096;
-    constexpr int    kPostRecoveryMsgs = 20;
-    const size_t     kBufSize = kMsgSize * (kPostRecoveryMsgs + 2);
-    std::vector<char> sendBuf(kBufSize), recvBuf(kBufSize);
-    for (size_t i = 0; i < kBufSize; i++) sendBuf[i] = static_cast<char>((i * 43 + 29) & 0xFF);
-    memset(recvBuf.data(), 0, kBufSize);
-
-    void* comm    = (rank == 0) ? recvComm : sendComm;
-    char* regBuf  = (rank == 0) ? recvBuf.data() : sendBuf.data();
-    void* mhandle = nullptr;
-    ASSERT_EQ(RegisterMemory(comm, regBuf, kBufSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
-
-    const int actualNqps = GetActualNqps(sendComm, recvComm, regBuf, kMsgSize, /*tag=*/1500, mhandle);
-    ASSERT_GT(actualNqps, 0);
-
-    // ── Phase 1: failover — drive both QPs to error ──────────────────────
-    static constexpr int kRecoveryWaitTag    = 9898;
-    static constexpr int kRecoveryPollIters  = 4000;  // 40s
-
-    bool phase1RecvDone = false;
-    void* recvReq1 = nullptr;
-
-    if (rank == 0) {
-        void*  bufs[1]    = {regBuf};
-        size_t sizes[1]   = {kMsgSize};
-        int    tags[1]    = {1501};
-        void*  handles[1] = {mhandle};
-        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq1), ncclSuccess);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    if (rank == 0) {
-        ncclIbCastFaultDriveRecvQpToError(recvComm, 0);
-    } else {
-        ncclIbCastFaultDriveQpToError(sendComm, 0);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    if (rank == 1) {
-        void* sendReq = nullptr;
-        ncclResult_t sendRet = ncclSuccess;
-        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
-            sendRet = PostSend(sendComm, regBuf, kMsgSize, 1501, mhandle, &sendReq);
-            if (sendRet != ncclSuccess || sendReq != nullptr) break;
-            usleep(kPollIntervalUs);
-        }
-        if (sendRet == ncclSuccess && sendReq != nullptr) {
-            for (int poll = 0; poll < 500; poll++) {
-                int done = 0, sz = 0;
-                ncclResult_t testRet = TestRequest(sendReq, &done, &sz);
-                if (testRet != ncclSuccess) { sendRet = testRet; break; }
-                if (done) break;
-                usleep(kPollIntervalUs);
-            }
-        }
-    }
-
-    if (rank == 0) {
-        for (int poll = 0; poll < 1500; poll++) {
-            int done = 0, sz = 0;
-            if (TestRequest(recvReq1, &done, &sz) != ncclSuccess) break;
-            if (done) { phase1RecvDone = true; break; }
-            usleep(kPollIntervalUs);
-        }
-        if (!phase1RecvDone) DrainRecvRequest(recvReq1);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    // ── Phase 2: wait for recovery ───────────────────────────────────────
-    int recoveryResult = -1;
-    if (rank == 1) {
-        struct ncclIbCastResiliencyState resState = {};
-        for (int poll = 0; poll < kRecoveryPollIters; poll++) {
-            ncclIbCastGetResiliencyState(sendComm, &resState);
-            if (resState.devState[0] == 0 || resState.devState[0] == 4) break;
-            usleep(10000);
-        }
-        recoveryResult = resState.devState[0];
-        MPI_Send(&recoveryResult, 1, MPI_INT, 0, kRecoveryWaitTag, MPI_COMM_WORLD);
-    } else {
-        MPI_Recv(&recoveryResult, 1, MPI_INT, 1, kRecoveryWaitTag, MPI_COMM_WORLD,
-                 MPI_STATUS_IGNORE);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    // Skip sustained traffic if recovery failed
-    if (recoveryResult != 0 && recoveryResult != 4) {
-        if (rank == 0) {
-            ADD_FAILURE() << "Recovery did not succeed (devState[0]=" << recoveryResult
-                          << "); skipping sustained traffic phase";
-        }
-        TeardownConnection(recvComm, listenComm, sendComm, mhandle);
-        return;
-    }
-
-    // ── Phase 3: 20 messages on the recovered connection ─────────────────
-    constexpr int kBaseTag = 1510;
-    for (int m = 0; m < kPostRecoveryMsgs; m++) {
-        char* msgSendBuf = sendBuf.data() + (m + 2) * kMsgSize;
-        char* msgRecvBuf = recvBuf.data() + (m + 2) * kMsgSize;
-        void* req = nullptr;
-
-        if (rank == 0) {
-            void*  bufs[1]    = {msgRecvBuf};
-            size_t sizes[1]   = {kMsgSize};
-            int    tags[1]    = {kBaseTag + m};
-            void*  handles[1] = {mhandle};
-            ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &req), ncclSuccess);
-            int sz = 0;
-            ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess)
-                << "Post-recovery message " << m << " recv failed";
-        } else {
-            PostSendWithRetry(sendComm, msgSendBuf, kMsgSize, kBaseTag + m, mhandle, &req);
-            int sz = 0;
-            ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess)
-                << "Post-recovery message " << m << " send failed";
-        }
-    }
-
-    // Verify data integrity and fatal count
-    int fatalCount = 0;
-    if (rank == 1) {
-        ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
-    }
-    MPI_Bcast(&fatalCount, 1, MPI_INT, /*root=*/1, MPI_COMM_WORLD);
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    if (rank == 0) {
-        for (int m = 0; m < kPostRecoveryMsgs; m++) {
-            size_t offset = (m + 2) * kMsgSize;
-            EXPECT_EQ(memcmp(recvBuf.data() + offset, sendBuf.data() + offset, kMsgSize), 0)
-                << "Data corruption in post-recovery message " << m;
-        }
-        EXPECT_EQ(fatalCount, 0)
-            << "Fatal error during sustained post-recovery traffic";
-    }
-
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
@@ -2370,9 +2173,9 @@ TEST_F(NetIbMPITest, RecoveryDeviceOneFailure) {
 
     // Fault QP index 1 = device 1 on both sides
     if (rank == 0) {
-        ncclIbCastFaultDriveRecvQpToError(recvComm, 1);
+        ASSERT_EQ(ncclIbCastFaultDriveRecvQpToError(recvComm, 1), ncclSuccess);
     } else {
-        ncclIbCastFaultDriveQpToError(sendComm, 1);
+        ASSERT_EQ(ncclIbCastFaultDriveQpToError(sendComm, 1), ncclSuccess);
     }
     MPI_Barrier(MPI_COMM_WORLD);
 
@@ -2434,7 +2237,7 @@ TEST_F(NetIbMPITest, RecoveryDeviceOneFailure) {
         struct ncclIbCastResiliencyState resState = {};
         for (int poll = 0; poll < kRecoveryPollIters; poll++) {
             ncclIbCastGetResiliencyState(sendComm, &resState);
-            if (resState.devState[1] == 0 || resState.devState[1] == 4) break;
+            if (resState.devState[1] == kDevStateOk || resState.devState[1] == kDevStateRecovered) break;
             usleep(10000);
         }
         devState1AfterRecovery = resState.devState[1];
@@ -2504,7 +2307,7 @@ TEST_F(NetIbMPITest, RecoveryDeviceOneFailure) {
         MPI_Recv(&pr, sizeof(pr), MPI_BYTE, 1, kDev1Phase3MpiTag, MPI_COMM_WORLD,
                  MPI_STATUS_IGNORE);
 
-        EXPECT_TRUE(devState1AfterRecovery == 0 || devState1AfterRecovery == 4)
+        EXPECT_TRUE(devState1AfterRecovery == kDevStateOk || devState1AfterRecovery == kDevStateRecovered)
             << "Recovery did not restore device 1 within timeout; "
             << "devState[1]=" << devState1AfterRecovery
             << " (expected Ok=0 or Recovered=4)";
