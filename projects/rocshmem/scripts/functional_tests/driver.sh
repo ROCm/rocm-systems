@@ -135,6 +135,7 @@ declare -A TEST_NUMBERS=(
   ["fence_putlargesmall"]="99"
   ["fence_fanout"]="100"
   ["fence_putwavenbichunks"]="101"
+  ["teamctxsubsetparentinfra"]="102"
 )
 
 ExecTest() {
@@ -616,6 +617,8 @@ TestOther() {
   ExecTest  "teamctxoddeveninfra" 5       1            1
   ExecTest  "teamctxsharedinfra"  2       1            1
   ExecTest  "teamctxsharedinfra"  5       1            1
+  ExecTest  "teamctxsubsetparentinfra" 4  1            1
+  ExecTest  "teamctxsubsetparentinfra" 5  1            1
   unset ROCSHMEM_MAX_NUM_CONTEXTS
 
   ExecTest  "shmemptr"         2       1            1         8
