@@ -8,10 +8,12 @@
 #include "core/perfetto_fwd.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
+#include <cstdint>
 
 #include <functional>
 #include <memory>
 #include <perfetto.h>
+#include <unordered_map>
 
 namespace rocprofsys
 {
@@ -21,10 +23,10 @@ using char_vec_t = std::vector<char>;
 
 struct pmc_track_info
 {
-    const char*                                                           default_units;
-    std::function<bool(uint64_t)>                                         exists_fn;
-    std::function<void(uint64_t, const std::string&, const std::string&)> emplace_fn;
-    std::function<void(uint64_t, uint64_t, uint64_t, double)>             trace_fn;
+    const char*                        default_units;
+    std::function<bool(std::uint64_t)> exists_fn;
+    std::function<void(std::uint64_t, const std::string&, const std::string&)> emplace_fn;
+    std::function<void(std::uint64_t, std::uint64_t, std::uint64_t, double)>   trace_fn;
 };
 
 class perfetto_processor_t : public processor_t<perfetto_processor_t>
@@ -58,17 +60,25 @@ private:
     void       flush(bool& perfetto_output_error);
     char_vec_t get_session_data();
 
+    // Returns a cached ::perfetto::Track for the given (category, args...) key,
+    // calling get_perfetto_track only on the first encounter to avoid the global
+    // mutex on every event in high-frequency handle() paths.
+    template <typename CategoryT, typename FuncT, typename... Args>
+    ::perfetto::Track get_or_create_track(CategoryT, FuncT&& desc_gen, Args&&... args);
+
     metadata_registry&                          m_metadata;
-    uint64_t                                    m_process_id;
-    uint64_t                                    m_parrent_pid;
+    std::uint64_t                               m_process_id;
+    std::uint64_t                               m_parrent_pid;
     agent_manager&                              m_agent_manager;
     ::perfetto::TraceConfig                     m_session_config;
     std::shared_ptr<tmp_file>                   m_tmp_file{ nullptr };
     std::unique_ptr<::perfetto::TracingSession> m_tracing_session{ nullptr };
     bool                                        m_use_annotations{ false };
+    bool                                        m_default_group_by_queue{ true };
 
-    std::unordered_map<size_t, pmc_track_info> m_pmc_track_map;
-    output_file_registry&                      m_output_registry;
+    std::unordered_map<size_t, pmc_track_info>           m_pmc_track_map;
+    std::unordered_map<std::uint64_t, ::perfetto::Track> m_track_cache;
+    output_file_registry&                                m_output_registry;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

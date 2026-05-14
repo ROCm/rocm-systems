@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -72,6 +72,7 @@
  * - 1.19 - hsa_amd_agent_preload
  * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
  * - 1.21 - hsa_amd_signal_get_event_id
+ * - 1.22 - hsa_amd_queue_get_info: per-queue VM fault state queries
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
 #define HSA_AMD_INTERFACE_VERSION_MINOR 21
@@ -126,8 +127,6 @@ typedef enum {
 
   /* Reserved for a packet that is not yet released */
   HSA_AMD_PACKET_TYPE_RESERVED200 = 200,
-  /* HSA_AMD_PACKET_TYPE_AIE_ERT packet was never released so value may change in the future */
-  HSA_AMD_PACKET_TYPE_AIE_ERT = 200,
 } hsa_amd_packet_type_t;
 
 /**
@@ -421,206 +420,6 @@ typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
   hsa_signal_t completion_signal;
 } hsa_amd_ext_kernel_dispatch_packet_t;
 
-/*
- * State of an AIE ERT command.
- */
-typedef enum {
-  /**
-   * Set by the host before submitting a command to the scheduler.
-   */
-  HSA_AMD_AIE_ERT_STATE_NEW = 1,
-  /**
-   * Internal scheduler state.
-   */
-  HSA_AMD_AIE_ERT_STATE_QUEUED = 2,
-  /**
-   * Internal scheduler state.
-   */
-  HSA_AMD_AIE_ERT_STATE_RUNNING = 3,
-  /**
-   * Set by the scheduler when a command completes.
-   */
-  HSA_AMD_AIE_ERT_STATE_COMPLETED = 4,
-  /**
-   * Set by the scheduler if a command failed.
-   */
-  HSA_AMD_AIE_ERT_STATE_ERROR = 5,
-  /**
-   * Set by the scheduler if a command aborted.
-   */
-  HSA_AMD_AIE_ERT_STATE_ABORT = 6,
-  /**
-   * Internal scheduler state.
-   */
-  HSA_AMD_AIE_ERT_STATE_SUBMITTED = 7,
-  /**
-   * Set by the scheduler on a timeout and reset.
-   */
-  HSA_AMD_AIE_ERT_STATE_TIMEOUT = 8,
-  /**
-   * Set by the scheduler on a timeout and fail to reset.
-   */
-  HSA_AMD_AIE_ERT_STATE_NORESPONSE = 9,
-  HSA_AMD_AIE_ERT_STATE_SKERROR = 10,
-  HSA_AMD_AIE_ERT_STATE_SKCRASHED = 11,
-  HSA_AMD_AIE_ERT_STATE_MAX
-} hsa_amd_aie_ert_state;
-
-/**
- * Opcode types for HSA AIE ERT commands.
- */
-typedef enum {
-  /**
-   * Start a workgroup on a compute unit (CU).
-   */
-  HSA_AMD_AIE_ERT_START_CU = 0,
-  /**
-   * Currently aliased to HSA_AMD_AIE_ERT_START_CU.
-   */
-  HSA_AMD_AIE_ERT_START_KERNEL = 0,
-  /**
-   * Configure command scheduler.
-   */
-  HSA_AMD_AIE_ERT_CONFIGURE = 2,
-  HSA_AMD_AIE_ERT_EXIT = 3,
-  HSA_AMD_AIE_ERT_ABORT = 4,
-  /**
-   * Execute a specified CU after writing.
-   */
-  HSA_AMD_AIE_ERT_EXEC_WRITE = 5,
-  /**
-   * Get stats about a CU's execution.
-   */
-  HSA_AMD_AIE_ERT_CU_STAT = 6,
-  /**
-   * Start KDMA CU or P2P.
-   */
-  HSA_AMD_AIE_ERT_START_COPYBO = 7,
-  /**
-   * Configure a soft kernel.
-   */
-  HSA_AMD_AIE_ERT_SK_CONFIG = 8,
-  /**
-   * Start a soft kernel.
-   */
-  HSA_AMD_AIE_ERT_SK_START = 9,
-  /**
-   * Unconfigure a soft kernel.
-   */
-  HSA_AMD_AIE_ERT_SK_UNCONFIG = 10,
-  /**
-   * Initialize a CU.
-   */
-  HSA_AMD_AIE_ERT_INIT_CU = 11,
-  HSA_AMD_AIE_ERT_START_FA = 12,
-  HSA_AMD_AIE_ERT_CLK_CALIB = 13,
-  HSA_AMD_AIE_ERT_MB_VALIDATE = 14,
-  /**
-   * Same as HSA_AMD_AIE_ERT_START_CU but with a key-value pair.
-   */
-  HSA_AMD_AIE_ERT_START_KEY_VAL = 15,
-  HSA_AMD_AIE_ERT_ACCESS_TEST_C = 16,
-  HSA_AMD_AIE_ERT_ACCESS_TEST = 17,
-  /**
-   * Instruction buffer command format.
-   */
-  HSA_AMD_AIE_ERT_START_DPU = 18,
-  /**
-   * Command chain.
-   */
-  HSA_AMD_AIE_ERT_CMD_CHAIN = 19,
-  /**
-   * Instruction buffer command format on NPU.
-   */
-  HSA_AMD_AIE_ERT_START_NPU = 20,
-  /**
-   * Instruction buffer command with pre-emption format on the NPU.
-   */
-  HSA_AMD_AIE_ERT_START_NPU_PREEMPT = 21
-} hsa_amd_aie_ert_cmd_opcode_t;
-
-/**
- * Payload data for AIE ERT start kernel packets (i.e., when the opcode is
- * HSA_AMD_AIE_ERT_START_KERNEL).
- */
-typedef struct hsa_amd_aie_ert_start_kernel_data_s {
-  /**
-   * Address to the PDI.
-   */
-  void* pdi_addr;
-  /**
-   * Opcode, instructions and kernel arguments.
-   */
-  uint32_t data[];
-} hsa_amd_aie_ert_start_kernel_data_t;
-
-/**
- * AMD AIE ERT packet. Used for sending a command to an AIE agent.
- */
-typedef struct hsa_amd_aie_ert_packet_s {
-  /**
-   * AMD vendor specific packet header.
-   */
-  hsa_amd_vendor_packet_header_t header;
-  /**
-   * Format for packets interpreted by the ERT to understand the command and
-   * payload data.
-   */
-  struct {
-    /**
-     * Current state of a command.
-     */
-    uint32_t state : 4;
-    /**
-     * Flexible field that can be interpreted on a per-command basis.
-     */
-    uint32_t custom : 8;
-    /**
-     * Number of DWORDs in the payload data.
-     */
-    uint32_t count : 11;
-    /**
-     * Opcode identifying the command.
-     */
-    uint32_t opcode : 5;
-    /**
-     * Type of a command (currently 0).
-     */
-    uint32_t type : 4;
-  };
-  /**
-   * Reserved. Must be 0.
-   */
-  uint64_t reserved0;
-  /**
-   * Reserved. Must be 0.
-   */
-  uint64_t reserved1;
-  /**
-   * Reserved. Must be 0.
-   */
-  uint64_t reserved2;
-  /**
-   * Reserved. Must be 0.
-   */
-  uint64_t reserved3;
-  /**
-   * Reserved. Must be 0.
-   */
-  uint64_t reserved4;
-  /**
-   * Signal used to indicate completion of the command. When the command has
-   * finished, the runtime decrements the signal value. The application can use
-   * the special signal handle 0 to indicate that no completion signal is used.
-   */
-  hsa_signal_t completion_signal;
-  /**
-   * Address of packet data payload. ERT commands contain arbitrarily sized
-   * data payloads.
-   */
-  uint64_t payload_data;
-} hsa_amd_aie_ert_packet_t;
-
 /** @} */
 
 /** \defgroup error-codes Error codes
@@ -837,10 +636,17 @@ enum {
   HSA_STATUS_ERROR_NOT_SUPPORTED = 47,
 
   /**
-   * Xnack is disabled on this system, but required 
+   * Xnack is disabled on this system, but required
    * by the requested operation.
    */
   HSA_STATUS_ERROR_XNACK_DISABLED = 48,
+
+  /**
+   * The kernel dispatch packet parameters exceed hardware limits for this
+   * agent (e.g. register usage, work-group dimensions, or other dispatch
+   * constraints enforced by the command processor).
+   */
+  HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS = 49,
 };
 
 /** @} */
@@ -3913,7 +3719,7 @@ hsa_status_t hsa_amd_svm_prefetch_async(void* ptr, size_t size, hsa_agent_t agen
  *
  * Only pointers allocated using ::hsa_amd_vmem_address_reserve can be discarded.
  *
- * 
+ *
  * @param[in] ptrs Array of @p count pointers to SVM memory ranges to discard.
  * Must not be NULL.
  *
@@ -4521,6 +4327,28 @@ typedef enum {
    * The type of this attribute is uint8_t[8].
    */
   HSA_AMD_QUEUE_INFO_PROPERTIES,
+
+  /*
+   * Per-queue VM fault state — populated after a GPU memory fault.
+   */
+
+  /*
+   * Whether this queue has experienced a VM fault.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS,
+  /*
+   * The virtual address that caused the VM fault on this queue.
+   * Only valid when HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS is true.
+   * The type of this attribute is uint64_t.
+   */
+  HSA_AMD_QUEUE_INFO_VM_FAULT_ADDRESS,
+  /*
+   * A bitmask of HSA_AMD_MEMORY_FAULT_* flags describing the reason for the
+   * VM fault on this queue.  Only valid when HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS
+   * is true.  The type of this attribute is uint32_t.
+   */
+  HSA_AMD_QUEUE_INFO_VM_FAULT_REASON,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,

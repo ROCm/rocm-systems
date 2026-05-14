@@ -7,6 +7,7 @@
 #include "library/pmc/collectors/gpu/collector.hpp"
 #include "library/pmc/collectors/gpu/perfetto_policy.hpp"
 #include "library/pmc/device_providers/amd_smi/provider.hpp"
+#include <cstdint>
 
 #if defined(ROCPROFSYS_BUILD_AINIC)
 #    include "library/pmc/collectors/nic/cache_policy.hpp"
@@ -37,6 +38,8 @@
 
 #include <cassert>
 #include <memory>
+#include <mutex>
+#include <new>
 #include <sys/resource.h>
 #include <vector>
 
@@ -152,7 +155,8 @@ sample()
         return;
     }
 
-    auto timestamp = static_cast<int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+    auto timestamp =
+        static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
 
     for(auto& slice : g_collector_slices)
     {
@@ -253,7 +257,8 @@ pause()
         return;
     }
 
-    auto timestamp = static_cast<int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+    auto timestamp =
+        static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
 
     for(auto& slice : g_collector_slices)
     {
@@ -288,6 +293,37 @@ postfork_parent_reinit()
     // internally calls fork(), which would re-enter the postfork handler
     // chain while glibc still holds __fork_lock. Defer to next sample().
     g_reinit_pending.store(true);
+}
+
+void
+prefork_lock_sampler()
+{
+    // A raw lock must be used, as we must lock in one function and unlock in another
+    // Thread that calls this should use postfork_parent_unlock_sampler()
+    // Child that inherits the locked mutex needs to use
+    // postfork_child_reset_sampler_lock()
+    type_mutex<category::amd_smi>().lock();
+}
+
+void
+postfork_parent_unlock_sampler()
+{
+    // Same kernel tid as thread that called prefork_lock_sampler(),
+    // so the unlock succeeds
+    type_mutex<category::amd_smi>().unlock();
+}
+
+void
+postfork_child_reset_sampler_lock()
+{
+    // Overwrite the existing mutex with a new one of the same type (placement-new)
+    // We cannot unlock it in the child as it has been locked by the parent and has a
+    // different kernel TID then what was used to lock it. Destructor cannot be used
+    // either, as on a locked mutex, it is undefined behaviour
+    using mutex_type =
+        std::remove_reference<decltype(type_mutex<category::amd_smi>())>::type;
+    auto& _m = type_mutex<category::amd_smi>();
+    ::new(static_cast<void*>(&_m)) mutex_type{};
 }
 
 }  // namespace rocprofsys::pmc
