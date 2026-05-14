@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/tracing.hpp"
 #include "core/concepts.hpp"
@@ -26,6 +7,7 @@
 #include "core/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
+#include <cstdint>
 
 #include <timemory/hash/types.hpp>
 #include <timemory/process/threading.hpp>
@@ -37,20 +19,20 @@ namespace rocprofsys::tracing
 namespace
 {
 tim::hash_map_ptr_t&
-get_timemory_hash_ids(int64_t _tid = threading::get_id());
+get_timemory_hash_ids(std::int64_t _tid = threading::get_id());
 
 tim::hash_alias_ptr_t&
-get_timemory_hash_aliases(int64_t _tid = threading::get_id());
+get_timemory_hash_aliases(std::int64_t _tid = threading::get_id());
 
 tim::hash_map_ptr_t&
-get_timemory_hash_ids(int64_t _tid)
+get_timemory_hash_ids(std::int64_t _tid)
 {
     return thread_data<identity<tim::hash_map_ptr_t>>::instance(
         construct_on_thread{ _tid });
 }
 
 tim::hash_alias_ptr_t&
-get_timemory_hash_aliases(int64_t _tid)
+get_timemory_hash_aliases(std::int64_t _tid)
 {
     return thread_data<identity<tim::hash_alias_ptr_t>>::instance(
         construct_on_thread{ _tid });

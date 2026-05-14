@@ -2,7 +2,7 @@
 name: amdsmi-review-performance
 description: "Performance review subagent. Checks efficiency, scaling, resource usage, hot paths. Use when: performance review, optimization check."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory
-model: "Claude Sonnet 4"
+model: "Claude Sonnet 4.6"
 user-invocable: false
 ---
 
@@ -12,15 +12,11 @@ You review performance and efficiency for the amd-smi project.
 
 ## Project Layout
 
-C/C++ → `src/`, `include/amd_smi/` | Python → `py-interface/`, `amdsmi_cli/`
+Project structure is stored in repo memories.
 
-## High-Churn Hotspots (watch for regressions)
+## High-Churn Hotspots
 
-| File | Risk |
-|------|------|
-| `src/amd_smi/amd_smi.cc` | Core C library — NIC/switch code, hot paths |
-| `py-interface/amdsmi_interface.py` | Python API — ctypes overhead, repeated calls |
-| `amdsmi_cli/amdsmi_commands.py` | CLI — output generation, device iteration |
+Key areas to watch: core C library hot paths (`src/amd_smi/`), Python ctypes overhead (`py-interface/`), CLI device iteration (`amdsmi_cli/`).
 
 ## Your Job
 
@@ -34,7 +30,7 @@ C/C++ → `src/`, `include/amd_smi/` | Python → `py-interface/`, `amdsmi_cli/`
 ## CI Evidence (when available)
 
 If the orchestrator provides CI run data, use it to:
-- Compare **step timings** between PR run and baseline `main` run
+- Compare **step timings** between PR run and baseline `develop` run
 - Flag steps that took significantly longer (>20% regression)
 - Identify **cache misses** or changed cache behavior
 - Correlate timing anomalies with code changes in the diff

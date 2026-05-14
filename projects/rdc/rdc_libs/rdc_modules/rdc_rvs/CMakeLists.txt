@@ -62,15 +62,6 @@ if(BUILD_RVS)
     set_property(TARGET ${RDC_RVS_LIB} PROPERTY SOVERSION "${VERSION_MAJOR}")
     set_property(TARGET ${RDC_RVS_LIB} PROPERTY VERSION "${SO_VERSION_STRING}")
 
-    # If the library is a release, strip the target library
-    if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-        add_custom_command(
-            TARGET ${RDC_RVS_LIB}
-            POST_BUILD
-            COMMAND ${CMAKE_STRIP} ${RDC_RVS_LIB_COMPONENT}.so
-        )
-    endif()
-
     # Install RVS config files into /opt/rocm/share/rdc/conf/rvs/
     install(
         DIRECTORY "${SRC_DIR}/conf/"

@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 """
 Output validators for rocprofiler-systems test results.

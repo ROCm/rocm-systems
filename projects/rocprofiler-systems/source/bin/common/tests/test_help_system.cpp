@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #include "common/common_utils.hpp"
 
@@ -261,8 +261,9 @@ TEST_F(help_system_test, domain_cpu_extracts_related_options)
 
 TEST_F(help_system_test, domain_cpu_include_continuation_lines)
 {
-    std::ostringstream oss;
-    print_help_for_domain(synthetic_help, "cpu", "run", oss);
+    std::ostringstream    oss;
+    [[maybe_unused]] auto matched =
+        print_help_for_domain(synthetic_help, "cpu", "run", oss);
     auto output = oss.str();
 
     // --sample-cputime has a continuation line "Accepts zero or more arguments"

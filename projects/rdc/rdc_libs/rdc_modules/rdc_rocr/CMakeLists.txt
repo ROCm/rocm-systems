@@ -68,13 +68,4 @@ if(BUILD_RUNTIME)
     # Set the VERSION and SOVERSION values
     set_property(TARGET ${RDC_ROCR_LIB} PROPERTY SOVERSION "${VERSION_MAJOR}")
     set_property(TARGET ${RDC_ROCR_LIB} PROPERTY VERSION "${SO_VERSION_STRING}")
-
-    # If the library is a release, strip the target library
-    if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-        add_custom_command(
-            TARGET ${RDC_ROCR_LIB}
-            POST_BUILD
-            COMMAND ${CMAKE_STRIP} ${RDC_ROCR_LIB_COMPONENT}.so
-        )
-    endif()
 endif()

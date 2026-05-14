@@ -5,17 +5,34 @@
 
 #pragma once
 
+#include "hipfile-cpp20.h"
 #include "hipfile-warnings.h"
+#include "stats.h"
+
 #include <stdexcept>
 #ifdef AIS_TESTING
 #include <mutex>
 #endif
 
+#define HIPFILE_CONTEXT_DEFAULT_IMPL(T, Impl)                                                                \
+    template <> struct ContextDefaultImpl<T> : ContextDefaultImplChecked<T, Impl> {}
+
 namespace hipFile {
 
 template <typename T> struct ContextOverride;
 
+template <typename T, typename Impl>
+HIPFILE_REQUIRES(std::derived_from<Impl, T>)
+struct ContextDefaultImplChecked {
+    using type = Impl;
+};
+
+template <typename T> struct ContextDefaultImpl : ContextDefaultImplChecked<T, T> {};
+HIPFILE_CONTEXT_DEFAULT_IMPL(IStatsServer, StatsServer);
+
 template <typename T> struct Context {
+    using DefaultImpl = typename ContextDefaultImpl<T>::type;
+    static_assert(std::is_base_of_v<T, DefaultImpl>, "ContextDefaultImpl<T>::type must derive from T");
     Context()                           = delete;
     Context(const Context &)            = delete;
     Context(Context &&)                 = delete;
@@ -31,11 +48,11 @@ template <typename T> struct Context {
     static T *get()
     {
         std::lock_guard<std::mutex> lock{m};
-        HIPFILE_WARN_NO_EXIT_DTOR_OFF
-        static T standard{};
-        HIPFILE_WARN_NO_EXIT_DTOR_ON
         if (replacement)
             return replacement;
+        HIPFILE_WARN_NO_EXIT_DTOR_OFF
+        static DefaultImpl standard{};
+        HIPFILE_WARN_NO_EXIT_DTOR_ON
         return &standard;
     }
 
@@ -67,7 +84,7 @@ private:
     static T *get()
     {
         HIPFILE_WARN_NO_EXIT_DTOR_OFF
-        static T context{};
+        static DefaultImpl context{};
         HIPFILE_WARN_NO_EXIT_DTOR_ON
         return &context;
     }
@@ -92,9 +109,6 @@ template <typename T> struct ContextOverride {
 };
 #endif
 
-class HipFileInit {
-    HipFileInit();
-    friend struct Context<HipFileInit>;
-};
+void hipFileInit();
 
 }

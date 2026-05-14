@@ -172,7 +172,8 @@
       "tests": [
         {"name": "BitOps", "description": "Bit operation utility tests (macros and typed fixtures)", "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"},
         {"name": "CommTests", "description": "Communicator helper tests", "test_filter": "CommTests.*"},
-        {"name": "EnqueueCountTests", "description": "Enqueue send/recv count helpers", "test_filter": "EnqueueCountTests.*"}
+        {"name": "EnqueueCountTests", "description": "Enqueue send/recv count helpers", "test_filter": "EnqueueCountTests.*"},
+        {"name": "MiscTests.Sorter", "description": "Task coll sorter unit test", "test_filter": "MiscTests.Sorter"}
       ]
     }
   },
@@ -185,7 +186,7 @@
     },
     {
       "name": "RCCL Unit Tests - Fixtures",
-      "description": "Header-only fixture tests: BitOps, CommTests, EnqueueCountTests",
+      "description": "rccl-UnitTestsFixtures (header-level tests including MiscTests.Sorter)",
       "config": "unit_tests_fixtures",
       "enabled": true
     }

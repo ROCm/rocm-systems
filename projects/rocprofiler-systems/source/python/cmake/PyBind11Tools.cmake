@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 #
 function(ROCPROFILER_SYSTEMS_FIND_PYTHON _VAR)
     set(options REQUIRED QUIET)

@@ -53,7 +53,8 @@ config_settings(const std::shared_ptr<settings>& _config)
 {
     if(!get_use_amd_smi() || !gpu::initialize_amdsmi()) return;
 
-    std::string default_metrics = "busy, temp, power, mem_usage, sdma_usage";
+    std::string default_metrics =
+        "busy, temp, power, mem_usage, sdma_usage, gfx_clock, mem_clock";
     // No distinction between busy and activity shown in description
     std::string jpeg_activity_support{};
     std::string vcn_activity_support{};

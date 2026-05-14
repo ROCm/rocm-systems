@@ -57,7 +57,9 @@ endif()
 
 set(AMDCUID_TST_EXECUTABLE amdcuid_test)
 set(UNIT_TEST_SOURCES
-    unit/cuid_test.cc
+    unit/cuid_api_test.cc
+    unit/cuid_misc_test.cc
+    functional/cuid_reverse_lookup_test.cc
 )
 
 

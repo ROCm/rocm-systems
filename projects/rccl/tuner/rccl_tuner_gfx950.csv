@@ -1,0 +1,4 @@
+allreduce,0,16383,tree,ll,1,1,8,-1,-1
+allreduce,16384,524287,ring,ll,-1,1,8,-1,-1
+allreduce,524288,1048575,ring,ll,32,1,8,-1,-1
+allreduce,1048576,2097000,ring,ll,56,1,8,-1,-1

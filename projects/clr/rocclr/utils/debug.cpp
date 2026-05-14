@@ -74,7 +74,9 @@ struct LogEntry {
 class AsyncLogger {
  public:
   AsyncLogger() : buffer_(kBufferSize) {
-    if (!flagIsDefault(AMD_LOG_ASYNC) && AMD_LOG_ASYNC) {
+    bool useAsync = !flagIsDefault(AMD_LOG_ASYNC) ? AMD_LOG_ASYNC
+                                                  : !flagIsDefault(AMD_LOG_LEVEL_FILE);
+    if (useAsync) {
       enable(true);
     }
   }

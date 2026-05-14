@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import os
 import sys
@@ -116,6 +117,14 @@ class ConfigureCITest(unittest.TestCase):
             therock_configure_ci.is_path_skippable("projects/rocminfo/docs/api.rst")
         )
         self.assertTrue(therock_configure_ci.is_path_skippable(".gitignore"))
+        self.assertTrue(therock_configure_ci.is_path_skippable(".github/labeler.yml"))
+        self.assertTrue(therock_configure_ci.is_path_skippable(".github/labels.yml"))
+        self.assertTrue(therock_configure_ci.is_path_skippable(".github/workflows/labeler.yml"))
+        self.assertTrue(
+            therock_configure_ci.is_path_skippable(
+                "experimental/rocjitsu/lib/python/amdisa/codegen/_generator.py"
+            )
+        )
 
         # Test non-skippable patterns
         self.assertFalse(
@@ -151,6 +160,20 @@ class ConfigureCITest(unittest.TestCase):
         # Mock git diff to return only doc files
         mock_process = MagicMock()
         mock_process.stdout = "README.md\ndocs/guide.rst\nprojects/rocprim/docs/api.md"
+        mock_run.return_value = mock_process
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 0)
+
+    @patch("subprocess.run")
+    def test_rocjitsu_only_change_returns_empty_list(self, mock_run):
+        args = {"is_pull_request": True, "base_ref": "HEAD^"}
+
+        mock_process = MagicMock()
+        mock_process.stdout = (
+            "experimental/rocjitsu/lib/python/amdisa/codegen/_generator.py\n"
+            "experimental/rocjitsu/lib/python/amdisa/codegen/execute/vector_alu.py"
+        )
         mock_run.return_value = mock_process
 
         project_to_run = therock_configure_ci.retrieve_projects(args)
@@ -294,6 +317,129 @@ class ConfigureCITest(unittest.TestCase):
 
         project_to_run = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_rccl_ci_triggered_by_rccl_paths_pull_request(self, mock_get_modified):
+        """workflow_dispatch with a windows_only subtree must not trigger Linux CI."""
+        args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
+
+        mock_get_modified.return_value = [
+            "projects/rccl/rccl.cpp",
+            "projects/rccl/test/test.cpp",
+        ]
+
+        outputs = therock_configure_ci.run(args)
+        projects = json.loads(outputs["projects"])
+        self.assertEqual(len(projects), 0)
+        self.assertEqual(outputs["run_linux_rccl_ci"], "true")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_rccl_ci_not_triggered_by_non_rccl_paths_pull_request(
+        self, mock_get_modified
+    ):
+        """workflow_dispatch with a windows_only subtree must not trigger Linux CI."""
+        args = {"is_pull_request": True, "base_ref": "HEAD^", "platform": "linux"}
+
+        mock_get_modified.return_value = ["projects/rocprim/rocprim.cpp"]
+
+        outputs = therock_configure_ci.run(args)
+        projects = json.loads(outputs["projects"])
+        self.assertGreaterEqual(len(projects), 1)
+        self.assertEqual(outputs["run_linux_rccl_ci"], "false")
+
+    def test_rccl_ci_triggered_nightly(self):
+        """workflow_dispatch with a windows_only subtree must not trigger Linux CI."""
+        args = {"is_nightly": True, "base_ref": "HEAD^", "platform": "linux"}
+
+        outputs = therock_configure_ci.run(args)
+        projects = json.loads(outputs["projects"])
+        self.assertGreaterEqual(len(projects), 1)
+        self.assertEqual(outputs["run_linux_rccl_ci"], "true")
+
+    def test_rccl_ci_triggered_workflow_dispatch(self):
+        """workflow_dispatch with a windows_only subtree must not trigger Linux CI."""
+        args = {
+            "is_workflow_dispatch": True,
+            "input_projects": "projects/rccl",
+            "base_ref": "HEAD^",
+            "platform": "linux",
+        }
+
+        outputs = therock_configure_ci.run(args)
+        projects = json.loads(outputs["projects"])
+        self.assertEqual(len(projects), 0)
+        self.assertEqual(outputs["run_linux_rccl_ci"], "true")
+
+    def test_rccl_ci_not_triggered_push(self):
+        """workflow_dispatch with a windows_only subtree must not trigger Linux CI."""
+        args = {"is_push": True, "base_ref": "HEAD^", "platform": "linux"}
+
+        outputs = therock_configure_ci.run(args)
+        projects = json.loads(outputs["projects"])
+        self.assertGreaterEqual(len(projects), 1)
+        self.assertEqual(outputs["run_linux_rccl_ci"], "false")
+
+    # Tests for push event with RCCL changes
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_push_only_rccl_skips_regular_ci(self, mock_get_modified):
+        """Push with only RCCL changes should skip regular CI but run RCCL CI."""
+        args = {"is_push": True, "base_ref": "HEAD^", "platform": "linux"}
+
+        mock_get_modified.return_value = [
+            "projects/rccl/src/main.cpp",
+            "projects/rccl/test/test.cpp",
+        ]
+
+        outputs = therock_configure_ci.run(args)
+        projects = json.loads(outputs["projects"])
+        self.assertEqual(len(projects), 0)
+        self.assertEqual(outputs["run_linux_rccl_ci"], "true")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_push_rccl_and_known_subtree_runs_both(self, mock_get_modified):
+        """Push with RCCL + known subtree changes should run both regular and RCCL CI."""
+        args = {"is_push": True, "base_ref": "HEAD^", "platform": "linux"}
+
+        mock_get_modified.return_value = [
+            "projects/rccl/src/main.cpp",
+            "projects/clr/src/clr.cpp",
+        ]
+
+        outputs = therock_configure_ci.run(args)
+        projects = json.loads(outputs["projects"])
+        self.assertGreaterEqual(len(projects), 1)
+        self.assertEqual(outputs["run_linux_rccl_ci"], "true")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_push_rccl_and_unknown_runs_full_ci(self, mock_get_modified):
+        """Push with RCCL + unknown path changes should run full regular CI and RCCL CI."""
+        args = {"is_push": True, "base_ref": "HEAD^", "platform": "linux"}
+
+        mock_get_modified.return_value = [
+            "projects/rccl/src/main.cpp",
+            "unknown/path/file.cpp",
+        ]
+
+        outputs = therock_configure_ci.run(args)
+        projects = json.loads(outputs["projects"])
+        # Should run full CI due to unknown path
+        self.assertGreaterEqual(len(projects), 1)
+        self.assertEqual(outputs["run_linux_rccl_ci"], "true")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_push_known_subtree_only_runs_regular_ci(self, mock_get_modified):
+        """Push with only known subtree changes should run regular CI, not RCCL CI."""
+        args = {"is_push": True, "base_ref": "HEAD^", "platform": "linux"}
+
+        mock_get_modified.return_value = [
+            "projects/clr/src/clr.cpp",
+            "projects/rocminfo/src/main.cpp",
+        ]
+
+        outputs = therock_configure_ci.run(args)
+        projects = json.loads(outputs["projects"])
+        self.assertGreaterEqual(len(projects), 1)
+        self.assertEqual(outputs["run_linux_rccl_ci"], "false")
 
 
 if __name__ == "__main__":

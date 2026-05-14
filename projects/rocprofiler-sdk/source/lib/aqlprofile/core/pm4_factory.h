@@ -24,7 +24,7 @@
 #define SRC_CORE_PM4_FACTORY_H_
 
 #include <assert.h>
-#include "hsa_includes.h"
+#include "lib/aqlprofile/hsa_includes.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -34,15 +34,15 @@
 #include <sstream>
 #include <string>
 
-#include "aqlprofile-sdk/aql_profile_v2.h"
-#include "core/aql_profile.hpp"
-#include "core/aql_profile_exception.h"
-#include "def/gpu_block_info.h"
-#include "pm4/cmd_builder.h"
-#include "pm4/pmc_builder.h"
-#include "pm4/spm_builder.h"
-#include "pm4/sqtt_builder.h"
-#include "util/hsa_rsrc_factory.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
+#include "lib/aqlprofile/core/aql_profile.hpp"
+#include "lib/aqlprofile/core/aql_profile_exception.h"
+#include "lib/aqlprofile/def/gpu_block_info.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
+#include "lib/aqlprofile/pm4/pmc_builder.h"
+#include "lib/aqlprofile/pm4/spm_builder.h"
+#include "lib/aqlprofile/pm4/sqtt_builder.h"
+#include "lib/aqlprofile/util/hsa_rsrc_factory.h"
 
 namespace aql_profile
 {
@@ -92,7 +92,7 @@ public:
     // Get block info for a given block id
     const GpuBlockInfo* Get(const uint32_t& block_id) const
     {
-        return (block_id < block_count_) ? block_table_[block_id] : NULL;
+        return (block_id < block_count_) ? block_table_[block_id] : nullptr;
     }
 
     // Find block by name
@@ -174,7 +174,7 @@ public:
     const GpuBlockInfo* GetBlockInfo(const aqlprofile_pmc_event_t* event) const
     {
         const GpuBlockInfo* info = block_map_.Get(event->block_name);
-        if(info == NULL) throw std::runtime_error("Bad Block");
+        if(info == nullptr) throw std::runtime_error("Bad Block");
         // Checking that the block index is in proper range
         if(event->block_index >= info->instance_count) throw std::runtime_error("Bad Index");
             // Checking that the counter event index is in proper range
@@ -189,7 +189,7 @@ public:
     const GpuBlockInfo* GetBlockInfo(const event_t* event) const
     {
         const GpuBlockInfo* info = block_map_.Get(event->block_name);
-        if(info == NULL) throw event_exception(std::string("Bad block, "), *event);
+        if(info == nullptr) throw event_exception(std::string("Bad block, "), *event);
         // Checking that the block index is in proper range
         if(event->block_index >= info->instance_count)
             throw event_exception(std::string("Bad block index, "), *event);
@@ -240,12 +240,7 @@ public:
 
 protected:
     explicit Pm4Factory(const BlockInfoMap& map)
-    : cmd_builder_(NULL)
-    , pmc_builder_(NULL)
-    , spm_builder_(NULL)
-    , sqtt_builder_(NULL)
-    , agent_info_(NULL)
-    , concurrent_mode_(concurrent_create_mode_)
+    : concurrent_mode_(concurrent_create_mode_)
     , block_map_(map)
     {}
 
@@ -258,20 +253,20 @@ protected:
     }
 
     // PM4 command builder
-    pm4_builder::CmdBuilder* cmd_builder_;
+    pm4_builder::CmdBuilder* cmd_builder_ = nullptr;
     // PMC PM4 packets builder
-    pm4_builder::PmcBuilder* pmc_builder_;
+    pm4_builder::PmcBuilder* pmc_builder_ = nullptr;
     // SPM PM4 packets builder
-    pm4_builder::SpmBuilder* spm_builder_;
+    pm4_builder::SpmBuilder* spm_builder_ = nullptr;
     // SQTT PM4 packets builder
-    pm4_builder::SqttBuilder* sqtt_builder_;
+    pm4_builder::SqttBuilder* sqtt_builder_ = nullptr;
     // agent info
-    const AgentInfo* agent_info_;
-    gpu_id_t         gpu_id_;
+    const AgentInfo* agent_info_ = nullptr;
+    gpu_id_t         gpu_id_     = INVAL_GPU_ID;
     // Concurrent mode
     static bool concurrent_create_mode_;
     static bool spm_kfd_mode_;
-    bool        concurrent_mode_;
+    bool        concurrent_mode_ = false;
 
 private:
     // PM4 factory instance map type
@@ -326,12 +321,12 @@ inline Pm4Factory*
 Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent)
 {
     // Check if we have the instance already created
-    if(instances_ == NULL) instances_ = new instances_t;
-    const auto            ret = instances_->insert({*agent_info, NULL});
+    if(instances_ == nullptr) instances_ = new instances_t;
+    const auto            ret = instances_->insert({*agent_info, nullptr});
     instances_t::iterator it  = ret.first;
 
     concurrent_create_mode_ = concurrent;
-    static bool spm_kfd     = getenv("ROCP_SPM_KFD_MODE") != NULL;
+    static bool spm_kfd     = getenv("ROCP_SPM_KFD_MODE") != nullptr;
     spm_kfd_mode_           = spm_kfd;
 
     // Create a factory implementation for the GPU id
@@ -357,7 +352,7 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
         }
     }
 
-    if(it->second == NULL) throw aql_profile_exc_msg("Pm4Factory::Create() failed");
+    if(it->second == nullptr) throw aql_profile_exc_msg("Pm4Factory::Create() failed");
     it->second->gpu_id_ = gpu_id;
     return it->second;
 }
@@ -376,12 +371,14 @@ Pm4Factory::Create(const hsa_agent_t agent, bool concurrent)
     uint32_t device_id = 0;
 
     // Getting GfxIP name
-    status = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_name.data());
+    status = rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+        agent, HSA_AGENT_INFO_NAME, agent_name.data());
     if(status == HSA_STATUS_SUCCESS)
     {
         // Getting DeviceId
         hsa_agent_info_t attribute = static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID);
-        status                     = hsa_agent_get_info(agent, attribute, &device_id);
+        status = rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+            agent, attribute, &device_id);
     }
     if(status != HSA_STATUS_SUCCESS)
     {
@@ -396,7 +393,7 @@ inline Pm4Factory*
 Pm4Factory::Create(aqlprofile_agent_handle_t agent_info, bool concurrent)
 {
     const auto* info = GetAgentInfo(agent_info);
-    if(info == NULL) throw aql_profile_exc_val<uint64_t>("Bad agent handle", agent_info.handle);
+    if(info == nullptr) throw aql_profile_exc_val<uint64_t>("Bad agent handle", agent_info.handle);
     const gpu_id_t gpu_id = GetGpuId(info->gfxip);
     return Pm4Factory::Create(info, gpu_id, concurrent);
 }
@@ -407,12 +404,12 @@ Pm4Factory::Destroy()
 {
     std::lock_guard<mutex_t> lck(mutex_);
 
-    if(instances_ != NULL)
+    if(instances_ != nullptr)
     {
         for(auto& item : *instances_)
             delete item.second;
         delete instances_;
-        instances_ = NULL;
+        instances_ = nullptr;
     }
 }
 

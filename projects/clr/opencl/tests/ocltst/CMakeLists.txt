@@ -3,12 +3,12 @@
 # SPDX-License-Identifier: MIT
 
 set(OCLTST_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+
 if (WIN32)
-    set(OCLTST_INSTALL_LIB_DIR ${CMAKE_INSTALL_BINDIR})
+    set(OCLTST_INSTALL_DIR "tests/ocltst")
 else()
-    set(OCLTST_INSTALL_LIB_DIR ${CMAKE_INSTALL_LIBDIR})
+    set(OCLTST_INSTALL_DIR "share/opencl/ocltst")
 endif()
-set(OCLTST_INSTALL_DIR ${CMAKE_INSTALL_BINDIR})
 
 find_package(OpenGL)
 find_package(GLEW)

@@ -1,15 +1,18 @@
-#include "hsa_includes.h"
-#include "include/aqlprofile-sdk/aql_profile_v2.h"
-#include "include/spm_common.hpp"
-#include "memorymanager.hpp"
-#include "core/commandbuffermgr.hpp"
+//
+//
+//
+
+#include "lib/aqlprofile/hsa_includes.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
+#include "lib/aqlprofile/core/spm_common.hpp"
+#include "lib/aqlprofile/core/memorymanager.hpp"
+#include "lib/aqlprofile/core/commandbuffermgr.hpp"
+
+#include "lib/aqlprofile/core/logger.hpp"
+#include "lib/aqlprofile/core/pm4_factory.h"
 
 #include <thread>
 #include <condition_variable>
-
-#include "core/logger.h"
-#include "core/pm4_factory.h"
-
 #include <map>
 #include <array>
 #include <shared_mutex>
@@ -76,12 +79,13 @@ inline static hsa_status_t
 HsaSpmSetDestBuffer(spm_set_dest_buffer_args& args)
 {
     if(args.hsa_agent.handle == 0) throw std::runtime_error("Invalid hsa agent");
-    return hsa_amd_spm_set_dest_buffer(args.hsa_agent,
-                                       args.buf_size,
-                                       &args.timeout,
-                                       &args.size_copied,
-                                       args.dest_buf,
-                                       &args.is_data_loss);
+    return rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_set_dest_buffer_fn(
+        args.hsa_agent,
+        args.buf_size,
+        &args.timeout,
+        &args.size_copied,
+        args.dest_buf,
+        &args.is_data_loss);
 }
 
 class ManagerThread
@@ -97,7 +101,7 @@ public:
         s->stop_cons_thread = false;
         s->stop_prod_thread = false;
 
-        status = hsa_amd_spm_acquire(s->hsa_agent);
+        status = rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_acquire_fn(s->hsa_agent);
         CHECKHSA(status, return );
 
         // This non-blocking (timeout = 0) HsaSpmSetDestBuffer() call will clear up all the
@@ -122,7 +126,7 @@ public:
         if(producer_thread.joinable()) producer_thread.join();
         if(consumer_thread.joinable()) consumer_thread.join();
 
-        hsa_amd_spm_release(this->agent);
+        rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_release_fn(this->agent);
     }
 
     hsa_status_t status = HSA_STATUS_ERROR;
@@ -195,11 +199,11 @@ is_agent_supported_for_spm(const AgentInfo* agentInfo)
 }
 
 std::vector<aqlprofile_spm_parameter_t> default_spm_params = {
-    {AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE, 1 << 26},                  // 64MB
-    {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES, 1 << 13},  // 4us
-    {AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT, 0},                            // 100ms
+    {AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE, 1 << 26},      // 64MB
+    {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, 1 << 13},  // 4us
+    {AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT, 0},                // 0ms
     {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE, AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK}};
-static_assert(AQLPROFILE_SPM_PARAMETER_TYPE_LAST == 6 && "Dont forget to add default param!");
+static_assert(AQLPROFILE_SPM_PARAMETER_TYPE_LAST == 4 && "Dont forget to add default param!");
 
 counter_des_t
 GetCounter(aql_profile::Pm4Factory*                       pm4_factory,
@@ -344,8 +348,7 @@ _internal_aqlprofile_spm_create_packets(aqlprofile_handle_t*          handle,
                                      (pm4_factory->GetGpuId() == aql_profile::MI200_GPU_ID);
         trace_config.spm_sample_delay_max = pm4_factory->GetSpmSampleDelayMax();
         trace_config.sampleRate =
-            (s->parameters.at(AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES) + 16) &
-            ~31ul;
+            (s->parameters.at(AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL) + 16) & ~31ul;
         if(trace_config.sampleRate == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
         if(s->parameters.at(AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE) !=
@@ -633,13 +636,34 @@ aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pm
 }
 
 PUBLIC_API hsa_status_t
-aqlprofile_spm_query_agent_capabilities(aqlprofile_agent_handle_t                    agent,
-                                        aqlprofile_spm_available_configurations_cb_t cb,
-                                        void*                                        userdata)
+aqlprofile_spm_query_agent_configurations(aqlprofile_agent_handle_t                    agent,
+                                          aqlprofile_spm_available_configurations_cb_t cb,
+                                          void*                                        userdata)
 {
-    const aqlprofile_spm_available_configuration_t sample_internel_caps[] = {
-        AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES, 32, (1 << 16) - 32};
-    size_t       num_caps = 1;
-    hsa_status_t status   = cb(sample_internel_caps, num_caps, userdata);
-    return status;
+    if(!cb) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    aql_profile::Pm4Factory* pm4_factory = nullptr;
+    try
+    {
+        pm4_factory = aql_profile::Pm4Factory::Create(agent);
+        if(!pm4_factory) return HSA_STATUS_ERROR_INVALID_AGENT;
+    } catch(...)
+    {
+        return HSA_STATUS_ERROR_INVALID_AGENT;
+    }
+
+    if(!aqlprofile::spm::is_agent_supported_for_spm(aql_profile::GetAgentInfo(agent)))
+        return HSA_STATUS_ERROR_INVALID_AGENT;
+
+    auto configs = std::vector<aqlprofile_spm_available_configuration_t>{};
+
+    auto& interval_config = configs.emplace_back();
+    interval_config.type  = AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL;
+    interval_config.interval.min_interval =
+        32;  // Sample interval time in sclks. Minimum is 32 clocks by HW design
+    interval_config.interval.max_interval =
+        (1 << 16) - 32;  // Maximum value by HW design. Must be multiples of 32.
+    interval_config.interval.mode = AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK;
+
+    return cb(configs.data(), configs.size(), userdata);
 }

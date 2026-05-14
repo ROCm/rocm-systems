@@ -52,12 +52,3 @@ set_target_properties(
     ${BOOTSTRAP_LIB}
     PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/rdc" THEROCK_NO_INSTALL_RPATH TRUE
 )
-
-# If the library is a release, strip the target library
-if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    add_custom_command(
-        TARGET ${BOOTSTRAP_LIB}
-        POST_BUILD
-        COMMAND ${CMAKE_STRIP} ${BOOTSTRAP_LIB_COMPONENT}.so
-    )
-endif()

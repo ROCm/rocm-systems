@@ -29,6 +29,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // stripped from imported dlmalloc.c:
 //   !ONLY_MSPACES; MALLOC_INSPECT_ALL; USE_LOCKS; DEBUG;
 #include "dlmalloc.hpp"
+#include "log.hpp"
 #include <cstdio>
 
 // Suppress GNU null pointer arithmetic warnings for dlmalloc's intentional
@@ -47,14 +48,12 @@ namespace rocshmem {
 #define NO_MALLOC_STATS 1
 
 #define USAGE_ERROR_ACTION(m, p) do {                                   \
-  fprintf(stderr, "Symmetric heap usage error detected, "               \
-                  "possibly at %p\n", p);                               \
-  ABORT;                                                                \
+  LOG_ERROR_ABORT("Symmetric heap usage error detected, "               \
+                  "possibly at %p", p);                                 \
 } while (0)
 
 #define CORRUPTION_ERROR_ACTION(m) do {                                 \
-  fprintf(stderr, "Symmetric heap data structure corruption found");    \
-  ABORT;                                                                \
+  LOG_ERROR_ABORT("Symmetric heap data structure corruption found");    \
 } while (0)
 
 #define DLMALLOC_EXPORT static
@@ -970,7 +969,7 @@ DLMALLOC_EXPORT int mspace_mallopt(int, int);
 #ifndef LACKS_ERRNO_H
 #include <errno.h>       /* for MALLOC_FAILURE_ACTION */
 #endif /* LACKS_ERRNO_H */
-#ifdef DEBUG
+#ifdef BUILD_DEBUG_TRACE_HOST
 #if ABORT_ON_ASSERT_FAILURE
 #undef assert
 #define assert(x) if(!(x)) ABORT

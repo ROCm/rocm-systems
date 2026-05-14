@@ -218,7 +218,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   //
   // @details Takes hsa_amd_memory_copy_op_t directly from the public API.
   // The implementation resolves agents, signals, and preferred SDMA engines
-  // internally using rec_sdma_eng_id_peers_info_. Operations sharing the
+  // internally using DmaPreferredEngine(). Operations sharing the
   // same copy_agent are grouped by the caller. Future optimizations can
   // group items by engine to reduce redundant packets.
   //
@@ -302,6 +302,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   virtual hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                                    HsaEventCallback event_callback, void* data,
                                    uint32_t private_segment_size, uint32_t group_segment_size,
+                                   bool metadata_prefetch,
                                    Queue** queue) = 0;
 
   // @brief Query the value of an attribute.

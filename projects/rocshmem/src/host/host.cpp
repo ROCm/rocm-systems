@@ -30,6 +30,7 @@
 #include "host_helpers.hpp"
 #include "memory/window_info.hpp"
 #include "util.hpp"
+#include "log.hpp"
 
 #include <cassert>
 
@@ -171,8 +172,7 @@ __host__ HostInterface::HostInterface(HdpPolicy* hdp_policy,
   }
 
 #if defined USE_HDP_FLUSH &&  not defined USE_SINGLE_NODE
-  printf("Non-mpi use-cases only supported with coherent heap at the moment. Aborting.\n");
-  abort();
+  LOG_ERROR_ABORT("Non-mpi use-cases only supported with coherent heap at the moment");
 #endif
 }
 
@@ -328,6 +328,16 @@ __host__ void HostInterface::barrier_all(WindowInfo* window_info) {
 __host__ void HostInterface::barrier_all_on_stream(hipStream_t stream) {
   // Launch kernel to do barrier with given stream
   rocshmem_barrier_all_kernel<<<1, 1, 0, stream>>>();
+}
+
+__host__ void HostInterface::quiet_on_stream(hipStream_t stream) {
+  // Launch kernel to do quiet with given stream
+  rocshmem_quiet_kernel<<<1, 1, 0, stream>>>();
+}
+
+__host__ void HostInterface::sync_all_on_stream(hipStream_t stream) {
+  // Launch kernel to do sync_all with given stream
+  rocshmem_sync_all_kernel<<<1, 1, 0, stream>>>();
 }
 
 __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,

@@ -274,6 +274,19 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     status = hsa_amd_agent_iterate_memory_pools(agent, FindStandardPool, &agent_info->gpu_pool);
     CHECK_ITER_STATUS("hsa_amd_agent_iterate_memory_pools(gpu pool)", status);
 
+    // TODO: Temporary patch for gfx1250's asymmetric CU design, will remove
+    //       after CU mask support is added to agent_info
+    // TODO: gfx1250 defines 1WGP = 1CU, different from other RDNA products.
+    //       Patch it to be WGP = 2CU to reuse profiler logic
+    if (!strncmp(agent_info->name, "gfx1250", 7)) {
+      agent_info->cu_num = agent_info->se_num * agent_info->shader_arrays_per_se * 9 * 2;
+      agent_info->xcc_per_aid = 4;
+    } else if (!strncmp(agent_info->name, "gfx94", 5) || !strncmp(agent_info->name, "gfx95", 5)) {
+      agent_info->xcc_per_aid = 2;
+    } else {
+      agent_info->xcc_per_aid = 1;
+    }
+
     // Set GPU index
     agent_info->dev_index = gpu_list_.size();
     gpu_list_.push_back(agent_info);

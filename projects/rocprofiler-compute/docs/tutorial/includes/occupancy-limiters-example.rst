@@ -60,7 +60,7 @@ Here we try to use as many :ref:`VGPRs <desc-valu>` as possible, to this end:
 * We specify ``__launch_bounds___(256)``
   to increase the number of VPGRs available to the kernel (by limiting the
   number of wavefronts that can be resident on a
-  :doc:`CU </conceptual/compute-unit>`).
+  :doc:`CU </conceptual/cdna/compute-unit>`).
 
 * Write a unique non-compile time constant to each element of the array.
 

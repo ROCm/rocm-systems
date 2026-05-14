@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # executable RPATH
 
 set(ROCPROFSYS_EXE_INSTALL_RPATH

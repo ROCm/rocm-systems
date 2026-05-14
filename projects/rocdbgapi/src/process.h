@@ -307,6 +307,10 @@ public:
   void update_queues ();
   void update_code_objects ();
 
+  /* Refresh the metadata of queues we know of.  Unlike update_queues, this
+     will not try to create new queues reported by the os_driver.  */
+  void update_queue_info (const std::vector<queue_t *> &queues) const;
+
   void runtime_enable (os_runtime_info_t runtime_info);
 
   void send_exceptions (

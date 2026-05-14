@@ -37,7 +37,7 @@ rocDecStatus ROCDECAPI rocDecCreateBitstreamReader(RocdecBitstreamReader *bs_rea
         handle = new RocBitstreamReaderHandle(input_file_path);
     }
     catch (const std::exception& e) {
-        CriticalLog(g_rocdec_logger, "Failed to create RocBitstreamReader handle, " + STR(e.what()));
+        CriticalLog(g_rocdec_logger, "Failed to create RocBitstreamReader handle, " + ROCDEC_STR(e.what()));
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_RUNTIME_ERROR;
     }

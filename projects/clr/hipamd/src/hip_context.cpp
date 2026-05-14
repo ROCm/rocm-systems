@@ -13,6 +13,7 @@
 #include "rocclr/os/os.hpp"
 
 #include <hip/amd_detail/hip_api_trace.hpp>
+#include "profiler/hip_clr_profiler.hpp"
 namespace hip {
 const HipToolsDispatchTable* GetHipToolsDispatchTable();
 }  // namespace hip
@@ -81,6 +82,10 @@ void init(bool* status) {
 
   // Complete platform initialization
   PlatformState::Instance().Init();
+
+  // Initialize built-in CLR profiler (no-op unless GPU_CLR_PROFILE=1)
+  HipProfilerInitExt();
+
   *status = true;
 }
 
@@ -109,7 +114,7 @@ hip::Stream* getStream(hipStream_t stream, bool wait) {
 
 // ================================================================================================
 hip::Stream* getNullStream(amd::Context& ctx, bool wait) {
-  for (auto& it : g_devices) {
+  for (const auto& it : g_devices) {
     if (it->asContext() == &ctx) {
       return it->NullStream(wait);
     }

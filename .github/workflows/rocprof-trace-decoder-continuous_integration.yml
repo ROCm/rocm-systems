@@ -23,19 +23,37 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  ROCM_PATH: "/opt/rocm"
+
 jobs:
   build-and-test-ubuntu:
-    name: Build & Test • Ubuntu 24.04
+    name: Build & Test • mi325 • Ubuntu 22.04
 
-    runs-on: ubuntu-24.04
+    runs-on: linux-gfx942-1gpu-ossci-rocm
     container:
-      image: rocm/dev-ubuntu-24.04:latest
-      options: --user root
+      image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      options: --privileged
 
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     steps:
+    - name: Install Latest Nightly ROCm
+      shell: bash
+      working-directory: /tmp
+      run: |
+        mv "${{ env.ROCM_PATH }}-gfx94X.tar.gz" .
+        rm -rf ${{ env.ROCM_PATH }}*
+        mkdir -p "${{ env.ROCM_PATH }}"
+        tar -xf "rocm-gfx94X.tar.gz" -C "${{ env.ROCM_PATH }}"
+        echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+
     - uses: actions/checkout@v5
       with:
         sparse-checkout: projects/rocprof-trace-decoder
@@ -55,6 +73,7 @@ jobs:
         echo "PATH: ${PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++; do which-realpath $i; done
+        cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
         pwd
 
@@ -64,7 +83,7 @@ jobs:
       run: |
         cmake -B build -S projects/rocprof-trace-decoder \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DCMAKE_PREFIX_PATH=/opt/rocm \
+          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
           -DBUILD_TESTS=ON \
           -DBUILD_UNIT_TESTS=ON
 

@@ -43,7 +43,7 @@ cmake --build <build_dir> --target user-api
 **Arguments:**
 
 | Position | Description | Default |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | 1 | Fibonacci number to compute | 10 |
 | 2 | Number of threads | min(16, hardware concurrency) |
 | 3 | Number of iterations per thread | 50000 |
@@ -57,7 +57,7 @@ rocprof-sys-run -- ./user-api 10 4 1000
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace with user regions |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 | `ROCPROFSYS_USE_SAMPLING` | `ON` | Enable statistical sampling |
@@ -71,7 +71,7 @@ rocprof-sys-instrument -l --min-instructions=8 -E custom_push_region \
 ```
 
 | Option | Purpose |
-|--------|---------|
+| -------- | --------- |
 | `-l` | Instrument at the loop level so the Fibonacci loop in `run()` is profiled |
 | `--min-instructions=8` | Lower the default threshold (1024) so small functions like `run()` are included |
 | `-E custom_push_region` | Exclude the user callback from instrumentation to avoid recursion and trace noise (the callback runs on every region push; instrumenting it would profile the profiler rather than the workload) |

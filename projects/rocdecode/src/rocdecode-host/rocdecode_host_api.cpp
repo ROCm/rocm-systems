@@ -41,7 +41,7 @@ rocDecCreateDecoderHost(rocDecDecoderHandle *decoder_handle, RocDecoderHostCreat
         handle = new DecHandleHost(*decoder_create_info);
     }
     catch(const std::exception& e) {
-        CriticalLog(g_rocdec_logger, "Error: Failed to init the rocDecode handle, " + STR(e.what()));
+        CriticalLog(g_rocdec_logger, "Error: Failed to init the rocDecode handle, " + ROCDEC_STR(e.what()));
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_NOT_INITIALIZED;
     }

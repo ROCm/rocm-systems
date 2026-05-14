@@ -226,8 +226,11 @@ unsigned int FamilyIdFromNode(const HsaNodeProperties *props) {
         familyId = FAMILY_GFX11;
         break;
     case 12:
-        familyId = FAMILY_GFX12;
-	break;
+        if (props->EngineId.ui32.Minor == 5)
+            familyId = FAMILY_GFX125X;
+        else
+            familyId = FAMILY_GFX12;
+	    break;
     }
 
     if (props->NumCPUCores && props->NumFComputeCores)
