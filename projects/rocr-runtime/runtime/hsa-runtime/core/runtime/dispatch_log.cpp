@@ -280,6 +280,18 @@ struct queue_drain_state {
   std::atomic<bool> should_stop{false};
   std::thread       worker;
 
+  // Diagnostic counters (DIAG_LOSS investigation, hip_graph_test 4/400/200
+  // showed ~13% record loss on heavy queues with 0 visible drops). These
+  // are HSA_DISPATCH_LOG_DIAG_LOSS=1 gated and dumped to stderr at disable.
+  // Mutated under drain_mu (records_*, sweep) or atomically (max_observed).
+  uint64_t              diag_records_emitted = 0;   // sum of count across emit calls
+  uint64_t              diag_zero_slots_swept = 0;  // bytes_lost via quarantine sweep
+  uint64_t              diag_drop_overrun_records = 0; // bytes_lost via overrun-skip
+  uint64_t              diag_drain_passes = 0;      // # of drain_one_queue calls
+  uint64_t              diag_drain_passes_with_work = 0; // calls that emitted >=1
+  std::atomic<uint64_t> diag_max_observed_signal{0}; // peak signal_ptr value seen
+  std::atomic<uint64_t> diag_initial_signal{0};      // signal at enable (next_idx baseline)
+
   // Defensive safety net for early-construction failures (review C2,
   // stage-2 code-quality). Supported lifetime model is explicit
   // disable / shutdown stops + joins worker BEFORE dropping the
@@ -506,8 +518,10 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
         qs.gpu_id,
         batch_count, batch_buf,
         (size_t)batch_count * kSlotStride, force_emit);
+    qs.diag_records_emitted += batch_count;  // DIAG_LOSS instrumentation
     batch_count = 0;
   };
+  ++qs.diag_drain_passes;
 
   // ============================================================================
   // PATH A: SIGNAL-BOUND SCAN (preferred, KFD MINOR>=20 + new FW)
@@ -564,6 +578,15 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   // ============================================================================
   if (qs.signal_ptr != nullptr) {
     const uint64_t observed = __atomic_load_n(qs.signal_ptr, __ATOMIC_ACQUIRE);
+
+    // DIAG_LOSS: track peak observed signal per-queue
+    {
+      uint64_t cur_peak = qs.diag_max_observed_signal.load(std::memory_order_relaxed);
+      while (observed > cur_peak &&
+             !qs.diag_max_observed_signal.compare_exchange_weak(
+                 cur_peak, observed,
+                 std::memory_order_relaxed, std::memory_order_relaxed)) {}
+    }
 
     // Backward (or stale) FW publish: ignore this pass entirely.
     // qs.next_idx is our monotonic floor.
@@ -642,8 +665,9 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     uint64_t start = qs.next_idx;
     uint64_t end   = observed;
     if ((end - start) > qs.ring_records) {
+      const uint64_t lost = (end - start) - qs.ring_records;
+      qs.diag_drop_overrun_records += lost;  // DIAG_LOSS (count even on init-sync silent skip)
       if (!initial_sync) {
-        const uint64_t lost = (end - start) - qs.ring_records;
         // force_emit propagated so the disable-edge final drain
         // (drain_one_queue invoked with force_emit=true) emits the drop
         // event even after the user has disabled the tracepoint.
@@ -794,6 +818,7 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
               // already disabled the tracepoint.
               rocm_trace_emit_hsa_kernel_dispatch_drop(
                   queue_id_to_wire(qs.queue_id), stale_count, force_emit);
+              qs.diag_zero_slots_swept += stale_count;  // DIAG_LOSS
               qs.next_idx = stale_end;
               if (qs.rptr_ptr) {
                 __atomic_store_n(qs.rptr_ptr, stale_end, __ATOMIC_RELEASE);
@@ -1045,7 +1070,9 @@ void per_queue_drain_loop(std::shared_ptr<queue_drain_state> qs) {
     }
 
     const bool any = drain_one_queue(*qs, /* force_emit = */ false);
-    if (!any) {
+    if (any) {
+      ++qs->diag_drain_passes_with_work;  // DIAG_LOSS
+    } else {
       // Path B (sentinel-scan) fallback or spurious wakeup: yield.
       ++idle_count;
       if (idle_count > 3) {
@@ -1400,6 +1427,7 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
     } else {
       qs->next_idx = 0;
     }
+    qs->diag_initial_signal.store(qs->next_idx, std::memory_order_relaxed);  // DIAG_LOSS
 
     g_active_drainers[qs->queue_id] = qs;
 
@@ -1477,6 +1505,30 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
   if (qs_ptr) {
     qs_ptr->should_stop.store(true, std::memory_order_release);
     if (qs_ptr->worker.joinable()) qs_ptr->worker.join();
+
+    // DIAG_LOSS: dump per-queue accounting after worker join (after final
+    // drain has run). HSA_DISPATCH_LOG_DIAG_LOSS=1 to enable.
+    if (const char* e = std::getenv("HSA_DISPATCH_LOG_DIAG_LOSS")) {
+      if (e[0] == '1') {
+        const uint64_t init_sig    = qs_ptr->diag_initial_signal.load(std::memory_order_relaxed);
+        const uint64_t max_obs     = qs_ptr->diag_max_observed_signal.load(std::memory_order_relaxed);
+        const uint64_t signal_span = max_obs > init_sig ? max_obs - init_sig : 0;
+        std::fprintf(stderr,
+            "[DIAG_LOSS] q=0x%lx gpu=%u sig_init=%lu sig_max=%lu sig_span=%lu "
+            "emitted=%lu zero_swept=%lu drop_overrun=%lu accounted=%lu "
+            "passes=%lu passes_with_work=%lu\n",
+            (unsigned long)qs_ptr->queue_id, qs_ptr->gpu_id,
+            (unsigned long)init_sig, (unsigned long)max_obs, (unsigned long)signal_span,
+            (unsigned long)qs_ptr->diag_records_emitted,
+            (unsigned long)qs_ptr->diag_zero_slots_swept,
+            (unsigned long)qs_ptr->diag_drop_overrun_records,
+            (unsigned long)(qs_ptr->diag_records_emitted +
+                            qs_ptr->diag_zero_slots_swept +
+                            qs_ptr->diag_drop_overrun_records),
+            (unsigned long)qs_ptr->diag_drain_passes,
+            (unsigned long)qs_ptr->diag_drain_passes_with_work);
+      }
+    }
   }
 
   // d. Poison the non-owning pointers under drain_mu (defense in depth;
