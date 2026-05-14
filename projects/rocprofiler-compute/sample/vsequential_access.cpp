@@ -23,8 +23,6 @@ __global__ void sequentialAccessKernel(int *d_data, int N)
 
 int main()
 {
-    hipError_t hip_status;
-
     const int N = 1 << 20; // 1M elements
     size_t size = N * sizeof(int);
     // Allocate host memory
@@ -48,6 +46,7 @@ int main()
     {
         hipLaunchKernelGGL(sequentialAccessKernel, gridSize, blockSize, 0, 0, d_data, N);
     }
+    HIP_ASSERT(hipDeviceSynchronize());
 
     // Copy back to host
     HIP_ASSERT(hipMemcpy(h_data, d_data, size, hipMemcpyDeviceToHost));
