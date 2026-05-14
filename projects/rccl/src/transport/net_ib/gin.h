@@ -21,6 +21,8 @@ struct ncclGinIbCollComm {
   int           queueDepth;
   void*         recvComm;
   void*         sendComm;
+  void**        fullSendComm; // RCCL_COMPAT_STUB: NCCL 2.30 added
+  void**        fullRecvComm; // RCCL_COMPAT_STUB: NCCL 2.30 added
   int           dev;
   struct {
     struct ibv_context* context;

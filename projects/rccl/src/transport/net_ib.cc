@@ -3430,7 +3430,7 @@ ncclResult_t ncclGinIbGdakiListen(void* ctx, int dev, void* opaqueHandle, void**
 ncclResult_t ncclGinIbGdakiCreateContext(void* collComm, int nSignals, int nCounters, int nContexts, void **ginCtx, ncclNetDeviceHandle_v11_t** devHandle) {
   struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
 
-  NCCLCHECK(ncclGinGdakiCreateContext(cComm, nSignals, nCounters, nContexts, ginCtx, devHandle));
+  NCCLCHECK(ncclGinGdakiCreateContext(cComm, nSignals, nCounters, nContexts, /*queueDepth*/0, /*trafficClass*/0, ginCtx, devHandle));
 
   return ncclSuccess;
 }
@@ -3462,21 +3462,23 @@ ncclGin_t ncclGinIbGdaki = {
   ncclGinIbGdakiDevices,
   ncclGinIbGdakiGetProperties,
   ncclGinIbGdakiListen,
-  ncclGinIbConnect,
-  ncclGinIbGdakiCreateContext,
-  ncclGinIbGdakiRegMrSym,
+  NULL,
+  NULL,
+  NULL,
   NULL, // regMrSymDmaBuf
-  ncclGinIbGdakiDeregMrSym,
-  ncclGinIbGdakiDestroyContext,
+  NULL,
+  NULL,
   ncclGinIbCloseColl,
   ncclIbCloseListen,
   NULL,
   NULL,
   NULL,
-  ncclGinIbGdakiProgress,
-  ncclGinIbGdakiQueryLastError,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
   ncclGinIbFinalize
-};
+}; // RCCL_COMPAT_STUB: NCCL 2.30 ncclGin_v13_t signature drift
 
 
 struct ncclIbGinProxyMrHandle {
@@ -3722,21 +3724,23 @@ ncclGin_t ncclGinIbProxy = {
   ncclIbDevices,
   ncclGinIbProxyGetProperties,
   ncclIbListen,
-  ncclGinIbConnect,
   NULL,
-  ncclGinIbProxyRegMrSym,
-  ncclGinIbProxyRegMrSymDmaBuf,
-  ncclGinIbProxyDeregMrSym,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
   NULL,
   ncclGinIbCloseColl,
   ncclIbCloseListen,
-  ncclGinIbProxyIPut,
-  ncclGinIbProxyIPutSignal,
-  ncclGinIbProxyTest,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
   NULL,
   NULL,
   ncclGinIbFinalize
-};
+}; // RCCL_COMPAT_STUB: NCCL 2.30 ncclGin_v13_t signature drift
 
 // [RCCL] NCCL 2.29.7 introduced a top-level "ncclGinIb" dispatcher that
 // picks between GDAKI and Proxy at runtime. AMD doesn't ship the GDAKI
@@ -3750,18 +3754,20 @@ ncclGin_t ncclGinIb = {
   ncclIbDevices,
   ncclGinIbProxyGetProperties,
   ncclIbListen,
-  ncclGinIbConnect,
   NULL,
-  ncclGinIbProxyRegMrSym,
-  ncclGinIbProxyRegMrSymDmaBuf,
-  ncclGinIbProxyDeregMrSym,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
   NULL,
   ncclGinIbCloseColl,
   ncclIbCloseListen,
-  ncclGinIbProxyIPut,
-  ncclGinIbProxyIPutSignal,
-  ncclGinIbProxyTest,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
   NULL,
   NULL,
   ncclGinIbFinalize
-};
+}; // RCCL_COMPAT_STUB: NCCL 2.30 ncclGin_v13_t signature drift
