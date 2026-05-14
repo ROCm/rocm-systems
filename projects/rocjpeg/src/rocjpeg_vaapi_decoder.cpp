@@ -56,7 +56,7 @@ void RocJpegVaapiMemoryPool::ReleaseResources() {
             if (!entry.va_surface_ids.empty()) {
                 va_status = vaDestroySurfaces(va_display_, entry.va_surface_ids.data(), entry.va_surface_ids.size());
                 if (va_status != VA_STATUS_SUCCESS) {
-                    ERR("ERROR: vaDestroySurfaces failed!");
+                    ErrorLog(g_rocjpeg_logger, "vaDestroySurfaces failed!");
                 }
             }
             if (!entry.hip_interops.empty()) {
@@ -64,13 +64,13 @@ void RocJpegVaapiMemoryPool::ReleaseResources() {
                     if (hip_interop_entry.hip_mapped_device_mem != nullptr) {
                         hip_status = hipFree(hip_interop_entry.hip_mapped_device_mem);
                         if (hip_status != hipSuccess) {
-                            ERR("ERROR: hipFree failed!");
+                            ErrorLog(g_rocjpeg_logger, "hipFree failed!");
                         }
                     }
                     if (hip_interop_entry.hip_ext_mem != nullptr) {
                         hip_status = hipDestroyExternalMemory(hip_interop_entry.hip_ext_mem);
                         if (hip_status != hipSuccess) {
-                            ERR("ERROR: hipDestroyExternalMemory failed!");
+                            ErrorLog(g_rocjpeg_logger, "hipDestroyExternalMemory failed!");
                         }
                     }
                 }
@@ -163,7 +163,7 @@ RocJpegStatus RocJpegVaapiMemoryPool::AddPoolEntry(uint32_t surface_format, cons
         if (DeleteIdleEntry()) {
             entries.push_back(pool_entry);
         } else {
-            ERR("cannot find an idle entry in the the memory pool!");
+            ErrorLog(g_rocjpeg_logger, "Cannot find an idle entry in the the memory pool!");
             return ROCJPEG_STATUS_INVALID_PARAMETER;
         }
     }
@@ -310,7 +310,7 @@ RocJpegStatus RocJpegVaapiMemoryPool::GetHipInteropMem(VASurfaceID surface_id, H
         }
     }
     // it shouldn't reach here unless the requested surface_id is not in the memory pool.
-    ERR("the surface_id: " + TOSTR(surface_id) + " was not found in the memory pool!");
+    ErrorLog(g_rocjpeg_logger, "The surface_id: " + ROCJPEG_TOSTR(surface_id) + " was not found in the memory pool!");
     return ROCJPEG_STATUS_INVALID_PARAMETER;
 }
 
@@ -355,24 +355,24 @@ RocJpegVappiDecoder::~RocJpegVappiDecoder() {
         vaapi_mem_pool_->ReleaseResources();
         RocJpegStatus rocjpeg_status = DestroyDataBuffers();
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-            ERR("Error: Failed to destroy VAAPI buffer");
+            ErrorLog(g_rocjpeg_logger, "Failed to destroy VAAPI buffer");
         }
         VAStatus va_status;
         if (va_context_id_ != 0) {
             va_status = vaDestroyContext(va_display_, va_context_id_);
             if (va_status != VA_STATUS_SUCCESS) {
-                ERR("ERROR: vaDestroyContext failed!");
+                ErrorLog(g_rocjpeg_logger, "vaDestroyContext failed!");
             }
         }
         if (va_config_id_) {
             va_status = vaDestroyConfig(va_display_, va_config_id_);
             if (va_status != VA_STATUS_SUCCESS) {
-                ERR("ERROR: vaDestroyConfig failed!");
+                ErrorLog(g_rocjpeg_logger, "vaDestroyConfig failed!");
             }
         }
         va_status = vaTerminate(va_display_);
         if (va_status != VA_STATUS_SUCCESS) {
-            ERR("ERROR: vaTerminate failed!");
+            ErrorLog(g_rocjpeg_logger, "vaTerminate failed!");
         }
 
     }
@@ -432,7 +432,7 @@ void RocJpegVappiDecoder::GetNumJpegCores() {
     const char *enable_vcn_hw_csc_str = std::getenv("ROCJPEG_ENABLE_VCN_HW_CSC");
     bool enable_vcn_hw_csc = (enable_vcn_hw_csc_str != nullptr && strcmp(enable_vcn_hw_csc_str, "1") == 0);
     if (amdgpu_device_initialize(drm_fd_, &major_version, &minor_version, &dev_handle)) {
-        ERR("amdgpu_device_initialize failed!");
+        ErrorLog(g_rocjpeg_logger, "amdgpu_device_initialize failed!");
         return;
     }
     error_code = amdgpu_query_hw_ip_count(dev_handle, AMDGPU_HW_IP_VCN_JPEG, &num_jpeg_cores);
@@ -442,7 +442,7 @@ void RocJpegVappiDecoder::GetNumJpegCores() {
         current_vcn_jpeg_spec_.can_roi_decode = (num_jpeg_cores >= 8);
         current_vcn_jpeg_spec_.can_convert_to_rgb = (num_jpeg_cores >= 8) && enable_vcn_hw_csc;
     } else {
-        ERR("Failed to get the number of jpeg cores.");
+        ErrorLog(g_rocjpeg_logger, "Failed to get the number of jpeg cores.");
     }
     amdgpu_device_deinitialize(dev_handle);
 }
@@ -460,12 +460,12 @@ void RocJpegVappiDecoder::GetNumJpegCores() {
 RocJpegStatus RocJpegVappiDecoder::InitVAAPI(std::string drm_node) {
     drm_fd_ = open(drm_node.c_str(), O_RDWR);
     if (drm_fd_ < 0) {
-        ERR("ERROR: failed to open drm node " + drm_node);
+        ErrorLog(g_rocjpeg_logger, "failed to open drm node " + drm_node);
         return ROCJPEG_STATUS_NOT_INITIALIZED;
     }
     va_display_ = vaGetDisplayDRM(drm_fd_);
     if (!va_display_) {
-        ERR("ERROR: failed to create va_display!");
+        ErrorLog(g_rocjpeg_logger, "failed to create va_display!");
         return ROCJPEG_STATUS_NOT_INITIALIZED;
     }
     vaSetInfoCallback(va_display_, NULL, NULL);
@@ -609,7 +609,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecode(const JpegStreamParameters *jpeg
         jpeg_stream_params->picture_parameter_buffer.picture_height < min_picture_height_ ||
         jpeg_stream_params->picture_parameter_buffer.picture_width > max_picture_width_ ||
         jpeg_stream_params->picture_parameter_buffer.picture_height > max_picture_height_) {
-            ERR("The JPEG image resolution is not supported!");
+            ErrorLog(g_rocjpeg_logger, "The JPEG image resolution is not supported!");
             return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
         }
 
@@ -654,7 +654,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecode(const JpegStreamParameters *jpeg
                 surface_attrib.value.value.i = VA_FOURCC_Y800;
                 break;
             default:
-                ERR("ERROR: The chroma subsampling is not supported by the VCN hardware!");
+                ErrorLog(g_rocjpeg_logger, "The chroma subsampling is not supported by the VCN hardware!");
                 return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
                 break;
         }
@@ -752,7 +752,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
             jpeg_stream_key.height < min_picture_height_ ||
             jpeg_stream_key.width > max_picture_width_ ||
             jpeg_stream_key.height > max_picture_height_) {
-                ERR("The JPEG image resolution is not supported!");
+                ErrorLog(g_rocjpeg_logger, "The JPEG image resolution is not supported!");
                 return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
             }
 
@@ -787,7 +787,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
                     jpeg_stream_key.pixel_format = VA_FOURCC_Y800;
                     break;
                 default:
-                    ERR("ERROR: The chroma subsampling is not supported by the VCN hardware!");
+                    ErrorLog(g_rocjpeg_logger, "The chroma subsampling is not supported by the VCN hardware!");
                     return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
                     break;
             }

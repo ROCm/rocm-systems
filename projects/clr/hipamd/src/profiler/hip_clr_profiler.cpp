@@ -2521,9 +2521,9 @@ void HipCaptureGraphNodeArgsExt(HipGraphNodeInfoExt* info, hipFunction_t func, v
       --len;
     }
     std::string mangled(raw.data(), len);
-    // ar->kernel_name from the HSA callback is the mangled name — use the same
-    // key (mangled) so fill_dispatch_info's strcmp(ni.gpu.kernel_name, ar->kernel_name)
-    // finds a match.  Demangling happens lazily at write time (PreDemangleKernelNames).
+    // ar->kernel_name from the HSA callback is the same mangled name as kernel->name().
+    // Use the mangled name as key so fill_dispatch_info's strcmp finds a match.
+    // Demangling happens lazily at write time in PreDemangleKernelNames.
     std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
     auto [it, ok] = g_kernel_names.emplace(mangled, mangled);
     (void)ok;
