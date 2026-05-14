@@ -487,129 +487,6 @@ __device__ int rocshmem_tile_min_reduce_wg(rocshmem_team_t team, dst_tensor_t ds
                                            const src_tensor_t src, tuple_t start_coord,
                                            tuple_t boundary, int root, uint64_t flags);
 
-// Rooted SUM Reductions
-
-/**
- * @brief Thread-granular tile rooted sum reduction operation
- *
- * Performs a sum reduction on a tile of data across all PEs in the team.
- * The result is stored only on the root PE. Each thread operates independently
- * on the tile region.
- *
- * @tparam src_tensor_t   Type of the source tensor
- * @tparam dst_tensor_t   Type of the destination tensor
- * @tparam tuple_t        Type of the coordinate tuple
- *
- * @param[in] team        The team participating in the collective
- * @param[in] src         Source tensor object
- * @param[in] dst         Destination tensor object (valid only on root PE)
- * @param[in] start_coord Starting coordinates of the tile
- * @param[in] boundary    Boundary coordinates of the tile
- * @param[in] root        Root PE for the reduction (relative to team)
- * @param[in] flags       Operation flags (reserved for future use)
- *
- * @return 0 on success, non-zero on failure
- */
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_tile_sum_rooted_reduce(rocshmem_team_t team, dst_tensor_t dst,
-                                               const src_tensor_t src, tuple_t start_coord,
-                                               tuple_t boundary, int root,
-                                               uint64_t flags);
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_tile_sum_rooted_reduce_wave(rocshmem_team_t team,
-                                                    dst_tensor_t dst, const src_tensor_t src,
-                                                    tuple_t start_coord, tuple_t boundary,
-                                                    int root, uint64_t flags);
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_tile_sum_rooted_reduce_wg(rocshmem_team_t team, dst_tensor_t dst,
-                                                  const src_tensor_t src, tuple_t start_coord,
-                                                  tuple_t boundary, int root,
-                                                  uint64_t flags);
-
-// Rooted MAX Reductions
-
-/**
- * @brief Thread-granular tile rooted max reduction operation
- *
- * Performs a max reduction on a tile of data across all PEs in the team.
- * The result is stored only on the root PE. Each thread operates independently
- * on the tile region.
- *
- * @tparam src_tensor_t   Type of the source tensor
- * @tparam dst_tensor_t   Type of the destination tensor
- * @tparam tuple_t        Type of the coordinate tuple
- *
- * @param[in] team        The team participating in the collective
- * @param[in] src         Source tensor object
- * @param[in] dst         Destination tensor object (valid only on root PE)
- * @param[in] start_coord Starting coordinates of the tile
- * @param[in] boundary    Boundary coordinates of the tile
- * @param[in] root        Root PE for the reduction (relative to team)
- * @param[in] flags       Operation flags (reserved for future use)
- *
- * @return 0 on success, non-zero on failure
- */
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_tile_max_rooted_reduce(rocshmem_team_t team, dst_tensor_t dst,
-                                               const src_tensor_t src, tuple_t start_coord,
-                                               tuple_t boundary, int root,
-                                               uint64_t flags);
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_tile_max_rooted_reduce_wave(rocshmem_team_t team,
-                                                    dst_tensor_t dst, const src_tensor_t src,
-                                                    tuple_t start_coord, tuple_t boundary,
-                                                    int root, uint64_t flags);
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_tile_max_rooted_reduce_wg(rocshmem_team_t team, dst_tensor_t dst,
-                                                  const src_tensor_t src, tuple_t start_coord,
-                                                  tuple_t boundary, int root,
-                                                  uint64_t flags);
-
-// Rooted MIN Reductions
-
-/**
- * @brief Thread-granular tile rooted min reduction operation
- *
- * Performs a min reduction on a tile of data across all PEs in the team.
- * The result is stored only on the root PE. Each thread operates independently
- * on the tile region.
- *
- * @tparam src_tensor_t   Type of the source tensor
- * @tparam dst_tensor_t   Type of the destination tensor
- * @tparam tuple_t        Type of the coordinate tuple
- *
- * @param[in] team        The team participating in the collective
- * @param[in] src         Source tensor object
- * @param[in] dst         Destination tensor object (valid only on root PE)
- * @param[in] start_coord Starting coordinates of the tile
- * @param[in] boundary    Boundary coordinates of the tile
- * @param[in] root        Root PE for the reduction (relative to team)
- * @param[in] flags       Operation flags (reserved for future use)
- *
- * @return 0 on success, non-zero on failure
- */
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_tile_min_rooted_reduce(rocshmem_team_t team, dst_tensor_t dst,
-                                               const src_tensor_t src, tuple_t start_coord,
-                                               tuple_t boundary, int root,
-                                               uint64_t flags);
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_tile_min_rooted_reduce_wave(rocshmem_team_t team,
-                                                    dst_tensor_t dst, const src_tensor_t src,
-                                                    tuple_t start_coord, tuple_t boundary,
-                                                    int root, uint64_t flags);
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_tile_min_rooted_reduce_wg(rocshmem_team_t team, dst_tensor_t dst,
-                                                  const src_tensor_t src, tuple_t start_coord,
-                                                  tuple_t boundary, int root,
-                                                  uint64_t flags);
-
 /******************************************************************************
  ****************** CONTEXT VERSIONS OF TILE API FUNCTIONS ********************
  *****************************************************************************/
@@ -725,25 +602,6 @@ __device__ int rocshmem_ctx_tile_sum_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team
                                                tuple_t start_coord, tuple_t boundary,
                                                int root, uint64_t flags);
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_ctx_tile_sum_rooted_reduce(rocshmem_ctx_t ctx, rocshmem_team_t team,
-                                                   dst_tensor_t dst, const src_tensor_t src,
-                                                   tuple_t start_coord, tuple_t boundary,
-                                                   int root, uint64_t flags);
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_ctx_tile_sum_rooted_reduce_wave(rocshmem_ctx_t ctx,
-                                                        rocshmem_team_t team, dst_tensor_t dst,
-                                                        const src_tensor_t src, tuple_t start_coord,
-                                                        tuple_t boundary, int root,
-                                                        uint64_t flags);
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_ctx_tile_sum_rooted_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
-                                                      dst_tensor_t dst, const src_tensor_t src,
-                                                      tuple_t start_coord, tuple_t boundary,
-                                                      int root, uint64_t flags);
-
 /******************************************************************************
  ******************** MAX REDUCTIONS (CTX VERSIONS) ***************************
  *****************************************************************************/
@@ -766,25 +624,6 @@ __device__ int rocshmem_ctx_tile_max_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team
                                                tuple_t start_coord, tuple_t boundary,
                                                int root, uint64_t flags);
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_ctx_tile_max_rooted_reduce(rocshmem_ctx_t ctx, rocshmem_team_t team,
-                                                   dst_tensor_t dst, const src_tensor_t src,
-                                                   tuple_t start_coord, tuple_t boundary,
-                                                   int root, uint64_t flags);
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_ctx_tile_max_rooted_reduce_wave(rocshmem_ctx_t ctx,
-                                                        rocshmem_team_t team, dst_tensor_t dst,
-                                                        const src_tensor_t src, tuple_t start_coord,
-                                                        tuple_t boundary, int root,
-                                                        uint64_t flags);
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_ctx_tile_max_rooted_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
-                                                      dst_tensor_t dst, const src_tensor_t src,
-                                                      tuple_t start_coord, tuple_t boundary,
-                                                      int root, uint64_t flags);
-
 /******************************************************************************
  ******************** MIN REDUCTIONS (CTX VERSIONS) ***************************
  *****************************************************************************/
@@ -806,25 +645,6 @@ __device__ int rocshmem_ctx_tile_min_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team
                                                dst_tensor_t dst, const src_tensor_t src,
                                                tuple_t start_coord, tuple_t boundary,
                                                int root, uint64_t flags);
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_ctx_tile_min_rooted_reduce(rocshmem_ctx_t ctx, rocshmem_team_t team,
-                                                   dst_tensor_t dst, const src_tensor_t src,
-                                                   tuple_t start_coord, tuple_t boundary,
-                                                   int root, uint64_t flags);
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_ctx_tile_min_rooted_reduce_wave(rocshmem_ctx_t ctx,
-                                                        rocshmem_team_t team, dst_tensor_t dst,
-                                                        const src_tensor_t src, tuple_t start_coord,
-                                                        tuple_t boundary, int root,
-                                                        uint64_t flags);
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int rocshmem_ctx_tile_min_rooted_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
-                                                      dst_tensor_t dst, const src_tensor_t src,
-                                                      tuple_t start_coord, tuple_t boundary,
-                                                      int root, uint64_t flags);
 
 }  // namespace rocshmem
 

@@ -794,151 +794,55 @@ __device__ inline int Context::tile_sum_reduce_wg(rocshmem_team_t team, void* ds
                                   start_coord, boundary, ndim, element_size, root, flags));
 }
 
-// MAX Reduction operations
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_max_reduce(rocshmem_team_t team, dst_tensor_t dst,
-                                        const src_tensor_t src, tuple_t start_coord,
-                                        tuple_t boundary, int root,
-                                        uint64_t flags) {
-  DISPATCH_RET(tile_max_reduce(team, dst, src, start_coord, boundary, root, flags));
+// MAX Reduction operations - Type-erased implementations using DISPATCH_RET
+__device__ inline int Context::tile_max_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                               const size_t* dst_strides, const size_t* src_strides,
+                                               const size_t* start_coord, const size_t* boundary,
+                                               int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_max_reduce(team, dst_data, src_data, dst_strides, src_strides,
+                               start_coord, boundary, ndim, element_size, root, flags));
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_max_reduce_wave(rocshmem_team_t team,
-                                             dst_tensor_t dst, const src_tensor_t src,
-                                             tuple_t start_coord,
-                                             tuple_t boundary, int root,
-                                             uint64_t flags) {
-  DISPATCH_RET(tile_max_reduce_wave(team, dst, src, start_coord, boundary, root, flags));
+__device__ inline int Context::tile_max_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                                    const size_t* dst_strides, const size_t* src_strides,
+                                                    const size_t* start_coord, const size_t* boundary,
+                                                    int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_max_reduce_wave(team, dst_data, src_data, dst_strides, src_strides,
+                                    start_coord, boundary, ndim, element_size, root, flags));
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_max_reduce_wg(rocshmem_team_t team,
-                                           dst_tensor_t dst, const src_tensor_t src,
-                                           tuple_t start_coord, tuple_t boundary,
-                                           int root, uint64_t flags) {
-  DISPATCH_RET(tile_max_reduce_wg(team, dst, src, start_coord, boundary, root, flags));
+__device__ inline int Context::tile_max_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                                  const size_t* dst_strides, const size_t* src_strides,
+                                                  const size_t* start_coord, const size_t* boundary,
+                                                  int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_max_reduce_wg(team, dst_data, src_data, dst_strides, src_strides,
+                                  start_coord, boundary, ndim, element_size, root, flags));
 }
 
-// MIN Reduction operations
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_min_reduce(rocshmem_team_t team, dst_tensor_t dst,
-                                        const src_tensor_t src, tuple_t start_coord,
-                                        tuple_t boundary, int root,
-                                        uint64_t flags) {
-  DISPATCH_RET(tile_min_reduce(team, dst, src, start_coord, boundary, root, flags));
+// MIN Reduction operations - Type-erased implementations using DISPATCH_RET
+__device__ inline int Context::tile_min_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                               const size_t* dst_strides, const size_t* src_strides,
+                                               const size_t* start_coord, const size_t* boundary,
+                                               int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_min_reduce(team, dst_data, src_data, dst_strides, src_strides,
+                               start_coord, boundary, ndim, element_size, root, flags));
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_min_reduce_wave(rocshmem_team_t team,
-                                             dst_tensor_t dst, const src_tensor_t src,
-                                             tuple_t start_coord,
-                                             tuple_t boundary, int root,
-                                             uint64_t flags) {
-  DISPATCH_RET(tile_min_reduce_wave(team, dst, src, start_coord, boundary, root, flags));
+__device__ inline int Context::tile_min_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                                    const size_t* dst_strides, const size_t* src_strides,
+                                                    const size_t* start_coord, const size_t* boundary,
+                                                    int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_min_reduce_wave(team, dst_data, src_data, dst_strides, src_strides,
+                                    start_coord, boundary, ndim, element_size, root, flags));
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_min_reduce_wg(rocshmem_team_t team,
-                                           dst_tensor_t dst, const src_tensor_t src,
-                                           tuple_t start_coord, tuple_t boundary,
-                                           int root, uint64_t flags) {
-  DISPATCH_RET(tile_min_reduce_wg(team, dst, src, start_coord, boundary, root, flags));
+__device__ inline int Context::tile_min_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                                  const size_t* dst_strides, const size_t* src_strides,
+                                                  const size_t* start_coord, const size_t* boundary,
+                                                  int ndim, size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_min_reduce_wg(team, dst_data, src_data, dst_strides, src_strides,
+                                  start_coord, boundary, ndim, element_size, root, flags));
 }
-
-// Rooted SUM Reduction operations
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_sum_rooted_reduce(rocshmem_team_t team,
-                                                dst_tensor_t dst,
-                                                const src_tensor_t src,
-                                                tuple_t start_coord,
-                                                tuple_t boundary, int root,
-                                                uint64_t flags) {
-  DISPATCH_RET(tile_sum_rooted_reduce(team, dst, src, start_coord, boundary, root, flags));
-}
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_sum_rooted_reduce_wave(rocshmem_team_t team,
-                                                     dst_tensor_t dst,
-                                                     const src_tensor_t src,
-                                                     tuple_t start_coord,
-                                                     tuple_t boundary, int root,
-                                                     uint64_t flags) {
-  DISPATCH_RET(tile_sum_rooted_reduce_wave(team, dst, src, start_coord, boundary, root, flags));
-}
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_sum_rooted_reduce_wg(rocshmem_team_t team,
-                                                   dst_tensor_t dst,
-                                                   const src_tensor_t src,
-                                                   tuple_t start_coord,
-                                                   tuple_t boundary, int root,
-                                                   uint64_t flags) {
-  DISPATCH_RET(tile_sum_rooted_reduce_wg(team, dst, src, start_coord, boundary, root, flags));
-}
-
-// Rooted MAX Reduction operations
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_max_rooted_reduce(rocshmem_team_t team,
-                                                dst_tensor_t dst,
-                                                const src_tensor_t src,
-                                                tuple_t start_coord,
-                                                tuple_t boundary, int root,
-                                                uint64_t flags) {
-  DISPATCH_RET(tile_max_rooted_reduce(team, dst, src, start_coord, boundary, root, flags));
-}
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_max_rooted_reduce_wave(rocshmem_team_t team,
-                                                     dst_tensor_t dst,
-                                                     const src_tensor_t src,
-                                                     tuple_t start_coord,
-                                                     tuple_t boundary, int root,
-                                                     uint64_t flags) {
-  DISPATCH_RET(tile_max_rooted_reduce_wave(team, dst, src, start_coord, boundary, root, flags));
-}
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_max_rooted_reduce_wg(rocshmem_team_t team,
-                                                   dst_tensor_t dst,
-                                                   const src_tensor_t src,
-                                                   tuple_t start_coord,
-                                                   tuple_t boundary, int root,
-                                                   uint64_t flags) {
-  DISPATCH_RET(tile_max_rooted_reduce_wg(team, dst, src, start_coord, boundary, root, flags));
-}
-
-// Rooted MIN Reduction operations
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_min_rooted_reduce(rocshmem_team_t team,
-                                                dst_tensor_t dst,
-                                                const src_tensor_t src,
-                                                tuple_t start_coord,
-                                                tuple_t boundary, int root,
-                                                uint64_t flags) {
-  DISPATCH_RET(tile_min_rooted_reduce(team, dst, src, start_coord, boundary, root, flags));
-}
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_min_rooted_reduce_wave(rocshmem_team_t team,
-                                                     dst_tensor_t dst,
-                                                     const src_tensor_t src,
-                                                     tuple_t start_coord,
-                                                     tuple_t boundary, int root,
-                                                     uint64_t flags) {
-  DISPATCH_RET(tile_min_rooted_reduce_wave(team, dst, src, start_coord, boundary, root, flags));
-}
-
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ int Context::tile_min_rooted_reduce_wg(rocshmem_team_t team,
-                                                   dst_tensor_t dst,
-                                                   const src_tensor_t src,
-                                                   tuple_t start_coord,
-                                                   tuple_t boundary, int root,
-                                                   uint64_t flags) {
-  DISPATCH_RET(tile_min_rooted_reduce_wg(team, dst, src, start_coord, boundary, root, flags));
-}
-
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_CONTEXT_TMPL_DEVICE_HPP_
