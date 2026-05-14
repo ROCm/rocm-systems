@@ -46,6 +46,11 @@ using rocshmem::rocshmem_ctx_t;
 using rocshmem::rocshmem_team_t;
 using rocshmem::Context;
 
+// Helper function to retrieve internal context from opaque handle
+__device__ Context* get_internal_ctx(rocshmem_ctx_t ctx) {
+  return reinterpret_cast<Context*>(ctx.ctx_opaque);
+}
+
 /******************************************************************************
  *************************** RMA PUT OPERATIONS ********************************
  *****************************************************************************/
@@ -336,6 +341,122 @@ extern "C" __device__ int rocshmem_tile_sum_reduce_wg_internal(
 /******************************************************************************
  ************************ COLLECTIVE WAIT **************************************
  *****************************************************************************/
+
+/******************************************************************************
+ ************************ REDUCTION - MAX **************************************
+ *****************************************************************************/
+
+extern "C" __device__ int rocshmem_tile_max_reduce_internal(
+    rocshmem_team_t team,
+    void* dst_data,
+    const void* src_data,
+    const size_t* dst_strides,
+    const size_t* src_strides,
+    const size_t* start_coord,
+    const size_t* boundary,
+    int ndim,
+    size_t element_size,
+    int root,
+    uint64_t flags) {
+
+  return get_internal_ctx(rocshmem::ROCSHMEM_CTX_DEFAULT)->tile_max_reduce(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+extern "C" __device__ int rocshmem_tile_max_reduce_wave_internal(
+    rocshmem_team_t team,
+    void* dst_data,
+    const void* src_data,
+    const size_t* dst_strides,
+    const size_t* src_strides,
+    const size_t* start_coord,
+    const size_t* boundary,
+    int ndim,
+    size_t element_size,
+    int root,
+    uint64_t flags) {
+
+  return get_internal_ctx(rocshmem::ROCSHMEM_CTX_DEFAULT)->tile_max_reduce_wave(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+extern "C" __device__ int rocshmem_tile_max_reduce_wg_internal(
+    rocshmem_team_t team,
+    void* dst_data,
+    const void* src_data,
+    const size_t* dst_strides,
+    const size_t* src_strides,
+    const size_t* start_coord,
+    const size_t* boundary,
+    int ndim,
+    size_t element_size,
+    int root,
+    uint64_t flags) {
+
+  return get_internal_ctx(rocshmem::ROCSHMEM_CTX_DEFAULT)->tile_max_reduce_wg(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+/******************************************************************************
+ ************************ REDUCTION - MIN **************************************
+ *****************************************************************************/
+
+extern "C" __device__ int rocshmem_tile_min_reduce_internal(
+    rocshmem_team_t team,
+    void* dst_data,
+    const void* src_data,
+    const size_t* dst_strides,
+    const size_t* src_strides,
+    const size_t* start_coord,
+    const size_t* boundary,
+    int ndim,
+    size_t element_size,
+    int root,
+    uint64_t flags) {
+
+  return get_internal_ctx(rocshmem::ROCSHMEM_CTX_DEFAULT)->tile_min_reduce(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+extern "C" __device__ int rocshmem_tile_min_reduce_wave_internal(
+    rocshmem_team_t team,
+    void* dst_data,
+    const void* src_data,
+    const size_t* dst_strides,
+    const size_t* src_strides,
+    const size_t* start_coord,
+    const size_t* boundary,
+    int ndim,
+    size_t element_size,
+    int root,
+    uint64_t flags) {
+
+  return get_internal_ctx(rocshmem::ROCSHMEM_CTX_DEFAULT)->tile_min_reduce_wave(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+extern "C" __device__ int rocshmem_tile_min_reduce_wg_internal(
+    rocshmem_team_t team,
+    void* dst_data,
+    const void* src_data,
+    const size_t* dst_strides,
+    const size_t* src_strides,
+    const size_t* start_coord,
+    const size_t* boundary,
+    int ndim,
+    size_t element_size,
+    int root,
+    uint64_t flags) {
+
+  return get_internal_ctx(rocshmem::ROCSHMEM_CTX_DEFAULT)->tile_min_reduce_wg(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
 
 extern "C" __device__ int rocshmem_tile_collective_wait_internal(
     rocshmem_team_t team,

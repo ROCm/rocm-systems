@@ -1215,131 +1215,95 @@ __device__ inline int GDAContext::tile_sum_reduce_wg([[maybe_unused]] rocshmem_t
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-// MAX Reduction operations
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+// MAX Reduction operations - Type-erased interface
 __device__ inline int GDAContext::tile_max_reduce([[maybe_unused]] rocshmem_team_t team,
-                                           [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                           [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                           [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+                                                   [[maybe_unused]] void* dst_data,
+                                                   [[maybe_unused]] const void* src_data,
+                                                   [[maybe_unused]] const size_t* dst_strides,
+                                                   [[maybe_unused]] const size_t* src_strides,
+                                                   [[maybe_unused]] const size_t* start_coord,
+                                                   [[maybe_unused]] const size_t* boundary,
+                                                   [[maybe_unused]] int ndim,
+                                                   [[maybe_unused]] size_t element_size,
+                                                   [[maybe_unused]] int root,
+                                                   [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
 __device__ inline int GDAContext::tile_max_reduce_wave([[maybe_unused]] rocshmem_team_t team,
-                                                [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                                [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                                [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+                                                        [[maybe_unused]] void* dst_data,
+                                                        [[maybe_unused]] const void* src_data,
+                                                        [[maybe_unused]] const size_t* dst_strides,
+                                                        [[maybe_unused]] const size_t* src_strides,
+                                                        [[maybe_unused]] const size_t* start_coord,
+                                                        [[maybe_unused]] const size_t* boundary,
+                                                        [[maybe_unused]] int ndim,
+                                                        [[maybe_unused]] size_t element_size,
+                                                        [[maybe_unused]] int root,
+                                                        [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
 __device__ inline int GDAContext::tile_max_reduce_wg([[maybe_unused]] rocshmem_team_t team,
-                                              [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                              [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                              [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+                                                      [[maybe_unused]] void* dst_data,
+                                                      [[maybe_unused]] const void* src_data,
+                                                      [[maybe_unused]] const size_t* dst_strides,
+                                                      [[maybe_unused]] const size_t* src_strides,
+                                                      [[maybe_unused]] const size_t* start_coord,
+                                                      [[maybe_unused]] const size_t* boundary,
+                                                      [[maybe_unused]] int ndim,
+                                                      [[maybe_unused]] size_t element_size,
+                                                      [[maybe_unused]] int root,
+                                                      [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-// MIN Reduction operations
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+// MIN Reduction operations - Type-erased interface
 __device__ inline int GDAContext::tile_min_reduce([[maybe_unused]] rocshmem_team_t team,
-                                           [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                           [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                           [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+                                                   [[maybe_unused]] void* dst_data,
+                                                   [[maybe_unused]] const void* src_data,
+                                                   [[maybe_unused]] const size_t* dst_strides,
+                                                   [[maybe_unused]] const size_t* src_strides,
+                                                   [[maybe_unused]] const size_t* start_coord,
+                                                   [[maybe_unused]] const size_t* boundary,
+                                                   [[maybe_unused]] int ndim,
+                                                   [[maybe_unused]] size_t element_size,
+                                                   [[maybe_unused]] int root,
+                                                   [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
 __device__ inline int GDAContext::tile_min_reduce_wave([[maybe_unused]] rocshmem_team_t team,
-                                                [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                                [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                                [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+                                                        [[maybe_unused]] void* dst_data,
+                                                        [[maybe_unused]] const void* src_data,
+                                                        [[maybe_unused]] const size_t* dst_strides,
+                                                        [[maybe_unused]] const size_t* src_strides,
+                                                        [[maybe_unused]] const size_t* start_coord,
+                                                        [[maybe_unused]] const size_t* boundary,
+                                                        [[maybe_unused]] int ndim,
+                                                        [[maybe_unused]] size_t element_size,
+                                                        [[maybe_unused]] int root,
+                                                        [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
 __device__ inline int GDAContext::tile_min_reduce_wg([[maybe_unused]] rocshmem_team_t team,
-                                              [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                              [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                              [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
+                                                      [[maybe_unused]] void* dst_data,
+                                                      [[maybe_unused]] const void* src_data,
+                                                      [[maybe_unused]] const size_t* dst_strides,
+                                                      [[maybe_unused]] const size_t* src_strides,
+                                                      [[maybe_unused]] const size_t* start_coord,
+                                                      [[maybe_unused]] const size_t* boundary,
+                                                      [[maybe_unused]] int ndim,
+                                                      [[maybe_unused]] size_t element_size,
+                                                      [[maybe_unused]] int root,
+                                                      [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
 // Rooted SUM Reduction operations
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int GDAContext::tile_sum_rooted_reduce([[maybe_unused]] rocshmem_team_t team,
-                                                   [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                                   [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                                   [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
-}
-
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int GDAContext::tile_sum_rooted_reduce_wave([[maybe_unused]] rocshmem_team_t team,
-                                                        [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                                        [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                                        [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
-}
-
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int GDAContext::tile_sum_rooted_reduce_wg([[maybe_unused]] rocshmem_team_t team,
-                                                      [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                                      [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                                      [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
-}
-
 // Rooted MAX Reduction operations
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int GDAContext::tile_max_rooted_reduce([[maybe_unused]] rocshmem_team_t team,
-                                                   [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                                   [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                                   [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
-}
-
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int GDAContext::tile_max_rooted_reduce_wave([[maybe_unused]] rocshmem_team_t team,
-                                                        [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                                        [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                                        [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
-}
-
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int GDAContext::tile_max_rooted_reduce_wg([[maybe_unused]] rocshmem_team_t team,
-                                                      [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                                      [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                                      [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
-}
-
 // Rooted MIN Reduction operations
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int GDAContext::tile_min_rooted_reduce([[maybe_unused]] rocshmem_team_t team,
-                                                   [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                                   [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                                   [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
-}
-
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int GDAContext::tile_min_rooted_reduce_wave([[maybe_unused]] rocshmem_team_t team,
-                                                        [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                                        [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                                        [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
-}
-
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int GDAContext::tile_min_rooted_reduce_wg([[maybe_unused]] rocshmem_team_t team,
-                                                      [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                                      [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                                      [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
-  return ROCSHMEM_ERROR;  // Not implemented
-}
-
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_GDA_CONTEXT_TMPL_DEVICE_HPP_
