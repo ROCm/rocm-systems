@@ -103,7 +103,7 @@ has_trace_cache_args(std::index_sequence<Idx...>)
 
 template <typename Tp>
 std::string
-get_trace_cache_arg_type()
+get_serialized_arg_type()
 {
     using value_type = std::decay_t<Tp>;
     if constexpr(std::is_convertible<value_type, std::string_view>::value)
@@ -118,7 +118,7 @@ get_trace_cache_arg_type()
 
 template <typename Tp>
 std::string
-get_trace_cache_arg_value(Tp&& value)
+get_serialized_arg_value(Tp&& value)
 {
     std::stringstream ss;
     ss << std::forward<Tp>(value);
@@ -127,31 +127,131 @@ get_trace_cache_arg_value(Tp&& value)
 
 template <typename KeyT, typename ValueT>
 void
-append_trace_cache_arg(std::string& args_str, std::uint32_t idx, KeyT&& key,
-                       ValueT&& value)
+append_serialized_arg(std::string& args_str, std::uint32_t idx, KeyT&& key,
+                      ValueT&& value)
 {
     const auto* delimiter = ";;";
-    args_str += fmt::format(
-        "{}{}{}{}{}{}{}{}", idx, delimiter, get_trace_cache_arg_type<ValueT>(), delimiter,
-        std::string_view{ std::forward<KeyT>(key) }, delimiter,
-        get_trace_cache_arg_value(std::forward<ValueT>(value)), delimiter);
+    args_str +=
+        fmt::format("{}{}{}{}{}{}{}{}", idx, delimiter, get_serialized_arg_type<ValueT>(),
+                    delimiter, std::string_view{ std::forward<KeyT>(key) }, delimiter,
+                    get_serialized_arg_value(std::forward<ValueT>(value)), delimiter);
+}
+
+void
+append_serialized_arg(std::string& args_str, std::uint32_t idx, std::string_view arg_type,
+                      std::string_view key, std::string_view value)
+{
+    const auto* delimiter = ";;";
+    args_str += fmt::format("{}{}{}{}{}{}{}{}", idx, delimiter, arg_type, delimiter, key,
+                            delimiter, value, delimiter);
 }
 
 template <size_t Idx = 0, typename TupleT>
 void
-append_trace_cache_args(std::string& args_str, TupleT&& args)
+append_serialized_args(std::string& args_str, TupleT&& args)
 {
     if constexpr(Idx < std::tuple_size<std::remove_reference_t<TupleT>>::value)
     {
-        append_trace_cache_arg(args_str, Idx / 2, std::get<Idx>(args),
-                               std::get<Idx + 1>(args));
-        append_trace_cache_args<Idx + 2>(args_str, std::forward<TupleT>(args));
+        append_serialized_arg(args_str, Idx / 2, std::get<Idx>(args),
+                              std::get<Idx + 1>(args));
+        append_serialized_args<Idx + 2>(args_str, std::forward<TupleT>(args));
     }
 }
 
+template <typename Tp>
+std::string
+get_serialized_annotation_value(const void* value)
+{
+    std::stringstream ss;
+    ss << *reinterpret_cast<const Tp*>(value);
+    return ss.str();
+}
+
+std::string
+get_serialized_pointer_value(const void* value)
+{
+    std::stringstream ss;
+    ss << value;
+    return ss.str();
+}
+
+bool
+append_serialized_annotation_record_arg(std::string& args_str, std::uint32_t idx,
+                                        const rocprofsys_annotation_t& annotation)
+{
+    if(!annotation.name || annotation.type == ROCPROFSYS_VALUE_NONE || !annotation.value)
+        return false;
+
+    std::string arg_type  = {};
+    std::string arg_value = {};
+
+    switch(annotation.type)
+    {
+        case ROCPROFSYS_VALUE_CSTR:
+            arg_type  = "string";
+            arg_value = reinterpret_cast<const char*>(annotation.value);
+            break;
+        case ROCPROFSYS_VALUE_SIZE_T:
+            arg_type  = "size_t";
+            arg_value = get_serialized_annotation_value<size_t>(annotation.value);
+            break;
+        case ROCPROFSYS_VALUE_INT16:
+            arg_type  = "std::int16_t";
+            arg_value = get_serialized_annotation_value<std::int16_t>(annotation.value);
+            break;
+        case ROCPROFSYS_VALUE_INT32:
+            arg_type  = "std::int32_t";
+            arg_value = get_serialized_annotation_value<std::int32_t>(annotation.value);
+            break;
+        case ROCPROFSYS_VALUE_INT64:
+            arg_type  = "std::int64_t";
+            arg_value = get_serialized_annotation_value<std::int64_t>(annotation.value);
+            break;
+        case ROCPROFSYS_VALUE_UINT16:
+            arg_type  = "std::uint16_t";
+            arg_value = get_serialized_annotation_value<std::uint16_t>(annotation.value);
+            break;
+        case ROCPROFSYS_VALUE_UINT32:
+            arg_type  = "std::uint32_t";
+            arg_value = get_serialized_annotation_value<std::uint32_t>(annotation.value);
+            break;
+        case ROCPROFSYS_VALUE_UINT64:
+            arg_type  = "std::uint64_t";
+            arg_value = get_serialized_annotation_value<std::uint64_t>(annotation.value);
+            break;
+        case ROCPROFSYS_VALUE_FLOAT32:
+            arg_type  = "float";
+            arg_value = get_serialized_annotation_value<float>(annotation.value);
+            break;
+        case ROCPROFSYS_VALUE_FLOAT64:
+            arg_type  = "double";
+            arg_value = get_serialized_annotation_value<double>(annotation.value);
+            break;
+        case ROCPROFSYS_VALUE_VOID_P:
+            arg_type  = "void*";
+            arg_value = get_serialized_pointer_value(annotation.value);
+            break;
+        default: return false;
+    }
+
+    append_serialized_arg(args_str, idx, arg_type, annotation.name, arg_value);
+    return true;
+}
+
+template <typename Tp>
+void
+append_serialized_annotation_arg(std::string& args_str, std::uint32_t& idx, Tp&& value)
+{
+    auto arg_name = fmt::format(
+        "arg{}-{}", idx, rocprofsys::utility::demangle<std::remove_reference_t<Tp>>());
+    append_serialized_arg(args_str, idx, arg_name, std::forward<Tp>(value));
+    ++idx;
+}
+
+// Serialize explicit argument pairs {"name", value}
 template <typename... Args>
 std::string
-get_trace_cache_args_string(Args&&... args)
+get_serialized_args(Args&&... args)
 {
     using tuple_type = std::tuple<Args...>;
     if constexpr(has_trace_cache_args<tuple_type>(
@@ -159,13 +259,41 @@ get_trace_cache_args_string(Args&&... args)
     {
         auto        args_tuple = std::forward_as_tuple(args...);
         std::string args_str;
-        append_trace_cache_args(args_str, args_tuple);
+        append_serialized_args(args_str, args_tuple);
         return args_str;
     }
     else
     {
         return {};
     }
+}
+
+// Serialize annotation records using their provided names and value types
+inline std::string
+get_serialized_annotation_args(rocprofsys_annotation_t* annotations,
+                               size_t                   annotation_count)
+{
+    if(!annotations || annotation_count == 0) return {};
+
+    std::string   args_str = {};
+    std::uint32_t idx      = 0;
+    for(size_t i = 0; i < annotation_count; ++i)
+    {
+        if(append_serialized_annotation_record_arg(args_str, idx, annotations[i])) ++idx;
+    }
+    return args_str;
+}
+
+// Serialize audit annotation values using generated argN-type names
+template <typename... Args>
+std::string
+get_serialized_annotation_args(Args&&... args)
+{
+    std::string   args_str = {};
+    std::uint32_t idx      = 0;
+    ROCPROFSYS_FOLD_EXPRESSION(
+        append_serialized_annotation_arg(args_str, idx, std::forward<Args>(args)));
+    return args_str;
 }
 
 template <typename CategoryT>
@@ -379,15 +507,15 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
         ++tracing::push_count();
     }
 
-    // Allow cache_start to process arguments passed through args
-    // excluding perfetto annotations
+    // Only serialize name/value argument pairs. Perfetto annotation callbacks are handled
+    // separately by the tracing path
     constexpr bool _has_cache_args = has_trace_cache_args<std::tuple<Args...>>(
         std::make_index_sequence<sizeof...(Args)>{});
 
     std::string _cache_args = {};
     if constexpr(_has_cache_args)
     {
-        _cache_args = get_trace_cache_args_string(args...);
+        _cache_args = get_serialized_args(args...);
     }
 
     auto _hash = tim::add_hash_id(name);
@@ -564,6 +692,11 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                 _args, _n++));
         }
     });
+
+    if constexpr(sizeof...(Args) > 0)
+    {
+        set_cache_args(_data.tool_id.c_str(), get_serialized_annotation_args(_args...));
+    }
 }
 
 template <typename CategoryT>
@@ -595,6 +728,11 @@ category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
                 _args, _n++));
         }
     });
+
+    if constexpr(sizeof...(Args) > 0)
+    {
+        set_cache_args(_name.data(), get_serialized_annotation_args(_args...));
+    }
 }
 
 template <typename CategoryT>
