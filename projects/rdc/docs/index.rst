@@ -28,7 +28,7 @@ The code is open and hosted at `<https://github.com/ROCm/rocm-systems/tree/devel
   .. grid-item-card:: Install
 
     * :doc:`Install RDC <install/install>`
-    * :doc:`Build and test <install/handbook>`
+    * :doc:`Build from source <install/handbook>`
 
   .. grid-item-card:: How to
 
