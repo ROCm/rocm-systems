@@ -1081,114 +1081,136 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
  **************** TILE API STUB IMPLEMENTATIONS (NOT IMPLEMENTED) *************
  *****************************************************************************/
 
-// RMA PUT operations
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int GDAContext::tile_put([[maybe_unused]] dst_tensor_t dst, [[maybe_unused]] const src_tensor_t src,
-                                    [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+// RMA PUT operations - Type-erased interface
+__device__ inline int GDAContext::tile_put([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                    [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                    [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                    [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
                                     [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int GDAContext::tile_put_wave([[maybe_unused]] dst_tensor_t dst, [[maybe_unused]] const src_tensor_t src,
-                                         [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+__device__ inline int GDAContext::tile_put_wave([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                         [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                         [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                         [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
                                          [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int GDAContext::tile_put_wg([[maybe_unused]] dst_tensor_t dst, [[maybe_unused]] const src_tensor_t src,
-                                       [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+__device__ inline int GDAContext::tile_put_wg([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                       [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                       [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                       [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
                                        [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-// RMA GET operations
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int GDAContext::tile_get([[maybe_unused]] dst_tensor_t dst, [[maybe_unused]] src_tensor_t src,
-                                    [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+// RMA GET operations - Type-erased interface
+__device__ inline int GDAContext::tile_get([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                    [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                    [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                    [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
                                     [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int GDAContext::tile_get_wg([[maybe_unused]] dst_tensor_t dst, [[maybe_unused]] src_tensor_t src,
-                                       [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+__device__ inline int GDAContext::tile_get_wave([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                         [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                         [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                         [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
+                                         [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
+  return ROCSHMEM_ERROR;  // Not implemented
+}
+
+__device__ inline int GDAContext::tile_get_wg([[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                       [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                       [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                       [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
                                        [[maybe_unused]] int pe, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-// Allgather operations
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+// Allgather operations - Type-erased interface
 __device__ inline int GDAContext::tile_allgather([[maybe_unused]] rocshmem_team_t team,
-                                          [[maybe_unused]] dst_tensor_t dst, [[maybe_unused]] src_tensor_t src,
-                                          [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                          [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                          [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                          [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                          [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
                                           [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int GDAContext::tile_allgather_wave([[maybe_unused]] rocshmem_team_t team,
-                                               [[maybe_unused]] dst_tensor_t dst, [[maybe_unused]] src_tensor_t src,
-                                               [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                               [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                               [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                               [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                               [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
                                                [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int GDAContext::tile_allgather_wg([[maybe_unused]] rocshmem_team_t team,
-                                             [[maybe_unused]] dst_tensor_t dst, [[maybe_unused]] src_tensor_t src,
-                                             [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                             [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                             [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                             [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                             [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
                                              [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-// Broadcast operations
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
+// Broadcast operations - Type-erased interface
 __device__ inline int GDAContext::tile_broadcast([[maybe_unused]] rocshmem_team_t team,
-                                          [[maybe_unused]] dst_tensor_t dst, [[maybe_unused]] src_tensor_t src,
-                                          [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                          [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                          [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                          [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                          [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
                                           [[maybe_unused]] int pe_root, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int GDAContext::tile_broadcast_wave([[maybe_unused]] rocshmem_team_t team,
-                                               [[maybe_unused]] dst_tensor_t dst, [[maybe_unused]] src_tensor_t src,
-                                               [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                               [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                               [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                               [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                               [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
                                                [[maybe_unused]] int pe_root, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int GDAContext::tile_broadcast_wg([[maybe_unused]] rocshmem_team_t team,
-                                             [[maybe_unused]] dst_tensor_t dst, [[maybe_unused]] src_tensor_t src,
-                                             [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                             [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                             [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                             [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                             [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
                                              [[maybe_unused]] int pe_root, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-// SUM Reduction operations
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
+// SUM Reduction operations - Type-erased interface
 __device__ inline int GDAContext::tile_sum_reduce([[maybe_unused]] rocshmem_team_t team,
-                                           [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                           [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                           [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                           [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                           [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                           [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
                                            [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
 __device__ inline int GDAContext::tile_sum_reduce_wave([[maybe_unused]] rocshmem_team_t team,
-                                                [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                                [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                                [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                                [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                                [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                                [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
                                                 [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
 __device__ inline int GDAContext::tile_sum_reduce_wg([[maybe_unused]] rocshmem_team_t team,
-                                              [[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                              [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
+                                              [[maybe_unused]] void* dst_data, [[maybe_unused]] const void* src_data,
+                                              [[maybe_unused]] const size_t* dst_strides, [[maybe_unused]] const size_t* src_strides,
+                                              [[maybe_unused]] const size_t* start_coord, [[maybe_unused]] const size_t* boundary,
+                                              [[maybe_unused]] int ndim, [[maybe_unused]] size_t element_size,
                                               [[maybe_unused]] int root, [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
