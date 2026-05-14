@@ -797,8 +797,7 @@ append_batch_traced_copy_data(std::vector<traced_copy_data>& _traced_copies,
     if(_bytes_copied == 0) return false;
 
     auto _traced_copy = traced_copy_data{};
-    auto _copy_meta =
-        get_copy_metadata(_dst_agent, _src_agent, _dst_address, _src_address, _name);
+    auto _copy_meta = get_copy_metadata(_dst_agent, _src_agent, _dst_address, _src_address, _name);
 
     if(!populate_traced_copy_data(_traced_copy,
                                   _copy_meta,
@@ -1059,12 +1058,11 @@ async_copy_impl(Args... args)
 
     {
         auto _traced_copy = traced_copy_data{};
-        auto _copy_meta   = get_copy_metadata(
-            std::get<dst_agent_idx>(_tied_args),
-            std::get<src_agent_idx>(_tied_args),
-            compute_address(std::get<dst_addr_idx>(_tied_args)).ptr,
-            compute_address(std::get<src_addr_idx>(_tied_args)).ptr,
-            meta_type::name);
+        auto _copy_meta   = get_copy_metadata(std::get<dst_agent_idx>(_tied_args),
+                                            std::get<src_agent_idx>(_tied_args),
+                                            compute_address(std::get<dst_addr_idx>(_tied_args)).ptr,
+                                            compute_address(std::get<src_addr_idx>(_tied_args)).ptr,
+                                            meta_type::name);
 
         if(!populate_traced_copy_data(_traced_copy,
                                       _copy_meta,
