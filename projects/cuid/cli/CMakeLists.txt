@@ -22,9 +22,6 @@ project(amdcuid_tool)
 
 set(CMAKE_CXX_STANDARD 14)
 
-# Find OpenSSL
-find_package(OpenSSL REQUIRED)
-
 set(AMDCUID_TOOL_EXECUTABLE amdcuid_tool)
 set(SRC_LIST amdcuid_tool.cc)
 

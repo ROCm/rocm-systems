@@ -28,7 +28,7 @@ set(SRC_LIST amdcuid_daemon.cc)
 if(WIN32)
     set(CONFIG_INSTALL_DIR "CONFIG") # Relative to prefix
 else()
-    set(CONFIG_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/${AMDCUID}/config")
+    set(CONFIG_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/amdcuid/config")
 endif()
 
 find_package(Threads REQUIRED)
@@ -39,11 +39,12 @@ add_executable(amdcuid_daemon amdcuid_daemon.cc)
 # Include directories
 target_include_directories(${AMDCUID_DAEMON_EXECUTABLE} PRIVATE ${INC_DIR})
 
-# Pass the version-independent shared config directory to the daemon at compile
-# time so that multi-version installs all reference the same HMAC key and conf.
+# Pass the resolved config install directory to the daemon at compile time so
+# the HMAC key and daemon configuration paths are always built from a concrete
+# location.
 target_compile_definitions(
     ${AMDCUID_DAEMON_EXECUTABLE}
-    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
+    PRIVATE AMDCUID_CONFIG_DIR="${CONFIG_INSTALL_DIR}"
 )
 
 # Link against the CUID library
@@ -61,6 +62,11 @@ install(
 )
 
 set(DAEMON_CONFIG_FILE amdcuid_daemon.conf)
+install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/${DAEMON_CONFIG_FILE}
+    DESTINATION ${AMDCUID_SHARED_CONFIG_DIR}
+    COMPONENT ${DAEMON_COMPONENT}
+)
 
 # udev rules for Linux; TODO: need to figure out Windows service/driver registration for device event handling
 if(UNIX AND NOT APPLE)

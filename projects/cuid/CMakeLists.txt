@@ -50,8 +50,7 @@ endif()
 
 # Platform-specific dependencies; use native Windows bcrypt for HMAC, and OpenSSL on Linux/Unix
 if(WIN32)
-    # use native Windows bcrypt
-    find_package(bcrypt REQUIRED)
+    # Use the native Windows bcrypt library and link it directly on Windows targets.
 else()
     # Prefer a system-installed OpenSSL; fall back to building from source via
     # FetchContent if the dev package is not present (e.g. in bare containers).

@@ -22,8 +22,6 @@ project(amdcuid_example)
 
 set(CMAKE_CXX_STANDARD 14)
 
-find_package(OpenSSL REQUIRED)
-
 set(AMDCUID_EXAMPLE_EXECUTABLE amdcuid_example)
 set(SRC_LIST main.cc)
 

@@ -231,7 +231,6 @@ int main() {
       return 1;
     }
   }
-  close(fd);
 
   // read config file first get logging options and whether to run as a daemon
   // or only on boot
