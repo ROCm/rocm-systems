@@ -21,40 +21,64 @@
 // THE SOFTWARE.
 
 
-#include <dlfcn.h>
-#include <pthread.h>
+// WINDOWS-DIVERGENCE: see test-amdhip-ctor-mt.cpp -- pthread is POSIX only;
+// dlfcn is unused.
+#if !defined(_WIN32)
+#    include <dlfcn.h>
+#    include <pthread.h>
+#endif
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "common/fwd.hpp"
 
-void
-run(const std::string& name, pthread_barrier_t* _barrier)
+#if defined(_WIN32)
+using barrier_t = portable_barrier;
+#else
+using barrier_t = pthread_barrier_t;
+#endif
+
+namespace
 {
-    if(_barrier) pthread_barrier_wait(_barrier);
+inline void
+barrier_wait(barrier_t* _barrier)
+{
+    if(!_barrier) return;
+#if defined(_WIN32)
+    _barrier->wait();
+#else
+    pthread_barrier_wait(_barrier);
+#endif
+}
+}  // namespace
+
+void
+run(const std::string& name, barrier_t* _barrier)
+{
+    barrier_wait(_barrier);
 
     if(hip_init_fn)
     {
-        if(_barrier) pthread_barrier_wait(_barrier);
+        barrier_wait(_barrier);
         hip_init_fn();
     }
 
     if(hsa_init_fn)
     {
-        if(_barrier) pthread_barrier_wait(_barrier);
+        barrier_wait(_barrier);
         hsa_init_fn();
     }
 
     if(roctxRangePush_fn)
     {
-        if(_barrier) pthread_barrier_wait(_barrier);
+        barrier_wait(_barrier);
         roctxRangePush_fn(name.c_str());
     }
 
     if(roctxRangePop_fn)
     {
-        if(_barrier) pthread_barrier_wait(_barrier);
+        barrier_wait(_barrier);
         roctxRangePop_fn(name.c_str());
     }
 }
@@ -68,7 +92,15 @@ run_threads(unsigned long n)
     for(unsigned long i = 0; i < n; ++i)
         names.emplace_back(std::string{ "thread-" } + std::to_string(i));
 
-    auto _barrier = pthread_barrier_t{};
+#if defined(_WIN32)
+    auto _barrier = barrier_t{ n };
+    for(unsigned long i = 0; i < n; ++i)
+        threads.emplace_back(run, names.at(i), &_barrier);
+
+    for(auto& itr : threads)
+        itr.join();
+#else
+    auto _barrier = barrier_t{};
     pthread_barrier_init(&_barrier, nullptr, n);
 
     for(unsigned long i = 0; i < n; ++i)
@@ -78,6 +110,7 @@ run_threads(unsigned long n)
         itr.join();
 
     pthread_barrier_destroy(&_barrier);
+#endif
 }
 
 int

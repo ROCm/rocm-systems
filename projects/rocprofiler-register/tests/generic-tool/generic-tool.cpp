@@ -21,7 +21,11 @@
 // THE SOFTWARE.
 
 
-#include <pthread.h>
+// WINDOWS-DIVERGENCE: <pthread.h> is POSIX only and is unused by this
+// translation unit (no thread primitives are referenced).
+#if !defined(_WIN32)
+#    include <pthread.h>
+#endif
 #include <cstdint>
 #include <stdexcept>
 #include <string_view>
@@ -48,9 +52,20 @@ typedef struct rocprofiler_tool_configure_result_t
     void* tool_data;  ///< data to provide to init and fini callbacks
 } rocprofiler_tool_configure_result_t;
 
-rocprofiler_tool_configure_result_t*
-rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*)
-    __attribute__((visibility("default")));
+// WINDOWS-DIVERGENCE: GCC's __attribute__((visibility("default"))) is
+// elided by MSVC; the equivalent for symbols exported from a DLL is
+// __declspec(dllexport). The Linux side relies on default visibility being
+// off via -fvisibility=hidden so this attribute makes the symbol resolvable
+// via dlsym; on Windows GetProcAddress requires the symbol to be in the
+// DLL's export table, which __declspec(dllexport) accomplishes.
+#if defined(_WIN32)
+#    define ROCP_REG_TEST_TOOL_EXPORT __declspec(dllexport)
+#else
+#    define ROCP_REG_TEST_TOOL_EXPORT __attribute__((visibility("default")))
+#endif
+
+ROCP_REG_TEST_TOOL_EXPORT rocprofiler_tool_configure_result_t*
+rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*);
 
 rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t                 version,

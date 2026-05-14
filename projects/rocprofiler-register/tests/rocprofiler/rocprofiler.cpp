@@ -29,8 +29,18 @@
 #include <rocjpeg/rocjpeg.hpp>
 #include <roctx/roctx.hpp>
 
-#include <dlfcn.h>
-#include <pthread.h>
+// WINDOWS-DIVERGENCE: <dlfcn.h> -> Win32 dynamic loader (LoadLibraryA /
+// GetProcAddress / GetModuleHandleA). <pthread.h> is unused in this mock.
+#if defined(_WIN32)
+#    ifndef WIN32_LEAN_AND_MEAN
+#        define WIN32_LEAN_AND_MEAN
+#    endif
+#    include <windows.h>
+#else
+#    include <dlfcn.h>
+#    include <pthread.h>
+#endif
+#include <cinttypes>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -39,44 +49,67 @@
 #include <vector>
 
 #ifndef ROCP_REG_FILE_NAME
+// WINDOWS-DIVERGENCE: __FILE__ uses '\\' separators on MSVC by default;
+// strip either separator so the produced log lines match on both platforms.
+#    if defined(_WIN32)
+#        define ROCP_REG_FILE_NAME_SEP '\\'
+#    else
+#        define ROCP_REG_FILE_NAME_SEP '/'
+#    endif
 #    define ROCP_REG_FILE_NAME                                                           \
         ::std::string{ __FILE__ }                                                        \
-            .substr(::std::string_view{ __FILE__ }.find_last_of('/') + 1)                \
+            .substr(::std::string_view{ __FILE__ }.find_last_of(                         \
+                        ROCP_REG_FILE_NAME_SEP) +                                        \
+                    1)                                                                   \
             .c_str()
 #endif
 
+// WINDOWS-DIVERGENCE: rocprofiler-register installs as
+// "rocprofiler-register.dll" on Windows (no SOVERSION in filename, no "lib"
+// prefix); on Linux it is "librocprofiler-register.so".
+#if defined(_WIN32)
+#    define ROCP_REG_HOST_LIBRARY_NAME "rocprofiler-register.dll"
+#else
+#    define ROCP_REG_HOST_LIBRARY_NAME "librocprofiler-register.so"
+#endif
+
+// WINDOWS-DIVERGENCE: prefer C99 __func__ over MSVC's __FUNCTION__ inside
+// this namespace. MSVC's __FUNCTION__ expands to 'rocprofiler::hip_init'
+// (namespace-qualified) whereas GCC's expands to just 'hip_init'. __func__
+// yields the unqualified identifier on both compilers and keeps Linux's
+// PASS_REGEX log strings matching unchanged on Windows.
 namespace rocprofiler
 {
 void
 hip_init()
 {
-    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
+    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __func__);
 }
 
 void
 hsa_init()
 {
-    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
+    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __func__);
 }
 
 ncclResult_t
 ncclGetVersion(int*)
 {
-    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
+    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __func__);
     return {};
 }
 
 rocDecStatus
 rocDecCreateDecoder(rocDecDecoderHandle*, RocDecoderCreateInfo*)
 {
-    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
+    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __func__);
     return {};
 }
 
 RocJpegStatus
 rocJpegStreamCreate(RocJpegStreamHandle* jpeg_stream_handle)
 {
-    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
+    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __func__);
     return {};
 }
 
@@ -113,10 +146,16 @@ check_registration_info(const char*          name,
 }
 }  // namespace rocprofiler
 
+// WINDOWS-DIVERGENCE: GCC visibility attribute -> __declspec(dllexport).
+#if defined(_WIN32)
+#    define ROCP_REG_TEST_MOCK_EXPORT __declspec(dllexport)
+#else
+#    define ROCP_REG_TEST_MOCK_EXPORT __attribute__((visibility("default")))
+#endif
+
 extern "C" {
-int
-rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t)
-    __attribute__((visibility("default")));
+ROCP_REG_TEST_MOCK_EXPORT int
+rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t);
 
 int
 rocprofiler_set_api_table(const char* name,
@@ -125,7 +164,9 @@ rocprofiler_set_api_table(const char* name,
                           void**      tables,
                           uint64_t    num_tables)
 {
-    printf("[%s] %s :: %lu :: %lu :: %lu\n",
+    // WINDOWS-DIVERGENCE: %lu is 32-bit on Windows but uint64_t is 64-bit;
+    // use PRIu64 for cross-platform correctness.
+    printf("[%s] %s :: %" PRIu64 " :: %" PRIu64 " :: %" PRIu64 "\n",
            ROCP_REG_FILE_NAME,
            name,
            lib_version,
@@ -135,11 +176,24 @@ rocprofiler_set_api_table(const char* name,
     auto* _tool_libs = std::getenv("ROCP_TOOL_LIBRARIES");
     if(_tool_libs)
     {
+        // WINDOWS-DIVERGENCE: dlopen(RTLD_GLOBAL | RTLD_LAZY) -> LoadLibraryA.
+        // RTLD_GLOBAL has no Win32 analogue (Windows has no global symbol
+        // namespace); LoadLibraryA always loads with eager binding, so
+        // RTLD_LAZY is also a no-op semantically.
+#if defined(_WIN32)
+        auto* _handle = ::LoadLibraryA(_tool_libs);
+#else
         auto* _handle = dlopen(_tool_libs, RTLD_GLOBAL | RTLD_LAZY);
+#endif
         if(!_handle)
             throw std::runtime_error{ std::string{ "error opening tool library " } +
                                       _tool_libs };
+#if defined(_WIN32)
+        auto* _sym = reinterpret_cast<void*>(
+            ::GetProcAddress(_handle, "rocprofiler_configure"));
+#else
         auto* _sym = dlsym(_handle, "rocprofiler_configure");
+#endif
         if(!_sym)
             throw std::runtime_error{ std::string{ "tool library " } +
                                       std::string{ _tool_libs } +
@@ -148,16 +202,30 @@ rocprofiler_set_api_table(const char* name,
 
     auto registration_info = ::rocprofiler::reginfo_vec_t{};
     {
+        // WINDOWS-DIVERGENCE: dlopen(RTLD_NOLOAD) returns a handle only if
+        // the library is already loaded into the process. The Win32
+        // equivalent is GetModuleHandleA, which never increments the refcount
+        // and only succeeds when the module is already present.
+#if defined(_WIN32)
+        auto* _handle = ::GetModuleHandleA(ROCP_REG_HOST_LIBRARY_NAME);
+#else
         auto* _handle =
-            dlopen("librocprofiler-register.so", RTLD_LAZY | RTLD_LOCAL | RTLD_NOLOAD);
+            dlopen(ROCP_REG_HOST_LIBRARY_NAME, RTLD_LAZY | RTLD_LOCAL | RTLD_NOLOAD);
+#endif
         if(!_handle)
-            throw std::runtime_error{
-                "error opening librocprofiler-register.so library "
-            };
+            throw std::runtime_error{ std::string{ "error opening " } +
+                                      std::string{ ROCP_REG_HOST_LIBRARY_NAME } +
+                                      " library " };
+#if defined(_WIN32)
+        auto* _sym = reinterpret_cast<void*>(::GetProcAddress(
+            _handle, "rocprofiler_register_iterate_registration_info"));
+#else
         auto* _sym = dlsym(_handle, "rocprofiler_register_iterate_registration_info");
+#endif
         if(!_sym)
             throw std::runtime_error{
-                "librocprofiler-register.so did not contain "
+                std::string{ ROCP_REG_HOST_LIBRARY_NAME } +
+                " did not contain "
                 "rocprofiler_register_iterate_registration_info symbol"
             };
 
@@ -239,13 +307,23 @@ rocprofiler_set_api_table(const char* name,
 }
 }
 
-void
-     rocp_ctor(void) __attribute__((constructor));
+// WINDOWS-DIVERGENCE: __attribute__((constructor)) (GCC) has no MSVC
+// equivalent. The portable C++ way to run code at DLL load is a static
+// initializer. We declare a namespace-scope variable whose initializer has
+// the same observable effects as the GCC constructor (sets the flag,
+// prints the line). This runs during DLL initialization on both platforms,
+// before any exported function is called by a client.
 bool rocprofiler_test_lib_link = false;
 
-void
-rocp_ctor()
+namespace
 {
-    rocprofiler_test_lib_link = true;
-    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
-}
+struct rocp_ctor_t
+{
+    rocp_ctor_t()
+    {
+        rocprofiler_test_lib_link = true;
+        printf("[%s] %s\n", ROCP_REG_FILE_NAME, "rocp_ctor");
+    }
+};
+const auto rocp_ctor_instance = rocp_ctor_t{};
+}  // namespace

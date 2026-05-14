@@ -42,9 +42,19 @@
 ROCPROFILER_REGISTER_DEFINE_IMPORT(roctx, ROCP_REG_VERSION)
 
 #ifndef ROCP_REG_FILE_NAME
+// WINDOWS-DIVERGENCE: __FILE__ uses '\\' separators on MSVC by default. Match
+// either separator so produced PASS_REGEX-able log lines render the bare
+// basename on both platforms.
+#    if defined(_WIN32)
+#        define ROCP_REG_FILE_NAME_SEP '\\'
+#    else
+#        define ROCP_REG_FILE_NAME_SEP '/'
+#    endif
 #    define ROCP_REG_FILE_NAME                                                           \
         ::std::string{ __FILE__ }                                                        \
-            .substr(::std::string_view{ __FILE__ }.find_last_of('/') + 1)                \
+            .substr(::std::string_view{ __FILE__ }.find_last_of(                         \
+                        ROCP_REG_FILE_NAME_SEP) +                                        \
+                    1)                                                                   \
             .c_str()
 #endif
 

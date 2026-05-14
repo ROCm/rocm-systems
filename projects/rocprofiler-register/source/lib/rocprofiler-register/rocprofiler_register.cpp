@@ -18,6 +18,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+// WINDOWS-DIVERGENCE: DllMain loader-lock constraint.
+// On Windows, this DLL must perform NO LoadLibrary, GetProcAddress against
+// other DLLs, thread creation, or other loader-lock-acquiring work inside
+// DllMain (regardless of fdwReason). Doing so risks deadlocks because the
+// loader lock is already held when DllMain runs. All non-trivial init --
+// including module enumeration, symbol lookup, glog startup, and loading
+// the rocprofiler-sdk DLL -- is deferred to the public API entry points
+// (rocprofiler_register_library_api_table / rocprofiler_register_attach /
+// rocprofiler_register_detach) and routed through std::call_once so it
+// happens lazily, on the caller's thread, with the loader lock NOT held.
+// The Linux pattern is identical (std::call_once from the public entry
+// points); the constraint is just stricter on Windows.
+
 #define GNU_SOURCE 1
 
 #include <rocprofiler-register/rocprofiler-register.h>
@@ -26,7 +39,10 @@
 #include "details/environment.hpp"
 #include "details/filesystem.hpp"
 #include "details/logging.hpp"
+#include "details/platform/loader.hpp"
+#include "details/platform/pe_parser.hpp"
 #include "details/scope_destructor.hpp"
+#include "details/utility.hpp"
 
 #include <fmt/format.h>
 #include <glog/logging.h>
@@ -34,6 +50,7 @@
 #include <array>
 #include <atomic>
 #include <bitset>
+#include <cstring>
 #include <fstream>
 #include <mutex>
 #include <regex>
@@ -41,8 +58,10 @@
 #include <string_view>
 #include <utility>
 
-#include <dlfcn.h>
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <dlfcn.h>
+#    include <unistd.h>
+#endif
 
 namespace
 {
@@ -51,20 +70,6 @@ using rocprofiler_register_library_api_table_func_t =
 }
 
 extern "C" {
-#pragma weak rocprofiler_configure
-#pragma weak rocprofiler_set_api_table
-#pragma weak rocprofiler_attach
-#pragma weak rocprofiler_detach
-#pragma weak rocprofiler_attach_set_api_table
-#pragma weak rocprofiler_register_import_hip
-#pragma weak rocprofiler_register_import_hip_static
-#pragma weak rocprofiler_register_import_hip_compiler
-#pragma weak rocprofiler_register_import_hip_compiler_static
-#pragma weak rocprofiler_register_import_hsa
-#pragma weak rocprofiler_register_import_hsa_static
-#pragma weak rocprofiler_register_import_roctx
-#pragma weak rocprofiler_register_import_roctx_static
-
 typedef struct rocprofiler_client_id_t
 {
     const char*    name;    ///< clients should set this value for debugging
@@ -85,6 +90,30 @@ typedef struct rocprofiler_tool_configure_result_t
     rocprofiler_tool_finalize_t   finalize;    ///< cleanup
     void* tool_data;  ///< data to provide to init and fini callbacks
 } rocprofiler_tool_configure_result_t;
+
+#if !defined(_WIN32)
+// On Linux these symbols are declared #pragma weak so undefined references
+// resolve to null at link time. The runtime then checks the symbol address
+// against nullptr to determine whether the corresponding tool / SDK is
+// present in the process.
+//
+// WINDOWS-DIVERGENCE: PE/COFF has no #pragma weak equivalent. On Windows we
+// replace the link-time weak resolution with runtime GetProcAddress lookup
+// (see rocp_reg_weak_lookup() below) and never declare these symbols at this
+// scope.
+#    pragma weak rocprofiler_configure
+#    pragma weak rocprofiler_set_api_table
+#    pragma weak rocprofiler_attach
+#    pragma weak rocprofiler_detach
+#    pragma weak rocprofiler_attach_set_api_table
+#    pragma weak rocprofiler_register_import_hip
+#    pragma weak rocprofiler_register_import_hip_static
+#    pragma weak rocprofiler_register_import_hip_compiler
+#    pragma weak rocprofiler_register_import_hip_compiler_static
+#    pragma weak rocprofiler_register_import_hsa
+#    pragma weak rocprofiler_register_import_hsa_static
+#    pragma weak rocprofiler_register_import_roctx
+#    pragma weak rocprofiler_register_import_roctx_static
 
 extern rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*);
@@ -129,36 +158,88 @@ rocprofiler_register_import_hsa_static(void);
 
 extern uint32_t
 rocprofiler_register_import_roctx_static(void);
+#endif  // !defined(_WIN32)
 }
 
 namespace
 {
 using namespace rocprofiler_register;
+
+// Function-pointer typedefs — derived from the weak C declarations on Linux,
+// duplicated explicitly on Windows where the weak declarations do not exist.
+#if defined(_WIN32)
+using rocprofiler_set_api_table_t = int (*)(const char*,
+                                            uint64_t,
+                                            uint64_t,
+                                            void**,
+                                            uint64_t);
+using rocprofiler_attach_func_t   = int (*)(void);
+using rocprofiler_detach_func_t   = int (*)(void);
+using rocprofiler_attach_set_api_table_t =
+    int (*)(const char*,
+            uint64_t,
+            uint64_t,
+            void**,
+            uint64_t,
+            rocprofiler_register_library_api_table_func_t);
+#else
 using rocprofiler_set_api_table_t        = decltype(::rocprofiler_set_api_table)*;
 using rocprofiler_attach_set_api_table_t = decltype(::rocprofiler_attach_set_api_table)*;
 using rocprofiler_attach_func_t          = decltype(::rocprofiler_attach)*;
 using rocprofiler_detach_func_t          = decltype(::rocprofiler_detach)*;
+#endif
 using rocp_set_api_table_data_t          = std::tuple<void*,
                                              rocprofiler_set_api_table_t,
                                              rocprofiler_attach_func_t,
                                              rocprofiler_detach_func_t>;
 
-using bitset_t = std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle)>;
+#if defined(_WIN32)
+// WINDOWS-DIVERGENCE: emulate the runtime-nullable behaviour of #pragma weak
+// symbols using lazy GetProcAddress lookup (via the platform::loader
+// abstraction). Each call performs a fresh enumerate-modules walk because
+// tools may be loaded after rocprofiler-register's own static initialisers
+// run; results are not cached at this layer (the rocp_reg_scan_for_tools
+// caller already memoises the resolved handle for the SDK case).
+inline void*
+rocp_reg_weak_lookup(const char* sym_name) noexcept
+{
+    return platform::module_sym_default(sym_name);
+}
+#endif
 
-static_assert(sizeof(bitset_t) ==
-                  sizeof(rocprofiler_register_library_indentifier_t::handle),
-              "bitset should be same at uint64_t");
+using bitset_t =
+    std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle) * 8>;
 
+static_assert(bitset_t{}.size() ==
+                  sizeof(rocprofiler_register_library_indentifier_t::handle) * 8,
+              "bitset should have bits equal to uint64_t size in bits");
+
+// SDK + attach library names are intentionally unversioned on both platforms:
+// the rocprofiler-sdk DSO/DLL has no SOVERSION suffix in its install layout
+// (verified against the pre-port HEAD value of "librocprofiler-sdk.so").
+//
+// WINDOWS-DIVERGENCE: PE/COFF DLLs use unversioned ".dll" filenames (the SO
+// version concept does not apply on PE/COFF); the side-by-side version is
+// encoded in the file's VS_VERSION_INFO resource block, not in the filename.
+// rocprofiler-register itself ships with a SOVERSION on Linux only (see the
+// `rocprofiler_register_lib_name` definitions below) -- the Linux value is
+// preserved verbatim from the pre-port baseline.
+#if defined(_WIN32)
+constexpr auto rocprofiler_lib_name                = "rocprofiler-sdk.dll";
+constexpr auto rocprofiler_attach_lib_name         = "rocprofiler-sdk-attach.dll";
+constexpr auto rocprofiler_register_lib_name       = "rocprofiler-register.dll";
+#else
 constexpr auto rocprofiler_lib_name                = "librocprofiler-sdk.so";
-constexpr auto rocprofiler_lib_register_entrypoint = "rocprofiler_set_api_table";
 constexpr auto rocprofiler_attach_lib_name         = "librocprofiler-sdk-attach.so";
+constexpr auto rocprofiler_register_lib_name =
+    "librocprofiler-register.so." ROCPROFILER_REGISTER_SOVERSION;
+#endif
+
+constexpr auto rocprofiler_lib_register_entrypoint = "rocprofiler_set_api_table";
 constexpr auto rocprofiler_attach_lib_register_entrypoint =
     "rocprofiler_attach_set_api_table";
 constexpr auto rocprofiler_lib_attach_entrypoint = "rocprofiler_attach";
 constexpr auto rocprofiler_lib_detach_entrypoint = "rocprofiler_detach";
-
-constexpr auto rocprofiler_register_lib_name =
-    "librocprofiler-register.so." ROCPROFILER_REGISTER_SOVERSION;
 
 enum rocp_reg_supported_library  // NOLINT(performance-enum-size)
 {
@@ -204,45 +285,70 @@ struct rocp_reg_error_message;
         static constexpr auto value = MSG;                                               \
     };
 
+// WINDOWS-DIVERGENCE: ROCm runtimes ship as PE DLLs on Windows (no "lib"
+// prefix, ".dll" extension, no embedded SOVERSION in the filename), so the
+// Linux SONAME regexes below never match Windows-mapped modules. Provide
+// per-platform regex strings that the secure-mode address-range check in
+// rocprofiler_register_library_api_table() compares against the basename
+// reported by binary::get_segment_addresses() (i.e. the loaded module's
+// filename). Linux strings are unchanged.
+#if defined(_WIN32)
+#    define ROCP_REG_LIBNAME_HSA          "hsa-runtime64\\.dll"
+#    define ROCP_REG_LIBNAME_HIP          "amdhip64\\.dll"
+#    define ROCP_REG_LIBNAME_ROCTX        "roctx64\\.dll"
+#    define ROCP_REG_LIBNAME_RCCL         "rccl\\.dll"
+#    define ROCP_REG_LIBNAME_ROCDECODE    "rocdecode\\.dll"
+#    define ROCP_REG_LIBNAME_ROCJPEG      "rocjpeg\\.dll"
+#    define ROCP_REG_LIBNAME_ROCATTACH    "rocprofiler-sdk-attach\\.dll"
+#else
+#    define ROCP_REG_LIBNAME_HSA          "libhsa-runtime64.so.[2-9]($|\\.[0-9\\.]+)"
+#    define ROCP_REG_LIBNAME_HIP          "libamdhip64.so.[6-9]($|\\.[0-9\\.]+)"
+#    define ROCP_REG_LIBNAME_ROCTX        "libroctx64.so.[4-9]($|\\.[0-9\\.]+)"
+#    define ROCP_REG_LIBNAME_RCCL         "librccl.so.[6-9]($|\\.[0-9\\.]+)"
+#    define ROCP_REG_LIBNAME_ROCDECODE    "librocdecode.so.[0-9]($|\\.[0-9\\.]+)"
+#    define ROCP_REG_LIBNAME_ROCJPEG      "librocjpeg.so.[0-9]($|\\.[0-9\\.]+)"
+#    define ROCP_REG_LIBNAME_ROCATTACH    "librocprofiler-sdk-attach.so.[0-9]($|\\.[0-9\\.]+)"
+#endif
+
 ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_HSA,
                                "hsa",
                                "rocprofiler_register_import_hsa",
-                               "libhsa-runtime64.so.[2-9]($|\\.[0-9\\.]+)")
+                               ROCP_REG_LIBNAME_HSA)
 
 ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_HIP,
                                "hip",
                                "rocprofiler_register_import_hip",
-                               "libamdhip64.so.[6-9]($|\\.[0-9\\.]+)")
+                               ROCP_REG_LIBNAME_HIP)
 
 ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCTX,
                                "roctx",
                                "rocprofiler_register_import_roctx",
-                               "libroctx64.so.[4-9]($|\\.[0-9\\.]+)")
+                               ROCP_REG_LIBNAME_ROCTX)
 
 ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_HIP_COMPILER,
                                "hip_compiler",
                                "rocprofiler_register_import_hip_compiler",
-                               "libamdhip64.so.[6-9]($|\\.[0-9\\.]+)")
+                               ROCP_REG_LIBNAME_HIP)
 
 ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_RCCL,
                                "rccl",
                                "rocprofiler_register_import_rccl",
-                               "librccl.so.[6-9]($|\\.[0-9\\.]+)")
+                               ROCP_REG_LIBNAME_RCCL)
 
 ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCDECODE,
                                "rocdecode",
                                "rocprofiler_register_import_rocdecode",
-                               "librocdecode.so.[0-9]($|\\.[0-9\\.]+)")
+                               ROCP_REG_LIBNAME_ROCDECODE)
 
 ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCJPEG,
                                "rocjpeg",
                                "rocprofiler_register_import_rocjpeg",
-                               "librocjpeg.so.[0-9]($|\\.[0-9\\.]+)")
+                               ROCP_REG_LIBNAME_ROCJPEG)
 
 ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCATTACH,
                                "rocattach",
                                "rocprofiler_register_import_attach",
-                               "librocprofiler-sdk-attach.so.[0-9]($|\\.[0-9\\.]+)")
+                               ROCP_REG_LIBNAME_ROCATTACH)
 
 ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_SUCCESS, "Success")
 ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_NO_TOOLS, "rocprofiler-register found no tools")
@@ -267,8 +373,15 @@ ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_ATTACHMENT_NOT_AVAILABLE,
 auto
 get_this_library_path()
 {
+    // The open_modes argument is preserved for source compatibility with the
+    // Linux dlopen flag-matrix; the platform::loader abstraction ignores it
+    // on Windows (PE/COFF has no RTLD_NOLOAD/RTLD_LAZY analogue).
+#if defined(_WIN32)
+    auto _this_lib_path = binary::get_linked_path(rocprofiler_register_lib_name);
+#else
     auto _this_lib_path = binary::get_linked_path(rocprofiler_register_lib_name,
                                                   { RTLD_NOLOAD | RTLD_LAZY });
+#endif
     LOG_IF(FATAL, !_this_lib_path)
         << rocprofiler_register_lib_name
         << " could not locate itself in the list of loaded libraries";
@@ -332,15 +445,43 @@ auto existing_scanned_data = rocp_scan_data{};
 rocp_scan_data
 rocp_reg_scan_for_tools()
 {
+#if defined(_WIN32)
+    // WINDOWS-DIVERGENCE: no #pragma weak. Probe for tool / SDK presence by
+    // enumerating loaded modules and looking up the relevant entry points
+    // via GetProcAddress (encapsulated in platform::module_sym_default).
+    auto* _configure_func = rocp_reg_weak_lookup("rocprofiler_configure");
+    auto* _weak_set_api_table_fn =
+        reinterpret_cast<rocprofiler_set_api_table_t>(
+            rocp_reg_weak_lookup(rocprofiler_lib_register_entrypoint));
+    auto* _weak_attach_fn = reinterpret_cast<rocprofiler_attach_func_t>(
+        rocp_reg_weak_lookup(rocprofiler_lib_attach_entrypoint));
+    auto* _weak_detach_fn = reinterpret_cast<rocprofiler_detach_func_t>(
+        rocp_reg_weak_lookup(rocprofiler_lib_detach_entrypoint));
+#else
     auto* _configure_func = dlsym(RTLD_DEFAULT, "rocprofiler_configure");
-    auto  _rocp_tool_libs = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
-    auto  _rocp_reg_lib = common::get_env("ROCPROFILER_REGISTER_LIBRARY", std::string{});
-    bool  _force_tool =
-        common::get_env("ROCPROFILER_REGISTER_FORCE_LOAD",
-                        !_rocp_reg_lib.empty() || !_rocp_tool_libs.empty());
+#endif
+    auto _rocp_tool_libs = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
+    auto _rocp_reg_lib = common::get_env("ROCPROFILER_REGISTER_LIBRARY", std::string{});
 
+    // ROCP_TOOL_LIBRARIES is documented as a path-list (POSIX-conventional ":"
+    // on Linux, ";" on Windows -- see common::path_list_separator()). Prior
+    // production code only consumed the variable as a single opaque string
+    // for a non-emptiness probe; splitting it here is a strict generalisation
+    // (a single path collapses to a one-element list) and prepares the value
+    // for the planned tool-iteration site (plan §3 Rec-03).
+    auto _rocp_tool_lib_list = utility::delimit<std::vector<std::string>>(
+        _rocp_tool_libs, std::string{ 1, common::path_list_separator() });
+
+    bool _force_tool =
+        common::get_env("ROCPROFILER_REGISTER_FORCE_LOAD",
+                        !_rocp_reg_lib.empty() || !_rocp_tool_lib_list.empty());
+
+#if defined(_WIN32)
+    bool _found_tool = (_configure_func != nullptr || _force_tool);
+#else
     bool _found_tool =
         (rocprofiler_configure != nullptr || _configure_func != nullptr || _force_tool);
+#endif
 
     static void*                       rocprofiler_lib_handle    = nullptr;
     static rocprofiler_set_api_table_t rocprofiler_lib_config_fn = nullptr;
@@ -366,12 +507,21 @@ rocp_reg_scan_for_tools()
             << rocprofiler_lib_register_entrypoint << " not found. Tried to dlopen "
             << _rocp_reg_lib;
     }
+#if defined(_WIN32)
+    else if(_found_tool && _weak_set_api_table_fn)
+    {
+        rocprofiler_lib_config_fn = _weak_set_api_table_fn;
+        rocprofiler_lib_attach_fn = _weak_attach_fn;
+        rocprofiler_lib_detach_fn = _weak_detach_fn;
+    }
+#else
     else if(_found_tool && rocprofiler_set_api_table)
     {
         rocprofiler_lib_config_fn = &rocprofiler_set_api_table;
         rocprofiler_lib_attach_fn = &rocprofiler_attach;
         rocprofiler_lib_detach_fn = &rocprofiler_detach;
     }
+#endif
 
     return rocp_scan_data{ rocprofiler_lib_handle,
                            rocprofiler_lib_config_fn,
@@ -394,7 +544,16 @@ get_library_handle(std::string_view _rocp_reg_lib)
             : (fs::path{ get_this_library_path() } / _rocp_reg_lib_path);
 
     // check to see if the rocprofiler library is already loaded
+#if defined(_WIN32)
+    // WINDOWS-DIVERGENCE: RTLD_NOLOAD/RTLD_LAZY/RTLD_GLOBAL have no PE/COFF
+    // analogues. Routed through the platform::loader abstraction:
+    //   module_open_already_loaded -> GetModuleHandleW
+    //   module_open                -> LoadLibraryW
+    rocprofiler_lib_handle =
+        platform::module_open_already_loaded(_rocp_reg_lib_path.string().c_str());
+#else
     rocprofiler_lib_handle = dlopen(_rocp_reg_lib_path.c_str(), RTLD_NOLOAD | RTLD_LAZY);
+#endif
 
     if(rocprofiler_lib_handle)
     {
@@ -406,8 +565,13 @@ get_library_handle(std::string_view _rocp_reg_lib)
     // try to load with the given path
     if(!rocprofiler_lib_handle)
     {
+#if defined(_WIN32)
+        rocprofiler_lib_handle =
+            platform::module_open(_rocp_reg_lib_path.string().c_str());
+#else
         rocprofiler_lib_handle =
             dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+#endif
 
         if(rocprofiler_lib_handle)
         {
@@ -422,16 +586,26 @@ get_library_handle(std::string_view _rocp_reg_lib)
     if(!rocprofiler_lib_handle)
     {
         _rocp_reg_lib_path = _rocp_reg_lib_path_abs;
+#if defined(_WIN32)
+        rocprofiler_lib_handle =
+            platform::module_open(_rocp_reg_lib_path.string().c_str());
+#else
         rocprofiler_lib_handle =
             dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+#endif
     }
 
     // try to load with the basename path
     if(!rocprofiler_lib_handle)
     {
         _rocp_reg_lib_path = _rocp_reg_lib_path_fname;
+#if defined(_WIN32)
+        rocprofiler_lib_handle =
+            platform::module_open(_rocp_reg_lib_path.string().c_str());
+#else
         rocprofiler_lib_handle =
             dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+#endif
     }
 
     LOG(INFO) << "loaded " << _rocp_reg_lib << " library at "
@@ -452,6 +626,7 @@ rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
     rocprofiler_attach_func_t   rocprofiler_lib_attach_fn = nullptr;
     rocprofiler_detach_func_t   rocprofiler_lib_detach_fn = nullptr;
 
+#if !defined(_WIN32)
     if(rocprofiler_set_api_table)
     {
         rocprofiler_lib_config_fn = &rocprofiler_set_api_table;
@@ -465,14 +640,28 @@ rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
                                rocprofiler_lib_config_fn,
                                rocprofiler_lib_attach_fn,
                                rocprofiler_lib_detach_fn);
+#endif
+    // WINDOWS-DIVERGENCE: no LD_PRELOAD pre-binding step; the equivalent
+    // probe is the GetProcAddress walk below (module_sym_default).
 
     // look to see if entrypoint function is already a symbol
+#if defined(_WIN32)
+    // WINDOWS-DIVERGENCE: dlsym(RTLD_DEFAULT, ...) -> EnumProcessModulesEx
+    // walk + GetProcAddress (encapsulated in platform::module_sym_default).
+    *(void**) (&rocprofiler_lib_config_fn) =
+        platform::module_sym_default(rocprofiler_lib_register_entrypoint);
+    *(void**) (&rocprofiler_lib_attach_fn) =
+        platform::module_sym_default(rocprofiler_lib_attach_entrypoint);
+    *(void**) (&rocprofiler_lib_detach_fn) =
+        platform::module_sym_default(rocprofiler_lib_detach_entrypoint);
+#else
     *(void**) (&rocprofiler_lib_config_fn) =
         dlsym(RTLD_DEFAULT, rocprofiler_lib_register_entrypoint);
     *(void**) (&rocprofiler_lib_attach_fn) =
         dlsym(RTLD_DEFAULT, rocprofiler_lib_attach_entrypoint);
     *(void**) (&rocprofiler_lib_detach_fn) =
         dlsym(RTLD_DEFAULT, rocprofiler_lib_detach_entrypoint);
+#endif
 
     // return if found via RTLD_DEFAULT
     if(rocprofiler_lib_config_fn)
@@ -487,6 +676,16 @@ rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
 
     rocprofiler_lib_handle = get_library_handle(_rocp_reg_lib);
 
+#if defined(_WIN32)
+    *(void**) (&rocprofiler_lib_config_fn) = platform::module_sym(
+        rocprofiler_lib_handle, rocprofiler_lib_register_entrypoint);
+
+    *(void**) (&rocprofiler_lib_attach_fn) = platform::module_sym(
+        rocprofiler_lib_handle, rocprofiler_lib_attach_entrypoint);
+
+    *(void**) (&rocprofiler_lib_detach_fn) = platform::module_sym(
+        rocprofiler_lib_handle, rocprofiler_lib_detach_entrypoint);
+#else
     *(void**) (&rocprofiler_lib_config_fn) =
         dlsym(rocprofiler_lib_handle, rocprofiler_lib_register_entrypoint);
 
@@ -495,6 +694,7 @@ rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
 
     *(void**) (&rocprofiler_lib_detach_fn) =
         dlsym(rocprofiler_lib_handle, rocprofiler_lib_detach_entrypoint);
+#endif
 
     LOG_IF(WARNING, rocprofiler_lib_config_fn == nullptr)
         << _rocp_reg_lib << " (handle=" << rocprofiler_lib_handle << ") did not contain '"
@@ -640,7 +840,7 @@ load_environment_buffer(const char* environment_buffer)
         position += strlen(value) + 1;
 
         LOG(INFO) << "Attachment adding environment variable: " << name << "=" << value;
-        setenv(name, value, 1);
+        common::set_env(name, value, 1);
     }
 }
 
@@ -788,6 +988,19 @@ rocprofiler_register_library_api_table(
             }
         }
 
+#if defined(_WIN32)
+        // WINDOWS-DIVERGENCE (defence-in-depth): VirtualQuery exposes per-page
+        // protection metadata that has no /proc/self/maps analogue. Use it to
+        // confirm the import_func pointer lives in executable memory in
+        // addition to the address-range check above. Linux relies on segment
+        // ranges alone (the same metadata richness is not available there).
+        if(_valid_addr &&
+           !platform::is_address_executable(reinterpret_cast<const void*>(import_func)))
+        {
+            _valid_addr = false;
+        }
+#endif
+
         // the library provided
         if(!_valid_addr) return ROCP_REG_INVALID_API_ADDRESS;
     }
@@ -820,8 +1033,13 @@ rocprofiler_register_library_api_table(
             return ROCP_REG_NO_TOOLS;
         }
         rocprofiler_attach_set_api_table_t rocprofiler_attach_set_api_table_fn;
+#if defined(_WIN32)
+        *(void**) (&rocprofiler_attach_set_api_table_fn) = platform::module_sym(
+            attachlibrary, rocprofiler_attach_lib_register_entrypoint);
+#else
         *(void**) (&rocprofiler_attach_set_api_table_fn) =
             dlsym(attachlibrary, rocprofiler_attach_lib_register_entrypoint);
+#endif
 
         if(!rocprofiler_attach_set_api_table_fn)
         {
@@ -904,12 +1122,14 @@ rocprofiler_register_iterate_registration_info(
     {
         if(itr)
         {
-            auto _info = rocprofiler_register_registration_info_t{
-                .size             = sizeof(rocprofiler_register_registration_info_t),
-                .common_name      = itr->common_name,
-                .lib_version      = itr->lib_version,
-                .api_table_length = itr->api_tables.size()
-            };
+            // WINDOWS-DIVERGENCE: MSVC pre-C++20 does not accept C99 designated
+            // initializers in C++. Use per-field assignment to remain portable
+            // while preserving the same field values as the Linux original.
+            auto _info             = rocprofiler_register_registration_info_t{};
+            _info.size             = sizeof(rocprofiler_register_registration_info_t);
+            _info.common_name      = itr->common_name;
+            _info.lib_version      = itr->lib_version;
+            _info.api_table_length = itr->api_tables.size();
             // invoke callback and break if the caller does not return zero
             if(callback(&_info, data) != ROCP_REG_SUCCESS) break;
         }
@@ -986,7 +1206,7 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
               << tool_lib_path;
 
     // Set default tool library path if not provided
-    setenv("ROCPROFILER_REGISTER_TOOL_ATTACHED", "1", 1);
+    common::set_env("ROCPROFILER_REGISTER_TOOL_ATTACHED", "1", 1);
 
     LOG_IF(FATAL, tool_lib_path == nullptr)
         << "ROCP_TOOL_LIBRARIES is set, but tool_lib_path is NULL. "
@@ -997,7 +1217,7 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
     // load_environment_buffer(environment_buffer);
 
     // Use provided path. Must come after load_environment_buffer to ensure override
-    setenv("ROCP_TOOL_LIBRARIES", tool_lib_path, 1);
+    common::set_env("ROCP_TOOL_LIBRARIES", tool_lib_path, 1);
     LOG(INFO) << "Using provided tool library: " << tool_lib_path;
 
     // TODO: should save old environment variables if they get overwritten and restore

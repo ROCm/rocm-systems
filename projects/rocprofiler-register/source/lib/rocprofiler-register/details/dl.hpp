@@ -28,20 +28,20 @@
 #include <string_view>
 #include <vector>
 
-#include <dlfcn.h>
-#include <sys/types.h>
-#include <unistd.h>
-
 namespace rocprofiler_register
 {
 namespace binary
 {
+// open_modes_vec_t is a vestigial Linux concept (vector of dlopen flags)
+// preserved here so the get_linked_path overload signature stays stable for
+// callers. The platform::loader implementation does not consult these flags
+// on Windows (PE/COFF has no RTLD_LAZY/RTLD_NOLOAD analogue).
 using open_modes_vec_t = std::vector<int>;
 
 struct address_range
 {
-    uintptr_t start = 0;
-    uintptr_t last  = 0;
+    std::uintptr_t start = 0;
+    std::uintptr_t last  = 0;
 };
 
 struct segment_address_ranges
@@ -50,11 +50,21 @@ struct segment_address_ranges
     std::vector<address_range> ranges   = {};
 };
 
+// Enumerate the address ranges of every module loaded into this process.
+// Linux: parses /proc/self/maps. Windows: EnumProcessModulesEx +
+// GetModuleInformation. Each returned segment has filepath set and one or
+// more ranges (Linux: one per ELF segment; Windows: one covering SizeOfImage).
 std::vector<segment_address_ranges>
-get_segment_addresses(pid_t _pid = getpid());
+get_segment_addresses();
 
-// helper function for translating generic lib name to resolved path
+// Translate a generic library name to its absolute filesystem path, if
+// loadable. Linux: dlopen(name, RTLD_LAZY | RTLD_NOLOAD) then dlinfo. Windows:
+// GetModuleHandleW(name) (preferred) then a transient LoadLibraryW(name) +
+// GetModuleFileNameW + FreeLibrary fallback. Returns nullopt if the library
+// cannot be located. The open_modes argument is preserved for source
+// compatibility with prior Linux code; it is unused on Windows.
 std::optional<std::string>
 get_linked_path(std::string_view, open_modes_vec_t&& = {});
+
 }  // namespace binary
 }  // namespace rocprofiler_register

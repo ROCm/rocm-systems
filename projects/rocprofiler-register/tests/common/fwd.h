@@ -22,20 +22,42 @@
 
 #pragma once
 
-#include <dlfcn.h>
+#if !defined(_WIN32)
+#    include <dlfcn.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if defined(ROCP_REG_TEST_WEAK) && ROCP_REG_TEST_WEAK > 0
-#    pragma weak hip_init
-#    pragma weak hsa_init
-#    pragma weak roctxRangePush
-#    pragma weak roctxRangePop
-#    pragma weak ncclGetVersion
-#    pragma weak rocDecCreateDecoder
-#    pragma weak rocJpegStreamCreate
+// WINDOWS-DIVERGENCE: PE/COFF has no equivalent of #pragma weak. The "weak"
+// test scenario on Windows is emulated at run-time by always going through
+// LoadLibrary/GetProcAddress (see fwd.hpp) instead of relying on the linker
+// to leave the import unresolved. Suppress the weak pragmas on MSVC/clang-cl.
+#if !defined(_WIN32)
+#    if defined(ROCP_REG_TEST_WEAK) && ROCP_REG_TEST_WEAK > 0
+#        pragma weak hip_init
+#        pragma weak hsa_init
+#        pragma weak roctxRangePush
+#        pragma weak roctxRangePop
+#        pragma weak ncclGetVersion
+#        pragma weak rocDecCreateDecoder
+#        pragma weak rocJpegStreamCreate
+#    endif
+#endif
+
+// WINDOWS-DIVERGENCE: in weak mode on Linux, taking the address of a
+// `#pragma weak` symbol yields nullptr when the import is unresolved (which
+// is what triggers the LoadLibrary fallback in fwd.hpp). On Windows there
+// are no weak symbols, so taking the address of an undefined extern is a
+// link error. ROCP_REG_TEST_WEAK_FN(name) expands to (nullptr) on Windows
+// in weak mode -- forcing the LoadLibrary path -- and to the symbol name
+// itself on Linux or in strong mode (preserving the resolved-at-link
+// short-circuit).
+#if defined(_WIN32) && defined(ROCP_REG_TEST_WEAK) && ROCP_REG_TEST_WEAK > 0
+#    define ROCP_REG_TEST_WEAK_FN(name) (nullptr)
+#else
+#    define ROCP_REG_TEST_WEAK_FN(name) (name)
 #endif
 
 extern void

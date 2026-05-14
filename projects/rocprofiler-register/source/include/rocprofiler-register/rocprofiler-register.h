@@ -104,7 +104,7 @@ typedef enum rocprofiler_register_error_code_t  // NOLINT(performance-enum-size)
 /// @brief primary function call that needs to be performed when the API table of the
 /// library is initialized.
 ///
-rocprofiler_register_error_code_t
+ROCPROFILER_REGISTER_EXPORT_DECL rocprofiler_register_error_code_t
 rocprofiler_register_library_api_table(
     const char*                                 lib_name,
     rocprofiler_register_import_func_t          import_func,
@@ -114,8 +114,8 @@ rocprofiler_register_library_api_table(
     rocprofiler_register_library_indentifier_t* register_id)
     ROCPROFILER_REGISTER_ATTRIBUTE(nonnull(4, 6)) ROCPROFILER_REGISTER_PUBLIC_API;
 
-const char* rocprofiler_register_error_string(rocprofiler_register_error_code_t)
-    ROCPROFILER_REGISTER_PUBLIC_API;
+ROCPROFILER_REGISTER_EXPORT_DECL const char* rocprofiler_register_error_string(
+    rocprofiler_register_error_code_t) ROCPROFILER_REGISTER_PUBLIC_API;
 
 /// @brief Struct containing the information about the libraries which have registered
 /// with rocprofiler-register. @see rocprofiler_register_iterate_registration_info
@@ -155,7 +155,7 @@ typedef int (*rocprofiler_register_registration_info_cb_t)(
  * @return ::rocprofiler_register_error_code_t
  * @retval ::ROCP_REG_SUCCESS Always returned
  */
-rocprofiler_register_error_code_t
+ROCPROFILER_REGISTER_EXPORT_DECL rocprofiler_register_error_code_t
 rocprofiler_register_iterate_registration_info(
     rocprofiler_register_registration_info_cb_t callback,
     void*                                       data)
@@ -211,6 +211,19 @@ rocprofiler_register_iterate_registration_info(
 #define ROCPROFILER_REGISTER_IMPORT_FUNC(NAME)                                           \
     ROCPROFILER_REGISTER_PP_COMBINE(rocprofiler_register_import_, NAME)
 
+/// @def ROCPROFILER_REGISTER_IMPORT_FUNC_EXPORT
+/// @brief Storage-class decoration for the import-function symbol defined by
+/// ROCPROFILER_REGISTER_DEFINE_IMPORT. The defining library must export this
+/// symbol so rocprofiler-register can resolve it at runtime. On Linux this is
+/// realised via the ROCPROFILER_REGISTER_ATTRIBUTE(visibility("default"))
+/// suffix; on Windows we need a __declspec(dllexport) prefix because the
+/// consumer (e.g. HIP) is the producer of this symbol.
+#if defined(_WIN32)
+#    define ROCPROFILER_REGISTER_IMPORT_FUNC_EXPORT __declspec(dllexport)
+#else
+#    define ROCPROFILER_REGISTER_IMPORT_FUNC_EXPORT
+#endif
+
 /// @def ROCPROFILER_REGISTER_DEFINE_IMPORT(NAME, VERSION)
 /// @param[in] NAME the unquoted string identifier for the library, e.g. hip
 /// @brief Helper macro for declaring a visible import symbol for rocprofiler-register
@@ -219,15 +232,17 @@ rocprofiler_register_iterate_registration_info(
 #ifdef __cplusplus
 #    define ROCPROFILER_REGISTER_DEFINE_IMPORT(NAME, VERSION)                            \
         extern "C" {                                                                     \
-        uint32_t ROCPROFILER_REGISTER_IMPORT_FUNC(NAME)()                                \
-            ROCPROFILER_REGISTER_ATTRIBUTE(visibility("default"));                       \
+        ROCPROFILER_REGISTER_IMPORT_FUNC_EXPORT uint32_t                                 \
+            ROCPROFILER_REGISTER_IMPORT_FUNC(NAME)()                                     \
+                ROCPROFILER_REGISTER_ATTRIBUTE(visibility("default"));                   \
                                                                                          \
         uint32_t ROCPROFILER_REGISTER_IMPORT_FUNC(NAME)() { return VERSION; }            \
         }
 #else
 #    define ROCPROFILER_REGISTER_DEFINE_IMPORT(NAME, VERSION)                            \
-        uint32_t ROCPROFILER_REGISTER_IMPORT_FUNC(NAME)(void)                            \
-            ROCPROFILER_REGISTER_ATTRIBUTE(visibility("default"));                       \
+        ROCPROFILER_REGISTER_IMPORT_FUNC_EXPORT uint32_t                                 \
+            ROCPROFILER_REGISTER_IMPORT_FUNC(NAME)(void)                                 \
+                ROCPROFILER_REGISTER_ATTRIBUTE(visibility("default"));                   \
                                                                                          \
         uint32_t ROCPROFILER_REGISTER_IMPORT_FUNC(NAME)(void) { return VERSION; }
 #endif

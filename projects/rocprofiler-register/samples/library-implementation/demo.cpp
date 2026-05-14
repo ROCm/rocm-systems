@@ -35,6 +35,19 @@
 
 ROCPROFILER_REGISTER_DEFINE_IMPORT(hip, ROCP_REG_VERSION)
 
+#if defined(_WIN32)
+// WINDOWS-DIVERGENCE: PE/COFF DLLs require all referenced externals to be
+// resolved at link time, unlike ELF shared objects which permit unresolved
+// symbols. The sample's hip_init() is a "fake hip function" whose address is
+// only ever stored in the demo HipApiTable -- it is never invoked. Provide a
+// trivial stub here so the sample DLL links on MSVC. On Linux the symbol
+// remains undefined to mirror the real-world case where the actual HIP
+// runtime would supply hip_init at load time.
+extern "C" void
+hip_init(void)
+{}
+#endif
+
 namespace hip
 {
 namespace

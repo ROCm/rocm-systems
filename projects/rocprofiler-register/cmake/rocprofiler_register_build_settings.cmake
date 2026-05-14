@@ -22,41 +22,54 @@ endif()
 # ----------------------------------------------------------------------------------------#
 # dynamic linking and runtime libraries
 #
-if(CMAKE_DL_LIBS AND NOT "${CMAKE_DL_LIBS}" STREQUAL "dl")
-    # if cmake provides dl library, use that
-    set(dl_LIBRARY
-        ${CMAKE_DL_LIBS}
-        CACHE FILEPATH "dynamic linking system library")
-endif()
-
-foreach(_TYPE dl rt)
-    if(NOT ${_TYPE}_LIBRARY)
-        find_library(${_TYPE}_LIBRARY NAMES ${_TYPE})
-        find_package_handle_standard_args(${_TYPE}-library REQUIRED_VARS ${_TYPE}_LIBRARY)
-        if(${_TYPE}-library_FOUND)
-            string(TOUPPER "${_TYPE}" _TYPE_UC)
-            rocprofiler_register_target_compile_definitions(
-                rocprofiler-register-${_TYPE}
-                INTERFACE ROCPROFILER_REGISTER_${_TYPE_UC}=1)
-            target_link_libraries(rocprofiler-register-${_TYPE}
-                                  INTERFACE ${${_TYPE}_LIBRARY})
-            if("${_TYPE}" STREQUAL "dl" AND NOT ROCPROFILER_REGISTER_ENABLE_CLANG_TIDY)
-                # This instructs the linker to add all symbols, not only used ones, to the
-                # dynamic symbol table. This option is needed for some uses of dlopen or
-                # to allow obtaining backtraces from within a program.
-                rocprofiler_register_target_compile_options(
-                    rocprofiler-register-${_TYPE}
-                    LANGUAGES C CXX
-                    LINK_LANGUAGES C CXX
-                    INTERFACE "-rdynamic")
-            endif()
-        else()
-            rocprofiler_register_target_compile_definitions(
-                rocprofiler-register-${_TYPE}
-                INTERFACE ROCPROFILER_REGISTER_${_TYPE_UC}=0)
-        endif()
+if(WIN32)
+    # WINDOWS-DIVERGENCE: dl/rt are POSIX system libraries with no Windows
+    # equivalent (the dynamic-loader functionality is in kernel32.dll, which
+    # is implicitly linked, and the realtime extensions are subsumed by the
+    # standard CRT). The platform abstraction in details/platform/loader_win.cpp
+    # links psapi directly via target_link_libraries; no foreach probing here.
+    rocprofiler_register_target_compile_definitions(
+        rocprofiler-register-dl INTERFACE ROCPROFILER_REGISTER_DL=0)
+    rocprofiler_register_target_compile_definitions(
+        rocprofiler-register-rt INTERFACE ROCPROFILER_REGISTER_RT=0)
+else()
+    if(CMAKE_DL_LIBS AND NOT "${CMAKE_DL_LIBS}" STREQUAL "dl")
+        # if cmake provides dl library, use that
+        set(dl_LIBRARY
+            ${CMAKE_DL_LIBS}
+            CACHE FILEPATH "dynamic linking system library")
     endif()
-endforeach()
+
+    foreach(_TYPE dl rt)
+        if(NOT ${_TYPE}_LIBRARY)
+            find_library(${_TYPE}_LIBRARY NAMES ${_TYPE})
+            find_package_handle_standard_args(${_TYPE}-library REQUIRED_VARS
+                                              ${_TYPE}_LIBRARY)
+            if(${_TYPE}-library_FOUND)
+                string(TOUPPER "${_TYPE}" _TYPE_UC)
+                rocprofiler_register_target_compile_definitions(
+                    rocprofiler-register-${_TYPE}
+                    INTERFACE ROCPROFILER_REGISTER_${_TYPE_UC}=1)
+                target_link_libraries(rocprofiler-register-${_TYPE}
+                                      INTERFACE ${${_TYPE}_LIBRARY})
+                if("${_TYPE}" STREQUAL "dl" AND NOT ROCPROFILER_REGISTER_ENABLE_CLANG_TIDY)
+                    # This instructs the linker to add all symbols, not only used ones, to the
+                    # dynamic symbol table. This option is needed for some uses of dlopen or
+                    # to allow obtaining backtraces from within a program.
+                    rocprofiler_register_target_compile_options(
+                        rocprofiler-register-${_TYPE}
+                        LANGUAGES C CXX
+                        LINK_LANGUAGES C CXX
+                        INTERFACE "-rdynamic")
+                endif()
+            else()
+                rocprofiler_register_target_compile_definitions(
+                    rocprofiler-register-${_TYPE}
+                    INTERFACE ROCPROFILER_REGISTER_${_TYPE_UC}=0)
+            endif()
+        endif()
+    endforeach()
+endif()
 
 target_link_libraries(rocprofiler-register-build-flags INTERFACE rocprofiler-register::dl)
 
@@ -64,32 +77,56 @@ target_link_libraries(rocprofiler-register-build-flags INTERFACE rocprofiler-reg
 # set the compiler flags
 #
 
-set(_WARN_STACK_USAGE)
-if(NOT ROCPROFILER_REGISTER_ENABLE_CLANG_TIDY)
-    set(_WARN_STACK_USAGE "-Wstack-usage=8192") # 2 KB
+if(MSVC)
+    # WINDOWS-DIVERGENCE: MSVC / clang-cl take wholly different flag syntax
+    # from GCC/clang. The GCC-style flags below (-W, -Wall, -fstack-*,
+    # -Wstack-usage=, -faligned-new, -Werror, -Wdouble-promotion, -Wshadow,
+    # -Wextra) are filtered out by check_{c,cxx}_compiler_flag inside
+    # rocprofiler_register_target_compile_options on MSVC, but spending
+    # a full configure cycle probing each one is wasteful. Skip the GCC
+    # block entirely on MSVC and apply the documented MSVC equivalents
+    # instead. Plan §Phase-0/Phase-10.
+    rocprofiler_register_target_compile_options(
+        rocprofiler-register-build-flags
+        LANGUAGES C CXX
+        INTERFACE "/W4" "/permissive-" "/Zc:preprocessor" "/EHsc" "/utf-8"
+                  "/wd4127" # conditional expression is constant (templated code)
+                  "/wd4458" # declaration hides class member (false positive vs. struct ctor args)
+        )
+
+    # /WX is the MSVC equivalent of -Werror; only enable in developer mode.
+    rocprofiler_register_target_compile_options(
+        rocprofiler-register-developer-flags
+        LANGUAGES C CXX
+        INTERFACE "/WX")
+else()
+    set(_WARN_STACK_USAGE)
+    if(NOT ROCPROFILER_REGISTER_ENABLE_CLANG_TIDY)
+        set(_WARN_STACK_USAGE "-Wstack-usage=8192") # 2 KB
+    endif()
+
+    rocprofiler_register_target_compile_options(
+        rocprofiler-register-build-flags
+        INTERFACE "-W" "-Wall" "-Wno-unknown-pragmas" "-fstack-protector-strong"
+                  "-Wstack-protector" ${_WARN_STACK_USAGE})
+
+    # ----------------------------------------------------------------------------------------#
+    # debug-safe optimizations
+    #
+    rocprofiler_register_target_compile_options(
+        rocprofiler-register-build-flags
+        LANGUAGES CXX
+        INTERFACE "-faligned-new")
+
+    # ----------------------------------------------------------------------------------------#
+    # developer build flags
+    #
+    rocprofiler_register_target_compile_options(
+        rocprofiler-register-developer-flags
+        LANGUAGES C CXX
+        INTERFACE "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra"
+                  "-Wno-deprecated-declarations")
 endif()
-
-rocprofiler_register_target_compile_options(
-    rocprofiler-register-build-flags
-    INTERFACE "-W" "-Wall" "-Wno-unknown-pragmas" "-fstack-protector-strong"
-              "-Wstack-protector" ${_WARN_STACK_USAGE})
-
-# ----------------------------------------------------------------------------------------#
-# debug-safe optimizations
-#
-rocprofiler_register_target_compile_options(
-    rocprofiler-register-build-flags
-    LANGUAGES CXX
-    INTERFACE "-faligned-new")
-
-# ----------------------------------------------------------------------------------------#
-# developer build flags
-#
-rocprofiler_register_target_compile_options(
-    rocprofiler-register-developer-flags
-    LANGUAGES C CXX
-    INTERFACE "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra"
-              "-Wno-deprecated-declarations")
 
 if(ROCPROFILER_REGISTER_BUILD_DEVELOPER)
     target_link_libraries(rocprofiler-register-build-flags

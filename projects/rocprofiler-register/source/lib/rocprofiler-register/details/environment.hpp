@@ -23,10 +23,15 @@
 #include <fmt/core.h>
 #include <glog/logging.h>
 
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <unistd.h>
+#endif
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -36,14 +41,41 @@ namespace rocprofiler_register
 {
 namespace common
 {
+// Platform-aware environment access. On Windows, getenv() reads the CRT's
+// snapshot of the process environment, which can desynchronise from the Win32
+// process environment if anything in-process called SetEnvironmentVariable*
+// directly. To stay correct in mixed-API hosts, the Windows path goes through
+// GetEnvironmentVariableW (with UTF-8 conversion). On Linux we keep getenv().
+//
+// Returns std::nullopt when the variable is not set; an empty string is a
+// valid value distinct from "not set".
+std::optional<std::string>
+read_env_string(std::string_view env_id);
+
+// Platform-aware setter. On Linux this is setenv(); on Windows, _putenv_s().
+// Returns 0 on success, non-zero on failure (matching POSIX setenv()).
+int
+write_env_string(std::string_view env_id, std::string_view value, bool overwrite);
+
+// Path-list separator: ':' on POSIX, ';' on Windows.
+constexpr char
+path_list_separator() noexcept
+{
+#if defined(_WIN32)
+    return ';';
+#else
+    return ':';
+#endif
+}
+
 namespace
 {
 inline std::string
 get_env_impl(std::string_view env_id, std::string_view _default)
 {
     if(env_id.empty()) return std::string{ _default };
-    char* env_var = ::std::getenv(env_id.data());
-    if(env_var) return std::string{ env_var };
+    auto value = read_env_string(env_id);
+    if(value) return *value;
     return std::string{ _default };
 }
 
@@ -57,19 +89,19 @@ inline int
 get_env_impl(std::string_view env_id, int _default)
 {
     if(env_id.empty()) return _default;
-    char* env_var = ::std::getenv(env_id.data());
-    if(env_var)
+    auto value = read_env_string(env_id);
+    if(value)
     {
         try
         {
-            return std::stoi(env_var);
+            return std::stoi(*value);
         } catch(std::exception& _e)
         {
             LOG(ERROR) << fmt::format(
                 "[rocprofiler_register][get_env] Exception thrown converting getenv({}) "
                 "= {} to integer :: {}. Using default value of {}",
                 env_id.data(),
-                env_var,
+                value->c_str(),
                 _e.what(),
                 _default);
         }
@@ -82,25 +114,25 @@ inline bool
 get_env_impl(std::string_view env_id, bool _default)
 {
     if(env_id.empty()) return _default;
-    char* env_var = ::std::getenv(env_id.data());
-    if(env_var)
+    auto value = read_env_string(env_id);
+    if(value)
     {
-        if(std::string_view{ env_var }.empty())
+        auto& env_var = *value;
+        if(env_var.empty())
         {
             throw std::runtime_error(std::string{ "No boolean value provided for " } +
                                      std::string{ env_id });
         }
 
-        if(std::string_view{ env_var }.find_first_not_of("0123456789") ==
-           std::string_view::npos)
+        if(env_var.find_first_not_of("0123456789") == std::string::npos)
         {
             return static_cast<bool>(std::stoi(env_var));
         }
 
-        for(size_t i = 0; i < strlen(env_var); ++i)
-            env_var[i] = tolower(env_var[i]);
+        for(size_t i = 0; i < env_var.size(); ++i)
+            env_var[i] = static_cast<char>(tolower(static_cast<unsigned char>(env_var[i])));
         for(const auto& itr : { "off", "false", "no", "n", "f", "0" })
-            if(strcmp(env_var, itr) == 0) return false;
+            if(env_var == itr) return false;
 
         return true;
     }
@@ -110,7 +142,7 @@ get_env_impl(std::string_view env_id, bool _default)
 inline int
 set_env_impl(std::string_view env_id, bool value, int overwrite)
 {
-    return ::setenv(env_id.data(), (value) ? "1" : "0", overwrite);
+    return write_env_string(env_id, (value) ? "1" : "0", overwrite != 0);
 }
 
 template <typename Tp>
@@ -119,7 +151,7 @@ set_env_impl(std::string_view env_id, Tp value, int overwrite)
 {
     auto str_value = std::stringstream{};
     str_value << value;
-    return ::setenv(env_id.data(), str_value.str().c_str(), overwrite);
+    return write_env_string(env_id, str_value.str(), overwrite != 0);
 }
 }  // namespace
 
@@ -157,7 +189,7 @@ struct env_config
         if(env_name.empty()) return -1;
         LOG(INFO) << fmt::format(
             "setenv({}, {}, {})", env_name.c_str(), env_value.c_str(), overwrite);
-        return setenv(env_name.c_str(), env_value.c_str(), overwrite);
+        return write_env_string(env_name, env_value, overwrite != 0);
     }
 };
 }  // namespace common

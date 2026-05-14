@@ -77,9 +77,18 @@ file(RELATIVE_PATH rocp_reg_bin2src_rel_path ${PROJECT_BINARY_DIR} ${PROJECT_SOU
 string(REPLACE "//" "/" rocp_reg_inc_rel_path
                "${rocp_reg_bin2src_rel_path}/source/include")
 
-execute_process(
-    COMMAND ${CMAKE_COMMAND} -E create_symlink ${rocp_reg_inc_rel_path}
-            ${PROJECT_BINARY_DIR}/include WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+if(WIN32)
+    # Windows symlinks require admin or Developer Mode; mirror the source include
+    # directory into the build tree via copy_directory instead.
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${PROJECT_SOURCE_DIR}/source/include ${PROJECT_BINARY_DIR}/include
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+else()
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E create_symlink ${rocp_reg_inc_rel_path}
+                ${PROJECT_BINARY_DIR}/include WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+endif()
 
 set(_BUILDTREE_EXPORT_DIR
     "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/rocprofiler-register")

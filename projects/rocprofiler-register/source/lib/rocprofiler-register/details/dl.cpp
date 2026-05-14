@@ -20,103 +20,64 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#define GNU_SOURCE 1
-
 #include "dl.hpp"
+
 #include "filesystem.hpp"
-#include "utility.hpp"
+#include "platform/loader.hpp"
 
-#include <fstream>
-#include <optional>
+#include <cstdint>
 #include <string>
-#include <string_view>
-
-#include <dlfcn.h>
-#include <elf.h>
-#include <fmt/core.h>
-#include <link.h>
-#include <sys/types.h>
-#include <unistd.h>
+#include <utility>
+#include <vector>
 
 namespace rocprofiler_register
 {
 namespace binary
 {
-namespace
-{
-const open_modes_vec_t default_link_open_modes = { (RTLD_LAZY | RTLD_NOLOAD) };
-}  // namespace
-
 std::vector<segment_address_ranges>
-get_segment_addresses(pid_t _pid)
+get_segment_addresses()
 {
-    auto _data  = std::vector<segment_address_ranges>{};
-    auto _fname = fmt::format("/{}/{}/{}", "proc", _pid, "maps");
-    auto ifs    = std::ifstream{ _fname };
-    if(!ifs)
+    auto modules = platform::get_segment_addresses();
+    auto out     = std::vector<segment_address_ranges>{};
+    out.reserve(modules.size());
+    for(auto& mod : modules)
     {
-        fprintf(stderr, "Failure opening %s\n", _fname.c_str());
-    }
-    else
-    {
-        auto _get_entry = [&_data](std::string_view _name) -> segment_address_ranges& {
-            for(auto& itr : _data)
-            {
-                if(itr.filepath == _name) return itr;
-            }
-            return _data.emplace_back(
-                segment_address_ranges{ .filepath = std::string{ _name } });
-        };
-
-        while(ifs)
+        auto entry     = segment_address_ranges{};
+        entry.filepath = std::move(mod.filepath);
+        entry.ranges.reserve(mod.ranges.size());
+        for(const auto& range : mod.ranges)
         {
-            std::string _line = {};
-            if(std::getline(ifs, _line) && !_line.empty())
-            {
-                auto _delim = utility::delimit(_line, " \t\n\r");
-                if(_delim.size() > 5 && fs::exists(fs::path{ _delim.back() }))
-                {
-                    auto& _entry       = _get_entry(_delim.back());
-                    auto  _addr        = utility::delimit(_delim.front(), "-");
-                    auto  load_address = std::stoull(_addr.front(), nullptr, 16);
-                    auto  last_address = std::stoull(_addr.back(), nullptr, 16);
-                    _entry.ranges.emplace_back(
-                        address_range{ load_address, last_address });
-                }
-            }
+            entry.ranges.emplace_back(address_range{ range.start, range.last });
         }
+        out.emplace_back(std::move(entry));
     }
-    return _data;
+    return out;
 }
 
 std::optional<std::string>
-get_linked_path(std::string_view _name, open_modes_vec_t&& _open_modes)
+get_linked_path(std::string_view name, open_modes_vec_t&& /*open_modes*/)
 {
-    if(_name.empty()) return fs::current_path().string();
+    if(name.empty()) return fs::current_path().string();
 
-    if(_open_modes.empty()) _open_modes = default_link_open_modes;
+    auto name_str = std::string{ name };
 
-    void* _handle = nullptr;
-    bool  _noload = false;
-    for(auto _mode : _open_modes)
+    // Prefer the already-loaded handle (no refcount bump); fall back to a
+    // transient open + close on Windows / a noload + lazy retry on Linux.
+    auto* handle = platform::module_open_already_loaded(name_str.c_str());
+    auto  opened = false;
+    if(handle == nullptr)
     {
-        _handle = dlopen(_name.data(), _mode);
-        _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-        if(_handle) break;
+        handle = platform::module_open(name_str.c_str());
+        opened = (handle != nullptr);
     }
 
-    if(_handle)
-    {
-        struct link_map* _link_map = nullptr;
-        dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
-        if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
-        {
-            return fs::absolute(fs::path{ _link_map->l_name }).string();
-        }
-        if(_noload == false) dlclose(_handle);
-    }
+    if(handle == nullptr) return std::nullopt;
 
-    return std::nullopt;
+    auto path = platform::module_path(handle);
+    if(opened) platform::module_close(handle);
+    if(path.empty()) return std::nullopt;
+    return path;
 }
+
 }  // namespace binary
 }  // namespace rocprofiler_register

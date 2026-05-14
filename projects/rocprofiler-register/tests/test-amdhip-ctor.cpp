@@ -21,7 +21,12 @@
 // THE SOFTWARE.
 
 
-#include <dlfcn.h>
+// WINDOWS-DIVERGENCE: <dlfcn.h> has no PE/COFF equivalent and is unused
+// directly by this translation unit -- the LoadLibrary/GetProcAddress
+// abstraction lives in common/fwd.hpp.
+#if !defined(_WIN32)
+#    include <dlfcn.h>
+#endif
 #include <cstdlib>
 #include <string>
 

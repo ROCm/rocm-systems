@@ -55,13 +55,19 @@ endforeach()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_library(stdcxxfs_LIBRARY NAMES stdc++fs)
-find_package_handle_standard_args(stdcxxfs-library REQUIRED_VARS stdcxxfs_LIBRARY)
-
-if(stdcxxfs_LIBRARY)
-    target_link_libraries(rocprofiler-register-stdcxxfs
-                          INTERFACE $<BUILD_INTERFACE:${stdcxxfs_LIBRARY}>)
+if(WIN32)
+    # WINDOWS-DIVERGENCE: stdc++fs is a libstdc++ helper that does not exist on
+    # MSVC; std::filesystem is part of the MSVC STL and needs no extra link.
+    # Leave the rocprofiler-register-stdcxxfs interface target empty on Windows.
 else()
-    target_link_libraries(rocprofiler-register-stdcxxfs
-                          INTERFACE $<BUILD_INTERFACE:stdc++fs>)
+    find_library(stdcxxfs_LIBRARY NAMES stdc++fs)
+    find_package_handle_standard_args(stdcxxfs-library REQUIRED_VARS stdcxxfs_LIBRARY)
+
+    if(stdcxxfs_LIBRARY)
+        target_link_libraries(rocprofiler-register-stdcxxfs
+                              INTERFACE $<BUILD_INTERFACE:${stdcxxfs_LIBRARY}>)
+    else()
+        target_link_libraries(rocprofiler-register-stdcxxfs
+                              INTERFACE $<BUILD_INTERFACE:stdc++fs>)
+    endif()
 endif()

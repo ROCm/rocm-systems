@@ -29,6 +29,18 @@
 #include <cstddef>
 #include <cstdint>
 
+// WINDOWS-DIVERGENCE: GCC's __attribute__((visibility("default"))) is not
+// understood by MSVC; the equivalent for symbols exported from a DLL is
+// __declspec(dllexport). The Linux side relies on default visibility being
+// off via -fvisibility=hidden so this attribute makes the symbol resolvable
+// via dlsym; on Windows GetProcAddress requires the symbol to be in the
+// DLL's export table, which __declspec(dllexport) accomplishes.
+#if defined(_WIN32)
+#    define ROCP_REG_TEST_MOCK_EXPORT __declspec(dllexport)
+#else
+#    define ROCP_REG_TEST_MOCK_EXPORT __attribute__((visibility("default")))
+#endif
+
 extern "C" {
 // fake rccl function
 typedef int ncclResult_t;
@@ -37,8 +49,8 @@ enum ncclDataType_t
 {
 };
 
-ncclResult_t
-ncclGetVersion(int* version) __attribute__((visibility("default")));
+ROCP_REG_TEST_MOCK_EXPORT ncclResult_t
+ncclGetVersion(int* version);
 }
 
 namespace rccl

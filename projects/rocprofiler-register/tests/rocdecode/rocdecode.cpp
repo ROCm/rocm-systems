@@ -36,9 +36,19 @@
 ROCPROFILER_REGISTER_DEFINE_IMPORT(rocdecode, ROCP_REG_VERSION)
 
 #ifndef ROCP_REG_FILE_NAME
+// WINDOWS-DIVERGENCE: __FILE__ uses '\\' separators on MSVC by default. Match
+// either separator so produced PASS_REGEX-able log lines render the bare
+// basename on both platforms.
+#    if defined(_WIN32)
+#        define ROCP_REG_FILE_NAME_SEP '\\'
+#    else
+#        define ROCP_REG_FILE_NAME_SEP '/'
+#    endif
 #    define ROCP_REG_FILE_NAME                                                           \
         ::std::string{ __FILE__ }                                                        \
-            .substr(::std::string_view{ __FILE__ }.find_last_of('/') + 1)                \
+            .substr(::std::string_view{ __FILE__ }.find_last_of(                         \
+                        ROCP_REG_FILE_NAME_SEP) +                                        \
+                    1)                                                                   \
             .c_str()
 #endif
 
@@ -158,8 +168,27 @@ get_rocdecode_api_table()
 void
 rocdecode_init()
 {
-    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
+    // WINDOWS-DIVERGENCE: MSVC's __FUNCTION__ produces 'namespace::name'
+    // for functions inside a namespace; GCC produces just the bare name. C99
+    // __func__ yields the unqualified identifier on both compilers, which
+    // keeps the Linux PASS_REGEX patterns matching unchanged on Windows.
+    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __func__);
 }
+
+#if defined(_WIN32)
+// WINDOWS-DIVERGENCE: rocdecode.hpp's initialize_rocdecode_api_table takes the
+// address of ::rocdecode::rocDecCreateDecoder. PE/COFF requires every
+// referenced symbol to be resolved at link time; ELF .so files permit it to
+// remain undefined. Provide a trivial definition on Windows so the DLL links.
+// The function pointer is only stored in the API table; no rocdecode tests
+// are registered, so behavior is unchanged.
+rocDecStatus
+rocDecCreateDecoder(rocDecDecoderHandle*, RocDecoderCreateInfo*)
+{
+    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __func__);
+    return rocDecStatus{};
+}
+#endif
 }  // namespace rocdecode
 
 extern "C" {

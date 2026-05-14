@@ -21,7 +21,10 @@
 // THE SOFTWARE.
 
 
-#include <dlfcn.h>
+// WINDOWS-DIVERGENCE: see test-amdhip-ctor.cpp -- header is unused here.
+#if !defined(_WIN32)
+#    include <dlfcn.h>
+#endif
 #include <string>
 
 #include "common/fwd.hpp"

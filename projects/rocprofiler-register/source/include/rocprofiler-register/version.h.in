@@ -47,29 +47,87 @@
     ((10000 * ROCPROFILER_REGISTER_VERSION_MAJOR) +                                      \
      (100 * ROCPROFILER_REGISTER_VERSION_MINOR) + ROCPROFILER_REGISTER_VERSION_PATCH)
 
-#define ROCPROFILER_REGISTER_ATTRIBUTE(...)   __attribute__((__VA_ARGS__))
+// On platforms that support GCC-style attributes, ROCPROFILER_REGISTER_ATTRIBUTE
+// expands to __attribute__((...)); on MSVC (which has no equivalent for most of
+// these hints), it expands to nothing. clang-cl defines both _MSC_VER and
+// __clang__; clang-cl supports __attribute__ syntax, so prefer it when available
+// via __has_attribute.
+#if defined(__GNUC__) || (defined(__clang__) && !defined(_MSC_VER))
+#    define ROCPROFILER_REGISTER_ATTRIBUTE(...) __attribute__((__VA_ARGS__))
+#elif defined(__clang__) && defined(_MSC_VER)
+// clang-cl: keep attribute syntax available for hot/cold/etc. when supported,
+// but do not emit visibility(...) attributes since PE/COFF uses dllexport.
+#    define ROCPROFILER_REGISTER_ATTRIBUTE(...) __attribute__((__VA_ARGS__))
+#else
+#    define ROCPROFILER_REGISTER_ATTRIBUTE(...)
+#endif
+
 #define ROCPROFILER_REGISTER_PP_COMBINE(X, Y) X##Y
 
-#if defined(rocprofiler_register_EXPORTS)
+// ROCPROFILER_REGISTER_EXPORT_DECL is the prefix storage-class macro used on
+// public function declarations. On Linux it is empty (visibility is supplied by
+// the suffix ROCPROFILER_REGISTER_PUBLIC_API attribute). On Windows it expands
+// to __declspec(dllexport) when building rocprofiler-register itself, and to
+// __declspec(dllimport) when consuming it. CMake automatically defines
+// rocprofiler_register_EXPORTS when building a shared library named
+// rocprofiler-register; ROCPROFILER_REGISTER_EXPORTS is an additional
+// explicitly-named knob set by the build for the same purpose.
+#if defined(_WIN32)
+#    if defined(ROCPROFILER_REGISTER_EXPORTS) || defined(rocprofiler_register_EXPORTS)
+#        define ROCPROFILER_REGISTER_EXPORT_DECL __declspec(dllexport)
+#    else
+#        define ROCPROFILER_REGISTER_EXPORT_DECL __declspec(dllimport)
+#    endif
+#else
+#    define ROCPROFILER_REGISTER_EXPORT_DECL
+#endif
+
+#if defined(rocprofiler_register_EXPORTS) || defined(ROCPROFILER_REGISTER_EXPORTS)
 // only defined in build tree
-#    define ROCPROFILER_REGISTER_VISIBILITY(MODE)                                        \
-        ROCPROFILER_REGISTER_ATTRIBUTE(visibility(MODE))
-#    define ROCPROFILER_REGISTER_PUBLIC_API   ROCPROFILER_REGISTER_VISIBILITY("default")
-#    define ROCPROFILER_REGISTER_HIDDEN_API   ROCPROFILER_REGISTER_VISIBILITY("hidden")
-#    define ROCPROFILER_REGISTER_INTERNAL_API ROCPROFILER_REGISTER_VISIBILITY("internal")
-#    define ROCPROFILER_REGISTER_INLINE                                                  \
-        ROCPROFILER_REGISTER_ATTRIBUTE(always_inline) inline
-#    define ROCPROFILER_REGISTER_NOINLINE ROCPROFILER_REGISTER_ATTRIBUTE(noinline)
-#    define ROCPROFILER_REGISTER_HOT      ROCPROFILER_REGISTER_ATTRIBUTE(hot)
-#    define ROCPROFILER_REGISTER_COLD     ROCPROFILER_REGISTER_ATTRIBUTE(cold)
-#    define ROCPROFILER_REGISTER_CONST    ROCPROFILER_REGISTER_ATTRIBUTE(const)
-#    define ROCPROFILER_REGISTER_PURE     ROCPROFILER_REGISTER_ATTRIBUTE(pure)
-#    define ROCPROFILER_REGISTER_WEAK     ROCPROFILER_REGISTER_ATTRIBUTE(weak)
-#    define ROCPROFILER_REGISTER_PACKED   ROCPROFILER_REGISTER_ATTRIBUTE(__packed__)
-#    define ROCPROFILER_REGISTER_PACKED_ALIGN(VAL)                                       \
-        ROCPROFILER_REGISTER_PACKED ROCPROFILER_REGISTER_ATTRIBUTE(__aligned__(VAL))
-#    define ROCPROFILER_REGISTER_LIKELY(...)   __builtin_expect((__VA_ARGS__), 1)
-#    define ROCPROFILER_REGISTER_UNLIKELY(...) __builtin_expect((__VA_ARGS__), 0)
+#    if defined(_WIN32)
+#        define ROCPROFILER_REGISTER_VISIBILITY(MODE)
+#        define ROCPROFILER_REGISTER_PUBLIC_API
+#        define ROCPROFILER_REGISTER_HIDDEN_API
+#        define ROCPROFILER_REGISTER_INTERNAL_API
+#    else
+#        define ROCPROFILER_REGISTER_VISIBILITY(MODE)                                    \
+            ROCPROFILER_REGISTER_ATTRIBUTE(visibility(MODE))
+#        define ROCPROFILER_REGISTER_PUBLIC_API                                          \
+            ROCPROFILER_REGISTER_VISIBILITY("default")
+#        define ROCPROFILER_REGISTER_HIDDEN_API                                          \
+            ROCPROFILER_REGISTER_VISIBILITY("hidden")
+#        define ROCPROFILER_REGISTER_INTERNAL_API                                        \
+            ROCPROFILER_REGISTER_VISIBILITY("internal")
+#    endif
+
+#    if defined(_MSC_VER) && !defined(__clang__)
+// MSVC has no GCC-style hot/cold/packed; provide reasonable substitutes.
+#        define ROCPROFILER_REGISTER_INLINE             inline
+#        define ROCPROFILER_REGISTER_NOINLINE           __declspec(noinline)
+#        define ROCPROFILER_REGISTER_HOT
+#        define ROCPROFILER_REGISTER_COLD
+#        define ROCPROFILER_REGISTER_CONST
+#        define ROCPROFILER_REGISTER_PURE
+#        define ROCPROFILER_REGISTER_WEAK
+#        define ROCPROFILER_REGISTER_PACKED
+#        define ROCPROFILER_REGISTER_PACKED_ALIGN(VAL)  __declspec(align(VAL))
+#        define ROCPROFILER_REGISTER_LIKELY(...)        (__VA_ARGS__)
+#        define ROCPROFILER_REGISTER_UNLIKELY(...)      (__VA_ARGS__)
+#    else
+#        define ROCPROFILER_REGISTER_INLINE                                              \
+            ROCPROFILER_REGISTER_ATTRIBUTE(always_inline) inline
+#        define ROCPROFILER_REGISTER_NOINLINE ROCPROFILER_REGISTER_ATTRIBUTE(noinline)
+#        define ROCPROFILER_REGISTER_HOT      ROCPROFILER_REGISTER_ATTRIBUTE(hot)
+#        define ROCPROFILER_REGISTER_COLD     ROCPROFILER_REGISTER_ATTRIBUTE(cold)
+#        define ROCPROFILER_REGISTER_CONST    ROCPROFILER_REGISTER_ATTRIBUTE(const)
+#        define ROCPROFILER_REGISTER_PURE     ROCPROFILER_REGISTER_ATTRIBUTE(pure)
+#        define ROCPROFILER_REGISTER_WEAK     ROCPROFILER_REGISTER_ATTRIBUTE(weak)
+#        define ROCPROFILER_REGISTER_PACKED   ROCPROFILER_REGISTER_ATTRIBUTE(__packed__)
+#        define ROCPROFILER_REGISTER_PACKED_ALIGN(VAL)                                   \
+            ROCPROFILER_REGISTER_PACKED ROCPROFILER_REGISTER_ATTRIBUTE(__aligned__(VAL))
+#        define ROCPROFILER_REGISTER_LIKELY(...)   __builtin_expect((__VA_ARGS__), 1)
+#        define ROCPROFILER_REGISTER_UNLIKELY(...) __builtin_expect((__VA_ARGS__), 0)
+#    endif
 
 #    if defined(ROCPROFILER_REGISTER_CI) && ROCPROFILER_REGISTER_CI > 0
 #        if defined(NDEBUG)

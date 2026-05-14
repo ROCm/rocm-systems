@@ -3,7 +3,16 @@
 #
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-set(CMAKE_CXX_FLAGS_INIT "-W -Wall -Wextra")
+# WINDOWS-DIVERGENCE: -W -Wall -Wextra are GCC/Clang flags. MSVC's cl.exe
+# rejects them with D9002 ("ignoring unknown option"); clang-cl accepts them
+# silently but only as a partial fallback. CMAKE_CXX_FLAGS_INIT is consulted
+# before the CXX language is enabled, so it must be set without using the
+# CXX_COMPILER_ID generator-expression machinery -- gate on platform here and
+# defer the MSVC equivalent (/W4) to per-target compile options if/when it
+# becomes desired.
+if(NOT WIN32)
+    set(CMAKE_CXX_FLAGS_INIT "-W -Wall -Wextra")
+endif()
 
 project(rocprofiler-register-library-implementation LANGUAGES C CXX)
 

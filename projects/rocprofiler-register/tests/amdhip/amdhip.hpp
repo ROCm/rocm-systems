@@ -28,10 +28,22 @@
 
 #include <cstdint>
 
+// WINDOWS-DIVERGENCE: GCC's __attribute__((visibility("default"))) is not
+// understood by MSVC; the equivalent for symbols exported from a DLL is
+// __declspec(dllexport). The Linux side relies on default visibility being
+// off via -fvisibility=hidden so this attribute makes the symbol resolvable
+// via dlsym; on Windows GetProcAddress requires the symbol to be in the
+// DLL's export table, which __declspec(dllexport) accomplishes.
+#if defined(_WIN32)
+#    define ROCP_REG_TEST_MOCK_EXPORT __declspec(dllexport)
+#else
+#    define ROCP_REG_TEST_MOCK_EXPORT __attribute__((visibility("default")))
+#endif
+
 extern "C" {
 // fake hip function
-void
-hip_init(void) __attribute__((visibility("default")));
+ROCP_REG_TEST_MOCK_EXPORT void
+hip_init(void);
 }
 
 namespace hip

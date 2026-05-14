@@ -24,6 +24,26 @@
 #include "environment.hpp"
 #include "filesystem.hpp"
 
+#if defined(_WIN32)
+// WINDOWS-DIVERGENCE: <windows.h> drags in <wingdi.h>, which defines an
+// ERROR macro that collides with google::ERROR (glog log severity). NOGDI
+// suppresses GDI symbols (including the ERROR macro); WIN32_LEAN_AND_MEAN
+// trims the rest of the unused Win32 surface. Both must be defined before
+// any header that pulls in <windows.h>.
+#    ifndef WIN32_LEAN_AND_MEAN
+#        define WIN32_LEAN_AND_MEAN
+#    endif
+#    ifndef NOGDI
+#        define NOGDI
+#    endif
+#    include <windows.h>
+// Defensive guard: if any transitive include slipped in <wingdi.h> before
+// our NOGDI took effect, drop the ERROR macro so glog severities resolve.
+#    ifdef ERROR
+#        undef ERROR
+#    endif
+#endif
+
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <glog/logging.h>
@@ -34,8 +54,10 @@
 #include <string_view>
 #include <unordered_map>
 
-#include <sys/types.h>
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <sys/types.h>
+#    include <unistd.h>
+#endif
 
 namespace rocprofiler_register
 {
@@ -48,7 +70,7 @@ struct logging_config
     bool        logtostderr      = true;
     bool        alsologtostderr  = false;
     bool        logdir_gitignore = false;  // add .gitignore to logdir
-    int32_t     loglevel         = google::WARNING;
+    int32_t     loglevel         = google::GLOG_WARNING;
     std::string vlog_modules     = {};
     std::string name             = {};
     std::string logdir           = {};
@@ -118,6 +140,43 @@ init_logging(std::string_view env_prefix, logging_config cfg = logging_config{})
     static auto _once = std::once_flag{};
     std::call_once(_once, [env_prefix, &cfg]() {
         auto get_argv0 = []() {
+#if defined(_WIN32)
+            // WINDOWS-DIVERGENCE: no /proc/self/cmdline. The closest analogue
+            // for argv[0] (executable path) is GetModuleFileNameW(NULL,...);
+            // use the wide variant + UTF-8 conversion so non-ASCII install
+            // paths survive (UTF-8 internal storage is the project rule).
+            auto wbuf = std::wstring(MAX_PATH, L'\0');
+            auto len  = ::GetModuleFileNameW(
+                nullptr, wbuf.data(), static_cast<DWORD>(wbuf.size()));
+            // Grow buffer if the path was truncated (long-path support).
+            while(len == wbuf.size() &&
+                  ::GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+            {
+                wbuf.resize(wbuf.size() * 2);
+                len = ::GetModuleFileNameW(
+                    nullptr, wbuf.data(), static_cast<DWORD>(wbuf.size()));
+            }
+            if(len == 0) return std::string{};
+            auto sz = ::WideCharToMultiByte(CP_UTF8,
+                                            0,
+                                            wbuf.data(),
+                                            static_cast<int>(len),
+                                            nullptr,
+                                            0,
+                                            nullptr,
+                                            nullptr);
+            if(sz <= 0) return std::string{};
+            auto sarg = std::string(static_cast<std::size_t>(sz), '\0');
+            ::WideCharToMultiByte(CP_UTF8,
+                                  0,
+                                  wbuf.data(),
+                                  static_cast<int>(len),
+                                  sarg.data(),
+                                  sz,
+                                  nullptr,
+                                  nullptr);
+            return sarg;
+#else
             auto ifs  = std::ifstream{ "/proc/self/cmdline" };
             auto sarg = std::string{};
             while(ifs && !ifs.eof())
@@ -126,6 +185,7 @@ init_logging(std::string_view env_prefix, logging_config cfg = logging_config{})
                 if(!sarg.empty()) break;
             }
             return sarg;
+#endif
         };
 
         auto to_lower = [](std::string val) {
@@ -135,11 +195,11 @@ init_logging(std::string_view env_prefix, logging_config cfg = logging_config{})
         };
 
         const auto env_opts = std::unordered_map<std::string_view, log_level_info>{
-            { "trace", { google::INFO, ROCP_REG_LOG_LEVEL_TRACE } },
-            { "info", { google::INFO, ROCP_REG_LOG_LEVEL_INFO } },
-            { "warning", { google::WARNING, ROCP_REG_LOG_LEVEL_WARNING } },
-            { "error", { google::ERROR, ROCP_REG_LOG_LEVEL_ERROR } },
-            { "fatal", { google::FATAL, ROCP_REG_LOG_LEVEL_NONE } }
+            { "trace", { google::GLOG_INFO, ROCP_REG_LOG_LEVEL_TRACE } },
+            { "info", { google::GLOG_INFO, ROCP_REG_LOG_LEVEL_INFO } },
+            { "warning", { google::GLOG_WARNING, ROCP_REG_LOG_LEVEL_WARNING } },
+            { "error", { google::GLOG_ERROR, ROCP_REG_LOG_LEVEL_ERROR } },
+            { "fatal", { google::GLOG_FATAL, ROCP_REG_LOG_LEVEL_NONE } }
         };
 
         auto supported = std::vector<std::string>{};
@@ -165,7 +225,7 @@ init_logging(std::string_view env_prefix, logging_config cfg = logging_config{})
             auto val = std::stol(loglvl);
             if(val < 0)
             {
-                loglvl_v = google::FATAL;
+                loglvl_v = google::GLOG_FATAL;
             }
             else
             {
