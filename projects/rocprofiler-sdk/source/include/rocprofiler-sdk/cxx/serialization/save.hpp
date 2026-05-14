@@ -492,7 +492,7 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_rccl_api_data_t data)
 
 template <typename ArchiveT>
 void
-save(ArchiveT& ar, rocprofiler_rocshmem_api_retval_t /*data*/)
+save(ArchiveT& /*ar*/, rocprofiler_rocshmem_api_retval_t /*data*/)
 {
     // every traced rocSHMEM API returns void; nothing to record
 }
