@@ -475,7 +475,7 @@ def test_validate_dual_issue_metrics_silent_below_peak():
 
 
 def test_validate_dual_issue_metrics_uses_peak_empirical_fallback():
-    """Peak (Empirical) column is preferred over Peak when both are absent."""
+    """Peak (Empirical) wins when present; falls back to Peak otherwise."""
     arch_config = _make_dual_issue_arch_config(
         "VALU FLOPs (F64)", peak_col="Peak (Empirical)"
     )
