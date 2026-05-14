@@ -120,6 +120,7 @@
 
 #include "core/inc/agent.h"
 #include "core/inc/amd_aql_queue.h"
+#include "core/inc/intercept_queue.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/queue.h"
 #include "lttng/rocm_trace_emit.h"
@@ -1652,23 +1653,51 @@ void on_queue_create(core::Queue* q) {
 void on_queue_destroy(core::Queue* q) {
   if (q == nullptr) return;
 
+  // Unwrap intercept queues. hsa_queue_destroy passes the user-facing
+  // Queue*, which for hsa_amd_queue_intercept_create is the upper
+  // InterceptQueue (a QueueWrapper). on_queue_create was called on the
+  // LOWER AqlQueue at GpuAgent::QueueCreate, so the lower queue is what's
+  // registered in g_all_queues, what holds the dispatch_log_active flag,
+  // and what owns the drainer worker. The InterceptQueue copies the
+  // lower's amd_queue_ via memcpy at construction (intercept_queue.h:71)
+  // so queue_id_of() returns the same id either way -- the
+  // g_all_queues.erase() below succeeds against the upper too -- but
+  // dispatch_log_active and the worker lifecycle live on the lower.
+  // Without this unwrap the dispatch_log_active check on the upper is
+  // always false, disable_dispatch_log_for_queue_locked is never called,
+  // the worker is never joined, no final drain happens, and FW continues
+  // writing into the buffer after ~AqlQueue (chained from
+  // ~InterceptQueue -> ~QueueWrapper -> unique_ptr<Queue>) frees it.
+  // Manifests as 30-35% record loss on hipGraph workloads where intercept
+  // queues are torn down each phase.
+  core::Queue* effective = q;
+  while (auto* wrapper = (core::InterceptQueue::IsType(effective)
+                              ? static_cast<core::QueueWrapper*>(effective)
+                              : nullptr)) {
+    if (!wrapper->wrapped) break;
+    effective = wrapper->wrapped.get();
+  }
+
   // Remove from g_all_queues BEFORE the disable sequence so the poller
   // can never observe a Queue* whose underlying core::Queue is being torn
   // down. Held across the disable so the poller's iterating thread is
   // forced to wait behind the mutex if it currently holds it.
   {
     std::lock_guard<std::mutex> lk(g_queue_registry_mu);
-    g_all_queues.erase(queue_id_of(q));
-    if (q->dispatch_log_active.load(std::memory_order_acquire)) {
-      disable_dispatch_log_for_queue_locked(q);
+    g_all_queues.erase(queue_id_of(effective));
+    if (effective->dispatch_log_active.load(std::memory_order_acquire)) {
+      disable_dispatch_log_for_queue_locked(effective);
     }
   }
 
-  // Drop the per-queue refcount entry. Safe to do unconditionally — if the
-  // queue never had an acquire, the lookup is just a miss.
+  // Drop the per-queue refcount entry on BOTH the wrapper handle (in
+  // case anyone keyed by it) and the effective lower queue. Safe to do
+  // unconditionally -- if the queue never had an acquire, the lookup is
+  // just a miss.
   {
     std::lock_guard<std::mutex> lk(g_profiling_refcounts_mu);
-    g_profiling_refcounts.erase(q);
+    g_profiling_refcounts.erase(effective);
+    if (effective != q) g_profiling_refcounts.erase(q);
   }
 }
 
