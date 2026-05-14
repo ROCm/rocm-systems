@@ -3388,28 +3388,23 @@ ncclResult_t ncclCommRevoke_impl(ncclComm_t comm, int revokeFlags) {
   ncclResult_t ret = ncclSuccess;
   struct ncclCommRevokeAsyncJob* job = NULL;
 
+  // For now only NCCL_REVOKE_DEFAULT (0) is supported
   if (revokeFlags != NCCL_REVOKE_DEFAULT) {
-    WARN("ncclCommRevoke: unsupported revokeFlags 0x%x (only NCCL_REVOKE_DEFAULT is supported)", revokeFlags);
+    return ncclInvalidArgument;
+  }
+  if (comm == NULL) {
+    return ncclInvalidArgument;
+  }
+  // Disallow revoke if destroy/finalize in progress
+  if (comm->destroyFlag || comm->finalizeCalled) {
+    return ncclInvalidArgument;
+  }
+  // Disallow revoke if revoke in progress
+  if (__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE)) {
     return ncclInvalidArgument;
   }
 
-  if (ncclGroupDepth > 0) {
-    WARN("ncclCommRevoke cannot be called inside a group. Please call ncclGroupEnd() first.");
-    return ncclInvalidUsage;
-  }
-
   NCCLCHECK(ncclGroupStartInternal());
-
-  if (comm == NULL) {
-    ret = ncclInvalidArgument;
-    goto fail;
-  }
-
-  if (comm->destroyFlag || comm->finalizeCalled || __atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE)) {
-    WARN("Comm %p is already in a state of destruction, finalization, or revocation", comm);
-    ret = ncclInvalidUsage;
-    goto fail;
-  }
 
   // Abort in-flight kernels so commRevokeAsync's stream sync cannot deadlock.
   // finalizeCalled blocks commDestroySync in commReclaim (revoke handles cleanup).

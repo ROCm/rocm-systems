@@ -385,9 +385,7 @@ TEST_F(RevokeMPITest, P2P_Revoke_Shrink_P2P)
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
-/**
- * Revoking the same communicator twice must be rejected with ncclInvalidUsage.
- */
+// Revoking the same communicator twice must be rejected with ncclInvalidArgument.
 TEST_F(RevokeMPITest, Revoke_DoubleRevoke_Rejected)
 {
     ASSERT_TRUE(validateTestPrerequisites(2,
@@ -406,7 +404,7 @@ TEST_F(RevokeMPITest, Revoke_DoubleRevoke_Rejected)
     MPI_Barrier(MPI_COMM_WORLD);
 
     ncclResult_t result = ncclCommRevoke(comm, NCCL_REVOKE_DEFAULT);
-    ASSERT_MPI_EQ(ncclInvalidUsage, result);
+    ASSERT_MPI_EQ(ncclInvalidArgument, result);
 }
 
 /**
@@ -424,29 +422,6 @@ TEST_F(RevokeMPITest, Revoke_NullComm_Rejected)
 TEST_F(RevokeMPITest, Revoke_BadFlags_Rejected)
 {
     ASSERT_MPI_EQ(ncclInvalidArgument, ncclCommRevoke(nullptr, /*revokeFlags=*/0x1));
-}
-
-/**
- * ncclCommRevoke called from inside an active group must be rejected with
- * ncclInvalidUsage; ncclGroupEnd should still close cleanly.
- */
-TEST_F(RevokeMPITest, Revoke_InsideGroup_Rejected)
-{
-    ASSERT_TRUE(validateTestPrerequisites(2,
-                                          kNoProcessLimit,
-                                          kNoPowerOfTwoRequired,
-                                          1,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes";
-
-    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
-
-    ncclComm_t comm = getActiveCommunicator();
-
-    ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
-    ncclResult_t result = ncclCommRevoke(comm, NCCL_REVOKE_DEFAULT);
-    ASSERT_MPI_EQ(ncclInvalidUsage, result);
-    ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
 }
 
 /**
