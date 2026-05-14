@@ -41,20 +41,6 @@ from amdisa.codegen.execute.vop3_modifiers import (
     vop3_dst_mod,
     vop3_dst_mod_f64,
 )
-from amdisa.codegen.execute.scalar import (
-    gen_scalar_unary,
-    gen_scalar_binop,
-    gen_scalar_bfe,
-    gen_scalar_cmp,
-    gen_scalar_cmpk,
-    gen_scalar_bitcmp,
-    gen_scalar_saveexec,
-)
-from amdisa.codegen.execute.vector_alu import (
-    gen_vector_unary,
-    gen_vector_binop,
-    gen_vector_ternary,
-)
 from amdisa.codegen.execute.vector_special import (
     gen_vector_mbcnt,
     gen_vector_mad_64_32,
@@ -789,33 +775,14 @@ class CodeGenerator:
             L.append('  }')
             return '\n'.join(L)
 
-        if cls == 'scalar_mov':
-            if dtype == 'b64':
-                L.append(f'  {dst_ops[0]}.write_scalar64(wf, {src_ops[0]}.read_scalar64(wf));')
-            else:
-                L.append(f'  {dst_ops[0]}.write_scalar(wf, {src_ops[0]}.read_scalar(wf));')
-            return '\n'.join(L)
+        # scalar_mov, scalar_cmov, scalar_cselect now handled by SemaAST.
 
         if cls == 'scalar_movk':
             L.append(f'  {dst_ops[0]}.write_scalar(wf, static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({src_ops[0]}.encoding_value_))));')
             return '\n'.join(L)
 
-        if cls == 'scalar_cmov':
-            if dtype == 'b64':
-                L.append(f'  if (wf.read_scc()) {dst_ops[0]}.write_scalar64(wf, {src_ops[0]}.read_scalar64(wf));')
-            else:
-                L.append(f'  if (wf.read_scc()) {dst_ops[0]}.write_scalar(wf, {src_ops[0]}.read_scalar(wf));')
-            return '\n'.join(L)
-
         if cls == 'scalar_cmovk':
             L.append(f'  if (wf.read_scc()) {dst_ops[0]}.write_scalar(wf, static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({src_ops[0]}.encoding_value_))));')
-            return '\n'.join(L)
-
-        if cls == 'scalar_cselect':
-            if dtype == 'b64':
-                L.append(f'  {dst_ops[0]}.write_scalar64(wf, wf.read_scc() ? {src_ops[0]}.read_scalar64(wf) : {src_ops[1]}.read_scalar64(wf));')
-            else:
-                L.append(f'  {dst_ops[0]}.write_scalar(wf, wf.read_scc() ? {src_ops[0]}.read_scalar(wf) : {src_ops[1]}.read_scalar(wf));')
             return '\n'.join(L)
 
         if cls == 'scalar_addk':
@@ -928,51 +895,6 @@ class CodeGenerator:
             L.append('  }')
             return '\n'.join(L)
 
-        if cls == 'vector_mov':
-            L.append('  uint64_t exec = wf.exec();')
-            L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-            L.append('    if (!(exec & (1ULL << lane))) continue;')
-            if dtype == 'b64' and is_vop3:
-                L.append(f'    double s = std::bit_cast<double>({src_ops[0]}.read_lane64(wf, lane));')
-                L.extend(vop3_src_mod('s', 0, has_abs))
-                L.extend(vop3_dst_mod_f64('s'))
-                L.append(f'    {dst_ops[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(s));')
-            elif dtype == 'b64':
-                L.append(f'    {dst_ops[0]}.write_lane64(wf, lane, {src_ops[0]}.read_lane64(wf, lane));')
-            elif is_vop3:
-                L.append(f'    float s = std::bit_cast<float>({src_ops[0]}.read_lane(wf, lane));')
-                L.extend(vop3_src_mod('s', 0, has_abs))
-                L.extend(vop3_dst_mod('s'))
-                L.append(f'    {dst_ops[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(s));')
-            else:
-                L.append(f'    {dst_ops[0]}.write_lane(wf, lane, {src_ops[0]}.read_lane(wf, lane));')
-            L.append('  }')
-            return '\n'.join(L)
-
-        if cls == 'vector_cndmask':
-            # v_cndmask_b32 is a pure bitwise select — no input/output
-            # modifiers on any GFX version.  The VOP3 encoding's abs/neg/
-            # omod bits overlap with src2 and must be ignored.
-            L.append('  uint64_t exec = wf.exec();')
-            if is_vop3:
-                L.append(f'  uint64_t cond = {src_ops[2]}.read_scalar64(wf);')
-            else:
-                L.append('  uint64_t cond = wf.vcc();')
-            L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-            L.append('    if (!(exec & (1ULL << lane))) continue;')
-            if is_vop3:
-                L.append(f'    uint32_t val = (cond & (1ULL << lane))')
-                L.append(f'        ? {src_ops[1]}.read_lane(wf, lane)')
-                L.append(f'        : {src_ops[0]}.read_lane(wf, lane);')
-                L.append(f'    {dst_ops[0]}.write_lane(wf, lane, val);')
-            else:
-                L.append(f'    uint32_t val = (cond & (1ULL << lane))')
-                L.append(f'        ? {src_ops[1]}.read_lane(wf, lane)')
-                L.append(f'        : {src_ops[0]}.read_lane(wf, lane);')
-                L.append(f'    {dst_ops[0]}.write_lane(wf, lane, val);')
-            L.append('  }')
-            return '\n'.join(L)
-
         if cls == 'vector_readfirstlane':
             L.append('  uint64_t exec = wf.exec();')
             L.append('  uint32_t val = 0;')
@@ -996,15 +918,7 @@ class CodeGenerator:
             L.append(f'  {dst_ops[0]}.write_lane(wf, lane, val);')
             return '\n'.join(L)
 
-        if cls == 'vector_swap':
-            L.append('  uint64_t exec = wf.exec();')
-            L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-            L.append('    if (!(exec & (1ULL << lane))) continue;')
-            L.append(f'    uint32_t tmp = {dst_ops[0]}.read_lane(wf, lane);')
-            L.append(f'    {dst_ops[0]}.write_lane(wf, lane, {src_ops[0]}.read_lane(wf, lane));')
-            L.append(f'    {src_ops[0]}.write_lane(wf, lane, tmp);')
-            L.append('  }')
-            return '\n'.join(L)
+        # vector_swap now handled by SemaAST.
 
         if cls == 'vector_fmamk':
             # D = S0 * K + S2, K is inline constant (second src operand)

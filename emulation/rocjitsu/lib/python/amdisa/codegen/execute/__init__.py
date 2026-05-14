@@ -74,15 +74,10 @@ DISPATCH: dict[str, Callable[[ExecuteContext], str]] = {}
 def _register_handlers() -> None:
     """Populate DISPATCH with handlers from the extracted modules."""
     from amdisa.codegen.execute.scalar import (
-        gen_scalar_unary, gen_scalar_binop, gen_scalar_cmp,
-        gen_scalar_cmpk, gen_scalar_bitcmp, gen_scalar_saveexec,
-    )
-    from amdisa.codegen.execute.vector_alu import (
-        gen_vector_unary, gen_vector_binop, gen_vector_ternary,
+        gen_scalar_cmpk,
     )
     from amdisa.codegen.execute.vector_cmp import (
-        gen_vector_cmp_class, gen_vector_cmp, gen_vector_cmpx,
-        gen_vector_add_co,
+        gen_vector_cmp_class, gen_vector_cmpx,
     )
     from amdisa.codegen.execute.vector_special import (
         gen_vector_mbcnt, gen_vector_mad_64_32, gen_vector_mad_32_16,
@@ -100,25 +95,17 @@ def _register_handlers() -> None:
         gen_accvgpr_read, gen_accvgpr_write, gen_mfma,
     )
 
-    # Scalar ALU
-    DISPATCH['scalar_unary'] = lambda c: gen_scalar_unary(c.dst_ops, c.src_ops, c.op, c.dtype, c.scc)
-    DISPATCH['scalar_binop'] = lambda c: gen_scalar_binop(c.dst_ops, c.src_ops, c.op, c.dtype, c.scc)
-    DISPATCH['scalar_cmp'] = lambda c: gen_scalar_cmp(c.src_ops, c.op, c.dtype)
+    # Scalar ALU — scalar_unary, scalar_binop, scalar_cmp, scalar_bitcmp,
+    # scalar_saveexec now handled by SemaAST pipeline (_SEMA_CLASSES).
     DISPATCH['scalar_cmpk'] = lambda c: gen_scalar_cmpk(c.dst_ops, c.src_ops, c.op, c.dtype)
-    DISPATCH['scalar_bitcmp'] = lambda c: gen_scalar_bitcmp(c.src_ops, c.op, c.dtype)
-    DISPATCH['scalar_saveexec'] = lambda c: gen_scalar_saveexec(c.dst_ops, c.src_ops, c.op)
 
-    # Vector ALU
-    DISPATCH['vector_unary'] = lambda c: gen_vector_unary(c.dst_ops, c.src_ops, c.op, c.dtype, c.is_vop3, c.has_abs)
-    DISPATCH['vector_binop'] = lambda c: gen_vector_binop(c.dst_ops, c.src_ops, c.op, c.dtype, c.is_vop3, c.has_abs)
-    DISPATCH['vector_ternary'] = lambda c: gen_vector_ternary(c.dst_ops, c.src_ops, c.op, c.dtype, c.is_vop3, c.has_abs)
+    # Vector ALU — vector_unary, vector_binop, vector_ternary now handled
+    # by SemaAST pipeline (_SEMA_CLASSES).
 
-    # Vector compare
-    DISPATCH['vector_cmp'] = lambda c: gen_vector_cmp(c.dst_ops, c.src_ops, c.op, c.dtype, c.is_vop3, c.has_abs)
+    # Vector compare — vector_cmp, vector_cmp_class, vector_add_co now
+    # handled by SemaAST pipeline (_SEMA_CLASSES).
     DISPATCH['vector_cmpx'] = lambda c: gen_vector_cmpx(c.src_ops, c.op, c.dtype, c.cmpx_writes_vcc, c.is_vop3, c.dst_ops, c.has_abs)
-    DISPATCH['vector_cmp_class'] = lambda c: gen_vector_cmp_class(c.dst_ops, c.src_ops, c.dtype, False, False, c.is_vop3, c.has_abs)
     DISPATCH['vector_cmpx_class'] = lambda c: gen_vector_cmp_class(c.dst_ops, c.src_ops, c.dtype, True, c.cmpx_writes_vcc, c.is_vop3, c.has_abs)
-    DISPATCH['vector_add_co'] = lambda c: gen_vector_add_co(c.dst_ops, c.src_ops, c.op, c.dtype)
 
     # Vector special
     DISPATCH['vector_mbcnt'] = lambda c: gen_vector_mbcnt(c.dst_ops, c.src_ops, c.op)
