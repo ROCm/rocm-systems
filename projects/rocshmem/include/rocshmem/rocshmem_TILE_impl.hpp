@@ -42,27 +42,114 @@
 // Only provide actual implementation when compiling device code
 #ifdef __HIP_DEVICE_COMPILE__
 
-// We need the backend context implementations to be available
-// The user must include context_incl.hpp before this header
-#ifndef LIBRARY_SRC_CONTEXT_INCL_HPP_
-#error "rocshmem_TILE_impl.hpp requires context_incl.hpp to be included first. Include '../../src/context_incl.hpp' before this header."
-#endif
+// Bring types into scope for extern "C" declarations
+using rocshmem::rocshmem_ctx_t;
+using rocshmem::rocshmem_team_t;
+
+// Forward declarations of type-erased bitcode functions
+// These are implemented in src/rocshmem_tile_gpu.cpp
+extern "C" {
+  // RMA PUT operations
+  __device__ int rocshmem_ctx_tile_put_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+
+  __device__ int rocshmem_ctx_tile_put_wave_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+
+  __device__ int rocshmem_ctx_tile_put_wg_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+
+  // RMA GET operations
+  __device__ int rocshmem_ctx_tile_get_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+
+  __device__ int rocshmem_ctx_tile_get_wave_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+
+  __device__ int rocshmem_ctx_tile_get_wg_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+
+  // Collective - Allgather
+  __device__ int rocshmem_tile_allgather_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, uint64_t flags);
+
+  __device__ int rocshmem_tile_allgather_wave_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, uint64_t flags);
+
+  __device__ int rocshmem_tile_allgather_wg_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, uint64_t flags);
+
+  // Collective - Broadcast
+  __device__ int rocshmem_tile_broadcast_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe_root, uint64_t flags);
+
+  __device__ int rocshmem_tile_broadcast_wave_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe_root, uint64_t flags);
+
+  __device__ int rocshmem_tile_broadcast_wg_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe_root, uint64_t flags);
+
+  // Collective - SUM Reduce
+  __device__ int rocshmem_tile_sum_reduce_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+
+  __device__ int rocshmem_tile_sum_reduce_wave_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+
+  __device__ int rocshmem_tile_sum_reduce_wg_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+
+  // Collective wait
+  __device__ int rocshmem_tile_collective_wait_internal(
+      rocshmem_team_t team, uint64_t flags);
+}
 
 namespace rocshmem {
-
-// Internal helper to get context pointer
-// This typedef selects the appropriate context type based on build configuration
-#if defined(ENABLE_IPC_BITCODE)
-  typedef IPCContext ContextTy;
-#elif defined(ENABLE_IBGDA_BITCODE)
-  typedef GDAContext ContextTy;
-#else
-  typedef Context ContextTy;
-#endif
-
-static inline __device__ ContextTy *get_internal_ctx(rocshmem_ctx_t ctx) {
-  return reinterpret_cast<ContextTy *>(ctx.ctx_opaque);
-}
 
 /******************************************************************************
  **************** RMA OPERATIONS - CONTEXT VERSIONS (5) ***********************
@@ -72,8 +159,28 @@ template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_put(rocshmem_ctx_t ctx, dst_tensor_t dst,
                                      const src_tensor_t src, tuple_t start_coord,
                                      tuple_t boundary, int pe, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_put(dst, src, start_coord, boundary, pe,
-                                         flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  // Extract tensor/tuple properties into arrays
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_ctx_tile_put_internal(ctx, dst.data_handle(), src.data_handle(),
+                                  dst_strides, src_strides,
+                                  start_arr, boundary_arr,
+                                  ndim, sizeof(element_t), pe, flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -81,8 +188,27 @@ __device__ inline int rocshmem_ctx_tile_put_wave(rocshmem_ctx_t ctx, dst_tensor_
                                           const src_tensor_t src, tuple_t start_coord,
                                           tuple_t boundary, int pe,
                                           uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_put_wave(dst, src, start_coord, boundary,
-                                              pe, flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_ctx_tile_put_wave_internal(ctx, dst.data_handle(), src.data_handle(),
+                                       dst_strides, src_strides,
+                                       start_arr, boundary_arr,
+                                       ndim, sizeof(element_t), pe, flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -90,16 +216,54 @@ __device__ inline int rocshmem_ctx_tile_put_wg(rocshmem_ctx_t ctx, dst_tensor_t 
                                         const src_tensor_t src, tuple_t start_coord,
                                         tuple_t boundary, int pe,
                                         uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_put_wg(dst, src, start_coord, boundary,
-                                            pe, flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_ctx_tile_put_wg_internal(ctx, dst.data_handle(), src.data_handle(),
+                                     dst_strides, src_strides,
+                                     start_arr, boundary_arr,
+                                     ndim, sizeof(element_t), pe, flags);
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
 __device__ inline int rocshmem_ctx_tile_get(rocshmem_ctx_t ctx, dst_tensor_t dst,
                                      src_tensor_t src, tuple_t start_coord,
                                      tuple_t boundary, int pe, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_get(dst, src, start_coord, boundary, pe,
-                                         flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_ctx_tile_get_internal(ctx, dst.data_handle(), src.data_handle(),
+                                  dst_strides, src_strides,
+                                  start_arr, boundary_arr,
+                                  ndim, sizeof(element_t), pe, flags);
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
@@ -107,8 +271,27 @@ __device__ inline int rocshmem_ctx_tile_get_wave(rocshmem_ctx_t ctx, dst_tensor_
                                           src_tensor_t src, tuple_t start_coord,
                                           tuple_t boundary, int pe,
                                           uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_get_wave(dst, src, start_coord, boundary,
-                                              pe, flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_ctx_tile_get_wave_internal(ctx, dst.data_handle(), src.data_handle(),
+                                       dst_strides, src_strides,
+                                       start_arr, boundary_arr,
+                                       ndim, sizeof(element_t), pe, flags);
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
@@ -116,8 +299,27 @@ __device__ inline int rocshmem_ctx_tile_get_wg(rocshmem_ctx_t ctx, dst_tensor_t 
                                         src_tensor_t src, tuple_t start_coord,
                                         tuple_t boundary, int pe,
                                         uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_get_wg(dst, src, start_coord, boundary,
-                                            pe, flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_ctx_tile_get_wg_internal(ctx, dst.data_handle(), src.data_handle(),
+                                     dst_strides, src_strides,
+                                     start_arr, boundary_arr,
+                                     ndim, sizeof(element_t), pe, flags);
 }
 
 /******************************************************************************
@@ -181,8 +383,27 @@ __device__ inline int rocshmem_ctx_tile_allgather(rocshmem_ctx_t ctx, rocshmem_t
                                            dst_tensor_t dst, const src_tensor_t src,
                                            tuple_t start_coord, tuple_t boundary,
                                            uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_allgather(team, dst, src, start_coord,
-                                               boundary, flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_tile_allgather(team, dst.data_handle(), src.data_handle(),
+                                    dst_strides, src_strides,
+                                    start_arr, boundary_arr,
+                                    ndim, sizeof(element_t), flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -191,8 +412,27 @@ __device__ inline int rocshmem_ctx_tile_allgather_wave(rocshmem_ctx_t ctx,
                                                 dst_tensor_t dst, const src_tensor_t src,
                                                 tuple_t start_coord, tuple_t boundary,
                                                 uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_allgather_wave(team, dst, src, start_coord,
-                                                     boundary, flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_tile_allgather_wave(team, dst.data_handle(), src.data_handle(),
+                                         dst_strides, src_strides,
+                                         start_arr, boundary_arr,
+                                         ndim, sizeof(element_t), flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -201,8 +441,27 @@ __device__ inline int rocshmem_ctx_tile_allgather_wg(rocshmem_ctx_t ctx,
                                               dst_tensor_t dst, const src_tensor_t src,
                                               tuple_t start_coord, tuple_t boundary,
                                               uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_allgather_wg(team, dst, src, start_coord,
-                                                   boundary, flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_tile_allgather_wg(team, dst.data_handle(), src.data_handle(),
+                                       dst_strides, src_strides,
+                                       start_arr, boundary_arr,
+                                       ndim, sizeof(element_t), flags);
 }
 
 /******************************************************************************
@@ -243,8 +502,27 @@ __device__ inline int rocshmem_ctx_tile_broadcast(rocshmem_ctx_t ctx,
                                            dst_tensor_t dst, const src_tensor_t src,
                                            tuple_t start_coord, tuple_t boundary,
                                            int pe_root, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_broadcast(team, dst, src, start_coord,
-                                               boundary, pe_root, flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_tile_broadcast(team, dst.data_handle(), src.data_handle(),
+                                    dst_strides, src_strides,
+                                    start_arr, boundary_arr,
+                                    ndim, sizeof(element_t), pe_root, flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -253,8 +531,27 @@ __device__ inline int rocshmem_ctx_tile_broadcast_wave(rocshmem_ctx_t ctx,
                                                 dst_tensor_t dst, const src_tensor_t src,
                                                 tuple_t start_coord, tuple_t boundary,
                                                 int pe_root, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_broadcast_wave(
-      team, dst, src, start_coord, boundary, pe_root, flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_tile_broadcast_wave(team, dst.data_handle(), src.data_handle(),
+                                         dst_strides, src_strides,
+                                         start_arr, boundary_arr,
+                                         ndim, sizeof(element_t), pe_root, flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -263,8 +560,27 @@ __device__ inline int rocshmem_ctx_tile_broadcast_wg(rocshmem_ctx_t ctx,
                                               dst_tensor_t dst, const src_tensor_t src,
                                               tuple_t start_coord, tuple_t boundary,
                                               int pe_root, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_broadcast_wg(team, dst, src, start_coord,
-                                                   boundary, pe_root, flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_tile_broadcast_wg(team, dst.data_handle(), src.data_handle(),
+                                       dst_strides, src_strides,
+                                       start_arr, boundary_arr,
+                                       ndim, sizeof(element_t), pe_root, flags);
 }
 
 /******************************************************************************
@@ -305,7 +621,8 @@ __device__ inline int rocshmem_tile_broadcast_wg(rocshmem_team_t team,
 __device__ inline int rocshmem_ctx_tile_collective_wait(rocshmem_ctx_t ctx,
                                                  rocshmem_team_t team,
                                                  uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_collective_wait(team, flags);
+  // Forward to type-erased bitcode implementation
+  return rocshmem_tile_collective_wait(team, flags);
 }
 
 /******************************************************************************
@@ -327,8 +644,27 @@ __device__ inline int rocshmem_ctx_tile_sum_reduce(rocshmem_ctx_t ctx,
                                             dst_tensor_t dst, const src_tensor_t src,
                                             tuple_t start_coord,
                                             tuple_t boundary, int root, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_sum_reduce(team, dst, src, start_coord,
-                                                 boundary, root, flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_tile_sum_reduce(team, dst.data_handle(), src.data_handle(),
+                                     dst_strides, src_strides,
+                                     start_arr, boundary_arr,
+                                     ndim, sizeof(element_t), root, flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -339,8 +675,27 @@ __device__ inline int rocshmem_ctx_tile_sum_reduce_wave(rocshmem_ctx_t ctx,
                                                  tuple_t start_coord,
                                                  tuple_t boundary,
                                                  int root, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_sum_reduce_wave(team, dst, src, start_coord,
-                                                      boundary, root, flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_tile_sum_reduce_wave(team, dst.data_handle(), src.data_handle(),
+                                          dst_strides, src_strides,
+                                          start_arr, boundary_arr,
+                                          ndim, sizeof(element_t), root, flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -351,8 +706,27 @@ __device__ inline int rocshmem_ctx_tile_sum_reduce_wg(rocshmem_ctx_t ctx,
                                                tuple_t start_coord,
                                                tuple_t boundary,
                                                int root, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_sum_reduce_wg(team, dst, src, start_coord,
-                                                    boundary, root, flags);
+  using element_t = typename src_tensor_t::element_type;
+  constexpr int ndim = src_tensor_t::ndim;
+
+  size_t dst_strides[ndim];
+  size_t src_strides[ndim];
+  size_t start_arr[ndim];
+  size_t boundary_arr[ndim];
+
+  #pragma unroll
+  for (int i = 0; i < ndim; i++) {
+    dst_strides[i] = dst.stride(i);
+    src_strides[i] = src.stride(i);
+    start_arr[i] = start_coord.get(i);
+    boundary_arr[i] = boundary.get(i);
+  }
+
+  // Forward to type-erased bitcode implementation
+  return rocshmem_tile_sum_reduce_wg(team, dst.data_handle(), src.data_handle(),
+                                        dst_strides, src_strides,
+                                        start_arr, boundary_arr,
+                                        ndim, sizeof(element_t), root, flags);
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -363,8 +737,8 @@ __device__ inline int rocshmem_ctx_tile_sum_rooted_reduce(rocshmem_ctx_t ctx,
                                                    tuple_t start_coord,
                                                    tuple_t boundary, int root,
                                                    uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_sum_rooted_reduce(
-      team, dst, src, start_coord, boundary, root, flags);
+  // Not implemented yet - all backends return ROCSHMEM_ERROR
+  return rocshmem::ROCSHMEM_ERROR;
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -372,8 +746,8 @@ __device__ inline int rocshmem_ctx_tile_sum_rooted_reduce_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst,
     const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root,
     uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_sum_rooted_reduce_wave(
-      team, dst, src, start_coord, boundary, root, flags);
+  // Not implemented yet - all backends return ROCSHMEM_ERROR
+  return rocshmem::ROCSHMEM_ERROR;
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -384,8 +758,8 @@ __device__ inline int rocshmem_ctx_tile_sum_rooted_reduce_wg(rocshmem_ctx_t ctx,
                                                       tuple_t start_coord,
                                                       tuple_t boundary, int root,
                                                       uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_sum_rooted_reduce_wg(
-      team, dst, src, start_coord, boundary, root, flags);
+  // Not implemented yet - all backends return ROCSHMEM_ERROR
+  return rocshmem::ROCSHMEM_ERROR;
 }
 
 /******************************************************************************
@@ -467,8 +841,7 @@ __device__ inline int rocshmem_ctx_tile_max_reduce(rocshmem_ctx_t ctx,
                                             dst_tensor_t dst, const src_tensor_t src,
                                             tuple_t start_coord,
                                             tuple_t boundary, int root, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_max_reduce(team, dst, src, start_coord,
-                                                 boundary, root, flags);
+  return rocshmem::ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -479,8 +852,7 @@ __device__ inline int rocshmem_ctx_tile_max_reduce_wave(rocshmem_ctx_t ctx,
                                                  tuple_t start_coord,
                                                  tuple_t boundary,
                                                  int root, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_max_reduce_wave(team, dst, src, start_coord,
-                                                      boundary, root, flags);
+  return rocshmem::ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -491,8 +863,7 @@ __device__ inline int rocshmem_ctx_tile_max_reduce_wg(rocshmem_ctx_t ctx,
                                                tuple_t start_coord,
                                                tuple_t boundary,
                                                int root, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_max_reduce_wg(team, dst, src, start_coord,
-                                                    boundary, root, flags);
+  return rocshmem::ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -503,8 +874,7 @@ __device__ inline int rocshmem_ctx_tile_max_rooted_reduce(rocshmem_ctx_t ctx,
                                                    tuple_t start_coord,
                                                    tuple_t boundary, int root,
                                                    uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_max_rooted_reduce(
-      team, dst, src, start_coord, boundary, root, flags);
+  return rocshmem::ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -512,8 +882,7 @@ __device__ inline int rocshmem_ctx_tile_max_rooted_reduce_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst,
     const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root,
     uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_max_rooted_reduce_wave(
-      team, dst, src, start_coord, boundary, root, flags);
+  return rocshmem::ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -524,8 +893,7 @@ __device__ inline int rocshmem_ctx_tile_max_rooted_reduce_wg(rocshmem_ctx_t ctx,
                                                       tuple_t start_coord,
                                                       tuple_t boundary, int root,
                                                       uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_max_rooted_reduce_wg(
-      team, dst, src, start_coord, boundary, root, flags);
+  return rocshmem::ROCSHMEM_ERROR;  // Not implemented
 }
 
 /******************************************************************************
@@ -607,8 +975,7 @@ __device__ inline int rocshmem_ctx_tile_min_reduce(rocshmem_ctx_t ctx,
                                             dst_tensor_t dst, const src_tensor_t src,
                                             tuple_t start_coord,
                                             tuple_t boundary, int root, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_min_reduce(team, dst, src, start_coord,
-                                                 boundary, root, flags);
+  return rocshmem::ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -619,8 +986,7 @@ __device__ inline int rocshmem_ctx_tile_min_reduce_wave(rocshmem_ctx_t ctx,
                                                  tuple_t start_coord,
                                                  tuple_t boundary,
                                                  int root, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_min_reduce_wave(team, dst, src, start_coord,
-                                                      boundary, root, flags);
+  return rocshmem::ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -631,8 +997,7 @@ __device__ inline int rocshmem_ctx_tile_min_reduce_wg(rocshmem_ctx_t ctx,
                                                tuple_t start_coord,
                                                tuple_t boundary,
                                                int root, uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_min_reduce_wg(team, dst, src, start_coord,
-                                                    boundary, root, flags);
+  return rocshmem::ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -643,8 +1008,7 @@ __device__ inline int rocshmem_ctx_tile_min_rooted_reduce(rocshmem_ctx_t ctx,
                                                    tuple_t start_coord,
                                                    tuple_t boundary, int root,
                                                    uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_min_rooted_reduce(
-      team, dst, src, start_coord, boundary, root, flags);
+  return rocshmem::ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -652,8 +1016,7 @@ __device__ inline int rocshmem_ctx_tile_min_rooted_reduce_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst,
     const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root,
     uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_min_rooted_reduce_wave(
-      team, dst, src, start_coord, boundary, root, flags);
+  return rocshmem::ROCSHMEM_ERROR;  // Not implemented
 }
 
 template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
@@ -664,8 +1027,7 @@ __device__ inline int rocshmem_ctx_tile_min_rooted_reduce_wg(rocshmem_ctx_t ctx,
                                                       tuple_t start_coord,
                                                       tuple_t boundary, int root,
                                                       uint64_t flags) {
-  return get_internal_ctx(ctx)->tile_min_rooted_reduce_wg(
-      team, dst, src, start_coord, boundary, root, flags);
+  return rocshmem::ROCSHMEM_ERROR;  // Not implemented
 }
 
 /******************************************************************************

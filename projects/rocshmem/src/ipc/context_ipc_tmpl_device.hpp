@@ -653,53 +653,49 @@ IPC_CONTEXT_PUT_SIGNAL_DEF(_wave)
  ******************** TILE API STUB IMPLEMENTATIONS ***************************
  *****************************************************************************/
 
-// RMA Operations
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_put(dst_tensor_t dst, const src_tensor_t src,
-                                           tuple_t start_coord, tuple_t boundary,
-                                           int pe, [[maybe_unused]] uint64_t flags) {
-  // Extract tensor properties at compile time
-  using element_t = typename src_tensor_t::element_type;
-  constexpr int ndim = src_tensor_t::ndim;
-
+// RMA Operations - Type-erased implementations
+__device__ inline int IPCContext::tile_put(void* dst_data, const void* src_data,
+                                           const size_t* dst_strides, const size_t* src_strides,
+                                           const size_t* start_coord, const size_t* boundary,
+                                           int ndim, size_t element_size, int pe,
+                                           [[maybe_unused]] uint64_t flags) {
   // Get remote pointer using shmem_ptr
-  void* remote_base = shmem_ptr(dst.data_handle(), pe);
+  void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
   }
 
   // For 2D tensors (most common case for tiles)
-  if constexpr (ndim == 2) {
-    // Get strides (compile-time if possible)
-    const auto src_stride_0 = src.stride(0);
-    const auto src_stride_1 = src.stride(1);
-    const auto dst_stride_0 = dst.stride(0);
-    const auto dst_stride_1 = dst.stride(1);
+  if (ndim == 2) {
+    // Get strides
+    const auto src_stride_0 = src_strides[0];
+    const auto src_stride_1 = src_strides[1];
+    const auto dst_stride_0 = dst_strides[0];
+    const auto dst_stride_1 = dst_strides[1];
 
     // Get tile dimensions from start_coord and boundary
-    const auto tile_extent_0 = boundary.get(0) - start_coord.get(0);
-    const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
+    const auto tile_extent_0 = boundary[0] - start_coord[0];
+    const auto tile_extent_1 = boundary[1] - start_coord[1];
 
     // Calculate base pointers for the tile
-    element_t* src_base = src.data_handle();
-    element_t* dst_base = static_cast<element_t*>(remote_base) +
-                          start_coord.get(0) * dst_stride_0 +
-                          start_coord.get(1) * dst_stride_1;
+    char* src_base = static_cast<char*>(const_cast<void*>(src_data));
+    char* dst_base = static_cast<char*>(remote_base) +
+                     (start_coord[0] * dst_stride_0 + start_coord[1] * dst_stride_1) * element_size;
 
     // Optimization: Check if tile is contiguous (all elements adjacent)
     if (src_stride_1 == 1 && dst_stride_1 == 1 &&
         src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
       // Fully contiguous - single bulk transfer
-      size_t total_size = tile_extent_0 * tile_extent_1 * sizeof(element_t);
+      size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
       memcpy_lane<MemcpyKind::Put>(dst_base, src_base, total_size);
     }
     // Optimization: Row-major with contiguous rows
     else if (src_stride_1 == 1 && dst_stride_1 == 1) {
       // Transfer row by row
       for (int i = 0; i < tile_extent_0; i++) {
-        element_t* src_row = src_base + i * src_stride_0;
-        element_t* dst_row = dst_base + i * dst_stride_0;
-        size_t row_size = tile_extent_1 * sizeof(element_t);
+        char* src_row = src_base + i * src_stride_0 * element_size;
+        char* dst_row = dst_base + i * dst_stride_0 * element_size;
+        size_t row_size = tile_extent_1 * element_size;
         memcpy_lane<MemcpyKind::Put>(dst_row, src_row, row_size);
       }
     }
@@ -707,9 +703,9 @@ __device__ inline int IPCContext::tile_put(dst_tensor_t dst, const src_tensor_t 
     else if (src_stride_0 == 1 && dst_stride_0 == 1) {
       // Transfer column by column
       for (int j = 0; j < tile_extent_1; j++) {
-        element_t* src_col = src_base + j * src_stride_1;
-        element_t* dst_col = dst_base + j * dst_stride_1;
-        size_t col_size = tile_extent_0 * sizeof(element_t);
+        char* src_col = src_base + j * src_stride_1 * element_size;
+        char* dst_col = dst_base + j * dst_stride_1 * element_size;
+        size_t col_size = tile_extent_0 * element_size;
         memcpy_lane<MemcpyKind::Put>(dst_col, src_col, col_size);
       }
     }
@@ -717,29 +713,28 @@ __device__ inline int IPCContext::tile_put(dst_tensor_t dst, const src_tensor_t 
     else {
       for (int i = 0; i < tile_extent_0; i++) {
         for (int j = 0; j < tile_extent_1; j++) {
-          element_t* src_elem = src_base + i * src_stride_0 + j * src_stride_1;
-          element_t* dst_elem = dst_base + i * dst_stride_0 + j * dst_stride_1;
-          memcpy_lane<MemcpyKind::Put>(dst_elem, src_elem, sizeof(element_t));
+          char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
+          char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
+          memcpy_lane<MemcpyKind::Put>(dst_elem, src_elem, element_size);
         }
       }
     }
   }
   // For 1D tensors
-  else if constexpr (ndim == 1) {
-    const auto tile_extent = boundary.get(0) - start_coord.get(0);
-    element_t* src_ptr = src.data_handle();
-    element_t* dst_ptr = static_cast<element_t*>(remote_base) +
-                         start_coord.get(0) * dst.stride(0);
+  else if (ndim == 1) {
+    const auto tile_extent = boundary[0] - start_coord[0];
+    char* src_ptr = static_cast<char*>(const_cast<void*>(src_data));
+    char* dst_ptr = static_cast<char*>(remote_base) + start_coord[0] * dst_strides[0] * element_size;
 
-    if (src.stride(0) == 1 && dst.stride(0) == 1) {
+    if (src_strides[0] == 1 && dst_strides[0] == 1) {
       // Contiguous transfer
-      memcpy_lane<MemcpyKind::Put>(dst_ptr, src_ptr, tile_extent * sizeof(element_t));
+      memcpy_lane<MemcpyKind::Put>(dst_ptr, src_ptr, tile_extent * element_size);
     } else {
       // Strided transfer
       for (int i = 0; i < tile_extent; i++) {
-        memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst.stride(0),
-                                      src_ptr + i * src.stride(0),
-                                      sizeof(element_t));
+        memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst_strides[0] * element_size,
+                                      src_ptr + i * src_strides[0] * element_size,
+                                      element_size);
       }
     }
   }
@@ -747,30 +742,27 @@ __device__ inline int IPCContext::tile_put(dst_tensor_t dst, const src_tensor_t 
   return ROCSHMEM_SUCCESS;
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_put_wave(dst_tensor_t dst, const src_tensor_t src,
-                                         tuple_t start_coord, tuple_t boundary,
-                                         int pe, [[maybe_unused]] uint64_t flags) {
-  using element_t = typename src_tensor_t::element_type;
-  constexpr int ndim = src_tensor_t::ndim;
-
-  void* remote_base = shmem_ptr(dst.data_handle(), pe);
+__device__ inline int IPCContext::tile_put_wave(void* dst_data, const void* src_data,
+                                                const size_t* dst_strides, const size_t* src_strides,
+                                                const size_t* start_coord, const size_t* boundary,
+                                                int ndim, size_t element_size, int pe,
+                                                [[maybe_unused]] uint64_t flags) {
+  void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
   }
 
-  if constexpr (ndim == 2) {
-    const auto src_stride_0 = src.stride(0);
-    const auto src_stride_1 = src.stride(1);
-    const auto dst_stride_0 = dst.stride(0);
-    const auto dst_stride_1 = dst.stride(1);
-    const auto tile_extent_0 = boundary.get(0) - start_coord.get(0);
-    const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
+  if (ndim == 2) {
+    const auto src_stride_0 = src_strides[0];
+    const auto src_stride_1 = src_strides[1];
+    const auto dst_stride_0 = dst_strides[0];
+    const auto dst_stride_1 = dst_strides[1];
+    const auto tile_extent_0 = boundary[0] - start_coord[0];
+    const auto tile_extent_1 = boundary[1] - start_coord[1];
 
-    element_t* src_base = src.data_handle();
-    element_t* dst_base = static_cast<element_t*>(remote_base) +
-                          start_coord.get(0) * dst_stride_0 +
-                          start_coord.get(1) * dst_stride_1;
+    char* src_base = static_cast<char*>(const_cast<void*>(src_data));
+    char* dst_base = static_cast<char*>(remote_base) +
+                     (start_coord[0] * dst_stride_0 + start_coord[1] * dst_stride_1) * element_size;
 
     // Wave-collective: threads cooperate to transfer tile
     int wave_tid = get_flat_block_id() % WF_SIZE;
@@ -778,24 +770,24 @@ __device__ inline int IPCContext::tile_put_wave(dst_tensor_t dst, const src_tens
     // Fully contiguous case - use wave-collective memcpy
     if (src_stride_1 == 1 && dst_stride_1 == 1 &&
         src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
-      size_t total_size = tile_extent_0 * tile_extent_1 * sizeof(element_t);
+      size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
       memcpy_wave<MemcpyKind::Put>(dst_base, src_base, total_size);
     }
     // Row-major with contiguous rows - distribute rows among wave
     else if (src_stride_1 == 1 && dst_stride_1 == 1) {
       for (int i = wave_tid; i < tile_extent_0; i += WF_SIZE) {
-        element_t* src_row = src_base + i * src_stride_0;
-        element_t* dst_row = dst_base + i * dst_stride_0;
-        size_t row_size = tile_extent_1 * sizeof(element_t);
+        char* src_row = src_base + i * src_stride_0 * element_size;
+        char* dst_row = dst_base + i * dst_stride_0 * element_size;
+        size_t row_size = tile_extent_1 * element_size;
         memcpy_lane<MemcpyKind::Put>(dst_row, src_row, row_size);
       }
     }
     // Column-major with contiguous columns - distribute columns among wave
     else if (src_stride_0 == 1 && dst_stride_0 == 1) {
       for (int j = wave_tid; j < tile_extent_1; j += WF_SIZE) {
-        element_t* src_col = src_base + j * src_stride_1;
-        element_t* dst_col = dst_base + j * dst_stride_1;
-        size_t col_size = tile_extent_0 * sizeof(element_t);
+        char* src_col = src_base + j * src_stride_1 * element_size;
+        char* dst_col = dst_base + j * dst_stride_1 * element_size;
+        size_t col_size = tile_extent_0 * element_size;
         memcpy_lane<MemcpyKind::Put>(dst_col, src_col, col_size);
       }
     }
@@ -805,28 +797,27 @@ __device__ inline int IPCContext::tile_put_wave(dst_tensor_t dst, const src_tens
       for (int idx = wave_tid; idx < total_elements; idx += WF_SIZE) {
         int i = idx / tile_extent_1;
         int j = idx % tile_extent_1;
-        element_t* src_elem = src_base + i * src_stride_0 + j * src_stride_1;
-        element_t* dst_elem = dst_base + i * dst_stride_0 + j * dst_stride_1;
-        memcpy_lane<MemcpyKind::Put>(dst_elem, src_elem, sizeof(element_t));
+        char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
+        char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
+        memcpy_lane<MemcpyKind::Put>(dst_elem, src_elem, element_size);
       }
     }
   }
-  else if constexpr (ndim == 1) {
-    const auto tile_extent = boundary.get(0) - start_coord.get(0);
-    element_t* src_ptr = src.data_handle();
-    element_t* dst_ptr = static_cast<element_t*>(remote_base) +
-                         start_coord.get(0) * dst.stride(0);
+  else if (ndim == 1) {
+    const auto tile_extent = boundary[0] - start_coord[0];
+    char* src_ptr = static_cast<char*>(const_cast<void*>(src_data));
+    char* dst_ptr = static_cast<char*>(remote_base) + start_coord[0] * dst_strides[0] * element_size;
 
     int wave_tid = get_flat_block_id() % WF_SIZE;
 
-    if (src.stride(0) == 1 && dst.stride(0) == 1) {
-      size_t total_size = tile_extent * sizeof(element_t);
+    if (src_strides[0] == 1 && dst_strides[0] == 1) {
+      size_t total_size = tile_extent * element_size;
       memcpy_wave<MemcpyKind::Put>(dst_ptr, src_ptr, total_size);
     } else {
       for (int i = wave_tid; i < tile_extent; i += WF_SIZE) {
-        memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst.stride(0),
-                                      src_ptr + i * src.stride(0),
-                                      sizeof(element_t));
+        memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst_strides[0] * element_size,
+                                      src_ptr + i * src_strides[0] * element_size,
+                                      element_size);
       }
     }
   }
@@ -834,30 +825,27 @@ __device__ inline int IPCContext::tile_put_wave(dst_tensor_t dst, const src_tens
   return ROCSHMEM_SUCCESS;
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_put_wg(dst_tensor_t dst, const src_tensor_t src,
-                                       tuple_t start_coord, tuple_t boundary,
-                                       int pe, [[maybe_unused]] uint64_t flags) {
-  using element_t = typename src_tensor_t::element_type;
-  constexpr int ndim = src_tensor_t::ndim;
-
-  void* remote_base = shmem_ptr(dst.data_handle(), pe);
+__device__ inline int IPCContext::tile_put_wg(void* dst_data, const void* src_data,
+                                              const size_t* dst_strides, const size_t* src_strides,
+                                              const size_t* start_coord, const size_t* boundary,
+                                              int ndim, size_t element_size, int pe,
+                                              [[maybe_unused]] uint64_t flags) {
+  void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
   }
 
-  if constexpr (ndim == 2) {
-    const auto src_stride_0 = src.stride(0);
-    const auto src_stride_1 = src.stride(1);
-    const auto dst_stride_0 = dst.stride(0);
-    const auto dst_stride_1 = dst.stride(1);
-    const auto tile_extent_0 = boundary.get(0) - start_coord.get(0);
-    const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
+  if (ndim == 2) {
+    const auto src_stride_0 = src_strides[0];
+    const auto src_stride_1 = src_strides[1];
+    const auto dst_stride_0 = dst_strides[0];
+    const auto dst_stride_1 = dst_strides[1];
+    const auto tile_extent_0 = boundary[0] - start_coord[0];
+    const auto tile_extent_1 = boundary[1] - start_coord[1];
 
-    element_t* src_base = src.data_handle();
-    element_t* dst_base = static_cast<element_t*>(remote_base) +
-                          start_coord.get(0) * dst_stride_0 +
-                          start_coord.get(1) * dst_stride_1;
+    char* src_base = static_cast<char*>(const_cast<void*>(src_data));
+    char* dst_base = static_cast<char*>(remote_base) +
+                     (start_coord[0] * dst_stride_0 + start_coord[1] * dst_stride_1) * element_size;
 
     // Workgroup-collective: all threads in block cooperate
     int thread_id = get_flat_block_id();
@@ -866,7 +854,7 @@ __device__ inline int IPCContext::tile_put_wg(dst_tensor_t dst, const src_tensor
     // Fully contiguous case
     if (src_stride_1 == 1 && dst_stride_1 == 1 &&
         src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
-      size_t total_size = tile_extent_0 * tile_extent_1 * sizeof(element_t);
+      size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
       if (thread_id == 0) {
         memcpy_lane<MemcpyKind::Put>(dst_base, src_base, total_size);
       }
@@ -874,18 +862,18 @@ __device__ inline int IPCContext::tile_put_wg(dst_tensor_t dst, const src_tensor
     // Row-major with contiguous rows - distribute rows among workgroup
     else if (src_stride_1 == 1 && dst_stride_1 == 1) {
       for (int i = thread_id; i < tile_extent_0; i += block_size) {
-        element_t* src_row = src_base + i * src_stride_0;
-        element_t* dst_row = dst_base + i * dst_stride_0;
-        size_t row_size = tile_extent_1 * sizeof(element_t);
+        char* src_row = src_base + i * src_stride_0 * element_size;
+        char* dst_row = dst_base + i * dst_stride_0 * element_size;
+        size_t row_size = tile_extent_1 * element_size;
         memcpy_lane<MemcpyKind::Put>(dst_row, src_row, row_size);
       }
     }
     // Column-major with contiguous columns - distribute columns among workgroup
     else if (src_stride_0 == 1 && dst_stride_0 == 1) {
       for (int j = thread_id; j < tile_extent_1; j += block_size) {
-        element_t* src_col = src_base + j * src_stride_1;
-        element_t* dst_col = dst_base + j * dst_stride_1;
-        size_t col_size = tile_extent_0 * sizeof(element_t);
+        char* src_col = src_base + j * src_stride_1 * element_size;
+        char* dst_col = dst_base + j * dst_stride_1 * element_size;
+        size_t col_size = tile_extent_0 * element_size;
         memcpy_lane<MemcpyKind::Put>(dst_col, src_col, col_size);
       }
     }
@@ -895,31 +883,30 @@ __device__ inline int IPCContext::tile_put_wg(dst_tensor_t dst, const src_tensor
       for (int idx = thread_id; idx < total_elements; idx += block_size) {
         int i = idx / tile_extent_1;
         int j = idx % tile_extent_1;
-        element_t* src_elem = src_base + i * src_stride_0 + j * src_stride_1;
-        element_t* dst_elem = dst_base + i * dst_stride_0 + j * dst_stride_1;
-        memcpy_lane<MemcpyKind::Put>(dst_elem, src_elem, sizeof(element_t));
+        char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
+        char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
+        memcpy_lane<MemcpyKind::Put>(dst_elem, src_elem, element_size);
       }
     }
   }
-  else if constexpr (ndim == 1) {
-    const auto tile_extent = boundary.get(0) - start_coord.get(0);
-    element_t* src_ptr = src.data_handle();
-    element_t* dst_ptr = static_cast<element_t*>(remote_base) +
-                         start_coord.get(0) * dst.stride(0);
+  else if (ndim == 1) {
+    const auto tile_extent = boundary[0] - start_coord[0];
+    char* src_ptr = static_cast<char*>(const_cast<void*>(src_data));
+    char* dst_ptr = static_cast<char*>(remote_base) + start_coord[0] * dst_strides[0] * element_size;
 
     int thread_id = get_flat_block_id();
     int block_size = get_flat_block_size();
 
-    if (src.stride(0) == 1 && dst.stride(0) == 1) {
-      size_t total_size = tile_extent * sizeof(element_t);
+    if (src_strides[0] == 1 && dst_strides[0] == 1) {
+      size_t total_size = tile_extent * element_size;
       if (thread_id == 0) {
         memcpy_lane<MemcpyKind::Put>(dst_ptr, src_ptr, total_size);
       }
     } else {
       for (int i = thread_id; i < tile_extent; i += block_size) {
-        memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst.stride(0),
-                                      src_ptr + i * src.stride(0),
-                                      sizeof(element_t));
+        memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst_strides[0] * element_size,
+                                      src_ptr + i * src_strides[0] * element_size,
+                                      element_size);
       }
     }
   }
@@ -927,52 +914,49 @@ __device__ inline int IPCContext::tile_put_wg(dst_tensor_t dst, const src_tensor
   return ROCSHMEM_SUCCESS;
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_get(dst_tensor_t dst, src_tensor_t src,
-                                    tuple_t start_coord, tuple_t boundary,
-                                    int pe, [[maybe_unused]] uint64_t flags) {
-  using element_t = typename src_tensor_t::element_type;
-  constexpr int ndim = src_tensor_t::ndim;
-
-  void* remote_base = shmem_ptr(src.data_handle(), pe);
+__device__ inline int IPCContext::tile_get(void* dst_data, const void* src_data,
+                                           const size_t* dst_strides, const size_t* src_strides,
+                                           const size_t* start_coord, const size_t* boundary,
+                                           int ndim, size_t element_size, int pe,
+                                           [[maybe_unused]] uint64_t flags) {
+  void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
   }
 
-  if constexpr (ndim == 2) {
-    const auto src_stride_0 = src.stride(0);
-    const auto src_stride_1 = src.stride(1);
-    const auto dst_stride_0 = dst.stride(0);
-    const auto dst_stride_1 = dst.stride(1);
-    const auto tile_extent_0 = boundary.get(0) - start_coord.get(0);
-    const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
+  if (ndim == 2) {
+    const auto src_stride_0 = src_strides[0];
+    const auto src_stride_1 = src_strides[1];
+    const auto dst_stride_0 = dst_strides[0];
+    const auto dst_stride_1 = dst_strides[1];
+    const auto tile_extent_0 = boundary[0] - start_coord[0];
+    const auto tile_extent_1 = boundary[1] - start_coord[1];
 
-    element_t* src_base = static_cast<element_t*>(remote_base) +
-                          start_coord.get(0) * src_stride_0 +
-                          start_coord.get(1) * src_stride_1;
-    element_t* dst_base = dst.data_handle();
+    char* src_base = static_cast<char*>(remote_base) +
+                     (start_coord[0] * src_stride_0 + start_coord[1] * src_stride_1) * element_size;
+    char* dst_base = static_cast<char*>(dst_data);
 
     // Fully contiguous
     if (src_stride_1 == 1 && dst_stride_1 == 1 &&
         src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
-      size_t total_size = tile_extent_0 * tile_extent_1 * sizeof(element_t);
+      size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
       memcpy_lane<MemcpyKind::Get>(dst_base, src_base, total_size);
     }
     // Row-major with contiguous rows
     else if (src_stride_1 == 1 && dst_stride_1 == 1) {
       for (int i = 0; i < tile_extent_0; i++) {
-        element_t* src_row = src_base + i * src_stride_0;
-        element_t* dst_row = dst_base + i * dst_stride_0;
-        size_t row_size = tile_extent_1 * sizeof(element_t);
+        char* src_row = src_base + i * src_stride_0 * element_size;
+        char* dst_row = dst_base + i * dst_stride_0 * element_size;
+        size_t row_size = tile_extent_1 * element_size;
         memcpy_lane<MemcpyKind::Get>(dst_row, src_row, row_size);
       }
     }
     // Column-major with contiguous columns
     else if (src_stride_0 == 1 && dst_stride_0 == 1) {
       for (int j = 0; j < tile_extent_1; j++) {
-        element_t* src_col = src_base + j * src_stride_1;
-        element_t* dst_col = dst_base + j * dst_stride_1;
-        size_t col_size = tile_extent_0 * sizeof(element_t);
+        char* src_col = src_base + j * src_stride_1 * element_size;
+        char* dst_col = dst_base + j * dst_stride_1 * element_size;
+        size_t col_size = tile_extent_0 * element_size;
         memcpy_lane<MemcpyKind::Get>(dst_col, src_col, col_size);
       }
     }
@@ -980,26 +964,25 @@ __device__ inline int IPCContext::tile_get(dst_tensor_t dst, src_tensor_t src,
     else {
       for (int i = 0; i < tile_extent_0; i++) {
         for (int j = 0; j < tile_extent_1; j++) {
-          element_t* src_elem = src_base + i * src_stride_0 + j * src_stride_1;
-          element_t* dst_elem = dst_base + i * dst_stride_0 + j * dst_stride_1;
-          memcpy_lane<MemcpyKind::Get>(dst_elem, src_elem, sizeof(element_t));
+          char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
+          char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
+          memcpy_lane<MemcpyKind::Get>(dst_elem, src_elem, element_size);
         }
       }
     }
   }
-  else if constexpr (ndim == 1) {
-    const auto tile_extent = boundary.get(0) - start_coord.get(0);
-    element_t* src_ptr = static_cast<element_t*>(remote_base) +
-                         start_coord.get(0) * src.stride(0);
-    element_t* dst_ptr = dst.data_handle();
+  else if (ndim == 1) {
+    const auto tile_extent = boundary[0] - start_coord[0];
+    char* src_ptr = static_cast<char*>(remote_base) + start_coord[0] * src_strides[0] * element_size;
+    char* dst_ptr = static_cast<char*>(dst_data);
 
-    if (src.stride(0) == 1 && dst.stride(0) == 1) {
-      memcpy_lane<MemcpyKind::Get>(dst_ptr, src_ptr, tile_extent * sizeof(element_t));
+    if (src_strides[0] == 1 && dst_strides[0] == 1) {
+      memcpy_lane<MemcpyKind::Get>(dst_ptr, src_ptr, tile_extent * element_size);
     } else {
       for (int i = 0; i < tile_extent; i++) {
-        memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst.stride(0),
-                                      src_ptr + i * src.stride(0),
-                                      sizeof(element_t));
+        memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst_strides[0] * element_size,
+                                      src_ptr + i * src_strides[0] * element_size,
+                                      element_size);
       }
     }
   }
@@ -1007,30 +990,27 @@ __device__ inline int IPCContext::tile_get(dst_tensor_t dst, src_tensor_t src,
   return ROCSHMEM_SUCCESS;
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_get_wave(dst_tensor_t dst, src_tensor_t src,
-                                         tuple_t start_coord, tuple_t boundary,
-                                         int pe, [[maybe_unused]] uint64_t flags) {
-  using element_t = typename src_tensor_t::element_type;
-  constexpr int ndim = src_tensor_t::ndim;
-
-  void* remote_base = shmem_ptr(src.data_handle(), pe);
+__device__ inline int IPCContext::tile_get_wave(void* dst_data, const void* src_data,
+                                                const size_t* dst_strides, const size_t* src_strides,
+                                                const size_t* start_coord, const size_t* boundary,
+                                                int ndim, size_t element_size, int pe,
+                                                [[maybe_unused]] uint64_t flags) {
+  void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
   }
 
-  if constexpr (ndim == 2) {
-    const auto src_stride_0 = src.stride(0);
-    const auto src_stride_1 = src.stride(1);
-    const auto dst_stride_0 = dst.stride(0);
-    const auto dst_stride_1 = dst.stride(1);
-    const auto tile_extent_0 = boundary.get(0) - start_coord.get(0);
-    const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
+  if (ndim == 2) {
+    const auto src_stride_0 = src_strides[0];
+    const auto src_stride_1 = src_strides[1];
+    const auto dst_stride_0 = dst_strides[0];
+    const auto dst_stride_1 = dst_strides[1];
+    const auto tile_extent_0 = boundary[0] - start_coord[0];
+    const auto tile_extent_1 = boundary[1] - start_coord[1];
 
-    element_t* src_base = static_cast<element_t*>(remote_base) +
-                          start_coord.get(0) * src_stride_0 +
-                          start_coord.get(1) * src_stride_1;
-    element_t* dst_base = dst.data_handle();
+    char* src_base = static_cast<char*>(remote_base) +
+                     (start_coord[0] * src_stride_0 + start_coord[1] * src_stride_1) * element_size;
+    char* dst_base = static_cast<char*>(dst_data);
 
     // Wave-collective: threads cooperate to transfer tile
     int wave_tid = get_flat_block_id() % WF_SIZE;
@@ -1038,24 +1018,24 @@ __device__ inline int IPCContext::tile_get_wave(dst_tensor_t dst, src_tensor_t s
     // Fully contiguous case - use wave-collective memcpy
     if (src_stride_1 == 1 && dst_stride_1 == 1 &&
         src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
-      size_t total_size = tile_extent_0 * tile_extent_1 * sizeof(element_t);
+      size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
       memcpy_wave<MemcpyKind::Get>(dst_base, src_base, total_size);
     }
     // Row-major with contiguous rows - distribute rows among wave
     else if (src_stride_1 == 1 && dst_stride_1 == 1) {
       for (int i = wave_tid; i < tile_extent_0; i += WF_SIZE) {
-        element_t* src_row = src_base + i * src_stride_0;
-        element_t* dst_row = dst_base + i * dst_stride_0;
-        size_t row_size = tile_extent_1 * sizeof(element_t);
+        char* src_row = src_base + i * src_stride_0 * element_size;
+        char* dst_row = dst_base + i * dst_stride_0 * element_size;
+        size_t row_size = tile_extent_1 * element_size;
         memcpy_lane<MemcpyKind::Get>(dst_row, src_row, row_size);
       }
     }
     // Column-major with contiguous columns - distribute columns among wave
     else if (src_stride_0 == 1 && dst_stride_0 == 1) {
       for (int j = wave_tid; j < tile_extent_1; j += WF_SIZE) {
-        element_t* src_col = src_base + j * src_stride_1;
-        element_t* dst_col = dst_base + j * dst_stride_1;
-        size_t col_size = tile_extent_0 * sizeof(element_t);
+        char* src_col = src_base + j * src_stride_1 * element_size;
+        char* dst_col = dst_base + j * dst_stride_1 * element_size;
+        size_t col_size = tile_extent_0 * element_size;
         memcpy_lane<MemcpyKind::Get>(dst_col, src_col, col_size);
       }
     }
@@ -1065,28 +1045,27 @@ __device__ inline int IPCContext::tile_get_wave(dst_tensor_t dst, src_tensor_t s
       for (int idx = wave_tid; idx < total_elements; idx += WF_SIZE) {
         int i = idx / tile_extent_1;
         int j = idx % tile_extent_1;
-        element_t* src_elem = src_base + i * src_stride_0 + j * src_stride_1;
-        element_t* dst_elem = dst_base + i * dst_stride_0 + j * dst_stride_1;
-        memcpy_lane<MemcpyKind::Get>(dst_elem, src_elem, sizeof(element_t));
+        char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
+        char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
+        memcpy_lane<MemcpyKind::Get>(dst_elem, src_elem, element_size);
       }
     }
   }
-  else if constexpr (ndim == 1) {
-    const auto tile_extent = boundary.get(0) - start_coord.get(0);
-    element_t* src_ptr = static_cast<element_t*>(remote_base) +
-                         start_coord.get(0) * src.stride(0);
-    element_t* dst_ptr = dst.data_handle();
+  else if (ndim == 1) {
+    const auto tile_extent = boundary[0] - start_coord[0];
+    char* src_ptr = static_cast<char*>(remote_base) + start_coord[0] * src_strides[0] * element_size;
+    char* dst_ptr = static_cast<char*>(dst_data);
 
     int wave_tid = get_flat_block_id() % WF_SIZE;
 
-    if (src.stride(0) == 1 && dst.stride(0) == 1) {
-      size_t total_size = tile_extent * sizeof(element_t);
+    if (src_strides[0] == 1 && dst_strides[0] == 1) {
+      size_t total_size = tile_extent * element_size;
       memcpy_wave<MemcpyKind::Get>(dst_ptr, src_ptr, total_size);
     } else {
       for (int i = wave_tid; i < tile_extent; i += WF_SIZE) {
-        memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst.stride(0),
-                                      src_ptr + i * src.stride(0),
-                                      sizeof(element_t));
+        memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst_strides[0] * element_size,
+                                      src_ptr + i * src_strides[0] * element_size,
+                                      element_size);
       }
     }
   }
@@ -1094,30 +1073,27 @@ __device__ inline int IPCContext::tile_get_wave(dst_tensor_t dst, src_tensor_t s
   return ROCSHMEM_SUCCESS;
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src,
-                                       tuple_t start_coord, tuple_t boundary,
-                                       int pe, [[maybe_unused]] uint64_t flags) {
-  using element_t = typename src_tensor_t::element_type;
-  constexpr int ndim = src_tensor_t::ndim;
-
-  void* remote_base = shmem_ptr(src.data_handle(), pe);
+__device__ inline int IPCContext::tile_get_wg(void* dst_data, const void* src_data,
+                                              const size_t* dst_strides, const size_t* src_strides,
+                                              const size_t* start_coord, const size_t* boundary,
+                                              int ndim, size_t element_size, int pe,
+                                              [[maybe_unused]] uint64_t flags) {
+  void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
   }
 
-  if constexpr (ndim == 2) {
-    const auto src_stride_0 = src.stride(0);
-    const auto src_stride_1 = src.stride(1);
-    const auto dst_stride_0 = dst.stride(0);
-    const auto dst_stride_1 = dst.stride(1);
-    const auto tile_extent_0 = boundary.get(0) - start_coord.get(0);
-    const auto tile_extent_1 = boundary.get(1) - start_coord.get(1);
+  if (ndim == 2) {
+    const auto src_stride_0 = src_strides[0];
+    const auto src_stride_1 = src_strides[1];
+    const auto dst_stride_0 = dst_strides[0];
+    const auto dst_stride_1 = dst_strides[1];
+    const auto tile_extent_0 = boundary[0] - start_coord[0];
+    const auto tile_extent_1 = boundary[1] - start_coord[1];
 
-    element_t* src_base = static_cast<element_t*>(remote_base) +
-                          start_coord.get(0) * src_stride_0 +
-                          start_coord.get(1) * src_stride_1;
-    element_t* dst_base = dst.data_handle();
+    char* src_base = static_cast<char*>(remote_base) +
+                     (start_coord[0] * src_stride_0 + start_coord[1] * src_stride_1) * element_size;
+    char* dst_base = static_cast<char*>(dst_data);
 
     int thread_id = get_flat_block_id();
     int block_size = get_flat_block_size();
@@ -1125,7 +1101,7 @@ __device__ inline int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src
     // Fully contiguous
     if (src_stride_1 == 1 && dst_stride_1 == 1 &&
         src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
-      size_t total_size = tile_extent_0 * tile_extent_1 * sizeof(element_t);
+      size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
       if (thread_id == 0) {
         memcpy_lane<MemcpyKind::Get>(dst_base, src_base, total_size);
       }
@@ -1133,18 +1109,18 @@ __device__ inline int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src
     // Row-major with contiguous rows - distribute among workgroup
     else if (src_stride_1 == 1 && dst_stride_1 == 1) {
       for (int i = thread_id; i < tile_extent_0; i += block_size) {
-        element_t* src_row = src_base + i * src_stride_0;
-        element_t* dst_row = dst_base + i * dst_stride_0;
-        size_t row_size = tile_extent_1 * sizeof(element_t);
+        char* src_row = src_base + i * src_stride_0 * element_size;
+        char* dst_row = dst_base + i * dst_stride_0 * element_size;
+        size_t row_size = tile_extent_1 * element_size;
         memcpy_lane<MemcpyKind::Get>(dst_row, src_row, row_size);
       }
     }
     // Column-major with contiguous columns - distribute among workgroup
     else if (src_stride_0 == 1 && dst_stride_0 == 1) {
       for (int j = thread_id; j < tile_extent_1; j += block_size) {
-        element_t* src_col = src_base + j * src_stride_1;
-        element_t* dst_col = dst_base + j * dst_stride_1;
-        size_t col_size = tile_extent_0 * sizeof(element_t);
+        char* src_col = src_base + j * src_stride_1 * element_size;
+        char* dst_col = dst_base + j * dst_stride_1 * element_size;
+        size_t col_size = tile_extent_0 * element_size;
         memcpy_lane<MemcpyKind::Get>(dst_col, src_col, col_size);
       }
     }
@@ -1154,31 +1130,30 @@ __device__ inline int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src
       for (int idx = thread_id; idx < total_elements; idx += block_size) {
         int i = idx / tile_extent_1;
         int j = idx % tile_extent_1;
-        element_t* src_elem = src_base + i * src_stride_0 + j * src_stride_1;
-        element_t* dst_elem = dst_base + i * dst_stride_0 + j * dst_stride_1;
-        memcpy_lane<MemcpyKind::Get>(dst_elem, src_elem, sizeof(element_t));
+        char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
+        char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
+        memcpy_lane<MemcpyKind::Get>(dst_elem, src_elem, element_size);
       }
     }
   }
-  else if constexpr (ndim == 1) {
-    const auto tile_extent = boundary.get(0) - start_coord.get(0);
-    element_t* src_ptr = static_cast<element_t*>(remote_base) +
-                         start_coord.get(0) * src.stride(0);
-    element_t* dst_ptr = dst.data_handle();
+  else if (ndim == 1) {
+    const auto tile_extent = boundary[0] - start_coord[0];
+    char* src_ptr = static_cast<char*>(remote_base) + start_coord[0] * src_strides[0] * element_size;
+    char* dst_ptr = static_cast<char*>(dst_data);
 
     int thread_id = get_flat_block_id();
     int block_size = get_flat_block_size();
 
-    if (src.stride(0) == 1 && dst.stride(0) == 1) {
-      size_t total_size = tile_extent * sizeof(element_t);
+    if (src_strides[0] == 1 && dst_strides[0] == 1) {
+      size_t total_size = tile_extent * element_size;
       if (thread_id == 0) {
         memcpy_lane<MemcpyKind::Get>(dst_ptr, src_ptr, total_size);
       }
     } else {
       for (int i = thread_id; i < tile_extent; i += block_size) {
-        memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst.stride(0),
-                                      src_ptr + i * src.stride(0),
-                                      sizeof(element_t));
+        memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst_strides[0] * element_size,
+                                      src_ptr + i * src_strides[0] * element_size,
+                                      element_size);
       }
     }
   }
@@ -1186,72 +1161,129 @@ __device__ inline int IPCContext::tile_get_wg(dst_tensor_t dst, src_tensor_t src
   return ROCSHMEM_SUCCESS;
 }
 
-// Collective Allgather
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_allgather([[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] dst_tensor_t dst,
-                                          [[maybe_unused]] src_tensor_t src, [[maybe_unused]] tuple_t start_coord,
-                                          [[maybe_unused]] tuple_t boundary, [[maybe_unused]] uint64_t flags) {
+// Collective Allgather - Type-erased implementations
+__device__ inline int IPCContext::tile_allgather([[maybe_unused]] rocshmem_team_t team,
+                                                 [[maybe_unused]] void* dst_data,
+                                                 [[maybe_unused]] const void* src_data,
+                                                 [[maybe_unused]] const size_t* dst_strides,
+                                                 [[maybe_unused]] const size_t* src_strides,
+                                                 [[maybe_unused]] const size_t* start_coord,
+                                                 [[maybe_unused]] const size_t* boundary,
+                                                 [[maybe_unused]] int ndim,
+                                                 [[maybe_unused]] size_t element_size,
+                                                 [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_allgather_wave([[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] dst_tensor_t dst,
-                                               [[maybe_unused]] src_tensor_t src, [[maybe_unused]] tuple_t start_coord,
-                                               [[maybe_unused]] tuple_t boundary, [[maybe_unused]] uint64_t flags) {
+__device__ inline int IPCContext::tile_allgather_wave([[maybe_unused]] rocshmem_team_t team,
+                                                      [[maybe_unused]] void* dst_data,
+                                                      [[maybe_unused]] const void* src_data,
+                                                      [[maybe_unused]] const size_t* dst_strides,
+                                                      [[maybe_unused]] const size_t* src_strides,
+                                                      [[maybe_unused]] const size_t* start_coord,
+                                                      [[maybe_unused]] const size_t* boundary,
+                                                      [[maybe_unused]] int ndim,
+                                                      [[maybe_unused]] size_t element_size,
+                                                      [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_allgather_wg([[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] dst_tensor_t dst,
-                                             [[maybe_unused]] src_tensor_t src, [[maybe_unused]] tuple_t start_coord,
-                                             [[maybe_unused]] tuple_t boundary, [[maybe_unused]] uint64_t flags) {
+__device__ inline int IPCContext::tile_allgather_wg([[maybe_unused]] rocshmem_team_t team,
+                                                    [[maybe_unused]] void* dst_data,
+                                                    [[maybe_unused]] const void* src_data,
+                                                    [[maybe_unused]] const size_t* dst_strides,
+                                                    [[maybe_unused]] const size_t* src_strides,
+                                                    [[maybe_unused]] const size_t* start_coord,
+                                                    [[maybe_unused]] const size_t* boundary,
+                                                    [[maybe_unused]] int ndim,
+                                                    [[maybe_unused]] size_t element_size,
+                                                    [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-// Collective Broadcast
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_broadcast([[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] dst_tensor_t dst,
-                                          [[maybe_unused]] src_tensor_t src, [[maybe_unused]] tuple_t start_coord,
-                                          [[maybe_unused]] tuple_t boundary, [[maybe_unused]] int pe_root,
-                                          [[maybe_unused]] uint64_t flags) {
+// Collective Broadcast - Type-erased implementations
+__device__ inline int IPCContext::tile_broadcast([[maybe_unused]] rocshmem_team_t team,
+                                                 [[maybe_unused]] void* dst_data,
+                                                 [[maybe_unused]] const void* src_data,
+                                                 [[maybe_unused]] const size_t* dst_strides,
+                                                 [[maybe_unused]] const size_t* src_strides,
+                                                 [[maybe_unused]] const size_t* start_coord,
+                                                 [[maybe_unused]] const size_t* boundary,
+                                                 [[maybe_unused]] int ndim,
+                                                 [[maybe_unused]] size_t element_size,
+                                                 [[maybe_unused]] int pe_root,
+                                                 [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_broadcast_wave([[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] dst_tensor_t dst,
-                                               [[maybe_unused]] src_tensor_t src, [[maybe_unused]] tuple_t start_coord,
-                                               [[maybe_unused]] tuple_t boundary, [[maybe_unused]] int pe_root,
-                                               [[maybe_unused]] uint64_t flags) {
+__device__ inline int IPCContext::tile_broadcast_wave([[maybe_unused]] rocshmem_team_t team,
+                                                      [[maybe_unused]] void* dst_data,
+                                                      [[maybe_unused]] const void* src_data,
+                                                      [[maybe_unused]] const size_t* dst_strides,
+                                                      [[maybe_unused]] const size_t* src_strides,
+                                                      [[maybe_unused]] const size_t* start_coord,
+                                                      [[maybe_unused]] const size_t* boundary,
+                                                      [[maybe_unused]] int ndim,
+                                                      [[maybe_unused]] size_t element_size,
+                                                      [[maybe_unused]] int pe_root,
+                                                      [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename dst_tensor_t, typename src_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_broadcast_wg([[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] dst_tensor_t dst,
-                                             [[maybe_unused]] src_tensor_t src, [[maybe_unused]] tuple_t start_coord,
-                                             [[maybe_unused]] tuple_t boundary, [[maybe_unused]] int pe_root,
-                                             [[maybe_unused]] uint64_t flags) {
+__device__ inline int IPCContext::tile_broadcast_wg([[maybe_unused]] rocshmem_team_t team,
+                                                    [[maybe_unused]] void* dst_data,
+                                                    [[maybe_unused]] const void* src_data,
+                                                    [[maybe_unused]] const size_t* dst_strides,
+                                                    [[maybe_unused]] const size_t* src_strides,
+                                                    [[maybe_unused]] const size_t* start_coord,
+                                                    [[maybe_unused]] const size_t* boundary,
+                                                    [[maybe_unused]] int ndim,
+                                                    [[maybe_unused]] size_t element_size,
+                                                    [[maybe_unused]] int pe_root,
+                                                    [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-// SUM Reductions
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_sum_reduce([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                           [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                           [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
+// SUM Reductions - Type-erased implementations
+__device__ inline int IPCContext::tile_sum_reduce([[maybe_unused]] rocshmem_team_t team,
+                                                  [[maybe_unused]] void* dst_data,
+                                                  [[maybe_unused]] const void* src_data,
+                                                  [[maybe_unused]] const size_t* dst_strides,
+                                                  [[maybe_unused]] const size_t* src_strides,
+                                                  [[maybe_unused]] const size_t* start_coord,
+                                                  [[maybe_unused]] const size_t* boundary,
+                                                  [[maybe_unused]] int ndim,
+                                                  [[maybe_unused]] size_t element_size,
+                                                  [[maybe_unused]] int root,
+                                                  [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_sum_reduce_wave([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                                [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                                [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
+__device__ inline int IPCContext::tile_sum_reduce_wave([[maybe_unused]] rocshmem_team_t team,
+                                                       [[maybe_unused]] void* dst_data,
+                                                       [[maybe_unused]] const void* src_data,
+                                                       [[maybe_unused]] const size_t* dst_strides,
+                                                       [[maybe_unused]] const size_t* src_strides,
+                                                       [[maybe_unused]] const size_t* start_coord,
+                                                       [[maybe_unused]] const size_t* boundary,
+                                                       [[maybe_unused]] int ndim,
+                                                       [[maybe_unused]] size_t element_size,
+                                                       [[maybe_unused]] int root,
+                                                       [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
-template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t>
-__device__ inline int IPCContext::tile_sum_reduce_wg([[maybe_unused]] src_tensor_t src, [[maybe_unused]] dst_tensor_t dst,
-                                              [[maybe_unused]] tuple_t start_coord, [[maybe_unused]] tuple_t boundary,
-                                              [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] uint64_t flags) {
+__device__ inline int IPCContext::tile_sum_reduce_wg([[maybe_unused]] rocshmem_team_t team,
+                                                     [[maybe_unused]] void* dst_data,
+                                                     [[maybe_unused]] const void* src_data,
+                                                     [[maybe_unused]] const size_t* dst_strides,
+                                                     [[maybe_unused]] const size_t* src_strides,
+                                                     [[maybe_unused]] const size_t* start_coord,
+                                                     [[maybe_unused]] const size_t* boundary,
+                                                     [[maybe_unused]] int ndim,
+                                                     [[maybe_unused]] size_t element_size,
+                                                     [[maybe_unused]] int root,
+                                                     [[maybe_unused]] uint64_t flags) {
   return ROCSHMEM_ERROR;  // Not implemented
 }
 
