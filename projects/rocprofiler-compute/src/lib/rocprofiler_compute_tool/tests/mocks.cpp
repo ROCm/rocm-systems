@@ -192,3 +192,43 @@ const std::vector<MockCountersWriter::write_counters_info>& MockCountersWriter::
 {
     return m_write_counters_args;
 }
+
+/////////////////////////////////////////////////////////////////////////
+// MockToolSetUp
+void MockToolSetUp::set_up()
+{
+    ++m_setup_call_count;
+}
+
+int MockToolSetUp::get_setup_call_count() const
+{
+    return m_setup_call_count;
+}
+
+/////////////////////////////////////////////////////////////////////////
+// MockEnvironmentSetUp
+void MockEnvironmentSetUp::set_test_env(const std::vector<std::string>& entries)
+{
+    m_test_env = entries;
+}
+
+std::vector<std::string> MockEnvironmentSetUp::get_env_entries() const
+{
+    ++m_build_env_cache_calls;
+    return m_test_env;
+}
+
+void MockEnvironmentSetUp::set_env_var(const std::string& key, const std::string& value) const
+{
+    m_set_env_calls.push_back(set_env_call{key, value});
+}
+
+const std::vector<MockEnvironmentSetUp::set_env_call>& MockEnvironmentSetUp::get_set_env_calls() const
+{
+    return m_set_env_calls;
+}
+
+int MockEnvironmentSetUp::get_build_env_cache_call_count() const
+{
+    return m_build_env_cache_calls;
+}

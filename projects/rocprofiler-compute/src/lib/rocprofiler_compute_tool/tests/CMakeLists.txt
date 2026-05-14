@@ -8,6 +8,8 @@ add_executable(
     test_rocprofiler_compute_tool.cpp
     test_sdk_callbacks.h
     test_sdk_callbacks.cpp
+    test_tool_setup.h
+    test_tool_setup.cpp
     mocks.h
     mocks.cpp
     main.cpp
@@ -20,14 +22,15 @@ target_link_libraries(
 
 set_target_properties(
     ${target}
-    PROPERTIES INSTALL_RPATH "$ORIGIN/../../../${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}"
+    PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../../../${CMAKE_INSTALL_LIBDIR}/${CMAKE_PROJECT_NAME}"
 )
 
 if(INSTALL_TESTS)
     install(
         TARGETS ${target}
         RUNTIME
-            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${CMAKE_PROJECT_NAME}/tests
             COMPONENT tests
     )
 endif()

@@ -51,7 +51,7 @@
 +
 +// AMD AINIC
 +RCCL_PARAM(CtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
-+RCCL_PARAM(IbP2pDisableCts, "IB_P2P_DISABLE_CTS", 0);
++RCCL_PARAM(IbP2pDisableCts, "IB_P2P_DISABLE_CTS", 1);
 +
 +extern int64_t rcclParamAinicRoce();
 +
@@ -262,7 +262,7 @@
 +  if (qpCtsOffload) {
 +    qpInitAttr.cap.max_inline_data = MAX_INLINE_DATA_SIZE;
 +  } else {
-+    qpInitAttr.cap.max_inline_data = ncclIbUseInline ? sizeof(struct ncclIbSendFifo) : 0;
++    qpInitAttr.cap.max_inline_data = ncclIbUseInline ? NCCL_NET_IB_MAX_RECVS * sizeof(struct ncclIbSendFifo) : 0;
 +  }
    NCCLCHECK(wrap_ibv_create_qp(&qp->qp, base->pd, &qpInitAttr));
 +  if (rcclAinicRoce) {

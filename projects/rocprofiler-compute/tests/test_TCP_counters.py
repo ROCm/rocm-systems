@@ -17,23 +17,11 @@ config["METRIC_LOGGING"] = False
 
 
 def load_metrics(csv_file_path):
-    """
-    Reads the CSV file into a dictionary of dictionaries:
-        {
-            "Metric_1": {
-                    "Avg": value,
-                    "Min": value,
-                    "Max": value,
-                    "Unit": "unit"
-                },
-            "Metric_2": { ... },
-            ...
-        }
-    N/A values (unevaluable metrics) are parsed as NaN by pandas.
-    """
-    df = pd.read_csv(csv_file_path, na_values=["N/A"])
-    df["Metric"] = df["Metric"].str.strip()
-    return df.set_index("Metric").to_dict(orient="index")
+    """Read workload_metric.csv and return {metric_name: {value_name: value}}."""
+    df = pd.read_csv(csv_file_path)
+    return df.pivot(index="metric_name", columns="value_name", values="value").to_dict(
+        orient="index"
+    )
 
 
 _, soc = common.gpu_soc()
@@ -84,9 +72,7 @@ def test_L1_cache_counters(
         assert return_code == 0
 
         # 3. save results in local
-
-        # FIXME: customize file name to avoid hardcode
-        csv_path = workload_dir_output + "/16.3_vL1D_cache_access_metrics.csv"
+        csv_path = workload_dir_output + "/workload_metric.csv"
         data = load_metrics(csv_path)
 
         for metric in metrics:

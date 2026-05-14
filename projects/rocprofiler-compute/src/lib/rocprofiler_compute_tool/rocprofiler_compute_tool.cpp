@@ -7,6 +7,7 @@
 #include "input_parameters.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
+#include "tool_setup.h"
 
 #include <unistd.h>
 
@@ -21,6 +22,7 @@ static std::shared_ptr<SdkWrapper>      g_sdk_wrapper      = std::make_shared<Sd
 static std::shared_ptr<SdkCallbacks> g_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper);
 static std::shared_ptr<CountersWriter> g_counters_writer = std::make_shared<CsvCountersWriter>();
 static std::shared_ptr<rocprofiler_tool_configure_result_t> g_cfg;
+static std::shared_ptr<ToolSetUp>                           g_tool_setup;
 
 void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters>& input_parameters)
 {
@@ -37,9 +39,19 @@ void test_knobs::set_csv_writer(const std::shared_ptr<CountersWriter>& csv_write
     g_counters_writer = csv_writer;
 }
 
+void test_knobs::set_tool_setup(const std::shared_ptr<ToolSetUp>& tool_setup)
+{
+    g_tool_setup = tool_setup;
+}
+
 void test_knobs::reset_cfg()
 {
     g_cfg.reset();
+}
+
+void test_knobs::reset_tool_setup()
+{
+    g_tool_setup.reset();
 }
 
 namespace rocprofiler_compute_tool
@@ -228,6 +240,14 @@ rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t             
                                                            uint32_t                 priority,
                                                            rocprofiler_client_id_t* id)
 {
+    // create the tool setup
+    if (!g_tool_setup)
+    {
+        g_tool_setup = std::make_shared<EnvironmentSetUp>();
+    }
+    // setup the tool environment
+    g_tool_setup->set_up();
+
     // set the client name
     id->name = "[rocprofiler-compute]";
 

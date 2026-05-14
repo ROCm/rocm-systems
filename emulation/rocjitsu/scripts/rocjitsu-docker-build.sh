@@ -61,7 +61,6 @@ cmake -G Ninja \
     -DCMAKE_SHARED_LINKER_FLAGS="-static-libstdc++" \
     -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
     -DFETCHCONTENT_BASE_DIR=/tmp/deps \
-    -DRJ_BUILD_GUI=OFF \
     -DBUILD_TESTING=OFF \
     /src/experimental/rocjitsu 2>&1 | tail -5
 

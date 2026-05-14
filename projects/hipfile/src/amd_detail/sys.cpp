@@ -136,6 +136,15 @@ Sys::eventfd(unsigned int initval, int flags) const
     return throwOn(-1, ::eventfd(initval, flags));
 }
 
+// This syscall is not defined on kernels before 5.3
+#ifndef SYS_pidfd_open
+#if defined(__linux__) && defined(__x86_64__)
+#define SYS_pidfd_open 434
+#else
+#error "SYS_pidfd_open is unavailable on this architecture/libc; no safe fallback is defined."
+#endif
+#endif
+
 int
 Sys::pidfd_open(pid_t pid, unsigned int flags) const
 {
