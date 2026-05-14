@@ -72,7 +72,7 @@
  * - 1.19 - hsa_amd_agent_preload
  * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
  * - 1.21 - hsa_amd_signal_get_event_id
- * - 1.22 - hsa_amd_sdma_queue_create, destroy and get_info APIs
+ * - 1.22 - hsa_amd_sdma_queue APIs
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
 #define HSA_AMD_INTERFACE_VERSION_MINOR 22
@@ -842,6 +842,11 @@ enum {
    * by the requested operation.
    */
   HSA_STATUS_ERROR_XNACK_DISABLED = 48,
+
+  /**
+   * The operation timed out before completing.
+   */
+  HSA_STATUS_ERROR_TIMEOUT = 49,
 };
 
 /** @} */
@@ -4721,7 +4726,7 @@ typedef struct hsa_amd_sdma_queue_resource_s {
 /**
  * @brief SDMA queue info attribute IDs for hsa_amd_sdma_queue_get_info.
  */
-typedef enum hsa_amd_sdma_queue_info_attribute_s {
+typedef enum hsa_amd_sdma_queue_info_attribute_e {
   /**
    * SDMA queue pointers (ring base, size, rptr, wptr, doorbell).
    * Type: hsa_amd_sdma_queue_resource_t
@@ -4777,7 +4782,7 @@ typedef enum hsa_amd_sdma_queue_info_attribute_s {
 /**
  * @brief Flags for hsa_amd_sdma_queue_create.
  */
-typedef enum hsa_amd_sdma_queue_flag_s {
+typedef enum hsa_amd_sdma_queue_flag_e {
   /**
    * Create XGMI SDMA engine. Default type is PCIe. 
    */
@@ -4837,6 +4842,7 @@ hsa_status_t HSA_API hsa_amd_sdma_queue_create(hsa_agent_t agent, uint32_t flags
  * @retval HSA_STATUS_SUCCESS Queue destroyed successfully.
  * @retval HSA_STATUS_ERROR_NOT_INITIALIZED Runtime not initialized.
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid queue handle.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT @p queue not registered with any GPU agent.
  */
 hsa_status_t HSA_API hsa_amd_sdma_queue_destroy(hsa_amd_sdma_queue_t queue);
 
@@ -4853,27 +4859,56 @@ hsa_status_t HSA_API hsa_amd_sdma_queue_destroy(hsa_amd_sdma_queue_t queue);
  * @retval HSA_STATUS_SUCCESS Query successful.
  * @retval HSA_STATUS_ERROR_NOT_INITIALIZED Runtime not initialized.
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid queue or attribute.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT @p queue not registered with any GPU agent.
  */
 hsa_status_t HSA_API hsa_amd_sdma_queue_get_info(hsa_amd_sdma_queue_t queue,
                                                  hsa_amd_sdma_queue_info_attribute_t attribute,
                                                  void* value);
 
 /**
- * @brief Ring the doorbell for an SDMA queue.
+ * @brief Update the write pointer and ring the doorbell for an SDMA queue.
  *
- * On Linux, writing directly to the doorbell pointer is sufficient.
- * Windows/WSL requires a separate thunk call, which is why this call is required on it. 
- * This API handles both cases transparently.
+ * After writing SDMA packets into the ring buffer, the caller 
+ * must invoke this API to commit the submission to signal to the engine 
+ * about the availability of new work. This API handles platform-specific 
+ * doorbell requirements transparently.
  *
- * @param[in] queue Queue handle.
+ * The caller must not update the write pointer or doorbell directly when 
+ * using this API.
+ * 
+ * On Linux, callers may alternatively update the write pointer and doorbell 
+ * directly. On DXG/DTIF platforms, where direct MMIO access is
+ * unavailable, this API must be used.
+ *
+ * @param[in] queue Queue handle returned by ::hsa_amd_sdma_queue_create.
  * @param[in] write_index The write index value to signal.
  *
- * @retval HSA_STATUS_SUCCESS Doorbell rung successfully.
+ * @retval HSA_STATUS_SUCCESS Write pointer updated and doorbell signaled.
  * @retval HSA_STATUS_ERROR_NOT_INITIALIZED Runtime not initialized.
- * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid queue handle.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT @p queue is invalid. 
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT @p queue not registered with any GPU agent.
  */
 hsa_status_t HSA_API hsa_amd_sdma_queue_ring_doorbell(hsa_amd_sdma_queue_t queue,
                                                       uint64_t write_index);
+
+/**
+ * @brief Wait until all previously submitted packets on an SDMA queue have
+ *        been consumed by the hardware.
+ *
+ * The caller should invoke this before ::hsa_amd_sdma_queue_destroy to ensure
+ * no in-flight work remains on the queue.
+ *
+ * @param[in] queue     Queue handle returned by ::hsa_amd_sdma_queue_create.
+ * @param[in] timeout   Maximum time to wait in microseconds. Pass UINT64_MAX to wait infinitely.
+ *
+ * @retval HSA_STATUS_SUCCESS             All submitted work has completed.
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED Runtime not initialized.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT @p queue handle is invalid.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT @p queue not registered with any GPU agent.
+ * @retval HSA_STATUS_ERROR_TIMEOUT       Timed out before queue became idle.
+ */
+hsa_status_t HSA_API hsa_amd_sdma_queue_wait_idle(hsa_amd_sdma_queue_t queue,
+                                                  uint64_t timeout);
 
 /**
  * @brief logging types

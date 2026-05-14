@@ -1399,6 +1399,16 @@ hsa_status_t HSA_API hsa_amd_sdma_queue_get_info(hsa_amd_sdma_queue_t queue,
   return amdExtTable->hsa_amd_sdma_queue_get_info_fn(queue, attribute, value);
 }
 
+hsa_status_t HSA_API hsa_amd_sdma_queue_ring_doorbell(hsa_amd_sdma_queue_t queue,
+                                                      uint64_t write_index) {
+  return amdExtTable->hsa_amd_sdma_queue_ring_doorbell_fn(queue, write_index);
+}
+
+hsa_status_t HSA_API hsa_amd_sdma_queue_wait_idle(hsa_amd_sdma_queue_t queue,
+                                                  uint64_t timeout) {
+  return amdExtTable->hsa_amd_sdma_queue_wait_idle_fn(queue, timeout);
+}
+
 // Tools only table interfaces.
 namespace rocr {
 

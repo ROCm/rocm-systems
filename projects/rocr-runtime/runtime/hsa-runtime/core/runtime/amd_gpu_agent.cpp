@@ -277,6 +277,11 @@ GpuAgent::~GpuAgent() {
   {
     std::lock_guard<std::mutex> lock(user_sdma_lock_);
     for (auto* sdma : user_sdma_queues_) {
+      constexpr uint64_t kTimeout = 5000000;  //5s
+      if (!sdma->WaitForIdle(kTimeout)) {
+        debug_print("GpuAgent teardown: Timed out waiting for SDMA queue %p to become idle\n",
+                    static_cast<void*>(sdma));
+      }
       sdma->Destroy();
       delete sdma;
     }
@@ -4035,7 +4040,7 @@ hsa_status_t GpuAgent::RemoveUserSdmaQueue(AMD::BlitSdmaBase* sdma) {
   return HSA_STATUS_SUCCESS;
 }
 
-bool GpuAgent::IsValidSdmaQueue(AMD::BlitSdmaBase* sdma) {
+bool GpuAgent::IsValidSdmaQueue(AMD::BlitSdmaBase* sdma) const {
   std::lock_guard<std::mutex> lock(user_sdma_lock_);
   return user_sdma_queues_.find(sdma) != user_sdma_queues_.end();
 }
@@ -4047,7 +4052,7 @@ hsa_status_t GpuAgent::GetSdmaQueueInfo(AMD::BlitSdmaBase* sdma,
     case HSA_AMD_SDMA_QUEUE_INFO_RESOURCE: {
       auto* res = static_cast<hsa_amd_sdma_queue_resource_t*>(value);
       res->ring_base = static_cast<void*>(sdma->queue_start_addr());
-      res->ring_size = sdma->kQueueSize;
+      res->ring_size = BlitSdmaBase::kQueueSize;
       res->read_ptr = sdma->queue_rptr();
       res->write_ptr = sdma->queue_wptr();
       res->doorbell = sdma->queue_doorbell();
@@ -4058,7 +4063,7 @@ hsa_status_t GpuAgent::GetSdmaQueueInfo(AMD::BlitSdmaBase* sdma,
           static_cast<uint64_t>(sdma->queue_resource().QueueId);
       break;
     case HSA_AMD_SDMA_QUEUE_INFO_ENGINE_ID:
-      *static_cast<int*>(value) = sdma->sdma_engine_id();
+      *static_cast<uint32_t*>(value) = sdma->sdma_engine_id();
       break;
     case HSA_AMD_SDMA_QUEUE_INFO_IS_XGMI:
       *static_cast<bool*>(value) = sdma->is_xgmi();
@@ -4082,6 +4087,25 @@ hsa_status_t GpuAgent::GetSdmaQueueInfo(AMD::BlitSdmaBase* sdma,
       return HSA_STATUS_ERROR_INVALID_ARGUMENT; 
   }
 
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t GpuAgent::RingSdmaDoorbell(AMD::BlitSdmaBase* sdma,
+                                        uint64_t write_index) {
+  if (sdma == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // Update write pointer
+  *sdma->queue_wptr() = write_index;
+  std::atomic_thread_fence(std::memory_order_release);
+
+  // Write the doorbell register
+  *sdma->queue_doorbell() = write_index;
+
+  // On DXG/DTIF platforms, use the KMT thunk call to ring the doorbell
+  if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG() ||
+      core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF()) {
+    HSAKMT_CALL(hsaKmtQueueRingDoorbell(sdma->queue_resource().QueueId, write_index));
+  }
   return HSA_STATUS_SUCCESS;
 }
 

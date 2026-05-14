@@ -117,7 +117,7 @@ class BlitSdmaBase : public core::Blit {
 
   // @brief Block until all previously submitted packets have been consumed
   //        by the hardware (rptr catches up to wptr).
-  virtual void WaitForIdle() = 0;
+  virtual bool WaitForIdle(const uint64_t& timeout) = 0;
 
   // Accessors for SDMA information queries
   virtual char* queue_start_addr() const = 0;
@@ -125,7 +125,7 @@ class BlitSdmaBase : public core::Blit {
   virtual volatile uint64_t* queue_rptr() const = 0;
   virtual volatile uint64_t* queue_doorbell() const = 0;
   virtual const HsaQueueResource& queue_resource() const = 0;
-  virtual int sdma_engine_id() const = 0;
+  virtual uint32_t sdma_engine_id() const = 0;
   virtual bool is_xgmi() const = 0;
   virtual size_t min_submission_size() const = 0;
 };
@@ -239,7 +239,7 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
 
   bool SwapSupported() const override { return swap_supported_; }
   GpuAgent* agent() const override { return agent_; }
-  void WaitForIdle() override;
+  bool WaitForIdle(const uint64_t& timeout) override;
 
   // Accessors for direct sdma queue
   char* queue_start_addr() const override { return queue_start_addr_; }
@@ -247,7 +247,7 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   volatile uint64_t* queue_rptr() const override { return queue_rptr_; }
   volatile uint64_t* queue_doorbell() const override { return queue_doorbell_; }
   const HsaQueueResource& queue_resource() const override { return queue_resource_; }
-  int sdma_engine_id() const override { return sdma_engine_id_; }
+  uint32_t sdma_engine_id() const override { return sdma_engine_id_; }
   bool is_xgmi() const override { return is_xgmi_; }
   size_t min_submission_size() const override { return min_submission_size_; }
   bool GcrRequired() const override { return useGCR; }
@@ -447,7 +447,7 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   bool swap_supported_;
 
   /// SDMA engine ID assigned by KFD (-1 = auto-selected).
-  int sdma_engine_id_;
+  uint32_t sdma_engine_id_;
 
   /// True if this queue uses an xGMI-optimized SDMA engine.
   bool is_xgmi_;

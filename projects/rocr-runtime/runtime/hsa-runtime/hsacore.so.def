@@ -275,6 +275,8 @@ global:
 	hsa_amd_sdma_queue_create;
 	hsa_amd_sdma_queue_destroy;
 	hsa_amd_sdma_queue_get_info;
+	hsa_amd_sdma_queue_ring_doorbell;
+	hsa_amd_sdma_queue_wait_idle;
 local:
     *;
 };

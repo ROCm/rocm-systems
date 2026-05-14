@@ -631,6 +631,13 @@ TEST(rocrtstFunc, Sdma_Queues_Submit_LinearCopy_Test) {
   RunCustomTestEpilog(&sq);
 }
 
+TEST(rocrtstFunc, Sdma_Queues_Exclusive_Queues_Test) {
+  SdmaQueuesTest sq;
+  if (!RunCustomTestProlog(&sq)) return;
+  sq.ExclusiveQueueResources();
+  RunCustomTestEpilog(&sq);
+}
+
 TEST(rocrtstNeg, Memory_Negative_Tests) {
     MemoryAllocateNegativeTest mt;
     if (!RunCustomTestProlog(&mt)) return;
