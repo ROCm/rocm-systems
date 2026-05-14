@@ -288,6 +288,7 @@ set(SRC_FILES
   misc/mlx5dvwrap.cc
   misc/ionicdvsymbols.cc
   misc/ionicdvwrap.cc
+  misc/merge_compat_stubs.cc
   misc/npkit.cc
 # misc/nvmlwrap.cc
   misc/nvmlwrap_stub.cc
