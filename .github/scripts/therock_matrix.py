@@ -2,7 +2,8 @@
 This dictionary is used to map specific file directory changes to the corresponding build flag and tests
 """
 subtree_to_project_map = {
-    "emulation": "emulation",
+    "emulation/rocjistu": "emulation",
+    "emulation/mirage": "emulation",
     "projects/amdsmi": "core",
     "projects/aqlprofile": "profiler",
     "projects/clr": "runtimes",
