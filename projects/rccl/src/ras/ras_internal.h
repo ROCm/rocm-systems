@@ -25,6 +25,8 @@
 #include "utils.h"
 #include "hip_rocm_version_info.h"
 
+const char* ncclVersionToString(int version, char* buf, size_t bufLen);
+
 // Type of a RAS network or client message.
 typedef enum {
   RAS_MSG_CONNINIT = 1,
