@@ -11,9 +11,9 @@ set(HRR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 if(NOT DEFINED HIP_INCLUDE_DIR)
   set(HIP_INCLUDE_DIR "${HIP_ROOT}/include")
 endif()
-if(NOT DEFINED HIP_LIBRARY)
-  find_library(HIP_LIBRARY amdhip64 HINTS "${HIP_ROOT}/lib" REQUIRED)
-endif()
+
+# Always built in-tree alongside amdhip64 — link against the CMake target directly.
+set(HIP_LIBRARY amdhip64)
 
 # ---------------------------------------------------------------------------
 # hrr_reader — archive loader (STATIC)
