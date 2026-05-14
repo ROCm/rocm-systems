@@ -72,10 +72,10 @@ def _resolve_julia_lib_paths(julia_binary: str) -> Optional[tuple[str, str]]:
 @pytest.fixture
 def julia_environment(rocprof_config) -> Optional[dict[str, str]]:
     """Environment variables for HPC Julia tests."""
-    if not rocprof_config.julia:
+    if not rocprof_config.capabilities.julia_exec:
         return None
 
-    lib_paths = _resolve_julia_lib_paths(str(rocprof_config.julia))
+    lib_paths = _resolve_julia_lib_paths(str(rocprof_config.capabilities.julia_exec))
     if lib_paths is None:
         return None
 
@@ -113,6 +113,6 @@ class TestJulia(RocprofsysTest):
             mode,
             "vecadd.jl",
             env=julia_environment,
-            pre_run_args=[str(rocprof_config.julia)],
+            pre_run_args=[str(rocprof_config.capabilities.julia_exec)],
         )
         self.assert_regex(result, pass_regex=["PASSED!"])

@@ -931,6 +931,19 @@ For attachment profiling of running processes:
         default=None,
     )
 
+    add_parser_bool_argument(
+        advanced_options,
+        "--attach-children",
+        help="""When --pid is used, attach to the target process and all of its descendant processes. Enabled by default; use --attach-children=false to attach only to the specified PID.""",
+        default=True,
+    )
+
+    add_parser_bool_argument(
+        advanced_options,
+        "--attach-sync-output",
+        help="[Attach mode only] Generate output files synchronously during detachment (default: async). Use this option when scripts need to access output files immediately after rocprofv3 exits",
+    )
+
     if args is None:
         args = sys.argv[1:]
 
@@ -1475,6 +1488,7 @@ def run(app_args, args, **kwargs):
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
     update_env("ROCPROF_OUTPUT_PATH", _output_path)
     update_env("ROCPROF_OUTPUT_CONFIG_FILE", args.output_config, overwrite_if_true=True)
+    update_env("ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC", args.attach_sync_output)
     if app_pass is not None and args.sub_directory is not None:
         app_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
             f"{_output_path}", f"{args.sub_directory}{app_pass}"
@@ -1819,6 +1833,7 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_ATTACH_PID", args.pid)
         if args.attach_duration_msec is not None:
             update_env("ROCPROF_ATTACH_DURATION", f"{args.attach_duration_msec}")
+        update_env("ROCPROF_ATTACH_CHILDREN", "1" if args.attach_children else "0")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprof-attach")
         if app_args:
             exit_code = subprocess.check_call([sys.executable, path], env=app_env)

@@ -68,7 +68,11 @@ ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
   }
 
   CUmemAllocationProp memProp = {};
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+  memProp.type = hipMemAllocationTypeUncached;
+#else
   memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
   memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   memProp.requestedHandleType = ncclCuMemHandleType;
   memProp.location.id = comm->cudaDev;
@@ -121,7 +125,8 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
     }
   }
   CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
-  CUCHECKIGNORE(cuMemUnmap(flatAddr, devr->lsaSize*devr->bigSize));
+  // Returns error: invalid argument. Already unmapped by symMemoryDropRef
+  // CUCHECKIGNORE(cuMemUnmap(flatAddr, devr->lsaSize*devr->bigSize));
   CUCHECKIGNORE(cuMemAddressFree(flatAddr, devr->lsaSize*devr->bigSize));
   ncclShadowPoolDestruct(&devr->shadows);
   ncclSpaceDestruct(&devr->bigSpace);
@@ -743,7 +748,11 @@ ncclResult_t ncclDevrCommCreateInternal(
     outDevComm->resourceWindow_inlined = {};
   } else {
     CUmemAllocationProp memProp = {};
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+    memProp.type = hipMemAllocationTypeUncached;
+#else
     memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
     memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     memProp.requestedHandleType = ncclCuMemHandleType;
     memProp.location.id = comm->cudaDev;

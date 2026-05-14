@@ -27,7 +27,7 @@
 #include <array>
 #include <vector>
 
-#include "util/hsa_rsrc_factory.h"
+#include "lib/aqlprofile/util/hsa_rsrc_factory.h"
 
 /* Define the HW IP blocks will be used in driver , add more if necessary */
 enum amd_hw_ip_block_type

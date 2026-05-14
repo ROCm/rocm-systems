@@ -31,6 +31,16 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
+
+set(rocattach-test-env
+    "ROCP_TOOL_ATTACH=1"
+    "ROCPROFILER_REGISTER_LOG_LEVEL=${LOG_LEVEL}"
+    "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
+    "ROCATTACH_LOG_LEVEL=${LOG_LEVEL}"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    )
+
 add_executable(rocattach-parallel-attach-test)
 target_sources(rocattach-parallel-attach-test PRIVATE main.cpp)
 target_link_libraries(
@@ -39,50 +49,44 @@ target_link_libraries(
             rocprofiler-sdk::tests-common-library
             rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
 
-add_test(NAME rocattach-parallel-attach-test-execute
-         COMMAND $<TARGET_FILE:rocattach-parallel-attach-test>
-                 $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>)
-
-add_test(
-    NAME rocattach-parallel-attach-test-signal-execute
-    COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
-            $<TARGET_FILE:rocprofiler-sdk-c-tool> --send-signal)
-
-set(rocattach-test-env
-    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
-    "ROCP_TOOL_ATTACH=1"
-    "ROCPROFILER_REGISTER_LOG_LEVEL=${LOG_LEVEL}"
-    "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
-    "ROCATTACH_LOG_LEVEL=${LOG_LEVEL}"
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
-    )
-
-set_tests_properties(
+rocprofiler_add_integration_execute_test(
     rocattach-parallel-attach-test-execute
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${rocattach-test-env}"
-               PASS_REGULAR_EXPRESSION
-               "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${IS_DISABLED}")
+    TARGET rocattach-parallel-attach-test
+    ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${rocattach-test-env}"
+    PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-set_tests_properties(
+rocprofiler_add_integration_execute_test(
     rocattach-parallel-attach-test-signal-execute
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${rocattach-test-env}"
-               PASS_REGULAR_EXPRESSION
-               "Attachment test process [0-9]+ received signal 28"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${IS_DISABLED}")
+    TARGET rocattach-parallel-attach-test
+    ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>
+         --send-signal
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${rocattach-test-env}"
+    PASS_REGULAR_EXPRESSION "Attachment test process [0-9]+ received signal 28"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+add_executable(rocattach-attach-tree-test)
+target_sources(rocattach-attach-tree-test PRIVATE attach_tree.cpp)
+target_link_libraries(
+    rocattach-attach-tree-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
+            rocprofiler-sdk::tests-common-library
+            rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
+
+rocprofiler_add_integration_execute_test(
+    rocattach-attach-tree-test-execute
+    TARGET rocattach-attach-tree-test
+    ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${rocattach-test-env}"
+    PASS_REGULAR_EXPRESSION "verified: grandchild pid [0-9]+ loaded the tool library"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

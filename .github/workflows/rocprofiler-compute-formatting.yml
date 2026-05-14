@@ -45,7 +45,7 @@ jobs:
         if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
     - name: Run Ruff Linter and Import Sorter
       run: |
-        ruff check . --fix --exit-zero
+        ruff check . --fix
     - name: Run Ruff Formatter
       run: |
         ruff format .

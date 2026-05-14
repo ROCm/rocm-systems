@@ -21,8 +21,13 @@
 // SOFTWARE.
 
 #include <gtest/gtest.h>
+#include <unistd.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
+#include <sstream>
 #include <string_view>
 #include <vector>
 #include "lib/common/logging.hpp"
@@ -352,4 +357,212 @@ TEST(codeobj_library, inline_annotation)
     EXPECT_GE(max_depth, min_depth)
         << "Deepest inline call stack was " << max_depth << " levels (expected >= " << min_depth
         << "). DWARF inlined subroutine traversal may be broken.";
+}
+
+namespace
+{
+// Reduce a "file[:line[:col]]" frame to "basename:line", or "" for "no info".
+// llvm-symbolizer renders "no info" as "??:0:0" / "??:?"; DWARF line 0 is also
+// "no specific line".  Normalizing both sides this way makes path-prefix and
+// column differences across machines/builds irrelevant.
+std::string
+canonicalize(std::string_view s)
+{
+    if(s.empty() || s == "??:0:0" || s == "??:?" || s == "??:0") return {};
+
+    // Strip optional trailing ":col" (llvm-symbolizer is "file:line:col"; we are "file:line").
+    auto last  = s.rfind(':');
+    auto first = s.find(':');
+    if(last != first && last != std::string_view::npos) s = s.substr(0, last);
+
+    auto colon = s.rfind(':');
+    if(colon == std::string_view::npos) return std::string{s};
+    auto line = s.substr(colon + 1);
+    if(line == "0" || line == "?") return {};
+    auto path  = s.substr(0, colon);
+    auto slash = path.rfind('/');
+    auto base  = (slash == std::string_view::npos) ? path : path.substr(slash + 1);
+    return std::string{base} + ':' + std::string{line};
+}
+
+// Read a FILE* to EOF into a string.
+std::string
+slurp(FILE* fp)
+{
+    std::string out;
+    char        buf[4096];
+    while(size_t n = std::fread(buf, 1, sizeof(buf), fp))
+        out.append(buf, n);
+    return out;
+}
+
+// Locate llvm-symbolizer at runtime: $ROCM_PATH, $ROCM_HOME, /opt/rocm, then $PATH.
+// Resolved at runtime rather than configure time because some CI flows (e.g.
+// TheRock) wipe the build dir before tests run, leaving any baked-in absolute
+// path stale.
+std::string
+find_symbolizer()
+{
+    namespace fs = rocprofiler::common::filesystem;
+    auto exists  = [](const std::string& p) {
+        std::error_code ec;
+        return !p.empty() && fs::exists(p, ec) && !ec;
+    };
+    for(const char* env : {"ROCM_PATH", "ROCM_HOME"})
+        if(const char* v = std::getenv(env); v && *v)
+            if(auto p = std::string{v} + "/llvm/bin/llvm-symbolizer"; exists(p)) return p;
+    if(std::string p = "/opt/rocm/llvm/bin/llvm-symbolizer"; exists(p)) return p;
+
+    FILE* pipe = ::popen("command -v llvm-symbolizer 2>/dev/null", "r");
+    if(!pipe) return {};
+    auto out = slurp(pipe);
+    ::pclose(pipe);
+    while(!out.empty() && (out.back() == '\n' || out.back() == '\r'))
+        out.pop_back();
+    return out;
+}
+}  // namespace
+
+/**
+ * Differential test: every instruction inside each kernel symbol must yield the
+ * same source-line / inline-chain attribution from CodeobjDecoderComponent as
+ * from llvm-symbolizer.  Both parse the same .debug_line in the same ELF —
+ * disagreement is a bug, and llvm-symbolizer has had years more scrutiny.
+ *
+ * Guards against the bugs the recent line-attribution fix targets: ranges
+ * spilling past end_sequence rows, and ranges spilling across DWARF gaps.
+ * Skipped if llvm-symbolizer cannot be found at runtime.
+ */
+TEST(codeobj_library, dwarf_matches_llvm_symbolizer)
+{
+    namespace fs                   = rocprofiler::common::filesystem;
+    constexpr std::string_view sep = disassembly::Instruction::separator;
+
+    const std::string symbolizer = find_symbolizer();
+    if(symbolizer.empty()) GTEST_SKIP() << "llvm-symbolizer not found";
+
+    std::string obj_path = codeobjhelper::get_data_file_path("syncthreads_kernel.bin");
+    ASSERT_FALSE(obj_path.empty()) << "syncthreads_kernel.bin not found";
+
+    std::ifstream     in(obj_path, std::ios::binary);
+    std::vector<char> obj{std::istreambuf_iterator<char>(in), {}};
+    ASSERT_FALSE(obj.empty());
+
+    CodeobjDecoderComponent comp(obj.data(), obj.size());
+    ASSERT_FALSE(comp.m_symbol_map.empty());
+
+    // Walk every instruction; step by inst->size so we never feed comgr a
+    // mid-instruction address (which throws). Both sides see the same set.
+    std::vector<uint64_t>    addrs;
+    std::vector<std::string> ours;
+    for(auto& [kaddr, sym] : comp.m_symbol_map)
+    {
+        for(uint64_t va = kaddr; va < kaddr + sym.mem_size;)
+        {
+            auto faddr = comp.va2fo(va);
+            if(!faddr) break;
+            std::unique_ptr<disassembly::Instruction> inst;
+            try
+            {
+                inst = comp.disassemble_instruction(*faddr, va);
+            } catch(...)
+            {
+                break;
+            }
+            if(!inst || inst->size == 0) break;
+            addrs.push_back(va);
+            ours.push_back(inst->comment);
+            va += inst->size;
+        }
+    }
+    ASSERT_FALSE(addrs.empty());
+
+    // Feed addresses to llvm-symbolizer via stdin from a tmp file (the test's
+    // build dir is read-only in some CI install layouts).
+    std::error_code   ec;
+    auto              tmp      = fs::temp_directory_path(ec);
+    std::string       tmpl_str = (ec ? "/tmp" : tmp.string()) + "/codeobj_addrs.XXXXXX";
+    std::vector<char> tmpl(tmpl_str.begin(), tmpl_str.end());
+    tmpl.push_back('\0');
+    int fd = ::mkstemp(tmpl.data());
+    ASSERT_GE(fd, 0) << "mkstemp: " << ::strerror(errno);
+    {
+        FILE* fp = ::fdopen(fd, "w");
+        ASSERT_NE(fp, nullptr);
+        for(auto a : addrs)
+            std::fprintf(fp, "0x%lx\n", static_cast<unsigned long>(a));
+        std::fclose(fp);
+    }
+    std::string cmd = '"' + symbolizer + "\" --obj=\"" + obj_path +
+                      "\" --inlines --output-style=LLVM < \"" + tmpl.data() + "\" 2>&1";
+    FILE* pipe = ::popen(cmd.c_str(), "r");
+    ASSERT_NE(pipe, nullptr) << "popen: " << ::strerror(errno);
+    std::string raw = slurp(pipe);
+    int         rc  = ::pclose(pipe);
+    ::unlink(tmpl.data());
+    ASSERT_EQ(rc, 0) << "llvm-symbolizer rc=" << rc << " cmd=" << cmd << "\n" << raw;
+
+    // Parse: per-address record terminated by an empty line; each record is
+    // (function_name, file:line:col) line pairs, innermost first.
+    std::vector<std::vector<std::string>> theirs(addrs.size());
+    {
+        std::istringstream is(raw);
+        std::string        line;
+        size_t             i         = 0;
+        bool               want_func = true;
+        while(std::getline(is, line) && i < addrs.size())
+        {
+            if(line.empty())
+            {
+                ++i;
+                want_func = true;
+            }
+            else if(want_func)
+                want_func = false;
+            else
+            {
+                theirs[i].emplace_back(canonicalize(line));
+                want_func = true;
+            }
+        }
+    }
+
+    // Compare frame-by-frame after canonicalization. Trailing "no info" frames
+    // are dropped on both sides so {""} (llvm's "??:0:0") matches our empty.
+    auto trim = [](std::vector<std::string>& v) {
+        while(!v.empty() && v.back().empty())
+            v.pop_back();
+    };
+
+    size_t mismatches = 0;
+    for(size_t i = 0; i < addrs.size(); ++i)
+    {
+        std::vector<std::string> mine;
+        for(size_t pos = 0; pos <= ours[i].size();)
+        {
+            auto next = ours[i].find(sep, pos);
+            mine.emplace_back(
+                canonicalize(ours[i].substr(pos, next == std::string::npos ? next : next - pos)));
+            if(next == std::string::npos) break;
+            pos = next + sep.size();
+        }
+        trim(mine);
+        trim(theirs[i]);
+        if(mine == theirs[i]) continue;
+
+        if(mismatches++ < 10)
+        {
+            auto fmt = [](const std::vector<std::string>& v) {
+                std::string s;
+                for(auto& f : v)
+                    (s += '[') += f, s += ']';
+                return s;
+            };
+            ADD_FAILURE() << "addr=0x" << std::hex << addrs[i] << std::dec
+                          << "\n  ours  : " << fmt(mine) << "\n  theirs: " << fmt(theirs[i]);
+        }
+    }
+
+    EXPECT_EQ(mismatches, 0u) << mismatches << " of " << addrs.size()
+                              << " addresses disagreed with llvm-symbolizer";
 }

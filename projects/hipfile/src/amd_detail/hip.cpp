@@ -5,7 +5,6 @@
 
 #include "context.h"
 #include "hip.h"
-#include "static.h"
 
 #include <cstdlib>
 #include <system_error>
@@ -25,7 +24,7 @@ catch (...) {
 hipAmdFileRead_t
 getHipAmdFileReadPtr()
 {
-    HIPFILE_STATIC hipAmdFileRead_t hipAmdFileReadPtr{
+    static hipAmdFileRead_t hipAmdFileReadPtr{
         reinterpret_cast<hipAmdFileRead_t>(hipGetProcAddressHelper("hipAmdFileRead"))};
     return hipAmdFileReadPtr;
 }
@@ -33,7 +32,7 @@ getHipAmdFileReadPtr()
 hipAmdFileWrite_t
 getHipAmdFileWritePtr()
 {
-    HIPFILE_STATIC hipAmdFileWrite_t hipAmdFileWritePtr{
+    static hipAmdFileWrite_t hipAmdFileWritePtr{
         reinterpret_cast<hipAmdFileWrite_t>(hipGetProcAddressHelper("hipAmdFileWrite"))};
     return hipAmdFileWritePtr;
 }
@@ -199,4 +198,19 @@ Hip::hipInit() const
     (void)throwOnHipError<Hip::RuntimeError>(::hipInit(0));
 }
 
+int
+Hip::hipGetDevice() const
+{
+    int device_id;
+    (void)throwOnHipError<Hip::RuntimeError>(::hipGetDevice(&device_id));
+    return device_id;
+}
+
+int
+Hip::hipGetDeviceCount() const
+{
+    int device_count;
+    (void)throwOnHipError<Hip::RuntimeError>(::hipGetDeviceCount(&device_count));
+    return device_count;
+}
 }

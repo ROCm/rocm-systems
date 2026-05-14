@@ -307,6 +307,9 @@ public:
   is_address_class_supported (const address_class_t &address_class) const
     = 0;
 
+  virtual std::vector<agent_t::aperture_t>
+  get_apertures (const os_agent_info_t &os) const = 0;
+
   /* Return the watchpoints for which an exception was generated in the given
      stopped wave.  */
   virtual std::vector<os_watch_id_t>

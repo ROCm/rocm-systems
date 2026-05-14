@@ -49,7 +49,8 @@ jobs:
     if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-latest
     outputs:
-      matrix_data: ${{ steps.generate_matrix_ci.outputs.matrix_data }}
+      distros: ${{ steps.generate_matrix_ci.outputs.distros }}
+      rocm_versions: ${{ steps.generate_matrix_ci.outputs.rocm_versions }}
 
     steps:
       - uses: actions/checkout@v6
@@ -60,8 +61,10 @@ jobs:
         working-directory: projects/rocprofiler-systems/docker
         id: generate_matrix_ci
         run: |
-          MATRIX_CONTENT=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
-          echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
+          DISTROS=$(cat containers-ci.yml | yq '.distros' -I=0 -o=json)
+          echo "distros=$DISTROS" >> $GITHUB_OUTPUT
+          ROCM_VERSIONS=$(cat containers-ci.yml | yq '.rocm-versions' -I=0 -o=json)
+          echo "rocm_versions=$ROCM_VERSIONS" >> $GITHUB_OUTPUT
 
   rocprofiler-systems-ci:
     needs: prepare_matrix_ci
@@ -70,7 +73,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
+        system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.distros) }}
+        rocm-version: ${{ fromJSON(needs.prepare_matrix_ci.outputs.rocm_versions) }}
+        exclude:
+          - system: { distro: "debian", version: "12" }
+            rocm-version: "6.3"
+          - system: { distro: "rhel", version: "10" }
+            rocm-version: "6.3"
+          - system: { distro: "rhel", version: "10" }
+            rocm-version: "6.4"
+          - system: { distro: "rhel", version: "10" }
+            rocm-version: "7.0"
 
     steps:
       - uses: actions/checkout@v6
@@ -101,14 +114,15 @@ jobs:
           command: |
             cd projects/rocprofiler-systems/docker
             ./build-docker-ci.sh \
-              --distro ${{ matrix.distro }} \
-              --versions ${{ matrix.version }} \
+              --distro ${{ matrix.system.distro }} \
+              --versions ${{ matrix.system.version }} \
+              --rocm-version ${{ matrix.rocm-version }} \
               --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
               --jobs 2 \
               --elfutils-version 0.188 \
               --boost-version 1.79.0
 
-      - name: Build Base Container (Push)
+      - name: Build CI Container (Push)
         if: github.event_name != 'pull_request'
         timeout-minutes: 45
         uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
@@ -119,8 +133,9 @@ jobs:
           command: |
             cd projects/rocprofiler-systems/docker
             ./build-docker-ci.sh \
-              --distro ${{ matrix.distro }} \
-              --versions ${{ matrix.version }} \
+              --distro ${{ matrix.system.distro }} \
+              --versions ${{ matrix.system.version }} \
+              --rocm-version ${{ matrix.rocm-version }} \
               --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} \
               --jobs 2 \
               --elfutils-version 0.188 \

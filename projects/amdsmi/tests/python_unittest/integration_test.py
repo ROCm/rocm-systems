@@ -742,10 +742,6 @@ class TestAmdSmiPython(unittest.TestCase):
                 power_cap_max = amdsmi.amdsmi_get_cpu_socket_power_cap_max(cpu)
                 self.common.print(msg, power_cap_max)
                 self.common.check_ret("", "", self.common.PASS)
-
-                # Convert power_cap_max from string that has units to an integer
-                # Ex.  power_cap_max = "500 W"  to   power_cap_max = 500
-                power_cap_max = int(power_cap_max.split()[0])
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                 if self.common.check_ret(msg, e, self.common.PASS):
                     self.raise_exception = e
@@ -767,7 +763,7 @@ class TestAmdSmiPython(unittest.TestCase):
             # Set cpu socket power back
             msg = f"\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap={power_cap_orig}):"
             try:
-                ret = amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, int(power_cap_orig.split()[0]))
+                ret = amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, power_cap_orig)
                 self.common.print(msg, ret)
                 self.common.check_ret("", "", self.common.PASS)
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:

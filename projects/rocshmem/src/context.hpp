@@ -530,6 +530,13 @@ class Context {
    * communication through shared memory.
    */
   IpcImpl ipcImpl_{};
+
+  /**
+   * @brief Used to broadcast signal across wg.
+   *        Note: There are potentional issues where multiple wgs share the ctx (AIROCSHMEM-368)
+   */
+
+  uint64_t wg_signal_scratch = 0;
 };
 
 }  // namespace rocshmem

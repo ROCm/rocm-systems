@@ -19,7 +19,11 @@ set(ROCPROFSYS_PYTEST_PACKAGE_FILES
     ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/capabilities.py
 )
 
-file(GLOB ROCPROFSYS_PYTEST_TEST_FILES "${CMAKE_CURRENT_LIST_DIR}/test_*.py")
+file(
+    GLOB ROCPROFSYS_PYTEST_TEST_FILES
+    CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_LIST_DIR}/test_*.py"
+)
 set(ROCPROFSYS_PYTEST_FILES
     ${CMAKE_CURRENT_LIST_DIR}/conftest.py
     ${ROCPROFSYS_PYTEST_TEST_FILES}
@@ -39,10 +43,7 @@ add_custom_target(
         ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_PYTEST_FILES}
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/pytest/
     COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/requirements.txt
-        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/
-    COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/README.md
+        ${CMAKE_COMMAND} -E copy_if_different ${PROJECT_SOURCE_DIR}/requirements.txt
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/
     COMMENT "Copying pytest files to build directory"
 )

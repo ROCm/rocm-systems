@@ -105,8 +105,6 @@ show-matrix()
     done
 
     echo ""
-    echo "ROCm '0.0' means no ROCm installation (CPU-only build)"
-    echo ""
     echo "Note: Patch versions are also supported (See: https://repo.radeon.com/amdgpu-install/)"
     echo ""
 }
@@ -140,16 +138,14 @@ validate-combinations()
             ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
             ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
             ROCM_MAJOR_MINOR="${ROCM_MAJOR}.${ROCM_MINOR}"
-            if ! ([ "${ROCM_MAJOR_MINOR}" == "0.0" ] && [ "${ROCM_VERSION}" != "0.0" ]); then
-                for i in "${!MATRIX_DISTROS[@]}"; do
-                    if [[ "${MATRIX_DISTROS[i]}" == "${DISTRO}" && \
-                        "${MATRIX_VERSIONS[i]}" == "${VERSION}" && \
-                        "${MATRIX_ROCM_VERSIONS[i]}" == "${ROCM_MAJOR_MINOR}" ]]; then
-                        valid=1
-                        break
-                    fi
-                done
-            fi
+            for i in "${!MATRIX_DISTROS[@]}"; do
+                if [[ "${MATRIX_DISTROS[i]}" == "${DISTRO}" && \
+                    "${MATRIX_VERSIONS[i]}" == "${VERSION}" && \
+                    "${MATRIX_ROCM_VERSIONS[i]}" == "${ROCM_MAJOR_MINOR}" ]]; then
+                    valid=1
+                    break
+                fi
+            done
 
             if [ ${valid} -eq 0 ]; then
                 send-error "Unsupported combination :: ${DISTRO}-${VERSION} + ROCm ${ROCM_VERSION}. See compatibility matrix for supported versions."

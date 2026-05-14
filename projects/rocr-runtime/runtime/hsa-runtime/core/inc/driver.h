@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -146,6 +146,7 @@ public:
                                       void **mem, size_t size,
                                       uint32_t node_id) = 0;
 
+  /// @brief Free memory allocated by @ref AllocateMemory.
   virtual hsa_status_t FreeMemory(void *mem, size_t size) = 0;
 
   /// @brief Create an agent dispatch queue with user-mode access rights.
@@ -157,7 +158,6 @@ public:
   /// if @p type is one of the SDMA queue types.
   /// @param[in] queue_addr Address of the queue's ring buffer.
   /// @param[in] queue_size_bytes Size of the queue's ring buffer in bytes.
-  /// @param[in] queue_metadata_addr Address of the queue's metadata ring buffer.
   /// @param[in] queue_metadata_size_bytes Size of the queue's metadata ring buffer in bytes.
   /// @param[in] event HsaEvent for event-driven callbacks.
   /// @param[out] queue_resource Queue resource information populated by the driver.

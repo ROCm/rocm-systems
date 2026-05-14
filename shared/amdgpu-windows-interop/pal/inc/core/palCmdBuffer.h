@@ -599,7 +599,7 @@ union TessDistributionFactors
         /// increments the accumulator for the Patch distribution factor.
         uint32 donutDistributionFactor : 5;
         /// Used when the distribution mode is TRAPEZOID for quad and tri domain types. The number of donuts in the patch
-        /// are compared against this value to detemine whether this donut gets split up into trapezoids (needs the patch to
+        /// are compared against this value to determine whether this donut gets split up into trapezoids (needs the patch to
         /// be in donut mode). A value of 0 or 1 will be treated as 2. The innermost donut is never allowed to be broken
         /// into trapezoids.
         uint32 trapDistributionFactor  : 3;
@@ -1416,7 +1416,7 @@ struct DrawIndirectArgs
     uint32 instanceCount;  ///< Number of instances to draw.
     uint32 firstVertex;    ///< Starting index value for the draw.  Indices passed to the vertex shader will range from
                            ///  firstVertex to firstVertex + vertexCount - 1.
-    uint32 firstInstance;  ///< Starting instance for the draw.  Instace IDs passed to the vertex shader will range from
+    uint32 firstInstance;  ///< Starting instance for the draw.  Instance IDs passed to the vertex shader will range from
                            ///  firstInstance to firstInstance + instanceCount - 1.
 };
 
@@ -1435,7 +1435,7 @@ struct DrawIndexedIndirectArgs
     uint32 firstIndex;     ///< Starting index buffer slot for the draw.
     int32  vertexOffset;   ///< Offset added to the index fetched from the index buffer before it is passed to the
                            ///  vertex shader.
-    uint32 firstInstance;  ///< Starting instance for the draw.  Instace IDs passed to the vertex shader will range from
+    uint32 firstInstance;  ///< Starting instance for the draw.  Instance IDs passed to the vertex shader will range from
                            ///  firstInstance to firstInstance + instanceCount - 1.
 };
 
@@ -1530,7 +1530,7 @@ enum class VrsCombiner : uint32
     Count
 };
 
-/// Structure for defining paramters to the CmdSetPerDrawVrsRate function.
+/// Structure for defining parameters to the CmdSetPerDrawVrsRate function.
 struct VrsRateParams
 {
     /// The shading rate to be bound to the render state.
@@ -1554,7 +1554,7 @@ struct VrsRateParams
     } flags;              ///< Flags controlling VRS rate parameters
 };
 
-/// Structure for defininig paramters to the CmdSetVrsCenterState function.
+/// Structure for defininig parameters to the CmdSetVrsCenterState function.
 struct VrsCenterState
 {
     /// The offset is scaled by the coarse pixel size and then added to the center location
@@ -1733,7 +1733,7 @@ typedef void (PAL_STDCALL *CmdDispatchAqlFunc)(
 /// @see ICmdBuffer::CmdSetInputAssemblyState
 struct InputAssemblyStateParams
 {
-    PrimitiveTopology topology;                     ///< Defines how vertices should be interpretted and rendered by
+    PrimitiveTopology topology;                     ///< Defines how vertices should be interpreted and rendered by
                                                     ///  the graphics pipeline.
     uint8             patchControlPoints;           ///< # of control points per patch. [0-32] valid. Should be set to
                                                     ///  0 by clients if topology is not PrimitiveTopology::Patch.
@@ -1793,7 +1793,7 @@ struct LineStippleStateParams
     uint32 lineStippleScale; ///< Line stipple repeat factor.
 };
 
-/// Specifies paramters for setting up depth bias. Depth Bias is used to ensure a primitive can properly be displayed
+/// Specifies parameters for setting up depth bias. Depth Bias is used to ensure a primitive can properly be displayed
 /// (without Z fighting) in front (or behind) of the previously rendered co-planar primitive.  This is useful for decal
 /// or shadow rendering.
 /// @see ICmdBuffer::CmdSetDepthBiasState
@@ -1886,7 +1886,7 @@ constexpr uint32 NumHiSPretests = 2;
 /// or via an app profile in the client layer. For example, if the application 1) clears stencil, 2) does a pass to
 /// write stencil, 3) then does a final pass that masks rendering based on the stencil value being > 0, ideally we
 /// would choose a pretest of func=Greater, mask=0xFF, and value=0 so that #2 would update the stencil image with
-/// per-tile data that lets #3 be accelerated at maximum effeciency.
+/// per-tile data that lets #3 be accelerated at maximum efficiency.
 ///
 /// In absence of app-specific knowledge, the following algorithm may be a good generic approach:
 /// 1. When the stencil image is cleared, set pretest #0 to func=Equal, mask=0xFF, and value set to the clear value.
@@ -1963,10 +1963,10 @@ struct ViewportParams
     DepthRange depthRange;              ///< Specifies the target range of Z values
     DepthClamp userDepthClamp;          ///< Specifies the clamp range of Z values for DepthClampMode::UserDefined.
     // Define viewports array at the end of the structure as it is common to only access the first N from the CPU.
-    Viewport   viewports[MaxViewports]; ///< Array of desciptors for each viewport.
+    Viewport   viewports[MaxViewports]; ///< Array of descriptors for each viewport.
 };
 
-/// Specifies the parameters for specifing the scissor rectangle.
+/// Specifies the parameters for specifying the scissor rectangle.
 struct ScissorRectParams
 {
     uint32 count;                   ///< Number of scissor rectangles.
@@ -2059,7 +2059,7 @@ enum ComputeStateFlags : uint32
     ComputeStatePipelineAndUserData = 0x1, ///< Selects the bound compute pipeline, all non-indirect user data, and all
                                            ///  kernel arguments (if applicable). Note that the current user data will
                                            ///  be invalidated on CmdSaveComputeState.
-    ComputeStateBorderColorPalette  = 0x2, ///< Selects the bound border color pallete that affects compute pipelines.
+    ComputeStateBorderColorPalette  = 0x2, ///< Selects the bound border color palette that affects compute pipelines.
     ComputeStateAllState            = 0x3, ///< Selects all state
     ComputeStateTreatAsBlt          = 0x4, ///< This compute state counts towards PipelineStageBlt.
     ComputeStateAllFlags            = 0x7, ///< Selects all possible options
@@ -2069,9 +2069,9 @@ enum ComputeStateFlags : uint32
 };
 
 /// Provides dynamic command buffer flags during submission
-/// The following flags are used for Frame Pacing when delay time is configured to be caculated by KMD.
+/// The following flags are used for Frame Pacing when delay time is configured to be calculated by KMD.
 /// (Currently DX clients require this).
-/// For clients that do not need Frame Pacing with KMD caculated delay time, they can ignore these flags:
+/// For clients that do not need Frame Pacing with KMD calculated delay time, they can ignore these flags:
 ///
 /// - frameBegin and frameEnd : Client's presenting queue should track its present state,
 ///   and set frameBegin flag on the first command buffer after present,
@@ -2103,7 +2103,7 @@ struct CmdBufInfo
             uint32 preflip                 : 1;  ///< This command buffer has pre-flip access to DirectCapture resource
             uint32 postflip                : 1;  ///< This command buffer has post-flip access to DirectCapture resource
             uint32 privateFlip             : 1;  ///< Need to flip to a private primary surface for DirectCapture feature
-            uint32 vpBltExecuted           : 1;  ///< This command buffer comtains VP Blt work.
+            uint32 vpBltExecuted           : 1;  ///< This command buffer contains VP Blt work.
             uint32 disableDccRejected      : 1;  ///< Reject KMD's DisableDcc request to avoid writing to front buffer.
             uint32 noFlip                  : 1;  ///< No flip when DirectCapture access submission completes
             uint32 frameGenIndex           : 4;  ///< Index of the DirectCapture feature generated frames
@@ -2263,7 +2263,7 @@ struct ScaledCopyInfo
     ImageRotation                   rotation;       ///< Rotation option between two images.
     const ColorKey*                 pColorKey;      ///< Color key value.
     const Rect*                     pScissorRect;   ///< Scissor test rectangle.
-    ScaledCopyFlags                 flags;          ///< Copy flags, identifies the type of blt to peform.
+    ScaledCopyFlags                 flags;          ///< Copy flags, identifies the type of blt to perform.
 };
 
 /// Input structure to @ref ICmdBuffer::CmdGenerateMipmaps. Specifies parameters needed to execute CmdGenerateMipmaps.
@@ -2580,13 +2580,13 @@ public:
 
     /// Sets the shading rate in the command buffer along with the state of the various combiners.
     ///
-    /// @param [in] rateParams     Nwe VRS shading rate parameters to be bound.
+    /// @param [in] rateParams     New VRS shading rate parameters to be bound.
     virtual void CmdSetPerDrawVrsRate(
         const VrsRateParams&  rateParams) = 0;
 
     /// Setup parameters regarding how pixel center will be evaluated with VRS.
     ///
-    /// @param [in] centerState     Nwe VRS parameters to be bound that control how pixel center is defined.
+    /// @param [in] centerState     New VRS parameters to be bound that control how pixel center is defined.
     virtual void CmdSetVrsCenterState(
         const VrsCenterState&  centerState) = 0;
 
@@ -3779,7 +3779,7 @@ public:
     /// equal than 8 bytes, CmdWriteImmediate() is preferred.
     ///
     /// @param [in] dstGpuMemory  GPU memory object to be updated.
-    /// @param [in] dstOffset     Byte offset into the GPU memory object to be udpated.  Must be a multiple of 4.
+    /// @param [in] dstOffset     Byte offset into the GPU memory object to be updated.  Must be a multiple of 4.
     /// @param [in] dataSize      Amount of data to write, in bytes.  Must be a multiple of 4.
     /// @param [in] pData         Pointer to host data to be copied into the GPU memory.
     virtual void CmdUpdateMemory(
@@ -4552,7 +4552,7 @@ public:
     /// Stalls a command buffer execution based on a condition that compares an immediate value with value coming from a
     /// GPU memory location.
     ///
-    /// The client (or application) is expected to transiton the memory to proper state before calling this function.
+    /// The client (or application) is expected to transition the memory to proper state before calling this function.
     /// The memory location for the condition must be 4-byte aligned.
     /// This function requires use of the following barrier flags on @ref gpuVirtAddr:
     /// - PipelineStage:  @ref PipelineStagePostPrefetch
@@ -4645,7 +4645,7 @@ public:
     /// normal IPerfExperiment buffer so we need a special command to get the data.
     ///
     /// The bulk of the implementation for this is done by the KMD. They are in charge of starting and stopping the
-    /// trace as well as all of the register programming. When KMD recieves a dfSpmTraceEnd bit from a CmdBufInfo
+    /// trace as well as all of the register programming. When KMD receives a dfSpmTraceEnd bit from a CmdBufInfo
     /// flag, they will wait for the command buffer to be completely idle before stopping the trace. Therefore, a
     /// CmdEndPerfExperiment call does not stop this particular sample, the end of a command buffer with a
     /// dfSpmTraceEnd does. This means that calling CmdCopyDfSpmTraceData in the same command buffer as
@@ -4855,7 +4855,7 @@ public:
         uint32 sizeInDwords,
         bool reserveInNewChunk) = 0;
 
-    /// Ensure data is commited the command buffer and unused space is reclaimed.
+    /// Ensure data is committed to the command buffer and unused space is reclaimed.
     /// This method is only supported on command buffers for the following queue types:
     ///
     /// @param [in] pCmdSpace  Pointer to the next unused dword in the command buffer.
@@ -5063,16 +5063,16 @@ public:
 
     /// Get the number of bytes required by CreateTrackedCmdLocationArray.
     ///
-    /// @detail The value returned here accomdates the full number of TrackedCmdLocationArray's to be
+    /// @detail The value returned here accommodates the full number of TrackedCmdLocationArray's to be
     ///         created, from a single contiguous allocation.
-    ///         If allocation has not yet occured, (GetNumTrackingArrays() == 0).
+    ///         If allocation has not yet occurred, (GetNumTrackingArrays() == 0).
     ///         If (GetTrackedCmdLocationArraySizeInBytes() > 0) &&  (GetNumTrackingArrays() == 0)
     ///         this ICmdBuffer supports TrackedCmdLocationArray's, but has not yet allocated them
     ///         If (GetTrackedCmdLocationArraySizeInBytes() == 0), this ICmdBuffer does not support
     ///         TrackedCmdLocationArray's
     ///
     /// @returns 0 if TrackedCmdLocationArray's are not supported
-    ///         The total number of bytes required requied by CreateTrackedCmdLocationArray otherwise.
+    ///         The total number of bytes required by CreateTrackedCmdLocationArray otherwise.
     virtual uint32 GetTrackedCmdLocationArraySizeInBytes() const = 0;
 
     /// Uses the memory pMemory to initialize GetNumTrackingArrays() TrackedCmdLocationArray's on this
@@ -5217,7 +5217,7 @@ public:
     ///     Result::Unsupported     if the implementation of ICmdBuffer does not support tracking
     ///     Result::ErrorInvalidPointer if there was an error encountered determining the cmdList correlation
     ///                             requested. This is likely to be an out-of-memory situation.
-    ///     Result::AlreadyExists   if registering clientId occured multiple times. This should only occur for
+    ///     Result::AlreadyExists   if registering clientId occurred multiple times. This should only occur for
     ///                             race conditions, if the code calling TrackClientEvent is not threadsafe
     virtual Result TrackClientEvent(
         uint64 clientId,

@@ -5,8 +5,8 @@
 
 #include "binary/dwarf_entry.hpp"
 #include "binary/symbol.hpp"
+#include "common/defines.h"
 #include "core/binary/fwd.hpp"
-#include "core/defines.hpp"
 #include "library/causal/fwd.hpp"
 
 #include <timemory/hash/types.hpp>
@@ -27,8 +27,6 @@ namespace causal
 {
 struct selected_entry
 {
-    ROCPROFSYS_DEFAULT_OBJECT(selected_entry)
-
     uintptr_t      address        = 0x0;
     uintptr_t      symbol_address = 0x0;
     binary::symbol symbol         = {};

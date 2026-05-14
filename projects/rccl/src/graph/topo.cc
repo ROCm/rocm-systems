@@ -757,6 +757,7 @@ ncclResult_t ncclTopoAddC2c(struct ncclXmlNode* node, struct ncclTopoSystem* sys
 ncclResult_t ncclTopoGetSystemFromXml(struct ncclXml* xml, struct ncclTopoSystem** topoSystem, const uint64_t localHostHash) {
   NCCLCHECK(ncclCalloc(topoSystem, 1));
   struct ncclTopoSystem* system = *topoSystem;
+  system->romeTopoModelIdx = RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE;
   struct ncclXmlNode* topNode;
   NCCLCHECK(xmlFindTag(xml, "system", &topNode));
   for (int s=0; s<topNode->nSubs; s++) {
@@ -1361,7 +1362,22 @@ ncclResult_t ncclTopoGetVNicParent(struct ncclXml* xml, ncclResult_t (*getProper
         NCCLCHECK(ncclTopoMakePciParent(xml, parent, physNetNodes[0]));
       }
     } else if (strcmp((*parent)->name, "cpu") == 0) {
-      // If the common parent is a PCI switch, we must reparent the new NIC under a made up pci device with a unique busid
+      // If the common parent is a CPU node, we must reparent the new NIC under a made up pci device with a unique busid
+      NCCLCHECK(ncclTopoMakePciParent(xml, parent, physNetNodes[0]));
+    } else if (strcmp((*parent)->name, "system") == 0) {
+      // Cross-NUMA merge: common parent is the system root, which ncclTopoGetSystemFromXml
+      // does not traverse for NICs (only iterates <cpu> children). Reparent under the first
+      // physical NIC's CPU so the vNIC appears inside a proper <cpu> subtree.
+      *parent = physNetNodes[0]->parent; // <nic> node
+      while (*parent && strcmp((*parent)->name, "cpu") != 0) *parent = (*parent)->parent;
+      if (*parent == NULL) {
+        WARN("TOPO/NET : Cannot find CPU parent for cross-NUMA vNIC, attaching to first CPU");
+        NCCLCHECK(xmlFindTag(xml, "cpu", parent));
+        if (*parent == NULL) {
+          WARN("TOPO/NET : No CPU node found in topology, cannot place cross-NUMA vNIC");
+          return ncclInternalError;
+        }
+      }
       NCCLCHECK(ncclTopoMakePciParent(xml, parent, physNetNodes[0]));
     }
   }

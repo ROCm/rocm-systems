@@ -23,17 +23,17 @@
 #ifndef _GFX90A_DEF_H_
 #define _GFX90A_DEF_H_
 
-#include "linux/vega10_enum.h"
-#include "util/soc15_common.h"
-#include "util/reg_offsets.h"
-#include "linux/packets/soc15d.h"
-#include "linux/registers/gc/gc_9_4_2_offset.h"
-#include "linux/registers/gc/gc_9_4_2_sh_mask.h"
-#include "linux/registers/athub/athub_1_0_offset.h"
-#include "linux/registers/athub/athub_1_0_sh_mask.h"
-#include "gfxip/gfx9/gfx9_block_info.h"
-#include "gfxip/gfx9/gfx9_primitives.h"
-#include "gfxip/gfx9/gfx9_block_table.h"
+#include "lib/aqlprofile/linux/vega10_enum.h"
+#include "lib/aqlprofile/util/soc15_common.h"
+#include "lib/aqlprofile/util/reg_offsets.h"
+#include "lib/aqlprofile/linux/packets/soc15d.h"
+#include "lib/aqlprofile/linux/registers/gc/gc_9_4_2_offset.h"
+#include "lib/aqlprofile/linux/registers/gc/gc_9_4_2_sh_mask.h"
+#include "lib/aqlprofile/linux/registers/athub/athub_1_0_offset.h"
+#include "lib/aqlprofile/linux/registers/athub/athub_1_0_sh_mask.h"
+#include "lib/aqlprofile/gfxip/gfx9/gfx9_block_info.h"
+#include "lib/aqlprofile/gfxip/gfx9/gfx9_primitives.h"
+#include "lib/aqlprofile/gfxip/gfx9/gfx9_block_table.h"
 
 using namespace gfxip::gfx9;
 

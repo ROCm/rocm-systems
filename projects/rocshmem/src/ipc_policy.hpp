@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+#include "constmem.hpp"
 #include "mpi_instance.hpp"
 #include "memory/std_allocator.hpp"
 #include "util.hpp"
@@ -54,6 +55,17 @@ class IpcOnImpl {
 
   int *pes_with_ipc_avail{nullptr};
 
+  /**
+   * @brief Fast O(1) IPC availability check.
+   *
+   * IPC-available PEs are either consecutive (e.g., [0,1,2,...,7]) or
+   * strided (e.g., [0,8,16,...]) in world rank. Detected at init time
+   * and stored as first_pe + stride, enabling arithmetic membership
+   * check with zero memory loads.
+   */
+  int ipc_first_pe{0};
+  int ipc_stride{0};    // 0 = pattern invalid
+
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                             MPI_Comm thread_comm);
 
@@ -62,26 +74,103 @@ class IpcOnImpl {
 
   __host__ void ipcHostStop();
 
-  __host__ __device__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) {
-    if (nullptr == pes_with_ipc_avail) { return false; }
+  /**
+   * @brief Detect consecutive or strided pattern from a host-accessible rank array.
+   * Must be called with host memory (not a hipMalloc'd device pointer).
+   * Sets ipc_stride:
+   *   > 0: consecutive (1) or strided pattern detected
+   *    0: irregular pattern (use linear scan fallback)
+   * IPC disabled is indicated by constmem.ipc_shm_size == 0.
+   */
+  __host__ void ipcDetectPattern(const int* host_ranks, int count) {
+    ipc_stride = 0;
+    if (host_ranks == nullptr || count <= 0) {
+      return;
+    }
+    ipc_first_pe = host_ranks[0];
+    int stride = (count > 1) ? (host_ranks[1] - host_ranks[0]) : 1;
+    if (stride <= 0) {
+      return;
+    }
+    for (int i = 0; i < count; i++) {
+      if (host_ranks[i] != ipc_first_pe + stride * i) {
+        return;
+      }
+    }
+    ipc_stride = stride;
+  }
 
+  __host__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) {
+    if (nullptr == pes_with_ipc_avail) { return false; }
     for (int i=0; i<shm_size; i++) {
       if (pes_with_ipc_avail[i] == target_pe) {
         *local_target_pe = i;
         return true;
       }
     }
-
     return false;
+  }
+
+  __device__ __attribute__((noinline))
+  bool isIpcAvailable_irregular(int target_pe, int *local_target_pe) {
+    for (int i = 0; i < shm_size; i++) {
+      if (pes_with_ipc_avail[i] == target_pe) {
+        *local_target_pe = i;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  __device__ __attribute__((noinline))
+  bool isIpcAvailable_strided(unsigned offset, int stride, int *local_target_pe) {
+    int idx = static_cast<int>(offset) / stride;
+    if (static_cast<unsigned>(idx) < static_cast<unsigned>(constmem.ipc_shm_size) &&
+        offset == static_cast<unsigned>(idx * stride)) {
+      *local_target_pe = idx;
+      return true;
+    }
+    return false;
+  }
+
+  __device__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) {
+    // IPC disabled: shm_size == 0
+    if (constmem.ipc_shm_size == 0) return false;
+
+    unsigned offset = static_cast<unsigned>(target_pe - constmem.ipc_first_pe);
+    int stride = constmem.ipc_stride;
+
+    if (stride == 1) {
+      // Consecutive PEs: branchless range check.
+      // Negative offsets wrap to large unsigned, failing the compare.
+      *local_target_pe = static_cast<int>(offset);
+      return offset < static_cast<unsigned>(constmem.ipc_shm_size);
+    }
+
+    if (stride > 1) {
+      return isIpcAvailable_strided(offset, stride, local_target_pe);
+    }
+
+    // stride == 0: irregular pattern (noinline linear scan)
+    return isIpcAvailable_irregular(target_pe, local_target_pe);
   }
 
   __device__ void ipcGpuInit(Backend *gpu_backend, Context *ctx, int thread_id);
 
-  __device__ void ipcCopy(void *dst, void *src, size_t size);
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy(void *dst, void *src, size_t size) {
+    memcpy_lane<Kind>(dst, src, size);
+  }
 
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size);
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy_wg(void *dst, void *src, size_t size) {
+    memcpy_wg<Kind>(dst, src, size);
+  }
 
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size);
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy_wave(void *dst, void *src, size_t size) {
+    memcpy_wave<Kind>(dst, src, size);
+  }
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
             detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
@@ -178,6 +267,9 @@ class IpcOffImpl {
 
   int *pes_with_ipc_avail{nullptr};
 
+  int ipc_first_pe{0};
+  int ipc_stride{0};
+
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                             MPI_Comm thread_comm) {}
 
@@ -186,16 +278,23 @@ class IpcOffImpl {
 
   __host__ void ipcHostStop() {}
 
-  __host__ __device__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) { return false; }
+  __host__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) { return false; }
+  __device__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) { return false; }
 
   __device__ void ipcGpuInit(Backend *rocshmem_handle, Context *ctx,
                              int thread_id) {}
 
-  __device__ void ipcCopy(void *dst, void *src, size_t size) {}
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
+                          [[maybe_unused]] size_t size) {}
 
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size) {}
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy_wg([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
+                             [[maybe_unused]] size_t size) {}
 
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size) {}
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy_wave([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
+                               [[maybe_unused]] size_t size) {}
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
             detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>

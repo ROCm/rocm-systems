@@ -96,7 +96,7 @@ hipError_t HIPAllocatorVMMPosixFd::VMMFree(void* ptr)
 }
 
 HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFree) {
-  type = AllocatorTypeVMMPosix;
+  type_ = AllocatorTypeVMMPosix;
 
   // Check Linux kernel version (recommends >= 6.8)
   struct utsname kernel_info;

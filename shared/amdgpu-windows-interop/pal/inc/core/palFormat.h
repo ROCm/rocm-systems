@@ -277,7 +277,7 @@ enum class ChNumFormat : Util::uint32
                                         ///  channels respectively. Image views can use the { Y8X8_Y8Z8, Unorm } format
                                         ///  where the Y0,X0,Y1,Z0 channels are mapped to the Y0,V0,Y1,U0 channels.
     YV12                     = 0xA2,    ///< YVU 4:2:0 planar format, with 8 bits per luma and chroma sample.  The Y
-                                        ///  plane is first, containg a uint8 per sample.  Next is the V plane and the U
+                                        ///  plane is first, containing a uint8 per sample.  Next is the V plane and the U
                                         ///  plane, both of which have a uint8 per sample.  Valid Image view formats are
                                         ///  { X8, Unorm } and { X8, Uint }.  Each view only has access to one of the Y,
                                         ///  V, or U planes.
@@ -308,7 +308,7 @@ enum class ChNumFormat : Util::uint32
     P010                     = 0xA7,    ///< YUV 4:2:0 planar format, with 10 bits per luma and chroma sample.  This is
                                         ///  identical to @ref ChNumFormat::P016, except that the lowest 6 bits of each
                                         ///  luma and chroma sample are ignored. This allows the source data to be
-                                        ///  interpreted as either P016 or P010 interchangably.
+                                        ///  interpreted as either P016 or P010 interchangeably.
     P210                     = 0xA8,    ///< YUV 4:2:2 planar format, with 10 bits per luma and chroma sample. This is
                                         ///  similar to @ref ChNumFormat::P010, except that the UV planes are sub-sampled
                                         ///  only in the horizontal direction, but still by a factor of 2 so the UV plane

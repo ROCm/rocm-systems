@@ -44,7 +44,7 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
   allocator.allocate((void**)&nonfetching_atomic, 8);
   allocator.allocate((void**)&fetching_atomic, 8 * FETCHING_ATOMIC_CNT);
   allocator.allocate((void**)&fetching_atomic_freelist, sizeof(FreeListT*));
-  new (fetching_atomic_freelist) FreeListT();
+  new (fetching_atomic_freelist) FreeListT(HIPAllocator());
 
   CHECK_HIP(hipMemset(nonfetching_atomic, 0, 8));
   CHECK_HIP(hipMemset(fetching_atomic, 0, 8 * FETCHING_ATOMIC_CNT));
@@ -223,7 +223,7 @@ __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
 }
 
 __device__ void QueuePair::quiet([[maybe_unused]] ActiveWFInfo &wf_info) {
-  if(wf_info.is_pe_group_leader) {
+  if(wf_info.is_pe_group_first) {
       switch (gda_provider_) {
     #if defined(GDA_IONIC)
       case GDAProvider::IONIC:
