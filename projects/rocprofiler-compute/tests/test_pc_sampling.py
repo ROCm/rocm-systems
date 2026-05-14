@@ -48,6 +48,12 @@ def is_pc_sampling_not_supported(output):
     return "Given PC sampling configuration is not supported" in output
 
 
+def _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir):
+    if is_pc_sampling_not_supported(f"{stdout}\n{stderr}"):
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        pytest.skip("PC sampling is not supported")
+
+
 def skip_unsupported_pc_sampling_soc(is_stochastic=False):
     unsupported_socs = {"MI100", "STRIX_HALO"}
     if is_stochastic:
@@ -74,15 +80,19 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
 
     workload_dir = test_utils.get_output_dir()
 
-    _ = binary_handler_profile_rocprof_compute(
+    code, stdout, stderr = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
         options,
-        check_success=True,
+        check_success=False,
+        capture_output=True,
         roof=False,
         app_name="app_mat_mul_max",
     )
 
+    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+
+    assert code == 0
     file_dict = test_utils.check_non_pmc_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
 
@@ -116,10 +126,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
         app_name="app_mat_mul_max",
     )
 
-    output = f"{stdout}\n{stderr}"
-    if is_pc_sampling_not_supported(output):
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-        pytest.skip("PC sampling is not supported")
+    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     assert code == 0
     file_dict = test_utils.check_non_pmc_files(workload_dir, num_devices, 1)
@@ -158,6 +165,8 @@ def test_multi_rank_pc_sampling_only(
         capture_output=True,
         check_success=False,
     )
+
+    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
 
     output = stdout + stderr
     assert "Multi-rank application detected" not in output
@@ -198,6 +207,8 @@ def test_multi_rank_warning_pc_sampling_with_counters(
         check_success=False,
     )
 
+    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+
     output = stdout + stderr
     assert "Multi-rank application detected" in output
     assert "Application replay mode" in output
@@ -230,15 +241,19 @@ def test_pc_sampling_profile_then_analyze(
 
     workload_dir = test_utils.get_output_dir()
 
-    _ = binary_handler_profile_rocprof_compute(
+    code, stdout, stderr = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
         options,
-        check_success=True,
+        check_success=False,
+        capture_output=True,
         roof=False,
         app_name="app_mat_mul_max",
     )
 
+    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+
+    assert code == 0
     file_dict = test_utils.check_non_pmc_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
 
@@ -313,15 +328,19 @@ def test_pc_sampling_with_sol_block(binary_handler_profile_rocprof_compute):
 
     workload_dir = test_utils.get_output_dir()
 
-    _ = binary_handler_profile_rocprof_compute(
+    code, stdout, stderr = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
         options,
-        check_success=True,
+        check_success=False,
+        capture_output=True,
         roof=False,
         app_name="app_mat_mul_max",
     )
 
+    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+
+    assert code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
 
