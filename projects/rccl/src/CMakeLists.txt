@@ -307,6 +307,10 @@ set(SRC_FILES
   nccl_device/lsa_barrier.cc
   os/linux.cc
   include/os.h
+  include/os/linux.h
+  include/os/windows.h
+  include/os/linux.h
+  include/os/windows.h
   rma/rma.cc
   rma/rma_ce.cc
   rma/rma_proxy.cc

@@ -16,22 +16,9 @@
 #include <mutex>
 
 #ifdef NCCL_OS_WINDOWS
-#include <windows.h>
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <iphlpapi.h>
-#endif
-
-#ifdef NCCL_OS_LINUX
-#define NCCL_INVALID_SOCKET -1
-#elif defined(NCCL_OS_WINDOWS)
-#define NCCL_INVALID_SOCKET INVALID_SOCKET
-#endif
-
-#ifdef NCCL_OS_LINUX
-typedef int ncclSocketDescriptor;
-#elif defined(NCCL_OS_WINDOWS)
-typedef SOCKET ncclSocketDescriptor;
+#include "os/windows.h"
+#else
+#include "os/linux.h"
 #endif
 
 uint64_t ncclOsGetPid();
@@ -64,11 +51,6 @@ ncclResult_t ncclOsSocketTryAccept(struct ncclSocket* sock);
 void ncclOsSetMutexCondShared(std::mutex &mutex, std::condition_variable &cond);
 
 /* Affinity functions */
-#ifdef NCCL_OS_LINUX
-typedef cpu_set_t ncclAffinity;
-#elif defined(NCCL_OS_WINDOWS)
-typedef DWORD_PTR ncclAffinity;
-#endif
 void ncclOsCpuZero(ncclAffinity& affinity);
 int ncclOsCpuCount(const ncclAffinity affinity);
 void ncclOsCpuSet(ncclAffinity& affinity, int cpu);
