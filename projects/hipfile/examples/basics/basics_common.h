@@ -16,45 +16,62 @@
 #include <cstdint>
 #include <sys/types.h>
 
-/// @brief Round value up to the next multiple of align. align must be a power of 2.
+/// @brief Round value up to the next multiple of align. Align _must_ be a power of 2.
+/// @param value [in] The value to round up.
+/// @param align [in] Value will be rounded up to a multiple of align.
+/// @return Value rounded up to a multiple of align.
 inline size_t
 align_up(size_t value, size_t align)
 {
     return (value + align - 1) & ~(align - 1);
 }
 
-/// @brief Determine if value is a power of two.
+/// @brief Determines if value is a power of two.
+/// @param value [in] The value to inspect.
+/// @return True if value is a power of two, false otherwise.
 inline bool
 is_power_of_two(size_t value)
 {
     return (value > 0) && ((value & (value - 1)) == 0);
 }
 
-/// @brief Fill buf with a deterministic test pattern (byte i = i & 0xFF).
+/// @brief Fill a buffer with a deterministic test pattern (byte i = i & 0xFF).
+/// Used so writers can emit known content and verifiers can recompute the
+/// expected hash without keeping the input around.
+/// @param buf  [out] Buffer to fill.
+/// @param size [in]  Number of bytes to write into buf.
 void fill_pattern(void *buf, size_t size);
 
-/// @brief Compute FNV-1a 64-bit hash of a memory buffer.
+/// @brief Compute the FNV-1a 64-bit hash of a memory buffer.
+/// @param buf  [in] Pointer to the bytes to hash.
+/// @param size [in] Number of bytes at buf to feed into the hash.
+/// @return The 64-bit FNV-1a hash of the size bytes at buf.
 uint64_t hash_buffer(const void *buf, size_t size);
 
-/// @brief Read the first `size` bytes of `path` and return their FNV-1a hash.
-/// @return zero on success, non-zero on failure.
-int hash_file(const char *path, size_t size, uint64_t *out_hash);
-
-/// @brief Read `size` bytes of `path` starting at byte `offset` and return their FNV-1a hash.
+/// @brief Read size bytes of path starting at byte offset, then FNV-1a hash them.
+/// Reads via plain POSIX I/O (no O_DIRECT), so this is the host-side reference
+/// path for verifying what hipFile wrote out.
+/// @param path     [in]  Path to the file to read.
+/// @param offset   [in]  Byte offset within the file to start reading from.
+/// @param size     [in]  Number of bytes to read and hash.
+/// @param out_hash [out] Receives the FNV-1a hash on success; untouched on failure.
 /// @return zero on success, non-zero on failure.
 int hash_file_range(const char *path, off_t offset, size_t size, uint64_t *out_hash);
 
 /// @brief Open a file and register it with hipFile.
-/// @param path   Path to the file.
-/// @param flags  Flags to pass to open(2). Pass O_DIRECT to take hipFile's
-///               GPU-direct fast path; omit it to route through the POSIX-IO
-///               compat path.
-/// @param mode   Mode bits for open(2) (used when O_CREAT is set).
-/// @param fd     [out] Resulting file descriptor.
-/// @param handle [out] Resulting hipFile handle.
+/// The caller controls all open(2) flags. Pass O_DIRECT to take hipFile's
+/// GPU-direct fast path; omit it to route through the POSIX-IO compat path.
+/// @param path   [in]  Path to the file.
+/// @param flags  [in]  Flags to pass to open(2). O_DIRECT is _not_ added for you.
+/// @param mode   [in]  Mode to pass to open(2) (used when O_CREAT is in flags).
+/// @param fd     [out] The file descriptor of the opened file.
+/// @param handle [out] The handle to use with hipFile APIs.
 /// @return zero on success, non-zero on failure.
 int open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *handle);
 
-/// @brief Deregister a hipFile handle and close the underlying file descriptor.
+/// @brief Unregister and close a file previously opened with open_file.
+/// @param path   [in] Path to the file (used only for error messages).
+/// @param fd     [in] The file descriptor of the opened file.
+/// @param handle [in] The handle of the opened file.
 /// @return zero on success, non-zero on failure.
 int close_file(const char *path, int fd, hipFileHandle_t handle);

@@ -190,9 +190,9 @@ main(int argc, char *argv[])
     {
         uint64_t hash_in, hash_out;
 
-        if (hash_file(in_path, payload_size, &hash_in))
+        if (hash_file_range(in_path, 0, payload_size, &hash_in))
             goto close_in;
-        if (hash_file(out_path, payload_size, &hash_out))
+        if (hash_file_range(out_path, 0, payload_size, &hash_out))
             goto close_in;
 
         if (hash_in != hash_out) {

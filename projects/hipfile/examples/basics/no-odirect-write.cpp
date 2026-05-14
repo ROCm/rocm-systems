@@ -111,8 +111,8 @@ main(int argc, char *argv[])
     buf_registered = true;
 
     /* 4. open file WITHOUT O_DIRECT + hipFileHandleRegister */
-    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
-                  &out_fd, &out_handle)) {
+    if (open_file(out_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &out_fd,
+                  &out_handle)) {
         goto deregister_buf;
     }
 
@@ -144,7 +144,7 @@ main(int argc, char *argv[])
         uint64_t hash_pattern = hash_buffer(cpu_pattern, payload_size);
         uint64_t hash_written;
 
-        if (hash_file(out_path, payload_size, &hash_written))
+        if (hash_file_range(out_path, 0, payload_size, &hash_written))
             goto deregister_buf;
 
         if (hash_pattern != hash_written) {

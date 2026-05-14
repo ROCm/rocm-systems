@@ -110,8 +110,8 @@ main(int argc, char *argv[])
     buf_registered = true;
 
     /* 3. Phase 1: write CREATED from registered GPU buffer */
-    if (open_file(created_path, O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
-                  &fd, &handle)) {
+    if (open_file(created_path, O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT,
+                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &fd, &handle)) {
         goto deregister_buf;
     }
 
@@ -191,9 +191,9 @@ main(int argc, char *argv[])
     {
         uint64_t hash_created, hash_copied;
 
-        if (hash_file(created_path, payload_size, &hash_created))
+        if (hash_file_range(created_path, 0, payload_size, &hash_created))
             goto deregister_buf;
-        if (hash_file(copied_path, payload_size, &hash_copied))
+        if (hash_file_range(copied_path, 0, payload_size, &hash_copied))
             goto deregister_buf;
 
         if (hash_created != hash_copied) {

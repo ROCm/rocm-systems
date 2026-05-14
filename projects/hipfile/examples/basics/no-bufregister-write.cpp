@@ -127,7 +127,7 @@ main(int argc, char *argv[])
         uint64_t hash_pattern = hash_buffer(cpu_pattern, payload_size);
         uint64_t hash_written;
 
-        if (hash_file(out_path, payload_size, &hash_written))
+        if (hash_file_range(out_path, 0, payload_size, &hash_written))
             goto free_devbuf;
 
         if (hash_pattern != hash_written) {

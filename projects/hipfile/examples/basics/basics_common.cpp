@@ -40,19 +40,19 @@ hash_file_range(const char *path, off_t offset, size_t size, uint64_t *out_hash)
 {
     uint8_t *cpu_buf = (uint8_t *)malloc(size);
     if (!cpu_buf) {
-        fprintf(stderr, "hash_file: malloc failed for %zu bytes\n", size);
+        fprintf(stderr, "hash_file_range: malloc failed for %zu bytes\n", size);
         return 1;
     }
 
     int fd = open(path, O_RDONLY);
     if (-1 == fd) {
-        fprintf(stderr, "hash_file: could not open %s (%s)\n", path, strerror(errno));
+        fprintf(stderr, "hash_file_range: could not open %s (%s)\n", path, strerror(errno));
         free(cpu_buf);
         return 1;
     }
 
     if (offset != 0 && lseek(fd, offset, SEEK_SET) == (off_t)-1) {
-        fprintf(stderr, "hash_file: lseek %s failed (%s)\n", path, strerror(errno));
+        fprintf(stderr, "hash_file_range: lseek %s failed (%s)\n", path, strerror(errno));
         close(fd);
         free(cpu_buf);
         return 1;
@@ -64,7 +64,7 @@ hash_file_range(const char *path, off_t offset, size_t size, uint64_t *out_hash)
         if (n < 0) {
             if (errno == EINTR)
                 continue;
-            fprintf(stderr, "hash_file: read %s failed (%s)\n", path, strerror(errno));
+            fprintf(stderr, "hash_file_range: read %s failed (%s)\n", path, strerror(errno));
             close(fd);
             free(cpu_buf);
             return 1;
@@ -76,7 +76,7 @@ hash_file_range(const char *path, off_t offset, size_t size, uint64_t *out_hash)
     close(fd);
 
     if (total != size) {
-        fprintf(stderr, "hash_file: short read on %s (%zu of %zu bytes)\n", path, total, size);
+        fprintf(stderr, "hash_file_range: short read on %s (%zu of %zu bytes)\n", path, total, size);
         free(cpu_buf);
         return 1;
     }
@@ -84,12 +84,6 @@ hash_file_range(const char *path, off_t offset, size_t size, uint64_t *out_hash)
     *out_hash = hash_buffer(cpu_buf, size);
     free(cpu_buf);
     return 0;
-}
-
-int
-hash_file(const char *path, size_t size, uint64_t *out_hash)
-{
-    return hash_file_range(path, 0, size, out_hash);
 }
 
 int
