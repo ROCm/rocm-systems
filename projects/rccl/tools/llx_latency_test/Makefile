@@ -1,3 +1,8 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# Licensed under the MIT License.
+#
+# See LICENSE.txt for license information
+
 ROCM_PATH ?= $(wildcard /opt/rocm)
 HIPCC      = $(ROCM_PATH)/bin/hipcc
 CXXFLAGS   = -O3 -std=c++17 --offload-arch=native -x hip
