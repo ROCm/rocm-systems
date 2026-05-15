@@ -285,12 +285,11 @@ public:
         } catch(...)
         {}
 
-        // .sqtt_funcmap is an ASCII section emitted by the
-        // sqtt_instrumentation LLVM pass. Each newline-terminated row
-        // assigns a marker ID (the value emitted by s_ttracedata{,_imm} at
-        // runtime -- see funcmap::decode_marker_value) to a function, kernel,
-        // user scope, or point marker. See sqtt-instrumentation/docs/SPEC.md
-        // section "Funcmap format" and funcmap.hpp for the full grammar.
+        // .sqtt_funcmap is an ASCII section emitted by the sqtt_instrumentation
+        // pass. Each newline-terminated row assigns a marker ID (the value
+        // emitted by s_ttracedata{,_imm} at runtime -- see
+        // funcmap::decode_marker_value) to a function, kernel, user scope, or
+        // point marker. See funcmap.hpp for the full grammar.
         //
         //   .sqtt_funcmap (raw bytes -- one row per entry, '\n'-terminated):
         //   +--------------------------------------------------------------+

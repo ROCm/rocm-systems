@@ -304,6 +304,10 @@ public:
             amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME_LENGTH, &name_size));
 
         std::string name;
+        // amd_comgr_symbol_get_info(NAME) writes a C-string: name_size payload
+        // bytes + a trailing '\0'. Reserve name_size + 1 so the NUL has a
+        // legal slot to land in (writing past end() would be UB), then shrink
+        // back to name_size to drop the NUL from std::string's logical size.
         name.resize(name_size + 1);
 
         RETURN_COMGR(amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME, name.data()));
