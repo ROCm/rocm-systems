@@ -25,6 +25,14 @@ set_and_check(@PROJECT_NAME@_LIBRARIES "@PACKAGE_LIB_INSTALL_DIR@/lib@PROJECT_NA
 if(NOT TARGET @PROJECT_NAME@::@PROJECT_NAME@)
   add_library(@PROJECT_NAME@::@PROJECT_NAME@ INTERFACE IMPORTED)
   set_target_properties(@PROJECT_NAME@::@PROJECT_NAME@ PROPERTIES INTERFACE_LINK_LIBRARIES ${@PROJECT_NAME@_LIBRARY})
+  # When installed via TheRock, propagate DT_RPATH for rocm_sysdeps/lib to all consumers.
+  # Some system libraries carries a transitive dependency on libva.so.2 and DT_RPATH
+  # in the executable is inherited by all loaded libraries (unlike DT_RUNPATH), ensuring
+  # these system libraries resolves libva.so.2 from TheRock instead of the system installation.
+  if(EXISTS "${PACKAGE_PREFIX_DIR}/lib/rocm_sysdeps/lib")
+    set_target_properties(@PROJECT_NAME@::@PROJECT_NAME@ PROPERTIES
+      INTERFACE_LINK_OPTIONS "-Wl,--disable-new-dtags,-rpath,${PACKAGE_PREFIX_DIR}/lib/rocm_sysdeps/lib")
+  endif()
 endif ()
 
 include(FindPackageHandleStandardArgs)
