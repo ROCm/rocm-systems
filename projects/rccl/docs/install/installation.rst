@@ -44,7 +44,7 @@ base ROCm packages.
 
    .. code-block:: shell-session
 
-      amdrocm-rccl<dev/devel><rocm_version>
+      amdrocm-rccl<-dev/devel><rocm_version>
 
    Where:
 
