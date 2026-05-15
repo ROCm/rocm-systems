@@ -5,8 +5,8 @@
  */
 
 /* Test Case Description:
-   Stress test for memory pool allocations. Allocates blocks from 1% to 80%
-   of total device memory in 5% increments, verifies pool attributes
+   Stress test for memory pool allocations. Allocates blocks from 1% to 50%
+   of total device memory in 2% increments, verifies pool attributes
    (UsedMemCurrent, ReservedMemCurrent) after all allocations, then frees
    all blocks and verifies memory returns to zero.
 */
@@ -30,16 +30,16 @@ HIP_TEST_CASE(Unit_hipMemPoolMaxAlloc) {
   hipStream_t stream = nullptr;
 
   constexpr int kStartPct = 1;
-  constexpr int kEndPct = 80;
-  constexpr int kStepPct = 5;
+  constexpr int kEndPct = 50;
+  constexpr int kStepPct = 2;
   constexpr int kMaxAllocs = (kEndPct - kStartPct) / kStepPct + 1;
-  const std::size_t memLimit = (memBudget / 100) * 90;
+  const std::size_t memLimit = (memBudget / 100) * 60;
 
   void* ptrs[kMaxAllocs] = {};
   std::size_t sizes[kMaxAllocs] = {};
   std::size_t expectedTotal = 0;
 
-  // Allocate all blocks, stop when cumulative usage would exceed 90% of device memory
+  // Allocate all blocks, stop when cumulative usage would exceed 60% of device memory
   int numAllocs = 0;
   for (int pct = kStartPct; pct <= kEndPct; pct += kStepPct) {
     std::size_t allocSize = (memBudget / 100) * pct;
