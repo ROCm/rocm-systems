@@ -1271,7 +1271,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_rx_ucast_bytes_track::exists(_device_id))
             amd_smi_nic_rx_ucast_bytes_track::emplace(
-                _device_id, make_track_name("RX RDMA Bytes"), "bytes");
+                _device_id, make_track_name("RX RDMA BYTES"), "bytes");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
                       amd_smi_nic_rx_ucast_bytes_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.rx_rdma_ucast_bytes));
@@ -1281,7 +1281,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_tx_ucast_bytes_track::exists(_device_id))
             amd_smi_nic_tx_ucast_bytes_track::emplace(
-                _device_id, make_track_name("TX RDMA Bytes"), "bytes");
+                _device_id, make_track_name("TX RDMA BYTES"), "bytes");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
                       amd_smi_nic_tx_ucast_bytes_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.tx_rdma_ucast_bytes));
@@ -1291,7 +1291,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_rx_ucast_pkts_track::exists(_device_id))
             amd_smi_nic_rx_ucast_pkts_track::emplace(
-                _device_id, make_track_name("RX RDMA Packets"), "packets");
+                _device_id, make_track_name("RX RDMA PACKETS"), "packets");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
                       amd_smi_nic_rx_ucast_pkts_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.rx_rdma_ucast_pkts));
@@ -1301,7 +1301,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_tx_ucast_pkts_track::exists(_device_id))
             amd_smi_nic_tx_ucast_pkts_track::emplace(
-                _device_id, make_track_name("TX RDMA Packets"), "packets");
+                _device_id, make_track_name("TX RDMA PACKETS"), "packets");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
                       amd_smi_nic_tx_ucast_pkts_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.tx_rdma_ucast_pkts));
@@ -1311,7 +1311,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_rx_cnp_pkts_track::exists(_device_id))
             amd_smi_nic_rx_cnp_pkts_track::emplace(
-                _device_id, make_track_name("RX CNP Packets"), "packets");
+                _device_id, make_track_name("RX CNP PACKETS"), "packets");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
                       amd_smi_nic_rx_cnp_pkts_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.rx_rdma_cnp_pkts));
@@ -1321,7 +1321,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_tx_cnp_pkts_track::exists(_device_id))
             amd_smi_nic_tx_cnp_pkts_track::emplace(
-                _device_id, make_track_name("TX CNP Packets"), "packets");
+                _device_id, make_track_name("TX CNP PACKETS"), "packets");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
                       amd_smi_nic_tx_cnp_pkts_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.tx_rdma_cnp_pkts));
@@ -1331,7 +1331,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_tx_rdma_ack_timeout_track::exists(_device_id))
             amd_smi_nic_tx_rdma_ack_timeout_track::emplace(
-                _device_id, make_track_name("TX ACK TIMEOUT"), "packets");
+                _device_id, make_track_name("TX ACK TIMEOUT"), "timeouts");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
                       amd_smi_nic_tx_rdma_ack_timeout_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.tx_rdma_ack_timeout));
@@ -1341,7 +1341,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_resp_tx_pkt_seq_err_track::exists(_device_id))
             amd_smi_nic_resp_tx_pkt_seq_err_track::emplace(
-                _device_id, make_track_name("RESP TX PKT SEQ ERROR"), "packets");
+                _device_id, make_track_name("RESP TX PKT SEQ ERR"), "packets");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
                       amd_smi_nic_resp_tx_pkt_seq_err_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.resp_tx_pkt_seq_err));
@@ -1351,7 +1351,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_req_rx_pkt_seq_err_track::exists(_device_id))
             amd_smi_nic_req_rx_pkt_seq_err_track::emplace(
-                _device_id, make_track_name("REQ RX PKT SEQ ERROR"), "packets");
+                _device_id, make_track_name("REQ RX PKT SEQ ERR"), "packets");
         TRACE_COUNTER(trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
                       amd_smi_nic_req_rx_pkt_seq_err_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.req_rx_pkt_seq_err));
@@ -1361,7 +1361,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     {
         if(!amd_smi_nic_req_rx_impl_nak_seq_err_track::exists(_device_id))
             amd_smi_nic_req_rx_impl_nak_seq_err_track::emplace(
-                _device_id, make_track_name("REQ RX IMPL NAK SEQ ERROR"), "packets");
+                _device_id, make_track_name("REQ RX IMPL NAK SEQ ERR"), "packets");
         TRACE_COUNTER(
             trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
             amd_smi_nic_req_rx_impl_nak_seq_err_track::at(_device_id, 0), _ts,

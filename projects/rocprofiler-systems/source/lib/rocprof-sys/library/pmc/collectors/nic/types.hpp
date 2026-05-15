@@ -80,14 +80,13 @@ union enabled_metrics
         std::uint32_t resp_tx_pkt_seq_err     : 1;
         std::uint32_t req_rx_pkt_seq_err      : 1;
         std::uint32_t req_rx_impl_nak_seq_err : 1;
-
     } bits;
     std::uint32_t value = 0;
 };
 
-/// All 10 NIC RDMA metrics enabled (bits 0-9)
-static constexpr std::uint32_t ALL_NIC_METRICS = 0x3FF;
-
+// Bit-mask for all NIC RDMA metrics enabled
+inline constexpr std::uint32_t NIC_METRICS_COUNT = 10;
+inline constexpr std::uint32_t ALL_NIC_METRICS = (1 << NIC_METRICS_COUNT) - 1;
 /**
  * @brief Container for NIC RDMA metrics.
  *
