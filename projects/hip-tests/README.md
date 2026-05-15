@@ -17,10 +17,12 @@ The hip-tests repository maintains several branches. The branches that are of im
 
 ## Release tagging
 
-`hip-tests` releases typically follow a naming convention for each ROCm release to help differentiate them.
+`hip-tests` releases use a naming convention aligned with ROCm or TheRock versions to ensure clear version differentiation:
 
-* `rocm-x.yy`: These are the stable releases based on the ROCm release.
-  This type of release is typically made once a month.
+* `rocm-x.yz`: Stable releases mapped to specific ROCm versions
+* `release/TheRock-x.yz`: Stable releases mapped to specific TheRock versions
+
+  These types of releases are typically made once a month.
 
 ## Build HIP Catch tests
 
