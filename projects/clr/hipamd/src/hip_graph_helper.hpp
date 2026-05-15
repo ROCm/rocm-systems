@@ -24,6 +24,12 @@ hipError_t ihipMemcpy_validate_memory(amd::Memory* memObj, size_t sizeBytes, siz
 hipError_t ihipMemcpy_validate(amd::Memory* dstMemory, amd::Memory* srcMemory, size_t sizeBytes,
                                 size_t dstOffset, size_t srcOffset);
 
+// Two-size variant used by the batch memcpy path: indirect copies place a
+// sizeof(void*) pointer-holder on one side and the real data buffer on the other,
+// so src and dst must be validated against independent region sizes.
+hipError_t ihipMemcpy_validate(amd::Memory* dstMemory, amd::Memory* srcMemory, size_t srcSizeBytes,
+                               size_t dstSizeBytes, size_t dstOffset, size_t srcOffset);
+
 hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, const void* srcMemory,
                              size_t sizeBytes, hipMemcpyKind kind, hip::Stream& stream,
                              size_t dstOffset, bool isAsync = true);

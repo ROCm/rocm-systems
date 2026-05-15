@@ -802,12 +802,24 @@ class GpuAgent : public GpuAgentInt {
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
+  // Indirect copy: src and/or dst is a pointer-to-pointer slot that the SDMA
+  // engine dereferences just before performing the transfer.  Whatever fills
+  // the slot (e.g. a kernel or a host-side write) is expected to synchronize
+  // with this op through `dep_signals`: `dep_signals[0]` maps to the packet's
+  // hardware WAIT field and the remaining entries are emitted as 64-bit poll
+  // commands ahead of the copy.  The runtime itself therefore does not need
+  // to know how, or by whom, the slot gets populated.
+  hsa_status_t DmaCopyIndirect(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
   // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyMulti,
-  // and swap operations.  Submits prologue, per-entry bodies (selected by
-  // @p op), and epilogue with one signal.
-  // @p op is the hsa_amd_memory_copy_op_type_t from the public API; only
-  // HSA_AMD_MEMORY_COPY_OP_LINEAR and HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP are
-  // currently supported.
+  // swap and indirect operations.  Submits prologue, per-entry bodies
+  // (selected by @p op), and epilogue with one signal.
+  // @p op is the hsa_amd_memory_copy_op_type_t from the public API;
+  // currently supported values are HSA_AMD_MEMORY_COPY_OP_LINEAR,
+  // HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP and
+  // HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_{SRC,DST,SRCDST}.
   hsa_status_t DmaCopyFanOutOp(
       hsa_amd_memory_copy_op_type_t op,
       core::Signal& out_signal,
