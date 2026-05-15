@@ -58,7 +58,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@ea63b756da34b8243f79a2332ef336ea76fdd188 # TheRock@ea63b756da34b8243f79a2332ef336ea76fdd188
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@ea63b756da34b8243f79a2332ef336ea76fdd188 # TheRock 2025-05-15
     with:
       build_variant: "release"
       # Limit GPU families for rocm-systems CI
@@ -69,7 +69,7 @@ jobs:
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       repository: ROCm/TheRock
-      ref: ea63b756da34b8243f79a2332ef336ea76fdd188 # TheRock@ea63b756da34b8243f79a2332ef336ea76fdd188
+      ref: ea63b756da34b8243f79a2332ef336ea76fdd188 # TheRock 2025-05-15
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   linux_build_and_test:
@@ -80,7 +80,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@ea63b756da34b8243f79a2332ef336ea76fdd188 # TheRock@ea63b756da34b8243f79a2332ef336ea76fdd188
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@ea63b756da34b8243f79a2332ef336ea76fdd188 # TheRock 2025-05-15
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -89,7 +89,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: ea63b756da34b8243f79a2332ef336ea76fdd188 # TheRock@ea63b756da34b8243f79a2332ef336ea76fdd188
+      ref: ea63b756da34b8243f79a2332ef336ea76fdd188 # TheRock 2025-05-15
     permissions:
       contents: read
       id-token: write
@@ -102,7 +102,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@ea63b756da34b8243f79a2332ef336ea76fdd188 # TheRock@ea63b756da34b8243f79a2332ef336ea76fdd188
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@ea63b756da34b8243f79a2332ef336ea76fdd188 # TheRock 2025-05-15
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -111,7 +111,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: ea63b756da34b8243f79a2332ef336ea76fdd188 # TheRock@ea63b756da34b8243f79a2332ef336ea76fdd188
+      ref: ea63b756da34b8243f79a2332ef336ea76fdd188 # TheRock 2025-05-15
     permissions:
       contents: read
       id-token: write
@@ -129,7 +129,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: ea63b756da34b8243f79a2332ef336ea76fdd188 # TheRock@ea63b756da34b8243f79a2332ef336ea76fdd188
+          ref: ea63b756da34b8243f79a2332ef336ea76fdd188 # TheRock 2025-05-15
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
