@@ -1,3 +1,0 @@
-# CMake lint file for hipFile
-# https://cmake-format.readthedocs.io/en/latest/cmake-lint.html
-filter=-linelength

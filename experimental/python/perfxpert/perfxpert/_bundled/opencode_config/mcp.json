@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "perfxpert": {
-      "command": "perfxpert-mcp",
-      "args": [],
-      "env": {}
-    }
-  }
-}

@@ -1,9 +1,0 @@
-{
-  "attack_id": "test_anchor_removal",
-  "status": "defeated",
-  "details": {
-    "removed_tests": [
-      "test_baseline"
-    ]
-  }
-}
