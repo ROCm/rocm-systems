@@ -7,7 +7,6 @@ import ctypes
 import errno
 import glob
 import io
-import locale
 import os
 import pty
 import re
@@ -261,7 +260,7 @@ def get_version(rocprof_compute_home: Path) -> dict[str, str]:
     for directory in search_dirs:
         version_file = directory / "VERSION"
         try:
-            with open(version_file) as file:
+            with open(version_file, encoding="utf-8") as file:
                 VER = file.read().replace("\n", "")
                 found = True
                 version_dir = directory
@@ -285,7 +284,7 @@ def get_version(rocprof_compute_home: Path) -> dict[str, str]:
         except Exception:
             try:
                 sha_file = version_dir / "VERSION.sha"
-                with open(sha_file) as file:
+                with open(sha_file, encoding="utf-8") as file:
                     SHA = file.read().replace("\n", "")
                     MODE = "release"
             except Exception:
@@ -603,7 +602,7 @@ def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
     Parse the YAML file to get the pmc counters.
     Assumes only one job per file.
     """
-    with open(pmc_perf_file) as file:
+    with open(pmc_perf_file, encoding="utf-8") as file:
         data = yaml.safe_load(file) or {}
     jobs = data.get("jobs", [])
     if not jobs:
@@ -645,7 +644,7 @@ def parse_sets_yaml(arch: str) -> dict[str, Any]:
         / "sets"
         / f"{arch}_sets.yaml"
     )
-    with open(filename) as file:
+    with open(filename, encoding="utf-8") as file:
         content = file.read()
     data = yaml.safe_load(content)
 
@@ -668,7 +667,7 @@ def load_panel_configs(
     configs: dict[int, dict[str, Any]] = {}
     for dir_path in dirs:
         for yaml_file in Path(dir_path).glob("*.yaml"):
-            with open(yaml_file) as file:
+            with open(yaml_file, encoding="utf-8") as file:
                 config_yml = yaml.safe_load(file)
                 # metric key can be None due to some metric-
                 # tables not having any metrics
@@ -923,7 +922,7 @@ def convert_metric_id_to_panel_info(
 
 def load_yaml(filepath: str) -> dict[str, Any]:
     """Load YAML file and return as dictionary."""
-    with open(filepath) as f:
+    with open(filepath, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -1061,7 +1060,7 @@ def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
     # Current version of sdk uses config.yaml instead of counter_defs.yaml
     tmpfile_path_new = tmpfile_parent / "config.yaml"
 
-    with open(tmpfile_path_old, "w") as tmpfile:
+    with open(tmpfile_path_old, "w", encoding="utf-8") as tmpfile:
         # Old sdk does not support firmware restrictions
         sdk_config_old = {
             **sdk_config,
@@ -1073,31 +1072,22 @@ def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
         }
         yaml.dump(sdk_config_old, tmpfile, default_flow_style=False, sort_keys=False)
 
-    with open(tmpfile_path_new, "w") as tmpfile:
+    with open(tmpfile_path_new, "w", encoding="utf-8") as tmpfile:
         yaml.dump(sdk_config, tmpfile, default_flow_style=False, sort_keys=False)
 
     return str(tmpfile_parent)
 
 
-def set_locale_encoding() -> None:
-    try:
-        # Attempt to set the locale to 'C.UTF-8'
-        locale.setlocale(locale.LC_ALL, "C.UTF-8")
-    except locale.Error:
-        # If 'C.UTF-8' is not available, check if the current locale is UTF-8 based
-        current_locale = locale.getdefaultlocale()
-        if current_locale and current_locale[1] and "UTF-8" in current_locale[1]:
-            try:
-                locale.setlocale(locale.LC_ALL, current_locale[0])
-            except locale.Error as e:
-                console_error(
-                    f"Failed to set locale to the current UTF-8-based locale: {e}"
-                )
-        else:
-            console_error(
-                "Please ensure that a UTF-8-based locale is available on your system.",
-                exit=False,
-            )
+def reconfigure_stdio_utf8() -> None:
+    """Force sys.stdout and sys.stderr to UTF-8 so tabulated output never
+    crashes with UnicodeEncodeError on systems started under a non-UTF-8
+    locale.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, io.UnsupportedOperation):
+            pass
 
 
 def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, str]:
@@ -1126,7 +1116,7 @@ def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, s
 
     # Validate CSV structure
     try:
-        with open(benchmark_results) as csvfile:
+        with open(benchmark_results, newline="", encoding="utf-8") as csvfile:
             csv_reader = csv.reader(csvfile, delimiter=",")
             row_count = 0
             num_headers = 0

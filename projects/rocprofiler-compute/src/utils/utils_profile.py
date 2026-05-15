@@ -121,6 +121,7 @@ def run_prof(
         / "rocprof_compute_soc"
         / "profile_configs"
         / "sdk_config.yaml",
+        encoding="utf-8",
     ) as filename:
         sdk_config = yaml.safe_load(filename)
     # Extra counter definitions
@@ -130,7 +131,7 @@ def run_prof(
             "counter_def_" + fname_path.name[len("pmc_perf_") :]
         )
         if counter_def_fname.exists():
-            with open(Path(counter_def_fname)) as file:
+            with open(Path(counter_def_fname), encoding="utf-8") as file:
                 sdk_config["rocprofiler-sdk"]["counters"].extend(
                     yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
                 )

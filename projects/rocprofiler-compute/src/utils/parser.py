@@ -350,7 +350,7 @@ def search_key_in_json(file_path: Path, search_key: str) -> Union[list, dict, No
     # FIXME:
     #   Load the entire JSON into memory.
     #   Should not use for large file.
-    with open(file_path) as file:
+    with open(file_path, encoding="utf-8") as file:
         data = json.load(file)
         found = find_key_recursively(data, search_key)
         if found is None:

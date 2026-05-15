@@ -252,15 +252,15 @@ def extract_machine_info() -> dict[str, Any]:
     }
 
     try:
-        cpuinfo = path("/proc/cpuinfo").read_text()
-        meminfo = path("/proc/meminfo").read_text()
-        version = path("/proc/version").read_text()
-        os_release = path("/etc/os-release").read_text()
+        cpuinfo = path("/proc/cpuinfo").read_text(encoding="utf-8")
+        meminfo = path("/proc/meminfo").read_text(encoding="utf-8")
+        version = path("/proc/version").read_text(encoding="utf-8")
+        os_release = path("/etc/os-release").read_text(encoding="utf-8")
 
         result["cpu_model"] = search(r"^model name\s*: (.*?)$", cpuinfo)
         result["sbios"] = (
-            path("/sys/class/dmi/id/bios_vendor").read_text().strip()
-            + path("/sys/class/dmi/id/bios_version").read_text().strip()
+            path("/sys/class/dmi/id/bios_vendor").read_text(encoding="utf-8").strip()
+            + path("/sys/class/dmi/id/bios_version").read_text(encoding="utf-8").strip()
         )
         result["linux_kernel_version"] = search(r"version (\S*)", version)
         result["cpu_memory"] = search(r"MemTotal:\s*(\S*)", meminfo)
