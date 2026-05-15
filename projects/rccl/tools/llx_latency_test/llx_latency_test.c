@@ -76,6 +76,7 @@ static_assert(256 % LINE_ELEMS == 0,       "NTHREADS (256) must be divisible by 
 #define NTHREADS    256
 #define NBLOCKS_MAX  64
 #define ITERS_MAX  4096
+#define MIN_SWEEP_BYTES 8
 
 // ---------------------------------------------------------------------------
 // Watchdog
@@ -681,12 +682,15 @@ static bool parse_size(const char* s, size_t* out)
   unsigned long long v = strtoull(s, &end, 0);
   if (errno != 0 || end == s) return false;
   if (*end == 'K' || *end == 'k') {
+    if (v > (ULLONG_MAX >> 10)) return false;
     v <<= 10;
     ++end;
   } else if (*end == 'M' || *end == 'm') {
+    if (v > (ULLONG_MAX >> 20)) return false;
     v <<= 20;
     ++end;
   } else if (*end == 'G' || *end == 'g') {
+    if (v > (ULLONG_MAX >> 30)) return false;
     v <<= 30;
     ++end;
   }
@@ -700,12 +704,12 @@ int main(int argc, char** argv)
   int warmup = 10;
   int iters = 100;
   g_watchdog_timeout_s = 30.0;
-  size_t MAX_DATA = (128ULL << 20);
+  size_t max_data = (128ULL << 20);
 
   if ((argc > 1 && !parse_int(argv[1], &warmup)) ||
       (argc > 2 && !parse_int(argv[2], &iters)) ||
       (argc > 3 && !parse_double(argv[3], &g_watchdog_timeout_s)) ||
-      (argc > 4 && !parse_size(argv[4], &MAX_DATA))) {
+      (argc > 4 && !parse_size(argv[4], &max_data))) {
     fprintf(stderr, "Invalid numeric argument(s)\n");
     return 1;
   }
@@ -719,8 +723,8 @@ int main(int argc, char** argv)
     fprintf(stderr, "timeout_s must be > 0\n");
     return 1;
   }
-  if (MAX_DATA < 8) {
-    fprintf(stderr, "max_bytes must be >= 8\n");
+  if (max_data < MIN_SWEEP_BYTES) {
+    fprintf(stderr, "max_bytes must be >= %d\n", MIN_SWEEP_BYTES);
     return 1;
   }
 
@@ -734,7 +738,7 @@ int main(int argc, char** argv)
 
   printf("LL one-way benchmark  LINE_BYTES=%d  DATA_BYTES=%d  "
          "warmup=%d  iters=%d  timeout=%.0fs  max=%zu B\n",
-         LINE_BYTES, DATA_BYTES, warmup, iters, g_watchdog_timeout_s, MAX_DATA);
+         LINE_BYTES, DATA_BYTES, warmup, iters, g_watchdog_timeout_s, max_data);
   printf("Protocols: LL (16-B lines, 50%% eff)  "
          PROTO_SC " (s_waitcnt)  "
          PROTO_SC_WB " (+ threadfence_system)  "
@@ -742,7 +746,7 @@ int main(int argc, char** argv)
   printf("Wire efficiency LL<N>: %d/%d = %.1f%%\n\n",
          DATA_ELEMS, LINE_ELEMS, 100.0 * DATA_ELEMS / LINE_ELEMS);
 
-  const size_t BUF_WIRE = MAX_DATA * 2;
+  const size_t BUF_WIRE = max_data * 2;
 
   // ping buffer on GPU1 (GPU0 writes remotely, GPU1 reads locally)
   // ack_buf on GPU0 (GPU1 writes remotely, GPU0 polls locally)
@@ -756,7 +760,7 @@ int main(int argc, char** argv)
   hipSetDevice(0);
   HIP_CHECK(hipMalloc(&ack_buf, sizeof(uint64_t)));
 
-  for (size_t sz = 8; sz <= MAX_DATA; sz *= 2) {
+  for (size_t sz = MIN_SWEEP_BYTES; sz <= max_data; sz *= 2) {
     run_ll        (warmup, iters, sz, gpu1_ping, ack_buf, block_counters);
     run_lln_sc    (warmup, iters, sz, gpu1_ping, ack_buf, block_counters);
     run_lln_sc_wb (warmup, iters, sz, gpu1_ping, ack_buf, block_counters);
