@@ -53,6 +53,7 @@ rocprofiler_add_integration_execute_test(
         --marker-trace=no --kernel-trace=no --memory-copy-trace=no
         --memory-allocation-trace=no --scratch-memory-trace=no --rccl-trace=no
         --kokkos-trace=no --ompt-trace=no --rocdecode-trace=no --rocjpeg-trace=no
+        --rocshmem-trace=no
         --hip-runtime-trace=no --hip-compiler-trace=no --hsa-core-trace=no
         --hsa-amd-trace=no --hsa-image-trace=no --hsa-finalizer-trace=no
         --advanced-thread-trace=no --kfd-trace=no --kfd-page-migration-trace=no
