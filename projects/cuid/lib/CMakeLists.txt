@@ -81,11 +81,11 @@ target_include_directories(
 # the HMAC key is shared and CUIDs remain stable across version upgrades.
 target_compile_definitions(
     amdcuid_static
-    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
+    PRIVATE AMDCUID_CONFIG_DIR="${CMAKE_INSTALL_SYSCONFDIR}"
 )
 target_compile_definitions(
     amdcuid_shared
-    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
+    PRIVATE AMDCUID_CONFIG_DIR="${CMAKE_INSTALL_SYSCONFDIR}"
 )
 
 if(WIN32)

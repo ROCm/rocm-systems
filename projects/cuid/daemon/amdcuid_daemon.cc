@@ -25,6 +25,8 @@
 #include "src/ipc_protocol.h"
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
+#include <ctime>
 #include <fcntl.h>
 #include <fstream>
 #include <iostream>

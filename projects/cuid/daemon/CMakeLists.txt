@@ -25,11 +25,6 @@ set(CMAKE_CXX_STANDARD 14)
 set(INC_DIR ${CMAKE_SOURCE_DIR}/lib)
 set(AMDCUID_DAEMON_EXECUTABLE amdcuid_daemon)
 set(SRC_LIST amdcuid_daemon.cc)
-if(WIN32)
-    set(CONFIG_INSTALL_DIR "CONFIG") # Relative to prefix
-else()
-    set(CONFIG_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/amdcuid/config")
-endif()
 
 find_package(Threads REQUIRED)
 
@@ -44,7 +39,7 @@ target_include_directories(${AMDCUID_DAEMON_EXECUTABLE} PRIVATE ${INC_DIR})
 # location.
 target_compile_definitions(
     ${AMDCUID_DAEMON_EXECUTABLE}
-    PRIVATE AMDCUID_CONFIG_DIR="${CONFIG_INSTALL_DIR}"
+    PRIVATE AMDCUID_CONFIG_DIR="${CMAKE_INSTALL_SYSCONFDIR}"
 )
 
 # Link against the CUID library
@@ -64,7 +59,7 @@ install(
 set(DAEMON_CONFIG_FILE amdcuid_daemon.conf)
 install(
     FILES ${CMAKE_CURRENT_SOURCE_DIR}/${DAEMON_CONFIG_FILE}
-    DESTINATION ${AMDCUID_SHARED_CONFIG_DIR}
+    DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}
     COMPONENT ${DAEMON_COMPONENT}
 )
 

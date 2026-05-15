@@ -26,6 +26,8 @@
 //   OpenSSL <  3.0 (all other platforms) -> HMAC_CTX API
 
 #include "hmac.h"
+#include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -65,8 +67,7 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac()
-    : impl_(nullptr), key(nullptr), key_len(0), valid(false),
-      key_file_path(std::string(AMDCUID_CONFIG_DIR) + "/hmac_key.bin") {
+    : impl_(nullptr), key(nullptr), key_len(0), valid(false)) {
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->hAlg = nullptr;
@@ -153,33 +154,6 @@ amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t *data,
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t cuid_hmac::set_hmac_algorithm(const char *digest_name) {
-  if (!impl_)
-    return AMDCUID_STATUS_HMAC_ERROR;
-
-  const wchar_t *alg_id = Impl::to_bcrypt_alg(digest_name);
-  if (!alg_id) {
-    std::cerr << "Unsupported digest: "
-              << (digest_name ? digest_name : "(null)") << std::endl;
-    return AMDCUID_STATUS_INVALID_ARGUMENT;
-  }
-
-  BCRYPT_ALG_HANDLE hNew = nullptr;
-  NTSTATUS status = BCryptOpenAlgorithmProvider(&hNew, alg_id, nullptr,
-                                                BCRYPT_ALG_HANDLE_HMAC_FLAG);
-  if (!BCRYPT_SUCCESS(status)) {
-    std::cerr << "BCryptOpenAlgorithmProvider failed for new digest"
-              << std::endl;
-    return AMDCUID_STATUS_HMAC_ERROR;
-  }
-
-  if (impl_->hAlg)
-    BCryptCloseAlgorithmProvider(impl_->hAlg, 0);
-  impl_->hAlg = hNew;
-  impl_->digest_name = digest_name;
-  return AMDCUID_STATUS_SUCCESS;
-}
-
 amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t key_data[key_length]) {
   delete[] key;
   key = new uint8_t[key_length];
@@ -247,8 +221,7 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac()
-    : impl_(nullptr), key(nullptr), key_len(0), valid(false),
-      key_file_path(std::string(AMDCUID_CONFIG_DIR) + "/hmac_key.bin") {
+    : impl_(nullptr), key(nullptr), key_len(0), valid(false) {
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->mac = nullptr;
@@ -339,18 +312,6 @@ amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t *data,
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t cuid_hmac::set_hmac_algorithm(const char *digest_name) {
-  if (!impl_)
-    return AMDCUID_STATUS_HMAC_ERROR;
-
-  impl_->digest_name =
-      "SHA256"; // default to SHA256 if null or empty string provided
-  if (digest_name && digest_name[0] != '\0')
-    impl_->digest_name = digest_name;
-
-  return AMDCUID_STATUS_SUCCESS;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // OpenSSL 1.x  — HMAC_CTX API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -362,8 +323,7 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac()
-    : impl_(nullptr), key(nullptr), key_len(0), valid(false),
-      key_file_path(std::string(AMDCUID_CONFIG_DIR) + "/hmac_key.bin") {
+    : impl_(nullptr), key(nullptr), key_len(0), valid(false) {
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->ctx = HMAC_CTX_new();
@@ -440,18 +400,6 @@ amdcuid_status_t cuid_hmac::generate_hmac_sha256(const uint8_t *data,
   }
 
   *out_len = len;
-  return AMDCUID_STATUS_SUCCESS;
-}
-
-amdcuid_status_t cuid_hmac::set_hmac_algorithm(const char *digest_name) {
-  if (!impl_)
-    return AMDCUID_STATUS_HMAC_ERROR;
-
-  impl_->digest_name =
-      "SHA256"; // default to SHA256 if null or empty string provided
-  if (digest_name && digest_name[0] != '\0')
-    impl_->digest_name = digest_name;
-
   return AMDCUID_STATUS_SUCCESS;
 }
 

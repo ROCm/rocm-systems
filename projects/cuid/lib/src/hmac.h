@@ -24,7 +24,7 @@
 #define HMAC_H
 
 #include "include/amd_cuid.h"
-#include <stdint.h>
+#include <cstddef>
 #include <string>
 
 #define key_length 32
@@ -50,9 +50,6 @@ public:
 
   amdcuid_status_t generate_hmac_sha256(const uint8_t *data, size_t data_len,
                                         uint8_t *out_hash, size_t *out_len);
-  // digest_name follows OpenSSL naming conventions, e.g. "SHA256", "SHA512".
-  // On Windows CNG, "SHA1", "SHA256", "SHA384", "SHA512" are supported.
-  amdcuid_status_t set_hmac_algorithm(const char *digest_name);
   amdcuid_status_t set_hmac_key(const uint8_t key_data[key_length]);
   amdcuid_status_t generate_key(uint8_t key[key_length]);
 
