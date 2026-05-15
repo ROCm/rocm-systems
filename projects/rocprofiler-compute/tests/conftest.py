@@ -7,15 +7,12 @@ import random
 import shutil
 import subprocess
 import sys
-from collections.abc import Generator
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from common import ROOT
-
-from utils.utils_profile import shell_basenames
 
 # Determine script path
 rocprof_compute_script_path = Path(ROOT) / "src/rocprof-compute"
@@ -228,35 +225,6 @@ def skip_monkeypatch_with_binary(request):
         pytest.skip(
             "Test uses monkeypatch which is incompatible with --call-binary mode"
         )
-
-
-FAKE_ETC_SHELLS = """\
-# /etc/shells: valid login shells
-/bin/sh
-/bin/bash
-/usr/bin/zsh
-/usr/bin/ksh
-/usr/bin/fish
-/usr/bin/csh
-/usr/bin/tcsh
-/usr/bin/dash
-"""
-
-
-@pytest.fixture
-def mock_etc_shells(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
-    """Force /etc/shells to a known content for shell-target tests."""
-    real_read_text = Path.read_text
-
-    def fake_read_text(self: Path, *args, **kwargs) -> str:
-        if str(self) == "/etc/shells":
-            return FAKE_ETC_SHELLS
-        return real_read_text(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_text", fake_read_text)
-    shell_basenames.cache_clear()
-    yield
-    shell_basenames.cache_clear()
 
 
 @pytest.fixture
