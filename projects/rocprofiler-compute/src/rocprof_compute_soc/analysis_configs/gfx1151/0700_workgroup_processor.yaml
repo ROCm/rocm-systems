@@ -154,8 +154,8 @@ Panel Config:
           min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
           max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
           unit: (Count + $normUnit)
-        # Instructions - Dual VALU (VOPD): row omitted (SQ_INSTS_DUAL_VALU_WAVE32 unreliable). When
-        # restoring, uncomment below, switch to SUM(SQ_INSTS_DUAL_VALU_WAVE32_sum)/… per sdk_config,
+        # Instructions - Dual VALU (VOPD): row omitted (sq_insts_dual_valu_wave32 unreliable). When
+        # restoring, uncomment below, switch to SUM(sq_insts_dual_valu_wave32_sum)/… per sdk_config,
         # and sync tools/per_arch_metric_definitions/gfx1151_metrics_description.yaml,
         # docs/data/metrics/gfx1151_metrics.yaml, and SoL prose if needed. Lowercase tokens in the
         # snippet avoid PMC expansion if pasted verbatim; replace with SQ_* before enabling.
