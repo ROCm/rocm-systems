@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -33,6 +34,8 @@
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <fstream>
+
 namespace rocprofiler
 {
 namespace counters
@@ -42,6 +45,32 @@ CounterController::CounterController()
     // Pre-read metrics map file to catch faliures during initial setup.
     rocprofiler::counters::loadMetrics();
     rocprofiler::counters::check_installed_firmware_restrictions();
+
+    // Check if power_dpm_force_performance_level is set to profile_standard
+    // for all GPU agents. Navi3x requires profile_standard for stable counter collection.
+    for(const auto* agent : agent::get_agents()) {
+        if(!agent || agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+        auto card_num = agent->drm_render_minor - 128;
+        auto perf_path = fmt::format(
+            "/sys/class/drm/card{}/device/power_dpm_force_performance_level", card_num);
+
+        std::ifstream perf_file(perf_path);
+        if(!perf_file.is_open()) continue;
+
+        std::string perf_level;
+        std::getline(perf_file, perf_level);
+
+        if(!perf_level.empty() && perf_level != "profile_standard")
+        {
+            ROCP_WARNING << fmt::format(
+                "Agent {} (card{}) power_dpm_force_performance_level is '{}'. "
+                "Set to 'profile_standard' for stable counter collection.",
+                agent->node_id,
+                card_num,
+                perf_level);
+        }
+    }
 }
 
 // Adds a counter collection profile to our global cache.
