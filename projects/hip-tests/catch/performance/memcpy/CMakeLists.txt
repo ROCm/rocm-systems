@@ -8,6 +8,7 @@ set(TEST_SRC
     hipMemcpyWithStream.cc
     hipMemcpyAtoH.cc
     hipMemcpyHtoA.cc
+    hipMemcpyBatchAsync.cc
     hipMemcpyDtoD.cc
     hipMemcpyDtoDAsync.cc
     hipMemcpyDtoH.cc
