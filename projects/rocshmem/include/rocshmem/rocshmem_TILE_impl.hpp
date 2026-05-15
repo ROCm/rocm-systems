@@ -438,7 +438,7 @@ __device__ inline int rocshmem_ctx_tile_allgather(rocshmem_ctx_t ctx, rocshmem_t
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_allgather(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_allgather_internal(team, dst.data_handle(), src.data_handle(),
                                     dst_strides, src_strides,
                                     start_arr, boundary_arr,
                                     ndim, sizeof(element_t), flags);
@@ -467,7 +467,7 @@ __device__ inline int rocshmem_ctx_tile_allgather_wave(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_allgather_wave(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_allgather_wave_internal(team, dst.data_handle(), src.data_handle(),
                                          dst_strides, src_strides,
                                          start_arr, boundary_arr,
                                          ndim, sizeof(element_t), flags);
@@ -496,7 +496,7 @@ __device__ inline int rocshmem_ctx_tile_allgather_wg(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_allgather_wg(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_allgather_wg_internal(team, dst.data_handle(), src.data_handle(),
                                        dst_strides, src_strides,
                                        start_arr, boundary_arr,
                                        ndim, sizeof(element_t), flags);
@@ -557,7 +557,7 @@ __device__ inline int rocshmem_ctx_tile_broadcast(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_broadcast(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_broadcast_internal(team, dst.data_handle(), src.data_handle(),
                                     dst_strides, src_strides,
                                     start_arr, boundary_arr,
                                     ndim, sizeof(element_t), pe_root, flags);
@@ -586,7 +586,7 @@ __device__ inline int rocshmem_ctx_tile_broadcast_wave(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_broadcast_wave(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_broadcast_wave_internal(team, dst.data_handle(), src.data_handle(),
                                          dst_strides, src_strides,
                                          start_arr, boundary_arr,
                                          ndim, sizeof(element_t), pe_root, flags);
@@ -615,7 +615,7 @@ __device__ inline int rocshmem_ctx_tile_broadcast_wg(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_broadcast_wg(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_broadcast_wg_internal(team, dst.data_handle(), src.data_handle(),
                                        dst_strides, src_strides,
                                        start_arr, boundary_arr,
                                        ndim, sizeof(element_t), pe_root, flags);
@@ -660,7 +660,7 @@ __device__ inline int rocshmem_ctx_tile_collective_wait(rocshmem_ctx_t ctx,
                                                  rocshmem_team_t team,
                                                  uint64_t flags) {
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_collective_wait(team, flags);
+  return rocshmem_tile_collective_wait_internal(team, flags);
 }
 
 /******************************************************************************
@@ -699,7 +699,7 @@ __device__ inline int rocshmem_ctx_tile_sum_reduce(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_sum_reduce(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_sum_reduce_internal(team, dst.data_handle(), src.data_handle(),
                                      dst_strides, src_strides,
                                      start_arr, boundary_arr,
                                      ndim, sizeof(element_t), root, flags);
@@ -730,7 +730,7 @@ __device__ inline int rocshmem_ctx_tile_sum_reduce_wave(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_sum_reduce_wave(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_sum_reduce_wave_internal(team, dst.data_handle(), src.data_handle(),
                                           dst_strides, src_strides,
                                           start_arr, boundary_arr,
                                           ndim, sizeof(element_t), root, flags);
@@ -761,7 +761,7 @@ __device__ inline int rocshmem_ctx_tile_sum_reduce_wg(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_sum_reduce_wg(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_sum_reduce_wg_internal(team, dst.data_handle(), src.data_handle(),
                                         dst_strides, src_strides,
                                         start_arr, boundary_arr,
                                         ndim, sizeof(element_t), root, flags);

@@ -172,8 +172,8 @@ __global__ void tile_exchange_kernel(Tensor2D<int> local_tensor,
     Coord2D boundary(tile_row + tile_rows, tile_col + tile_cols);
 
     // Send tile using Tile API
-    // Note: tile_put uses (src, dst) parameter order
-    rocshmem_tile_put(local_tensor, remote_buffer, start, boundary,
+    // Note: tile_put uses (dst, src) parameter order
+    rocshmem_tile_put(remote_buffer, local_tensor, start, boundary,
                      remote_pe, 0);
   }
 }
