@@ -9,8 +9,9 @@
 #endif
 
 #include <hip/hip_runtime_api.h>
-#include "rocshmem/rocshmem_common.hpp"
-using rocshmem_team_t = rocshmem::rocshmem_team_t;
+
+// rocshmem_team_t mirrors the definition in rocshmem_common.hpp's namespace.
+typedef uint64_t *rocshmem_team_t;
 
 #ifdef __cplusplus
 extern "C" {
