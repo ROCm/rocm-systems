@@ -531,6 +531,12 @@ exit:
          "(load balancer integration with resiliency is pending)");
     castGlobalQpSchedParms.enable = false;
   }
+  if (ret == ncclSuccess && IbCastOffloadEnabled &&
+      (ncclParamIbCastResiliencyPortFailover() || ncclParamIbCastResiliencyPortRecovery())) {
+    INFO(NCCL_INIT|NCCL_NET, "NET/IB : PORT_FAILOVER/RECOVERY enabled - disabling CTS offload "
+         "(not compatible with resiliency)");
+    IbCastOffloadEnabled = false;
+  }
   return ret;
 fail:
   if(devices && (ncclSuccess != wrap_ibv_free_device_list(devices))){WARN("NET/IB : Unable to free device list");}
