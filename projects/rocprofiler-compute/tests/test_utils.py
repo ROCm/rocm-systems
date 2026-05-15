@@ -5134,6 +5134,146 @@ def test_experimental_action_help_suppression():
     assert "--test-exp-feature" not in help_text, f"{help_text}"
 
 
+@pytest.mark.experimental_feature
+def test_experimental_gui_without_flag_errors(monkeypatch, capsys):
+    """Test that using --gui without --experimental flag raises error."""
+    import argparse
+
+    from argparser import ExperimentalAction
+
+    monkeypatch.setattr("sys.argv", ["rocprof-compute", "--gui"])
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--gui",
+        type=int,
+        nargs="?",
+        const=8050,
+        default=None,
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=False,
+        feature_label="GUI",
+        help="Activate GUI",
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args()
+
+    assert exc_info.value.code == 2
+    captured = capsys.readouterr()
+    assert "experimental feature" in captured.err.lower()
+    assert "--experimental" in captured.err.lower()
+
+
+@pytest.mark.experimental_feature
+def test_experimental_gui_with_flag_succeeds(monkeypatch, caplog):
+    """Test that using --gui with --experimental flag succeeds and stores port."""
+    import argparse
+
+    from argparser import ExperimentalAction
+
+    monkeypatch.setattr("sys.argv", ["rocprof-compute", "--gui"])
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--gui",
+        type=int,
+        nargs="?",
+        const=8050,
+        default=None,
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=True,
+        feature_label="GUI",
+        help="Activate GUI",
+    )
+
+    args = parser.parse_args()
+    assert args.gui == 8050
+    assert "GUI" in caplog.text
+    assert "experimental" in caplog.text.lower()
+
+    caplog.clear()
+    monkeypatch.setattr("sys.argv", ["rocprof-compute", "--gui", "9090"])
+
+    parser2 = argparse.ArgumentParser()
+    parser2.add_argument(
+        "--gui",
+        type=int,
+        nargs="?",
+        const=8050,
+        default=None,
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=True,
+        feature_label="GUI",
+        help="Activate GUI",
+    )
+
+    args2 = parser2.parse_args()
+    assert args2.gui == 9090
+
+
+@pytest.mark.experimental_feature
+def test_experimental_tui_without_flag_errors(monkeypatch, capsys):
+    """Test that using --tui without --experimental flag raises error."""
+    import argparse
+
+    from argparser import ExperimentalAction
+
+    monkeypatch.setattr("sys.argv", ["rocprof-compute", "--tui"])
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--tui",
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=False,
+        feature_label="TUI",
+        help="Activate TUI",
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args()
+
+    assert exc_info.value.code == 2
+    captured = capsys.readouterr()
+    assert "experimental feature" in captured.err.lower()
+    assert "--experimental" in captured.err.lower()
+
+
+@pytest.mark.experimental_feature
+def test_experimental_tui_with_flag_succeeds(monkeypatch, caplog):
+    """Test that using --tui with --experimental flag succeeds."""
+    import argparse
+
+    from argparser import ExperimentalAction
+
+    monkeypatch.setattr("sys.argv", ["rocprof-compute", "--tui"])
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--tui",
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=True,
+        feature_label="TUI",
+        help="Activate TUI",
+    )
+
+    args = parser.parse_args()
+    assert args.tui is True
+    assert "TUI" in caplog.text
+    assert "experimental" in caplog.text.lower()
+
+
 # =============================================================================
 # Test rocm library resolver
 # =============================================================================
