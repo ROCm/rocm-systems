@@ -17,19 +17,8 @@
 #include "queue.h"
 #include <cuda_runtime.h>
 
-<<<<<<<< HEAD:projects/rccl/plugins/profiler/example/event.h
 #define MAX_CHANNELS                     128 // Match RCCL's MAXCHANNELS
 #define MAX_STEPS                        1024
-========
-// CE timing modes
-typedef enum {
-  CE_TIMING_CPU = 0,
-  CE_TIMING_GPU = 1
-} CeTimingMode_t;
-
-#define MAX_CHANNELS                     32
-#define MAX_STEPS                        32
->>>>>>>> v2.30.4-1:plugins/profiler/example/event.h
 #define MAX_OPS                          16 // Up to 64K ranks for PAT
 #define MAX_EVENTS_PER_REQ               (8)
 

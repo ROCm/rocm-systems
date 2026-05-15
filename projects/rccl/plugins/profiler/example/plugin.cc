@@ -96,7 +96,6 @@ static void freeDeferredContexts() {
   pthread_mutex_unlock(&deferredCtxLock);
 }
 
-<<<<<<<< HEAD:projects/rccl/plugins/profiler/example/plugin.cc
   // pre-allocate memory for event object pools in dedicated profiler context
   struct context* ctx = (struct context *)calloc(1, sizeof(*ctx));
   if (ctx == nullptr) return ncclSystemError;
@@ -106,14 +105,6 @@ static void freeDeferredContexts() {
   ctx->rank = rank;
   logFn = logfn;
   INFO(NCCL_INIT, "PROFILER/Plugin: init commName: %s commHash: %lu nranks: %d rank: %d", commName ? commName : "", commId, nranks, rank);
-========
-static inline struct context* getTaskEventCtx(struct taskEventBase* base) {
-  if (!base || !base->parent) return nullptr;
-  if (base->type == ncclProfileColl) return ((struct collApi*)base->parent)->ctx;
-  if (base->type == ncclProfileP2p) return ((struct p2pApi*)base->parent)->ctx;
-  return nullptr;
-}
->>>>>>>> v2.30.4-1:plugins/profiler/example/plugin.cc
 
 static struct context* contextFromEventHandle(void* eHandle) {
   if (!eHandle) return nullptr;

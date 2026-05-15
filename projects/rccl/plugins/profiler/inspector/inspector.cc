@@ -349,7 +349,6 @@ const char* inspectorTimingSourceToString(inspectorTimingSource_t timingSource) 
  *
  */
 
-<<<<<<<< HEAD:projects/rccl/plugins/profiler/inspector/inspector.cc
 /*
  * Description:
  *
@@ -618,8 +617,6 @@ finalize:
   INS_CHK(inspectorUnlockRWLock(&commList->guard));
   return res;
 }
-========
->>>>>>>> v2.30.4-1:plugins/profiler/inspector/inspector.cc
 
 /*
  * Description:
@@ -757,7 +754,6 @@ static void genDumpDir(char** workdir) {
   }
 }
 
-<<<<<<<< HEAD:projects/rccl/plugins/profiler/inspector/inspector.cc
 // RCCL: rewritten as a plain struct with pthread condvar sleep replacing
 // std::this_thread::sleep_for. Fixes teardown hang.
 // For upcoming syncs with Prometheus/ROCm extensions — do not sync without manual review.
@@ -791,17 +787,9 @@ struct inspectorDumpThread {
       pthread_cond_init(&sleepCond, nullptr);
       sleepCondClock = CLOCK_REALTIME;
     }
-========
-
-inspectorDumpThread::inspectorDumpThread(const char* _outputRoot, int64_t _sampleIntervalUsecs)
-  : jfo(nullptr), outputRoot(strdup(_outputRoot)), sampleIntervalUsecs(_sampleIntervalUsecs) {
-  if (inspectorLockInit(&guard) != inspectorSuccess) {
-    INFO_INSPECTOR("NCCL Inspector inspectorDumpThread: couldn't init lock");
->>>>>>>> v2.30.4-1:plugins/profiler/inspector/inspector.cc
   }
 }
 
-<<<<<<<< HEAD:projects/rccl/plugins/profiler/inspector/inspector.cc
   ~inspectorDumpThread() {
     if (jfo != nullptr) {
       jsonFinalizeFileOutput(jfo);
@@ -866,16 +854,6 @@ inspectorDumpThread::inspectorDumpThread(const char* _outputRoot, int64_t _sampl
       if (jsonSuccess != result) {
         INFO(NCCL_INSPECTOR, "Cannot open %s for writing: %s", tmp, jsonErrorString(result));
         return inspectorFileOpenError;
-========
-inspectorDumpThread::~inspectorDumpThread() {
-  // Close and cleanup Prometheus files, only in Prom mode
-  if (enableNcclInspectorPromDump) {
-    // Close any open Prometheus file handles
-    for (size_t i = 0; i < deviceFlushEntries.size(); i++) {
-      if (deviceFlushEntries[i].fileHandle) {
-        fclose(deviceFlushEntries[i].fileHandle);
-        deviceFlushEntries[i].fileHandle = NULL;
->>>>>>>> v2.30.4-1:plugins/profiler/inspector/inspector.cc
       }
     }
 
@@ -964,22 +942,12 @@ FILE* inspectorDumpThread::getOrCreateFileHandle(const char* deviceUuidStr,
       return NULL;
     }
 
-<<<<<<<< HEAD:projects/rccl/plugins/profiler/inspector/inspector.cc
     // RCCL: re-read ncomms under lock to avoid TOCTOU after inspectorCommInfoListDump.
     inspectorLockRd(&g_state.deletedComms.guard);
     bool hasDeleted = (g_state.deletedComms.ncomms > 0);
     inspectorUnlockRWLock(&g_state.deletedComms.guard);
     if (hasDeleted) {
       inspectorCommInfoListFinalize(&g_state.deletedComms);
-========
-    chmod(filename, 0777);
-
-    deviceFlushEntries[flushIndex].fileHandle = file;
-
-    if (needsFlush) {
-      TRACE_INSPECTOR("NCCL Inspector: Created/flushed Prometheus file %s", filename);
-      deviceFlushEntries[flushIndex].lastFlushTime = currentTime;
->>>>>>>> v2.30.4-1:plugins/profiler/inspector/inspector.cc
     }
   }
 
@@ -1123,7 +1091,6 @@ static inspectorResult_t inspectorStartDumpThread(int64_t intervalUsecs) {
     return inspectorSuccess;
   }
 
-<<<<<<<< HEAD:projects/rccl/plugins/profiler/inspector/inspector.cc
   static void* dumpMain(void* arg) {
     inspectorDumpThread* dumper = (inspectorDumpThread*)arg;
     inspectorResult_t res = inspectorSuccess;
@@ -1156,17 +1123,6 @@ static inspectorResult_t inspectorStartDumpThread(int64_t intervalUsecs) {
         if (rc == ETIMEDOUT) break;
       }
       pthread_mutex_unlock(&dumper->sleepMutex);
-========
-  char* dumpdir;
-  genDumpDir(&dumpdir);
-
-  if (dumpdir != nullptr) {
-    if (!ensureDir(dumpdir)) {
-      free(dumpdir);
-      INFO_INSPECTOR( "NCCL Inspector: failed to generate a dump dir; not "
-                      "starting internal dump thread.");
-      return inspectorSuccess;
->>>>>>>> v2.30.4-1:plugins/profiler/inspector/inspector.cc
     }
 
     dumper = new inspectorDumpThread(dumpdir, intervalUsecs);
@@ -1870,7 +1826,6 @@ void inspectorComputeOpBw(struct inspectorCommInfo *commInfo,
   double timeInSec = op->execTimeUsecs / 1000000.0;
   double factor = 0.0;
   double trafficSize = 0.0;
-<<<<<<<< HEAD:projects/rccl/plugins/profiler/inspector/inspector.cc
   switch (collType) {
   case ncclFuncReduce:
   case ncclFuncBroadcast:
@@ -1900,42 +1855,6 @@ void inspectorComputeOpBw(struct inspectorCommInfo *commInfo,
   default:
     trafficSize = 0;
     factor = 0.0;
-========
-
-  if (op->isP2p) {
-    trafficSize = (double)op->msgSizeBytes;
-    factor = 1.0;
-  } else {
-    switch (op->func) {
-    case ncclFuncReduce:
-    case ncclFuncBroadcast:
-      trafficSize = (double)op->msgSizeBytes;
-      factor = 1;
-      break;
-    case ncclFuncAllReduce:
-      trafficSize = (double)op->msgSizeBytes;
-      factor = ((double)(2 * (commInfo->nranks - 1))) / ((double)commInfo->nranks);
-      break;
-    case ncclFuncReduceScatter:
-      trafficSize = (double)(op->msgSizeBytes * commInfo->nranks);
-      factor = ((double)(commInfo->nranks - 1)) / ((double)commInfo->nranks);
-      break;
-    case ncclFuncAllGather:
-    case ncclFuncAllGatherV:
-      trafficSize = (double)(op->msgSizeBytes * commInfo->nranks);
-      factor = ((double)(commInfo->nranks - 1)) / ((double)commInfo->nranks);
-      break;
-    case ncclFuncSendRecv:
-    case ncclFuncSend:
-    case ncclFuncRecv:
-      trafficSize = (double)op->msgSizeBytes;
-      factor = 1;
-      break;
-    default:
-      trafficSize = 0;
-      factor = 0.0;
-    }
->>>>>>>> v2.30.4-1:plugins/profiler/inspector/inspector.cc
   }
   op->algoBwGbs = timeInSec != 0 ? (trafficSize / 1.0E9 / timeInSec) : 0;
   op->busBwGbs = op->algoBwGbs * factor;

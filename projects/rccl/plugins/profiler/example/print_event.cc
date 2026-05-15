@@ -30,13 +30,8 @@ __hidden void printGroupApiEventTrailer(FILE* fh, struct groupApi* event) {
 
 static __thread int p2pApiId;
 __hidden void printP2pApiEventHeader(FILE* fh, struct p2pApi* event) {
-<<<<<<<< HEAD:projects/rccl/plugins/profiler/example/print_event.cc
   fprintf(fh, "{\"name\": \"%s\", \"cat\": \"P2P_API\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"count\": %lu, \"datatype\": \"%s\", \"GraphCaptured\":%d, \"Stream\": \"%p\"}},\n",
       event->func, p2pApiId, getpid(), 1, event->startTs, event->count, event->datatype, event->graphCaptured, event->stream);
-========
-  fprintf(fh, "{\"name\": \"%s\", \"cat\": \"P2P_API\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"count\": %lu, \"datatype\": \"%s\", \"GraphCaptured\": %d, \"Stream\": \"%p\"}},\n",
-          event->func, p2pApiId, getpid(), 1, event->startTs, event->count, event->datatype, event->graphCaptured, event->stream);
->>>>>>>> v2.30.4-1:plugins/profiler/example/print_event.cc
 }
 
 __hidden void printP2pApiEventTrailer(FILE* fh, struct p2pApi* event) {
@@ -46,13 +41,8 @@ __hidden void printP2pApiEventTrailer(FILE* fh, struct p2pApi* event) {
 
 static __thread int collApiId;
 __hidden void printCollApiEventHeader(FILE* fh, struct collApi* event) {
-<<<<<<<< HEAD:projects/rccl/plugins/profiler/example/print_event.cc
   fprintf(fh, "{\"name\": \"%s\", \"cat\": \"COLL_API\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"count\": %lu, \"datatype\": \"%s\", \"root\": %d, \"GraphCaptured\":%d, \"Stream\": \"%p\"}},\n",
       event->func, collApiId, getpid(), 1, event->startTs, event->count, event->datatype, event->root, event->graphCaptured, event->stream);
-========
-  fprintf(fh, "{\"name\": \"%s\", \"cat\": \"COLL_API\", \"ph\": \"b\", \"id\": %d, \"pid\": %d, \"tid\": %d, \"ts\": %f, \"args\": {\"count\": %lu, \"datatype\": \"%s\", \"root\": %d, \"GraphCaptured\": %d, \"Stream\": \"%p\"}},\n",
-          event->func, collApiId, getpid(), 1, event->startTs, event->count, event->datatype, event->root, event->graphCaptured, event->stream);
->>>>>>>> v2.30.4-1:plugins/profiler/example/print_event.cc
 }
 
 __hidden void printCollApiEventTrailer(FILE* fh, struct collApi* event) {
