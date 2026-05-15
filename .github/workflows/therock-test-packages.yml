@@ -60,6 +60,7 @@ jobs:
         env:
           PROJECTS_TO_TEST: ${{ inputs.projects_to_test }}
           AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+          WINDOWS_HIP_ROCR_TESTS: ${{ contains(inputs.projects_to_test, 'hip-tests') }}
         id: configure
         run: python ./build_tools/github_actions/fetch_test_configurations.py
 

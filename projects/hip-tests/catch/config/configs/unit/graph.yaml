@@ -1669,3 +1669,34 @@ graph:
   Unit_hipEventSynchronize_ThreadLocalCapture_DefaultMode_CapturedEvent: *level_2
   Unit_hipEventQuery_SameThread_GlobalCapture: *level_2
   Unit_hipEventQuery_SameThread_RelaxedCapture: *level_2
+  Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_MemoryTrim:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSizes:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse:
+    <<: *level_2
+    disabled: [amd_windows]
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap:
+    <<: *level_2
+    tags: [node]
+  Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch:
+    <<: *level_2
+    tags: [node]

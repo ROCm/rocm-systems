@@ -927,6 +927,45 @@ ncclResult_t ncclSocketSendRecv(struct ncclSocket* sendSock, void* sendPtr, int 
   return ncclSuccess;
 }
 
+ncclResult_t ncclSocketMultiOp(struct ncclSocketOp* ops, int numOps) {
+  if (ops == NULL || numOps <= 0) {
+    WARN("ncclSocketMultiOp: invalid arguments ops=%p numOps=%d", ops, numOps);
+    return ncclInvalidArgument;
+  }
+
+  int completedOps = 0;
+  for (int i = 0; i < numOps; i++) {
+    if (ops[i].sock == NULL) {
+      WARN("ncclSocketMultiOp: invalid socket at index %d", i);
+      return ncclInvalidArgument;
+    }
+    if (ops[i].op != NCCL_SOCKET_SEND && ops[i].op != NCCL_SOCKET_RECV) {
+      WARN("ncclSocketMultiOp: invalid op %d at index %d", ops[i].op, i);
+      return ncclInvalidArgument;
+    }
+    if (ops[i].size < 0) {
+      WARN("ncclSocketMultiOp: invalid size %d at index %d", ops[i].size, i);
+      return ncclInvalidArgument;
+    }
+    if (ops[i].size > 0 && ops[i].ptr == NULL) {
+      WARN("ncclSocketMultiOp: NULL ptr with size %d at index %d", ops[i].size, i);
+      return ncclInvalidArgument;
+    }
+    ops[i].offset = 0;
+    if (ops[i].size == 0) completedOps++;
+  }
+
+  int i = 0;
+  while (completedOps < numOps) {
+    if (ops[i].offset < ops[i].size) {
+      NCCLCHECK(socketProgress(ops[i].op, ops[i].sock, ops[i].ptr, ops[i].size, &ops[i].offset));
+      if (ops[i].offset >= ops[i].size) completedOps++;
+    }
+    i = (i + 1) % numOps;
+  }
+  return ncclSuccess;
+}
+
 
 // Receive or detect connection closed
 ncclResult_t ncclSocketTryRecv(struct ncclSocket* sock, void* ptr, int size, int* closed, bool blocking) {
