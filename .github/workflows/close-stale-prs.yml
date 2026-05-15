@@ -61,3 +61,6 @@ jobs:
 
           # Maximum number of operations per run (to avoid API rate limits)
           operations-per-run: 1000
+
+          # Draft PRs can stay for as long as necessary
+          exempt-draft-pr: true
