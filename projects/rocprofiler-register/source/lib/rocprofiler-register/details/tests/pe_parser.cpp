@@ -43,7 +43,7 @@ TEST(pe_parser, get_memory_regions_returns_nonempty_on_windows)
 TEST(pe_parser, code_address_is_executable_on_windows)
 {
     using namespace rocprofiler_register::platform;
-    auto* address = reinterpret_cast<const void*>(&sample_function);
+    const auto* address = reinterpret_cast<const void*>(&sample_function);
     EXPECT_TRUE(is_address_executable(address));
     EXPECT_TRUE(is_address_readable(address));
 }
@@ -59,7 +59,7 @@ TEST(pe_parser, null_address_is_not_executable_on_windows)
 TEST(pe_parser, find_module_returns_nonnull_for_code_address_on_windows)
 {
     using namespace rocprofiler_register::platform;
-    auto* address = reinterpret_cast<const void*>(&sample_function);
+    const auto* address = reinterpret_cast<const void*>(&sample_function);
     auto* module  = find_module_for_address(address);
     EXPECT_NE(module, nullptr);
 }
@@ -67,7 +67,7 @@ TEST(pe_parser, find_module_returns_nonnull_for_code_address_on_windows)
 TEST(pe_parser, get_memory_protection_nonzero_for_code_on_windows)
 {
     using namespace rocprofiler_register::platform;
-    auto* address = reinterpret_cast<const void*>(&sample_function);
+    const auto* address = reinterpret_cast<const void*>(&sample_function);
     EXPECT_NE(get_memory_protection(address), 0u);
 }
 #else
@@ -76,7 +76,7 @@ TEST(pe_parser, get_memory_protection_nonzero_for_code_on_windows)
 TEST(pe_parser, returns_stub_results_on_linux)
 {
     using namespace rocprofiler_register::platform;
-    auto* address = reinterpret_cast<const void*>(&sample_function);
+    const auto* address = reinterpret_cast<const void*>(&sample_function);
     EXPECT_TRUE(get_memory_regions().empty());
     EXPECT_EQ(get_memory_protection(address), 0u);
     EXPECT_FALSE(is_address_executable(address));
