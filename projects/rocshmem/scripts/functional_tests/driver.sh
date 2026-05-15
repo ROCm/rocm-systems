@@ -627,6 +627,7 @@ TestOther() {
   ExecTest  "shmemptr"         2       16           128       8
 
   ########################### Fence ordering tests #############################
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-418: fence tests not supported on RO
   ExecTest  "fence_putwavesignal"    2       1     64        1048576
   ExecTest  "fence_putwavesignal"    2       8     256       1048576
   ExecTest  "fence_putwavesignal"    2       32    1024      65536
@@ -637,6 +638,7 @@ TestOther() {
   ExecTest  "fence_fanout"           8       8     256       65536
   ExecTest  "fence_putwavenbichunks" 2       1     64        1048576
   ExecTest  "fence_putwavenbichunks" 2       8     256       65536
+  else echo "Skip:   fence_* (AIROCSHMEM-418: fence tests not supported on RO)"; fi
 }
 
 TestHeatMapRMA() {
