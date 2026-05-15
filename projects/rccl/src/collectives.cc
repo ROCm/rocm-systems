@@ -98,7 +98,6 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     ALLGATHER_CHUNKSTEPS, comm -> rcclUseOneSlice ? ALLGATHER_SLICESTEPS_SINGLE_NODE : ALLGATHER_SLICESTEPS, nullptr };
 
   int nRanks, rank;
-  int in_place = 0;
   const void* srcBuf;
   void* dstBuf;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
@@ -116,7 +115,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
       sendcount, datatype, 0, 0, ncclSum, mscclFuncAllGather, comm, stream);
   }
 
-  if (rcclUseAllGatherDirect(comm, msgSize)) {
+  if (rcclUseAllGatherDirect(comm, msgSize) && ncclGroupDepth == 0) {
      INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff = %p",
 		     sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
      // use direct allgather
@@ -125,7 +124,6 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
      if (sendbuff == (((char*)recvbuff) + rank * rankOffset)) {
         srcBuf = ((char*)recvbuff) + rank * rankOffset;
         dstBuf = recvbuff;
-        in_place = 1;
      } else {
         srcBuf = sendbuff;
         dstBuf = recvbuff;
@@ -134,9 +132,6 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
      NCCLCHECK(ncclGroupStart());
 
      for (int r = 0; r < nRanks; r++) {
-         if (r == rank && in_place)
-             continue;
-         
          NCCLCHECK(ncclSend(((char*)srcBuf), sendcount, datatype, r, comm, stream));
          NCCLCHECK(ncclRecv(((char*)dstBuf) + r * rankOffset, sendcount, datatype, r, comm, stream));
      }
