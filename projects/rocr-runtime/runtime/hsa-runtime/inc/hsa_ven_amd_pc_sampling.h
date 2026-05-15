@@ -401,9 +401,10 @@ typedef enum {
    * When set, indicates that on multi-XCC GPUs, the data_ready_callback may be
    * invoked concurrently from multiple internal threads (one per XCC). Clients
    * must ensure their callback implementation is thread-safe when this flag is
-   * set. On single-XCC GPUs, this flag is not set.
+   * set. On single-XCC GPUs, this flag is not set, as callbacks happen on the
+   * same thread.
    */
-  HSA_VEN_AMD_PCS_CAPABILITY_MULTI_XCC_CALLBACKS = (1 << 0)
+  HSA_VEN_AMD_PCS_CAPABILITY_MULTITHREADED_CALLBACKS = (1 << 0)
 } hsa_ven_amd_pcs_capability_t;
 
 /**

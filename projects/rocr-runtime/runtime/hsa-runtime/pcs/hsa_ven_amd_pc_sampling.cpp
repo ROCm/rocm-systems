@@ -166,9 +166,9 @@ hsa_status_t hsa_ven_amd_pcs_get_capabilities(hsa_agent_t hsa_agent, uint64_t* c
 
   *capabilities = 0;
 
-  // Set multi-XCC callback capability flag if device has more than one XCC
+  // Set multithreaded callback capability flag if device has more than one XCC
   if (gpu_agent->properties().NumXcc > 1) {
-    *capabilities |= HSA_VEN_AMD_PCS_CAPABILITY_MULTI_XCC_CALLBACKS;
+    *capabilities |= HSA_VEN_AMD_PCS_CAPABILITY_MULTITHREADED_CALLBACKS;
   }
 
   return HSA_STATUS_SUCCESS;
