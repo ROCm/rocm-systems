@@ -97,6 +97,7 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     "hipMemcpyAsync",
     "hipMemcpyHtoD",
     "hipMemcpyHtoDAsync",
+    "hipMemcpyWithStream",
     # Fat binary registration — blob snapshotting
     "__hipRegisterFatBinary",
     # Host memory registration — blob snapshotting of initial host mem contents
@@ -132,6 +133,7 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipMemcpyAsync",
     "hipMemcpyHtoD",
     "hipMemcpyHtoDAsync",
+    "hipMemcpyWithStream",
     # Module load — must load code object from archive by hash, not raw image ptr
     "hipModuleLoadData",
     "hipModuleLoadDataEx",
@@ -308,6 +310,9 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
                            ("uint64_t", "blob_hash_hi", "zero (D2H)")],
     "hipMemcpyDtoDAsync": [("uint64_t", "blob_hash_lo", "zero (D2D)"),
                            ("uint64_t", "blob_hash_hi", "zero (D2D)")],
+    # hipMemcpyWithStream — same semantics as hipMemcpyAsync (H2D blob, D2H/D2D zero)
+    "hipMemcpyWithStream": [("uint64_t", "blob_hash_lo", "H2D blob hash lo"),
+                            ("uint64_t", "blob_hash_hi", "H2D blob hash hi")],
 }
 
 

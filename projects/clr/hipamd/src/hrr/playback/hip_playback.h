@@ -59,7 +59,8 @@ struct PlaybackContext {
     // Options propagated from hrr_replay / hrr_bench / hrr_fullreplay
     bool timing            = false;
     bool skip_device_sync  = false;
-    bool sync_after_launch = false;
+    bool sync_after_launch = false;  // hipDeviceSynchronize after every kernel launch
+    bool sync_after_event  = false;  // hipDeviceSynchronize after EVERY dispatched event
     bool verbose           = false;
     bool validate_d2h      = false;  // perform D2H validation against captured expected data
     std::string kernel_filter;
@@ -76,6 +77,12 @@ struct PlaybackContext {
     // from getting ahead of the global capture order without forcing strict
     // 1-at-a-time serialisation — a thread only waits when it IS ahead.
     std::atomic<uint64_t> next_seq{0};
+
+    // Set to true by dispatch_event on the first HIP error. All replay threads
+    // check this at the top of their event loop and exit immediately.
+    // The spin-wait in dispatch_event also checks it to avoid deadlock when a
+    // thread that was supposed to advance next_seq has already aborted.
+    std::atomic<bool> fatal_error{false};
 
     // Stats — atomic for safe concurrent increment from replay threads.
     // total_kernel_ms is guarded by map_mutex (unique_lock) in the timing path.
@@ -112,6 +119,20 @@ struct PlaybackContext {
                        static_cast<ptrdiff_t>(rec - base);
         }
         return nullptr;
+    }
+
+    // Returns bytes available from a live GPU pointer to end of its backing
+    // alloc_map entry. Returns 0 if the pointer is not within any known alloc.
+    size_t alloc_bytes_from(void* live_ptr) const {
+        if (!live_ptr) return 0;
+        uint64_t addr = reinterpret_cast<uint64_t>(live_ptr);
+        std::shared_lock lk(map_mutex);
+        for (auto& [base, entry] : alloc_map) {
+            uint64_t live_base = reinterpret_cast<uint64_t>(entry.live_ptr);
+            if (addr >= live_base && addr < live_base + entry.size)
+                return entry.size - static_cast<size_t>(addr - live_base);
+        }
+        return 0;
     }
 
     // ---- Handle resolution (shared lock — concurrent reads safe) ----

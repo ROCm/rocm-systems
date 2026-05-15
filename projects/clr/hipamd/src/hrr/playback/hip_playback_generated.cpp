@@ -1905,11 +1905,7 @@ static hipError_t playback_hipMemcpyToSymbolAsync(PlaybackContext& ctx, const ui
   return _r;
 }
 
-static hipError_t playback_hipMemcpyWithStream(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemcpyWithStream*>(payload);
-  hipError_t _r = (hipError_t)hipMemcpyWithStream(ctx.translate_ptr(a->dst), ctx.translate_ptr(a->src), (size_t)a->sizeBytes, (hipMemcpyKind)a->kind, (hipStream_t)ctx.translate_stream(a->stream));
-  return _r;
-}
+extern hipError_t playback_hipMemcpyWithStream(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemset(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipMemset*>(payload);

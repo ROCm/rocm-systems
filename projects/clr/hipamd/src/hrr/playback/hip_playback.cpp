@@ -130,6 +130,17 @@ hipModule_t PlaybackContext::load_module(uint64_t hash_lo, uint64_t hash_hi) {
     }
 
     // Cache miss — load without holding any lock (disk I/O + GPU call)
+    // Drain any deferred GPU error before loading: hipModuleLoadData triggers
+    // a driver state check that surfaces faults from prior async kernel launches
+    // even after hipDeviceSynchronize() has returned success.
+    {
+        hipError_t pre_sync = hipDeviceSynchronize();
+        hipError_t pre_err  = hipGetLastError();
+        if (pre_sync != hipSuccess || pre_err != hipSuccess)
+            fprintf(stderr, "[HRR] load_module %s: pre-drain sync=%d err=%d\n",
+                    hex.c_str(), pre_sync, pre_err);
+    }
+
     size_t sz = 0;
     const void* data = load_code_object(hash_lo, hash_hi, &sz);
     if (!data || sz == 0) {
@@ -250,7 +261,7 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
         ctx.func_cache.emplace(kernel_name, func);
     }
 
-    // Build kernelParams[] from captured args, translating GPU pointers
+    // Build kernelParams[] from captured args, translating GPU pointers.
     std::vector<void*>                arg_ptrs;
     std::vector<std::vector<uint8_t>> arg_storage;
     for (uint16_t i = 0; i < num_args; i++) {
@@ -277,12 +288,24 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
                         live ? "" : " (MISSING!)");
         } else {
             storage.assign(p, p + arg_size);
+            if (ctx.verbose) {
+                // Print scalar args as hex bytes for debugging
+                fprintf(stderr, "[HRR]   arg[%u]: scalar %u bytes = ", i, arg_size);
+                for (uint16_t b = 0; b < arg_size && b < 8; b++)
+                    fprintf(stderr, "%02x", p[b]);
+                if (arg_size > 8) fprintf(stderr, "...");
+                // Also print as u32/u64 for convenience
+                if (arg_size == 4) { uint32_t v; memcpy(&v, p, 4); fprintf(stderr, " (u32=%u)", v); }
+                if (arg_size == 8) { uint64_t v; memcpy(&v, p, 8); fprintf(stderr, " (u64=%llu)", (unsigned long long)v); }
+                fprintf(stderr, "\n");
+            }
         }
         arg_ptrs.push_back(storage.data());
         p += arg_size;
     }
 
     hipStream_t stream = ctx.translate_stream(stream_rec);
+
 
     // Skip HIP event timing during graph capture: recording events on a
     // captured stream inserts them into the graph and invalidates the
@@ -311,20 +334,75 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
     if (timing_ok)
         timing_ok = (HRR_HIP_CHECK(hipEventRecord(tl_start, stream)) == hipSuccess);
 
-    hipError_t r = hipModuleLaunchKernel(
-        func,
-        grid[0], grid[1], grid[2],
-        block[0], block[1], block[2],
-        shared_mem, stream,
-        arg_ptrs.empty() ? nullptr : arg_ptrs.data(),
-        nullptr);
+    // Launch the kernel.
+    //
+    // SP3 assembly kernels (MIOpen Sp3Asm*) directly index the kernarg buffer at
+    // known offsets and also read hidden args (hidden_global_offset_x/y/z, etc.)
+    // that must be zero. Using kernelParams[] leaves hidden slots uninitialized in
+    // the ring-buffer allocator, which causes GPU faults. Instead, build a packed
+    // kernarg buffer using the AMDGPU ABI layout rule: each argument is placed at
+    // the next offset that is a multiple of its own size (natural alignment).
+    // This matches exactly what amd::KernelSignature::at(i).offset_ reports.
+    //
+    // HIP C++ kernels (clang-compiled) work correctly with kernelParams[]: the
+    // runtime handles hidden args internally, so no packed buffer is needed.
+    hipError_t r;
+    {
+        bool is_sp3 = (kernel_name.find("Sp3") != std::string::npos ||
+                       kernel_name.find("sp3") != std::string::npos);
+        if (is_sp3 && !arg_ptrs.empty()) {
+            // Compute kernarg layout from captured arg sizes using natural alignment.
+            // Each arg aligns to its own size (max 8). Hidden args are zero-padded
+            // at the end by over-allocating the buffer.
+            uint32_t cursor = 0;
+            std::vector<uint32_t> koffsets(arg_storage.size());
+            for (size_t i = 0; i < arg_storage.size(); ++i) {
+                uint32_t sz = static_cast<uint32_t>(arg_storage[i].size());
+                uint32_t align = (sz >= 8) ? 8u : sz ? sz : 1u;
+                cursor = (cursor + align - 1) & ~(align - 1);
+                koffsets[i] = cursor;
+                cursor += sz;
+            }
+            // Round up to 64-byte alignment; add 256 bytes for hidden arg space.
+            uint32_t kbuf_sz = ((cursor + 63) & ~63u) + 256;
+            std::vector<uint8_t> kbuf(kbuf_sz, 0);
+            for (size_t i = 0; i < arg_storage.size(); ++i) {
+                const auto& s = arg_storage[i];
+                if (koffsets[i] + s.size() <= kbuf_sz)
+                    memcpy(kbuf.data() + koffsets[i], s.data(), s.size());
+            }
+            size_t extra_sz = kbuf_sz;
+            void* extra[5] = {
+                HIP_LAUNCH_PARAM_BUFFER_POINTER, kbuf.data(),
+                HIP_LAUNCH_PARAM_BUFFER_SIZE,    &extra_sz,
+                HIP_LAUNCH_PARAM_END
+            };
+            r = hipModuleLaunchKernel(
+                func,
+                grid[0], grid[1], grid[2],
+                block[0], block[1], block[2],
+                shared_mem, stream,
+                nullptr, extra);
+        } else {
+            // HIP C++ kernels: kernelParams[] path — runtime handles hidden args.
+            r = hipModuleLaunchKernel(
+                func,
+                grid[0], grid[1], grid[2],
+                block[0], block[1], block[2],
+                shared_mem, stream,
+                arg_ptrs.empty() ? nullptr : arg_ptrs.data(),
+                nullptr);
+        }
+    }
 
     if (timing_ok)
         timing_ok = (HRR_HIP_CHECK(hipEventRecord(tl_stop, stream)) == hipSuccess);
 
     if (r != hipSuccess) {
-        fprintf(stderr, "[HRR] Kernel '%s' launch error: %d (%s)\n",
-                kernel_name.c_str(), r, hipGetErrorString(r));
+        fprintf(stderr, "[HRR] Kernel '%s' launch error: %d (%s) func=%p"
+                " grid=[%u,%u,%u] block=[%u,%u,%u]\n",
+                kernel_name.c_str(), r, hipGetErrorString(r), (void*)func,
+                grid[0], grid[1], grid[2], block[0], block[1], block[2]);
         return r;
     }
 
@@ -339,10 +417,15 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
     }
 
     if (ctx.sync_after_launch) {
+        // Clear any pre-existing error before sync so we get a clean error code.
+        hipGetLastError();
         r = hipDeviceSynchronize();
+        hipError_t last_r = hipGetLastError();
+        if (r == hipSuccess && last_r != hipSuccess) r = last_r;
         if (r != hipSuccess)
-            fprintf(stderr, "[HRR] GPU error after '%s': %d (%s)\n",
-                    kernel_name.c_str(), r, hipGetErrorString(r));
+            fprintf(stderr, "[HRR] GPU error after '%s': %d (%s) last=%d (%s)\n",
+                    kernel_name.c_str(), r, hipGetErrorString(r),
+                    (int)last_r, hipGetErrorString(last_r));
         else if (ctx.verbose)
             fprintf(stderr, "[HRR] Kernel '%s' OK\n", kernel_name.c_str());
     }
@@ -495,17 +578,49 @@ hipError_t playback_hipModuleLoad(PlaybackContext& ctx,
 // Payload: ret(4) ptr(8) size(8) [additional fields for managed/host variants]
 // ptr at +4, size at +12
 
+// GPU allocation padding multiplier for replay.
+//
+// MIOpen / ROCBlas kernels are often launched with grids larger than the
+// batch size (e.g. grid[0] = batch * n_groups with n_groups=96; if batch=1
+// but grid is 256×n_groups, the kernel's s88 = blockIdx.x/n_groups sweeps
+// 256 "virtual batches" and accesses memory at up to 256× the single-batch
+// tensor size).  In the original application, a framework memory pool
+// allocates GPU VA contiguously so the adjacent pages are all mapped;
+// replay hipMallocs are independent and the adjacent pages are unmapped,
+// causing GPU page faults.
+//
+// Fix: over-allocate all device allocations by HRR_ALLOC_PAD_FACTOR so
+// any sub-allocation within the pool block has enough headroom.  The
+// extra memory is zero-initialized.
+//
+// SP3AsmConv stride2 on 64×112×112 input sweeps 256 virtual batches:
+//   256 × 64 × 112 × 112 × 4 = ~781 MB from in_ptr.
+// A 1 GB cap ensures any sub-allocation has ≥800 MB headroom.
+// With 46 GB GPU and ≤30 pool allocations: 30 × 1 GB = 30 GB — within budget.
+static constexpr size_t HRR_ALLOC_PAD_FACTOR = 256;
+static constexpr size_t HRR_ALLOC_PAD_MAX    = 1ULL * 1024 * 1024 * 1024;  // 1 GB cap
+
 static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
                                 bool managed = false) {
     const auto* a = reinterpret_cast<const hrr_args_hipMalloc*>(pl);
+    size_t orig_sz = static_cast<size_t>(a->size);
+    // Padded size: multiply by factor but cap at 256 MB.
+    size_t pad_sz = std::min(orig_sz * HRR_ALLOC_PAD_FACTOR, HRR_ALLOC_PAD_MAX);
+    pad_sz = std::max(orig_sz, pad_sz);  // never shrink
     void* live = nullptr;
     hipError_t r;
     if (managed)
-        r = hipMallocManaged(&live, static_cast<size_t>(a->size));
+        r = hipMallocManaged(&live, pad_sz);
     else
-        r = hipMalloc(&live, static_cast<size_t>(a->size));
-    if (r == hipSuccess)
-        ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size));
+        r = hipMalloc(&live, pad_sz);
+    if (r == hipSuccess) {
+        // hipMalloc on AMD returns zeroed memory (HIP spec requirement).
+        // No explicit hipMemset needed — avoids blocking 256MB zeroing per alloc.
+        ctx.record_alloc(a->ptr, live, pad_sz);
+        if (ctx.verbose && pad_sz > orig_sz)
+            fprintf(stderr, "[HRR] hipMalloc 0x%llx: orig=%zu padded=%zu\n",
+                    (unsigned long long)a->ptr, orig_sz, pad_sz);
+    }
     return r;
 }
 
@@ -528,9 +643,11 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     const auto* a = reinterpret_cast<const hrr_args_hipMallocAsync*>(pl);
     hipStream_t stream = ctx.translate_stream(a->stream);
     void* live = nullptr;
-    hipError_t r = hipMallocAsync(&live, static_cast<size_t>(a->size), stream);
+    size_t orig_sz = static_cast<size_t>(a->size);
+    size_t pad_sz = std::max(orig_sz, std::min(orig_sz * HRR_ALLOC_PAD_FACTOR, HRR_ALLOC_PAD_MAX));
+    hipError_t r = hipMallocAsync(&live, pad_sz, stream);
     if (r == hipSuccess)
-        ctx.record_alloc(a->dev_ptr, live, static_cast<size_t>(a->size));
+        ctx.record_alloc(a->dev_ptr, live, pad_sz);
     return r;
 }
 
@@ -540,9 +657,11 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
     hipMemPool_t pool   = ctx.translate_mempool(a->mem_pool);
     hipStream_t  stream = ctx.translate_stream(a->stream);
     void* live = nullptr;
-    hipError_t r = hipMallocFromPoolAsync(&live, static_cast<size_t>(a->size), pool, stream);
+    size_t orig_sz = static_cast<size_t>(a->size);
+    size_t pad_sz = std::max(orig_sz, std::min(orig_sz * HRR_ALLOC_PAD_FACTOR, HRR_ALLOC_PAD_MAX));
+    hipError_t r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     if (r == hipSuccess)
-        ctx.record_alloc(a->dev_ptr, live, static_cast<size_t>(a->size));
+        ctx.record_alloc(a->dev_ptr, live, pad_sz);
     return r;
 }
 
@@ -706,6 +825,7 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
     void*      dst = ctx.translate_ptr(dst_rec);
     hipError_t r   = hipSuccess;
 
+
     if (kind == hipMemcpyHostToDevice && (hash_lo || hash_hi)) {
         size_t blob_sz = 0;
         const void* blob = ctx.load_blob(hash_lo, hash_hi, &blob_sz);
@@ -714,23 +834,46 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                     (unsigned long long)hash_lo, (unsigned long long)hash_hi);
             return hipErrorNotFound;
         }
-        if (!dst) { fprintf(stderr, "[HRR] H2D dst 0x%llx not mapped\n",
-                            (unsigned long long)dst_rec); return hipErrorInvalidValue; }
+        if (!dst) { fprintf(stderr, "[HRR] H2D dst 0x%llx not mapped (size=%llu blob_sz=%zu)\n",
+                            (unsigned long long)dst_rec, (unsigned long long)size, blob_sz);
+                    return hipErrorInvalidValue; }
         size_t copy_sz = static_cast<size_t>(size);
         if (copy_sz > blob_sz) copy_sz = blob_sz;
+        size_t avail = ctx.alloc_bytes_from(dst);
+        if (avail > 0 && copy_sz > avail) {
+            fprintf(stderr, "[HRR] H2D dst 0x%llx: copy_sz=%zu > avail=%zu — clamping\n",
+                    (unsigned long long)dst_rec, copy_sz, avail);
+            copy_sz = avail;
+        }
         if (is_async)
             r = hipMemcpyAsync(dst, blob, copy_sz, hipMemcpyHostToDevice, stream);
         else
             r = hipMemcpy(dst, blob, copy_sz, hipMemcpyHostToDevice);
+        if (r != hipSuccess)
+            fprintf(stderr, "[HRR] H2D memcpy failed: %d (%s) dst=%p copy_sz=%zu blob_sz=%zu avail=%zu\n",
+                    r, hipGetErrorString(r), dst, copy_sz, blob_sz, avail);
     } else if (kind == hipMemcpyDeviceToDevice) {
         void* src = ctx.translate_ptr(src_rec);
+        if (!dst) fprintf(stderr, "[HRR] D2D dst 0x%llx not mapped\n", (unsigned long long)dst_rec);
+        if (!src) fprintf(stderr, "[HRR] D2D src 0x%llx not mapped\n", (unsigned long long)src_rec);
         if (dst && src) {
+            size_t copy_sz = static_cast<size_t>(size);
+            size_t dst_avail = ctx.alloc_bytes_from(dst);
+            size_t src_avail = ctx.alloc_bytes_from(src);
+            if (dst_avail > 0 && copy_sz > dst_avail) {
+                fprintf(stderr, "[HRR] D2D dst_avail=%zu < copy_sz=%zu — clamping\n", dst_avail, copy_sz);
+                copy_sz = dst_avail;
+            }
+            if (src_avail > 0 && copy_sz > src_avail)
+                copy_sz = src_avail;
             if (is_async)
-                r = hipMemcpyAsync(dst, src, static_cast<size_t>(size),
+                r = hipMemcpyAsync(dst, src, copy_sz,
                                    hipMemcpyDeviceToDevice, stream);
             else
-                r = hipMemcpy(dst, src, static_cast<size_t>(size),
+                r = hipMemcpy(dst, src, copy_sz,
                               hipMemcpyDeviceToDevice);
+            if (r != hipSuccess)
+                fprintf(stderr, "[HRR] D2D memcpy failed: %d (%s)\n", r, hipGetErrorString(r));
         }
     } else if (kind == hipMemcpyDeviceToHost && ctx.validate_d2h &&
                (hash_lo || hash_hi)) {
@@ -813,6 +956,20 @@ hipError_t playback_hipMemcpyHtoDAsync(PlaybackContext& ctx,
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpyHtoDAsync*>(pl);
     return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes,
                               hipMemcpyHostToDevice,
+                              /*is_async=*/true, ctx.translate_stream(a->stream),
+                              a->blob_hash_lo, a->blob_hash_hi);
+}
+
+// ---------------------------------------------------------------------------
+// Manual playback: hipMemcpyWithStream
+// ---------------------------------------------------------------------------
+// Synchronous copy with stream. Captured by manual shim (has blob_hash fields).
+// Routes through replay_memcpy_impl exactly like hipMemcpy/hipMemcpyAsync.
+// is_async=true so the stream is passed through (even if it translates to null).
+hipError_t playback_hipMemcpyWithStream(PlaybackContext& ctx,
+                                        const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemcpyWithStream*>(pl);
+    return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes, a->kind,
                               /*is_async=*/true, ctx.translate_stream(a->stream),
                               a->blob_hash_lo, a->blob_hash_hi);
 }

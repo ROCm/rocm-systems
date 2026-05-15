@@ -2816,6 +2816,8 @@ typedef struct {
     uint64_t sizeBytes;
     int32_t kind;
     uint64_t stream;
+    uint64_t blob_hash_lo;  /* H2D blob hash lo */
+    uint64_t blob_hash_hi;  /* H2D blob hash hi */
 } hrr_args_hipMemcpyWithStream;
 
 /* hipError_t hipMemset(void* dst, int value, size_t sizeBytes) */

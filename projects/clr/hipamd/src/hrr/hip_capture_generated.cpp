@@ -4127,21 +4127,6 @@ static hipError_t capture_hipMemcpyToSymbolAsync(const void* symbol, const void*
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipMemcpyWithStream(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind, hipStream_t stream) {
-  hipError_t r = g_real_table.hipMemcpyWithStream_fn(dst, src, sizeBytes, kind, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipMemcpyWithStream a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.dst = reinterpret_cast<uint64_t>(dst);
-    a.src = reinterpret_cast<uint64_t>(src);
-    a.sizeBytes = static_cast<decltype(a.sizeBytes)>(sizeBytes);
-    a.kind = static_cast<decltype(a.kind)>(kind);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPYWITHSTREAM, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipMemset(void* dst, int value, size_t sizeBytes) {
@@ -7380,6 +7365,7 @@ extern hipError_t capture_hipMemcpy(void* dst, const void* src, size_t sizeBytes
 extern hipError_t capture_hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind, hipStream_t stream);
 extern hipError_t capture_hipMemcpyHtoD(hipDeviceptr_t dst, const void* src, size_t sizeBytes);
 extern hipError_t capture_hipMemcpyHtoDAsync(hipDeviceptr_t dst, const void* src, size_t sizeBytes, hipStream_t stream);
+extern hipError_t capture_hipMemcpyWithStream(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind, hipStream_t stream);
 extern hipError_t capture_hipModuleLaunchKernel(hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t stream, void** kernelParams, void** extra);
 extern hipError_t capture_hipModuleLoad(hipModule_t* module, const char* fname);
 extern hipError_t capture_hipModuleLoadData(hipModule_t* module, const void* image);

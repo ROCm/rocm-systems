@@ -5,7 +5,7 @@
  *
  * Covers the MANUAL_CAPTURE_APIS set defined in gen_hrr_api_args.py:
  *   - Memcpy H2D variants with blob snapshotting (hipMemcpy, hipMemcpyAsync,
- *     hipMemcpyHtoD, hipMemcpyHtoDAsync)
+ *     hipMemcpyHtoD, hipMemcpyHtoDAsync, hipMemcpyWithStream)
  *   - Module load with code object snapshotting (hipModuleLoad*)
  *   - Kernel launch with arg introspection via kernel->signature()
  *   - Fat binary registration (__hipRegisterFatBinary)
@@ -330,6 +330,37 @@ hipError_t capture_hipMemcpyHtoDAsync(hipDeviceptr_t dst, const void* src,
     a.blob_hash_lo = h.lo;
     a.blob_hash_hi = h.hi;
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPYHTODASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// hipMemcpyWithStream — synchronous copy with an explicit stream.
+// Semantics: blocks until the copy completes (like hipMemcpy but with stream).
+// H2D: host src is valid immediately on return — snapshot directly.
+// D2H: host dst is valid immediately on return — snapshot directly.
+// D2D: no blob data needed (both ends are GPU pointers).
+hipError_t capture_hipMemcpyWithStream(void* dst, const void* src,
+                                       size_t sizeBytes, hipMemcpyKind kind,
+                                       hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemcpyWithStream_fn(dst, src, sizeBytes, kind, stream);
+  if (r == hipSuccess) {
+    hrr_cap::Hash128 h{0, 0};
+    if (kind == hipMemcpyHostToDevice && src && sizeBytes > 0) {
+      h = hrr_cap::writer::write_blob(src, sizeBytes);
+    } else if (kind == hipMemcpyDeviceToHost && dst && sizeBytes > 0) {
+      // Call is synchronous — dst is valid immediately after return.
+      h = hrr_cap::writer::write_blob(dst, sizeBytes);
+    }
+    hrr_args_hipMemcpyWithStream a{};
+    a.ret          = static_cast<int32_t>(r);
+    a.dst          = reinterpret_cast<uint64_t>(dst);
+    a.src          = reinterpret_cast<uint64_t>(src);
+    a.sizeBytes    = static_cast<uint64_t>(sizeBytes);
+    a.kind         = static_cast<int32_t>(kind);
+    a.stream       = reinterpret_cast<uint64_t>(stream);
+    a.blob_hash_lo = h.lo;
+    a.blob_hash_hi = h.hi;
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPYWITHSTREAM, &a.hdr, sizeof(a));
   }
   return r;
 }

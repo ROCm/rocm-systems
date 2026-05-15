@@ -195,21 +195,34 @@ static bool is_special(uint16_t etype) {
   }
 }
 
-static void handle_special(PlaybackContext& ctx, const hrr::Event& ev) {
+static hipError_t handle_special(PlaybackContext& ctx, const hrr::Event& ev) {
   switch (ev.header().event_type) {
 
     case HRR_API_HIPDEVICESYNCHRONIZE:
-      if (!ctx.skip_device_sync) hipDeviceSynchronize();
-      return;
+      if (!ctx.skip_device_sync) {
+        hipError_t r = hipDeviceSynchronize();
+        if (r != hipSuccess) {
+          fprintf(stderr, "[HRR] hipDeviceSynchronize error %d (%s)\n",
+                  r, hipGetErrorString(r));
+          return r;
+        }
+      }
+      return hipSuccess;
 
     case HRR_API_HIPSTREAMSYNCHRONIZE:
-      if (!ctx.skip_device_sync)
-        hipStreamSynchronize(ctx.translate_stream(ev.handle64));
-      return;
+      if (!ctx.skip_device_sync) {
+        hipError_t r = hipStreamSynchronize(ctx.translate_stream(ev.handle64));
+        if (r != hipSuccess) {
+          fprintf(stderr, "[HRR] hipStreamSynchronize error %d (%s)\n",
+                  r, hipGetErrorString(r));
+          return r;
+        }
+      }
+      return hipSuccess;
 
     case HRR_API_HIPMODULEUNLOAD:
       ctx.remove_module(ev.handle64);
-      return;
+      return hipSuccess;
 
     case HRR_API_HIPSETDEVICE: {
       if (ev.raw_payload.size() >= sizeof(hrr_args_hipSetDevice)) {
@@ -219,14 +232,14 @@ static void handle_special(PlaybackContext& ctx, const hrr::Event& ev) {
         if (dev >= n) dev = 0;
         hipSetDevice(dev);
       }
-      return;
+      return hipSuccess;
     }
 
     case HRR_API_HIPGETLASTERROR:
     case HRR_API_HIPPEEKATLASTERROR:
-      return;  // skip silently
+      return hipSuccess;  // skip silently
 
-    default: return;
+    default: return hipSuccess;
   }
 }
 
@@ -305,8 +318,10 @@ static bool needs_ordering(uint16_t etype) {
   }
 }
 
-static void dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
-                           size_t idx, bool log) {
+// Returns hipSuccess, or the first non-success error encountered.
+// On any error, ctx.fatal_error is set to true so all replay threads stop.
+static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
+                                 size_t idx, bool log) {
   uint16_t etype = ev.header().event_type;
 
   // Give kernel-launch handlers the sequence ID so they can wait and advance
@@ -314,10 +329,22 @@ static void dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   hrr_dispatch_seq = ev.header().sequence_id;
   auto order = needs_ordering(etype);
 
-  // Only "create" events need ordering — wait for turn then advance immediately
-  // (before the call) so the next thread can start preparing while we execute.
-  while (ctx.next_seq.load(std::memory_order_acquire) != ev.header().sequence_id)
+  // Spin-wait for our turn in global capture order.
+  // Also check fatal_error: if another thread failed and advanced next_seq
+  // past our slot, we must not spin forever — bail out immediately.
+  while (ctx.next_seq.load(std::memory_order_acquire) != ev.header().sequence_id) {
+    if (ctx.fatal_error.load(std::memory_order_acquire))
+      return hipErrorUnknown;
     std::this_thread::yield();
+  }
+
+  // If a fatal error was already flagged by another thread that ran before us,
+  // advance next_seq so the thread waiting on the next event can also exit,
+  // then bail out without executing this event.
+  if (ctx.fatal_error.load(std::memory_order_acquire)) {
+    ctx.next_seq.store(ev.header().sequence_id + 1, std::memory_order_release);
+    return hipErrorUnknown;
+  }
 
   // RAII guard: non-ordering events advance immediately (constructor) so the
   // next thread can proceed while this call is still in-flight; ordered events
@@ -337,24 +364,51 @@ static void dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   } seq_guard{ctx, ev.header().sequence_id + 1, order};
 
   if (is_special(etype)) {
-    handle_special(ctx, ev);
-    return;
+    hipError_t r = handle_special(ctx, ev);
+    if (r != hipSuccess) {
+      ctx.fatal_error.store(true, std::memory_order_release);
+      fprintf(stderr, "[HRR] Fatal: aborting replay after error in %s\n",
+              hrr::event_type_name(etype));
+    }
+    return r;
   }
 
   if (etype >= HRR_API_COUNT || !hrr_playback_dispatch[etype]) {
     if (log && ctx.verbose)
       fprintf(stderr, "[HRR] T%llu Event %zu: no handler for type %u\n",
               (unsigned long long)ev.header().thread_id, idx, etype);
-    return;
+    return hipSuccess;
   }
 
   hipError_t r = hrr_playback_dispatch[etype](ctx, ev.raw_payload.data());
 
-  if (r != hipSuccess && log) {
-    fprintf(stderr, "[HRR] T%llu Event %zu (%s) error %d (%s)\n",
-            (unsigned long long)ev.header().thread_id, idx,
-            hrr::event_type_name(etype), r, hipGetErrorString(r));
+  if (r != hipSuccess) {
+    ctx.fatal_error.store(true, std::memory_order_release);
+    if (log)
+      fprintf(stderr, "[HRR] Fatal: T%llu Event %zu (%s) returned %d (%s) — aborting replay\n",
+              (unsigned long long)ev.header().thread_id, idx,
+              hrr::event_type_name(etype), r, hipGetErrorString(r));
+    return r;
   }
+
+  // --sync-after-event: flush the GPU after every dispatched event and check
+  // for async errors. This makes GPU faults show up at the exact causal event
+  // rather than surfacing later on a sync or the next API call.
+  if (ctx.sync_after_event) {
+    hipError_t se = hipDeviceSynchronize();
+    if (se == hipSuccess) se = hipGetLastError();
+    if (se != hipSuccess) {
+      ctx.fatal_error.store(true, std::memory_order_release);
+      if (log)
+        fprintf(stderr,
+                "[HRR] Fatal: GPU error after T%llu Event %zu (%s): %d (%s) — aborting\n",
+                (unsigned long long)ev.header().thread_id, idx,
+                hrr::event_type_name(etype), se, hipGetErrorString(se));
+      return se;
+    }
+  }
+
+  return r;
 }
 
 // ---------------------------------------------------------------------------
@@ -365,6 +419,8 @@ static void replay_thread(PlaybackContext& ctx,
                           const std::vector<const hrr::Event*>& events,
                           bool log) {
   for (size_t i = 0; i < events.size(); i++) {
+    if (ctx.fatal_error.load(std::memory_order_acquire))
+      return;
     const hrr::Event& ev = *events[i];
     if (log && ctx.verbose)
       fprintf(stderr, "[HRR] T%llu [%zu] %s\n",
@@ -375,14 +431,81 @@ static void replay_thread(PlaybackContext& ctx,
 }
 
 // ---------------------------------------------------------------------------
+// Pre-pass device state snapshot
+// ---------------------------------------------------------------------------
+// Clears any pending GPU error, syncs the device, and logs available memory.
+// Called before every replay pass so we always start from a known-clean state.
+// Returns false if the device is already in an error state before we begin.
+
+static bool save_device_state(const char* label) {
+  // Drain any error left over from previous operations
+  hipError_t pending = hipGetLastError();
+  if (pending != hipSuccess)
+    fprintf(stderr, "[HRR] [%s] WARNING: pending GPU error cleared: %d (%s)\n",
+            label, pending, hipGetErrorString(pending));
+
+  // Sync to ensure all prior GPU work has completed
+  hipError_t sync_err = hipDeviceSynchronize();
+  if (sync_err != hipSuccess) {
+    fprintf(stderr, "[HRR] [%s] FATAL: hipDeviceSynchronize failed: %d (%s)\n",
+            label, sync_err, hipGetErrorString(sync_err));
+    return false;
+  }
+
+  // Check again after sync (async errors surface here)
+  hipError_t post_sync = hipGetLastError();
+  if (post_sync != hipSuccess) {
+    fprintf(stderr, "[HRR] [%s] FATAL: GPU error after sync: %d (%s)\n",
+            label, post_sync, hipGetErrorString(post_sync));
+    return false;
+  }
+
+  // Log available device memory
+  size_t free_bytes = 0, total_bytes = 0;
+  if (hipMemGetInfo(&free_bytes, &total_bytes) == hipSuccess) {
+    printf("[HRR] [%s] Device memory: %zu MB free / %zu MB total\n",
+           label,
+           free_bytes  / (1024 * 1024),
+           total_bytes / (1024 * 1024));
+  }
+
+  printf("[HRR] [%s] Device state OK — beginning replay\n", label);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // One full pass through the archive (single- or multi-threaded)
 // ---------------------------------------------------------------------------
 
-static void run_pass(PlaybackContext& ctx,
+// Returns false if a fatal HIP error occurred during the pass.
+static bool run_pass(PlaybackContext& ctx,
                      const hrr::Archive& archive,
                      const std::unordered_map<uint64_t,
                            std::vector<const hrr::Event*>>& thread_events,
                      bool use_mt, bool log) {
+  // Pre-load all code objects before any GPU work begins.
+  // hipModuleLoadData() triggers internal driver state checks that can surface
+  // deferred GPU faults from prior async kernel launches, even after
+  // hipDeviceSynchronize() returns success (WDDM-specific behavior on Windows).
+  // Loading all code objects up front ensures no code object load happens after
+  // any kernel launch, preventing error 719 from corrupting module loads.
+  if (log) printf("[HRR] Pre-loading %zu code objects...\n", archive.code_objects.size());
+  for (const auto& [hex, fpath] : archive.code_objects) {
+      // hex is "llllllllllllllllhhhhhhhhhhhhhhhh" (lo first, hi second)
+      uint64_t lo = 0, hi = 0;
+      if (hex.size() == 32) {
+          lo = strtoull(hex.substr(0,16).c_str(), nullptr, 16);
+          hi = strtoull(hex.substr(16).c_str(), nullptr, 16);
+      }
+      hipModule_t mod = ctx.load_module(lo, hi);
+      if (!mod) {
+          fprintf(stderr, "[HRR] Fatal: failed to pre-load code object %s — aborting\n",
+                  hex.c_str());
+          return false;
+      }
+  }
+  if (log) printf("[HRR] All code objects pre-loaded OK.\n");
+
   if (use_mt) {
     // Reset the global sequence counter to the first event's seq_id so
     // threads start waiting at the right value for each pass.
@@ -400,6 +523,8 @@ static void run_pass(PlaybackContext& ctx,
     for (auto& t : threads) t.join();
   } else {
     for (size_t i = 0; i < archive.events.size(); i++) {
+      if (ctx.fatal_error.load(std::memory_order_acquire))
+        break;
       const auto& ev = archive.events[i];
       if (log && ctx.verbose)
         fprintf(stderr, "[HRR] Event %zu: %s\n", i,
@@ -407,7 +532,18 @@ static void run_pass(PlaybackContext& ctx,
       dispatch_event(ctx, ev, i, log);
     }
   }
-  hipDeviceSynchronize();
+
+  if (ctx.fatal_error.load(std::memory_order_acquire))
+    return false;
+
+  hipError_t r = hipDeviceSynchronize();
+  if (r != hipSuccess) {
+    fprintf(stderr, "[HRR] Fatal: hipDeviceSynchronize after pass failed: %d (%s)\n",
+            r, hipGetErrorString(r));
+    ctx.fatal_error.store(true, std::memory_order_release);
+    return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -423,12 +559,16 @@ static void print_usage(const char* argv0) {
     "  --events              With --info: also print the full event log\n"
     "  --verbose             Print each event as it is processed\n"
     "  --skip-device-sync    Skip device/stream synchronize events\n"
-    "  --single-thread       Force single-threaded replay\n"
+    "  --multi-thread        Enable multi-threaded replay (default: single-threaded)\n"
     "  --timing              Report wall time and total GPU kernel time\n"
     "  --kernel-filter STR   Only launch kernels whose name contains STR\n"
     "                        (silent full warm-up pass runs first)\n"
-    "  --sync-after-launch   Sync after every kernel (surfaces GPU errors immediately)\n"
-    "  --help                Show this message\n",
+    "  --sync-after-launch   hipDeviceSynchronize after every kernel launch\n"
+    "  --sync-after-event    hipDeviceSynchronize after EVERY event (slowest, most precise)\n"
+    "  --help                Show this message\n"
+    "\n"
+    "Default mode: single-threaded, serialize GPU after pass, abort on first error.\n"
+    "Use --sync-after-event to pinpoint the exact event causing a GPU fault or hang.\n",
     argv0);
 }
 
@@ -438,18 +578,19 @@ int main(int argc, char** argv) {
   std::string archive_path;
   PlaybackContext ctx;
   ctx.validate_d2h = true;
-  bool single_thread = false;
+  bool single_thread = true;   // default: single-threaded for safety; use --multi-thread to opt in
   bool show_info     = false;
   bool show_events   = false;
 
   for (int i = 1; i < argc; i++) {
-    if      (!strcmp(argv[i], "--info"))              show_info             = true;
-    else if (!strcmp(argv[i], "--events"))            show_events           = true;
-    else if (!strcmp(argv[i], "--verbose"))           ctx.verbose           = true;
-    else if (!strcmp(argv[i], "--skip-device-sync"))  ctx.skip_device_sync  = true;
-    else if (!strcmp(argv[i], "--single-thread"))     single_thread         = true;
-    else if (!strcmp(argv[i], "--timing"))            ctx.timing            = true;
-    else if (!strcmp(argv[i], "--sync-after-launch")) ctx.sync_after_launch = true;
+    if      (!strcmp(argv[i], "--info"))              show_info              = true;
+    else if (!strcmp(argv[i], "--events"))            show_events            = true;
+    else if (!strcmp(argv[i], "--verbose"))           ctx.verbose            = true;
+    else if (!strcmp(argv[i], "--skip-device-sync"))  ctx.skip_device_sync   = true;
+    else if (!strcmp(argv[i], "--multi-thread"))      single_thread          = false;
+    else if (!strcmp(argv[i], "--timing"))            ctx.timing             = true;
+    else if (!strcmp(argv[i], "--sync-after-launch")) ctx.sync_after_launch  = true;
+    else if (!strcmp(argv[i], "--sync-after-event"))  ctx.sync_after_event   = true;
     else if (!strcmp(argv[i], "--kernel-filter") && i + 1 < argc)
       ctx.kernel_filter = argv[++i];
     else if (!strcmp(argv[i], "--help")) { print_usage(argv[0]); return 0; }
@@ -516,12 +657,16 @@ int main(int argc, char** argv) {
           t == HRR_API_HIPMODULELOADDATAEX  ||
           t == HRR_API_HIPMODULELOAD) {
         ctx.next_seq.store(ev.header().sequence_id, std::memory_order_release);
-        dispatch_event(ctx, ev, 0, /*log=*/false);
+        if (dispatch_event(ctx, ev, 0, /*log=*/true) != hipSuccess) {
+          fprintf(stderr, "[HRR] Fatal error in module pre-pass — aborting\n");
+          return 1;
+        }
       }
     }
     // After the pre-pass, reset next_seq to 0 so the main MT replay starts
     // from the beginning of the sequence ordering.
     ctx.next_seq.store(0, std::memory_order_release);
+    ctx.fatal_error.store(false, std::memory_order_release);
   }
 
   // Warm-up pass: when a kernel filter is active, run the full archive once
@@ -529,9 +674,14 @@ int main(int argc, char** argv) {
   // outputs) are correctly populated before the timed filtered pass.
   if (!ctx.kernel_filter.empty()) {
     printf("[HRR] Warm-up : full pass to populate GPU state...\n");
+    if (!save_device_state("warm-up")) return 1;
     std::string filter = ctx.kernel_filter;
     ctx.kernel_filter.clear();
-    run_pass(ctx, archive, thread_events, use_mt, /*log=*/false);
+    if (!run_pass(ctx, archive, thread_events, use_mt, /*log=*/false)) {
+      fprintf(stderr, "[HRR] Fatal error in warm-up pass — aborting\n");
+      return 1;
+    }
+    ctx.fatal_error.store(false, std::memory_order_release);
     ctx.kernel_filter    = filter;
     ctx.kernels_launched = 0;
     ctx.total_kernel_ms  = 0.0;
@@ -539,11 +689,17 @@ int main(int argc, char** argv) {
   }
 
   // Timed replay pass
+  if (!save_device_state("replay")) return 1;
   auto wall_start = std::chrono::high_resolution_clock::now();
-  run_pass(ctx, archive, thread_events, use_mt, /*log=*/true);
+  bool pass_ok = run_pass(ctx, archive, thread_events, use_mt, /*log=*/true);
   auto wall_end = std::chrono::high_resolution_clock::now();
   double wall_ms = std::chrono::duration<double, std::milli>(
                        wall_end - wall_start).count();
+
+  if (!pass_ok) {
+    fprintf(stderr, "[HRR] Replay aborted due to fatal HIP error — exiting\n");
+    return 1;
+  }
 
   // ---------------------------------------------------------------------------
   // Summary

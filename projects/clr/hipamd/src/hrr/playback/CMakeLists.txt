@@ -63,3 +63,38 @@ target_compile_definitions(hrr-playback PRIVATE
 )
 
 install(TARGETS hrr-playback RUNTIME DESTINATION bin)
+
+# ---------------------------------------------------------------------------
+# test_stride1 — standalone kernel launch test (diagnostic only, not installed)
+# ---------------------------------------------------------------------------
+add_executable(test_stride1 test_stride1.cpp)
+target_include_directories(test_stride1 PRIVATE
+  ${HIP_INCLUDE_DIR}
+)
+target_compile_definitions(test_stride1 PRIVATE
+  __HIP_PLATFORM_AMD__
+  $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
+)
+target_link_libraries(test_stride1 PRIVATE ${HIP_LIBRARY})
+
+# ---------------------------------------------------------------------------
+# test_stride2_then_stride1 — sequence test (diagnostic only, not installed)
+# ---------------------------------------------------------------------------
+add_executable(test_stride2_then_stride1 test_stride2_then_stride1.cpp)
+target_include_directories(test_stride2_then_stride1 PRIVATE ${HIP_INCLUDE_DIR})
+target_compile_definitions(test_stride2_then_stride1 PRIVATE
+  __HIP_PLATFORM_AMD__
+  $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
+)
+target_link_libraries(test_stride2_then_stride1 PRIVATE ${HIP_LIBRARY})
+
+# ---------------------------------------------------------------------------
+# time_stride1 — wall-clock / GPU-event timing at various grid sizes (diagnostic)
+# ---------------------------------------------------------------------------
+add_executable(time_stride1 time_stride1.cpp)
+target_include_directories(time_stride1 PRIVATE ${HIP_INCLUDE_DIR})
+target_compile_definitions(time_stride1 PRIVATE
+  __HIP_PLATFORM_AMD__
+  $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
+)
+target_link_libraries(time_stride1 PRIVATE ${HIP_LIBRARY})
