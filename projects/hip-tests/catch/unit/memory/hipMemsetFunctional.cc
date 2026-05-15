@@ -554,11 +554,6 @@ HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_3D) {
 // that the rewrite changed behavior on, and the precondition error propagation.
 TEST_CASE("Unit_hipMemset_UnalignedKernelCornerCases", "[fillBuffer][unaligned]") {
   SECTION("Byte-misaligned hipHostRegister patternSize=1") {
-    // Register a host buffer at an odd offset to obtain a byte-misaligned
-    // device-visible pointer, then run hipMemset (D8, patternSize=1) at sizes
-    // including 30 — which is the exact case where the cleanup-region sum
-    // hits 16 (head=7, body=1, body_tail=1, tail=7) and exposed the original
-    // off-by-one in the host-side assertion.
     constexpr size_t kSlack = 64;
     constexpr size_t kMaxFill = 64;
     std::vector<unsigned char> host(kSlack + kMaxFill + kSlack, 0);
@@ -587,16 +582,6 @@ TEST_CASE("Unit_hipMemset_UnalignedKernelCornerCases", "[fillBuffer][unaligned]"
   }
 
   SECTION("Body-cleanup path across pattern sizes 1/2/4 at varied sizes") {
-    // hipMalloc returns a base VA aligned to >= 256 bytes, so devPtr is
-    // 16-aligned. By offsetting the fill start by +8 we land on an address
-    // that is 8-aligned but not 16-aligned, which is the only configuration
-    // that produces body_count=1. Combined with sizes whose tail also lands
-    // 8-aligned-but-not-16-aligned, this exercises body_count=1 +
-    // body_tail_count=1 — the path that surfaces the Windows tile_size bug
-    // (sizeof(unsigned long)*2 == 8 on MSVC LLP64 instead of 16).
-    //
-    // HIP only exposes patternSize 1/2/4 via D8/D16/D32; patternSize 8 and 16
-    // are reachable from OpenCL clEnqueueFillBuffer (not tested here).
     constexpr size_t kAllocBytes = 256;
     void* base = nullptr;
     HIP_CHECK(hipMalloc(&base, kAllocBytes));
@@ -658,10 +643,6 @@ TEST_CASE("Unit_hipMemset_UnalignedKernelCornerCases", "[fillBuffer][unaligned]"
   }
 
   SECTION("Sub-pattern-misaligned VA returns hipError") {
-    // hipMalloc base is aligned >= 16. Offsetting by 1 gives an odd VA;
-    // calling hipMemsetD16 (patternSize=2) violates the precondition
-    // (VA + origin) % patternSize == 0 and must surface as a non-success
-    // hipError after the ihipMemset propagation fix in commit 1.
     void* base = nullptr;
     HIP_CHECK(hipMalloc(&base, 256));
     void* misaligned = static_cast<unsigned char*>(base) + 1;
