@@ -154,11 +154,13 @@ Panel Config:
           min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
           max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
           unit: (Count + $normUnit)
-        Instructions - Dual VALU (VOPD):
-          avg: SUM(SQ_INSTS_DUAL_VALU_WAVE32_sum) / SUM($denom)
-          min: MIN(SQ_INSTS_DUAL_VALU_WAVE32_sum / $denom)
-          max: MAX(SQ_INSTS_DUAL_VALU_WAVE32_sum / $denom)
-          unit: (Count + $normUnit)
+        # Instructions - Dual VALU (VOPD): disabled — SQ_INSTS_DUAL_VALU_WAVE32 /
+        # SQ_PERF_SEL_INSTS_DUAL_VALU_WAVE32 not collected (see sdk_config reserved
+        # lowercase counter sq_insts_dual_valu_wave32).
+        #   avg: SUM(SQ_INSTS_DUAL_VALU_WAVE32_sum) / SUM($denom)
+        #   min: MIN(SQ_INSTS_DUAL_VALU_WAVE32_sum / $denom)
+        #   max: MAX(SQ_INSTS_DUAL_VALU_WAVE32_sum / $denom)
+        #   unit: (Count + $normUnit)
         Instructions - VMEM:
           avg: SUM(SQ_INSTS_TEX_sum) / SUM($denom)
           min: MIN(SQ_INSTS_TEX_sum / $denom)
@@ -344,10 +346,7 @@ Panel Config:
       Transcendental VALU instructions (SQ_INSTS_VALU_TRANS) per normalization unit.
       These cover hardware approximations such as sin, cos, and log on the vector
       ALU.
-    Instructions - Dual VALU (VOPD): >-
-      Dual-issue VALU instructions executed in wave32 mode
-      (SQ_INSTS_DUAL_VALU_WAVE32) per normalization unit. The VOPD encoding pairs
-      two independent VALU operations that issue in the same cycle.
+    # Instructions - Dual VALU (VOPD): disabled with dual-issue counter (see sdk_config).
     Instructions - VMEM: >-
       Number of vector memory instructions executed, including global, buffer, and
       texture operations. High VMEM counts relative to VALU may indicate memory-bound

@@ -46,9 +46,10 @@ packed FP16 from 256 to 512 FLOPs/CU/cycle.
 The aggregate ``VALU FLOPs`` row in this panel uses the FP32 single-issue FMA
 ceiling (128 FLOPs/CU/cycle) as the peak. A workload that issues VOPD heavily,
 or that runs packed FP16, can therefore report a percentage of peak above
-100%. To gauge how much of the throughput is coming from VOPD, inspect the
-``Instructions - Dual VALU (VOPD)`` row on the :doc:`wgp` panel, which counts
-``SQ_INSTS_DUAL_VALU_WAVE32``.
+100%. A dedicated WGP counter row for dual-issue VALU (VOPD) is currently
+disabled in rocprofiler-compute because the underlying SQ counter is not
+reliably collected; infer VOPD contribution from VALU FLOPs vs. peak and ISA
+when needed.
 
 Peak theoretical VALU rates
 ---------------------------
