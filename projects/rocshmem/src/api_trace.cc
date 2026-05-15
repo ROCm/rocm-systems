@@ -18,7 +18,6 @@
 ROCPROFILER_REGISTER_DEFINE_IMPORT(rocshmem, ROCP_REG_VERSION)
 #endif
 
-#include <roctracer/roctx.h>
 #include "context.hpp"
 namespace rocshmem { extern rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT; }
 using rocshmem::ROCSHMEM_HOST_CTX_DEFAULT;
