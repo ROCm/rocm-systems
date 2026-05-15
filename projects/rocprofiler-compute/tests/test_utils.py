@@ -5134,28 +5134,54 @@ def test_experimental_action_help_suppression():
     assert "--test-exp-feature" not in help_text, f"{help_text}"
 
 
-@pytest.mark.experimental_feature
-def test_experimental_gui_without_flag_errors(monkeypatch, capsys):
-    """Test that using --gui without --experimental flag raises error."""
+EXPERIMENTAL_FEATURE_DEFS = {
+    "gui": {
+        "flag": "--gui",
+        "kwargs": {
+            "type": int,
+            "nargs": "?",
+            "const": 8050,
+            "default": None,
+            "base_action": "store",
+            "feature_label": "GUI",
+            "help": "Activate GUI",
+        },
+    },
+    "tui": {
+        "flag": "--tui",
+        "kwargs": {
+            "default": False,
+            "const": True,
+            "nargs": 0,
+            "base_action": "store_true",
+            "feature_label": "TUI",
+            "help": "Activate TUI",
+        },
+    },
+}
+
+
+def make_experimental_feature_parser(feature, experimental_enabled):
     import argparse
 
     from argparser import ExperimentalAction
 
-    monkeypatch.setattr("sys.argv", ["rocprof-compute", "--gui"])
-
+    config = EXPERIMENTAL_FEATURE_DEFS[feature]
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--gui",
-        type=int,
-        nargs="?",
-        const=8050,
-        default=None,
-        base_action="store",
+        config["flag"],
         action=ExperimentalAction,
-        experimental_enabled=False,
-        feature_label="GUI",
-        help="Activate GUI",
+        experimental_enabled=experimental_enabled,
+        **config["kwargs"],
     )
+    return parser
+
+
+@pytest.mark.experimental_feature
+def test_experimental_gui_without_flag_errors(monkeypatch, capsys):
+    """Test that using --gui without --experimental flag raises error."""
+    monkeypatch.setattr("sys.argv", ["rocprof-compute", "--gui"])
+    parser = make_experimental_feature_parser("gui", experimental_enabled=False)
 
     with pytest.raises(SystemExit) as exc_info:
         parser.parse_args()
@@ -5169,25 +5195,8 @@ def test_experimental_gui_without_flag_errors(monkeypatch, capsys):
 @pytest.mark.experimental_feature
 def test_experimental_gui_with_flag_succeeds(monkeypatch, caplog):
     """Test that using --gui with --experimental flag succeeds and stores port."""
-    import argparse
-
-    from argparser import ExperimentalAction
-
     monkeypatch.setattr("sys.argv", ["rocprof-compute", "--gui"])
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--gui",
-        type=int,
-        nargs="?",
-        const=8050,
-        default=None,
-        base_action="store",
-        action=ExperimentalAction,
-        experimental_enabled=True,
-        feature_label="GUI",
-        help="Activate GUI",
-    )
+    parser = make_experimental_feature_parser("gui", experimental_enabled=True)
 
     args = parser.parse_args()
     assert args.gui == 8050
@@ -5196,20 +5205,7 @@ def test_experimental_gui_with_flag_succeeds(monkeypatch, caplog):
 
     caplog.clear()
     monkeypatch.setattr("sys.argv", ["rocprof-compute", "--gui", "9090"])
-
-    parser2 = argparse.ArgumentParser()
-    parser2.add_argument(
-        "--gui",
-        type=int,
-        nargs="?",
-        const=8050,
-        default=None,
-        base_action="store",
-        action=ExperimentalAction,
-        experimental_enabled=True,
-        feature_label="GUI",
-        help="Activate GUI",
-    )
+    parser2 = make_experimental_feature_parser("gui", experimental_enabled=True)
 
     args2 = parser2.parse_args()
     assert args2.gui == 9090
@@ -5218,24 +5214,8 @@ def test_experimental_gui_with_flag_succeeds(monkeypatch, caplog):
 @pytest.mark.experimental_feature
 def test_experimental_tui_without_flag_errors(monkeypatch, capsys):
     """Test that using --tui without --experimental flag raises error."""
-    import argparse
-
-    from argparser import ExperimentalAction
-
     monkeypatch.setattr("sys.argv", ["rocprof-compute", "--tui"])
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--tui",
-        default=False,
-        const=True,
-        nargs=0,
-        base_action="store_true",
-        action=ExperimentalAction,
-        experimental_enabled=False,
-        feature_label="TUI",
-        help="Activate TUI",
-    )
+    parser = make_experimental_feature_parser("tui", experimental_enabled=False)
 
     with pytest.raises(SystemExit) as exc_info:
         parser.parse_args()
@@ -5249,24 +5229,8 @@ def test_experimental_tui_without_flag_errors(monkeypatch, capsys):
 @pytest.mark.experimental_feature
 def test_experimental_tui_with_flag_succeeds(monkeypatch, caplog):
     """Test that using --tui with --experimental flag succeeds."""
-    import argparse
-
-    from argparser import ExperimentalAction
-
     monkeypatch.setattr("sys.argv", ["rocprof-compute", "--tui"])
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--tui",
-        default=False,
-        const=True,
-        nargs=0,
-        base_action="store_true",
-        action=ExperimentalAction,
-        experimental_enabled=True,
-        feature_label="TUI",
-        help="Activate TUI",
-    )
+    parser = make_experimental_feature_parser("tui", experimental_enabled=True)
 
     args = parser.parse_args()
     assert args.tui is True
