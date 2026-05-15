@@ -195,7 +195,6 @@ message(STATUS "Compiling for ${GPU_TARGETS}")
 if (NOT BUILD_TESTS_ONLY)
   add_library(${PROJECT_NAME})
   add_library(roc::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
-  add_subdirectory(src)
 
   #############################################################################
   # PACKAGE DEPENDENCIES
@@ -409,6 +408,13 @@ if (NOT BUILD_TESTS_ONLY)
     DESCRIPTION "ROCm OpenSHMEM (rocSHMEM)"
     MAINTAINER "rocSHMEM Maintainer <rocshmem-maintainer@amd.com>"
   )
+endif (NOT BUILD_TESTS_ONLY)
+
+###############################################################################
+# TEST SUBDIRECTORIES
+###############################################################################
+if (NOT BUILD_TESTS_ONLY)
+  add_subdirectory(src)
 endif (NOT BUILD_TESTS_ONLY)
 
 ###############################################################################
