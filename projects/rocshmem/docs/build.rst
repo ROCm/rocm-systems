@@ -255,7 +255,7 @@ This is similar to the default build in ROCm 6.4.
 .. note::
 
   The default configuration changed from IPC only in ROCm 6.4 (built with the ``ipc_single`` script) to RO and IPC in ROCm 7.0 (built with the ``ro_ipc`` script), and then to GDA and RO and IPC in ROCm 7.1 (built with the ``all_backends`` script).
-  Other experimental configuration scripts are available in ``./scripts/build_configs``, but only ``ipc_single`` and ``ro_ipc``
+  Other experimental configuration scripts are available in ``./scripts/build_configs``, but only ``all_backends``, ``ipc_single`` and ``ro_ipc``
   are officially supported.
 
 Installation prefix
