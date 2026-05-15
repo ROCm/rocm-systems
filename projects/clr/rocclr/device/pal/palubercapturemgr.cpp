@@ -319,6 +319,9 @@ Pal::Result UberTraceCaptureMgr::TimedQueueSubmit(Pal::IQueue* queue, uint64_t c
   Pal::Result result = Pal::Result::Success;
   if (IsQueueTimingActive()) {
     result = queue_timings_trace_source_->TimedSubmit(queue, submitInfo, timedSubmitInfo);
+    if (result != Pal::Result::Success) {
+      result = queue->Submit(submitInfo);
+    }
   } else {
     result = queue->Submit(submitInfo);
   }
