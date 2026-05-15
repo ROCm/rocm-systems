@@ -237,6 +237,7 @@ ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int refcount, ncclIpcDe
       memcpy(&ipcDesc->cuDesc.data, &handle, sizeof(handle));
     } else {
       CUCHECK(cuMemExportToShareableHandle(&ipcDesc->cuDesc, handle, type, 0));
+#ifdef ENABLE_TRACE
       unsigned char *hbytes = (unsigned char*)&ipcDesc->cuDesc;
       static_assert(sizeof(ipcDesc->cuDesc) == 64, "cuDesc size changed — update handle byte-dump indices");
       TRACE(NCCL_P2P, "ncclP2pAllocateShareableBuffer: exported handle[0..31]= %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x type=%d",
@@ -250,6 +251,7 @@ ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int refcount, ncclIpcDe
            hbytes[40],hbytes[41],hbytes[42],hbytes[43],hbytes[44],hbytes[45],hbytes[46],hbytes[47],
            hbytes[48],hbytes[49],hbytes[50],hbytes[51],hbytes[52],hbytes[53],hbytes[54],hbytes[55],
            hbytes[56],hbytes[57],hbytes[58],hbytes[59],hbytes[60],hbytes[61],hbytes[62],hbytes[63]);
+#endif
     }
     if (refcount) {
       memcpy(&ipcDesc->memHandle, &handle, sizeof(handle));
@@ -314,6 +316,7 @@ ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_
       CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)fd, type));
       SYSCHECK(close(fd), "close");
     } else {
+#ifdef ENABLE_TRACE
       // Log handle bytes to verify correct data received cross-node
       unsigned char *hbytes = (unsigned char*)cuDesc;
       static_assert(sizeof(*cuDesc) == 64, "cuDesc size changed — update handle byte-dump indices");
@@ -328,6 +331,7 @@ ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_
            hbytes[40],hbytes[41],hbytes[42],hbytes[43],hbytes[44],hbytes[45],hbytes[46],hbytes[47],
            hbytes[48],hbytes[49],hbytes[50],hbytes[51],hbytes[52],hbytes[53],hbytes[54],hbytes[55],
            hbytes[56],hbytes[57],hbytes[58],hbytes[59],hbytes[60],hbytes[61],hbytes[62],hbytes[63]);
+#endif
       CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)cuDesc, type));
     }
     CUCHECK(cuMemAddressReserve(&dptr, size, /* alignment */ 0, /* addr */ 0, /* flags */ 0));
