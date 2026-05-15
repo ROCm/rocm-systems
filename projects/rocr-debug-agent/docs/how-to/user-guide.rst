@@ -1,6 +1,6 @@
 .. meta::
    :description: A library that can be loaded by ROCr to print the AMDGPU wavefront states
-   :keywords: rocr, debug, agent, how to, user, guide, usage, manual, example, env, var, environment, option
+   :keywords: rocr, debug agent, how to, user guide, usage, manual, example, env, var, environment, option
 
 .. _debug-agent-user-guide:
 

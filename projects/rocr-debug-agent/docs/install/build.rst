@@ -1,6 +1,6 @@
 .. meta::
    :description: Build AMD ROCr Debug Agent from source
-   :keywords: rocr, debug, agent, build, install, tool
+   :keywords: rocr debug agent, build, install, tool
 
 .. _debug-agent-installation:
 
@@ -23,7 +23,6 @@ System requirements
 
 - A C++ 17 compiler such as GCC 7 or Clang 5.
 
-- The AMD ROCm software stack. See the :doc:`ROCm installation instructions <rocm-install-on-linux:index>`.
 
 - Install the required packages according to the OS:
 
@@ -53,6 +52,7 @@ System requirements
 - Python 3.6 or later to run the tests.
 
 - :doc:`ROCdbgapi library <rocdbgapi:index>`. This can be installed using the ROCdbgapi package as part of the ROCm release. See the instructions to install :doc:`ROCdbgapi library <rocdbgapi:install/build>`.
+- :doc:`ROCm runtime <rocr-runtime:index>`. For install instructions, see :doc:`ROCR installation <rocr-runtime:install/installation>`.
 
 .. note::
 
@@ -74,7 +74,6 @@ To specify the location for the installation, use ``CMAKE_INSTALL_PREFIX``. The 
 
 To specify a list of paths (separated by semicolons) that are used to locate the ``cmake`` modules, use ``CMAKE_MODULE_PATH``. It is used to locate the HIP ``cmake`` modules required to build the tests. The default location is ``/opt/rocm/hip/cmake``.
 
-The built ROCr Debug Agent library is placed in ``build/librocm-debug-agent.so.2*``.
 
 To install the ROCr Debug Agent library, use:
 
@@ -110,10 +109,8 @@ Output:
     100% tests passed, 0 tests failed out of 1
     Total Test time (real) =   1.59 sec
 
-You can run the tests individually outside of the ``CTest`` harness as shown:
+To run the tests outside of the ``CTest`` harness, use:
 
 .. code-block:: shell
 
-    HSA_TOOLS_LIB=librocm-debug-agent.so.2 test/rocm-debug-agent-test 0
-    HSA_TOOLS_LIB=librocm-debug-agent.so.2 test/rocm-debug-agent-test 1
-    HSA_TOOLS_LIB=librocm-debug-agent.so.2 test/rocm-debug-agent-test 2
+    python3 ../test/run-test.py test/

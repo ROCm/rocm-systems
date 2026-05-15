@@ -1,6 +1,6 @@
 .. meta::
    :description: Installation instructions for ROCr Debug Agent
-   :keywords: rocm, rocr, debug, agent, install, debugger, tool
+   :keywords: rocm, rocr debug agent, install, debugger, tool
 
 .. _installation:
 
