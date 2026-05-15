@@ -32,7 +32,7 @@ UnregisteredFile::UnregisteredFile(int fd)
 #endif
                                      )},
       flags{Context<Sys>::get()->fcntl(fd, F_GETFL, 0)},
-      mountinfo{Context<LibMountHelper>::get()->getMountInfo(makedev(stx.stx_dev_major, stx.stx_dev_minor))},
+      mountinfo{},
 #if defined(STATX_DIOALIGN)
       m_dio_mem_align{stx.stx_mask & STATX_DIOALIGN ? stx.stx_dio_mem_align : 4096},
       m_dio_offset_align{stx.stx_mask & STATX_DIOALIGN ? stx.stx_dio_offset_align : 4096}
@@ -76,9 +76,8 @@ File::File(UnregisteredFile &&uf, const PassKey<FileMap> &)
       m_dio_offset_align{uf.m_dio_offset_align},
       m_is_block_device{(uf.stx.stx_mask & STATX_TYPE) && S_ISBLK(uf.stx.stx_mode)},
       m_is_regular_file{(uf.stx.stx_mask & STATX_TYPE) && S_ISREG(uf.stx.stx_mode)},
-      m_on_ext4_ordered{uf.mountinfo && uf.mountinfo->type == FilesystemType::ext4 &&
-                        uf.mountinfo->options.ext4.journaling_mode == ExtJournalingMode::ordered},
-      m_on_xfs{uf.mountinfo && uf.mountinfo->type == FilesystemType::xfs}
+      m_on_ext4_ordered{true},
+      m_on_xfs{true}
 {
 }
 
