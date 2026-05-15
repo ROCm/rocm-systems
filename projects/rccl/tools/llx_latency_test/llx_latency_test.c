@@ -660,8 +660,10 @@ static bool parse_int(const char* s, int* out)
   char* end = nullptr;
   errno = 0;
   long v = strtol(s, &end, 10);
-  if (errno != 0 || end == s || *end != '\0' || v < INT_MIN || v > INT_MAX) return false;
-  *out = (int)v;
+  if (errno != 0 || end == s || *end != '\0') return false;
+  int iv = (int)v;
+  if ((long)iv != v) return false;
+  *out = iv;
   return true;
 }
 
@@ -680,17 +682,17 @@ static bool parse_size(const char* s, size_t* out)
   char* end = nullptr;
   errno = 0;
   unsigned long long v = strtoull(s, &end, 0);
-  if (errno != 0 || end == s) return false;
+  if (errno != 0 || end == s || v > (unsigned long long)SIZE_MAX) return false;
   if (*end == 'K' || *end == 'k') {
-    if (v > (ULLONG_MAX >> 10)) return false;
+    if (v > ((unsigned long long)SIZE_MAX >> 10)) return false;
     v <<= 10;
     ++end;
   } else if (*end == 'M' || *end == 'm') {
-    if (v > (ULLONG_MAX >> 20)) return false;
+    if (v > ((unsigned long long)SIZE_MAX >> 20)) return false;
     v <<= 20;
     ++end;
   } else if (*end == 'G' || *end == 'g') {
-    if (v > (ULLONG_MAX >> 30)) return false;
+    if (v > ((unsigned long long)SIZE_MAX >> 30)) return false;
     v <<= 30;
     ++end;
   }
