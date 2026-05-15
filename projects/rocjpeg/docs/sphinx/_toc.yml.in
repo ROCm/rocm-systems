@@ -8,12 +8,10 @@ subtrees:
 
 - caption: Install
   entries:
-  - file: install/rocjpeg-prerequisites.rst
-    title: Installation prerequisites
-  - file: install/rocjpeg-clone-repo.rst    
-    title: Cloning the project
+  - file: install/rocjpeg-install.rst
+    title: Install rocJPEG
   - file: install/rocjpeg-build-and-install.rst
-    title: Building and installing from source code
+    title: Build from source
 
 - caption: How to
   entries:
