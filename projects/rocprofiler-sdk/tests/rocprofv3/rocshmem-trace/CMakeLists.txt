@@ -66,14 +66,15 @@ set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
 # launched with -np 2. Each rank gets its own per-rank output directory keyed by
 # %env{OMPI_COMM_WORLD_RANK}% so the two rocprofv3 instances don't race on the same files.
 # Validation only inspects rank 0's trace; the API surface exercised by both ranks is
-# identical.
+# identical. All four output formats are requested so the validator can exercise the
+# perfetto + otf2 serializers end-to-end (mirrors rocdecode-trace).
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocshmem-tracing
     COMMAND
         ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPIRUN_EXECUTABLE} -np 2
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocshmem-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace/rank.%env{OMPI_COMM_WORLD_RANK}% -o out
-        --output-format json csv --log-level env --
+        --output-format json csv pftrace otf2 --log-level env --
         $<IF:$<TARGET_EXISTS:rocshmem-demo>,$<TARGET_FILE:rocshmem-demo>,rocshmem-demo>
     DEPENDS rocshmem-demo
     TIMEOUT 60
