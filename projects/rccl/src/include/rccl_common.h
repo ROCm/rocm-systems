@@ -61,6 +61,7 @@ typedef enum {
 
 typedef enum {
   RCCL_DIRECT_ALLGATHER = NCCL_NUM_ALGORITHMS, // Direct AllGather
+  RCCL_HIERARCHICAL_ALLGATHER, // Hierarchical AllGather
 #ifdef ENABLE_WARP_SPEED
   RCCL_WARP_SPEED,
 #endif
@@ -116,6 +117,7 @@ NCCL_API(ncclResult_t, rcclGetAlgoInfo, struct ncclComm* comm, ncclFunc_t coll, 
 NCCL_API(ncclResult_t, rcclGetAlgoName, int algo, const char** algoName);
 NCCL_API(ncclResult_t, rcclGetProtocolName, int protocol, const char** algoName);
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize);
+bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize);
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseAlltoAllGda(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable);
