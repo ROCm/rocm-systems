@@ -2551,13 +2551,8 @@ rocprofiler-sdk:
       - gfx1152
       block: SQ
       event: 173
-  # Lowercase name: rocprofiler-compute only collects all-uppercase tokens from
-  # panel formulas (see gen_counter_list); keeps definition for reference without
-  # auto-selecting this counter for PMC when gfx1151 metrics are expanded.
-  - name: sq_insts_dual_valu_wave32
-    description: >-
-      Reserved (not collected). Maps to SQ_PERF_SEL_INSTS_DUAL_VALU_WAVE32 / SQ
-      event 178 on gfx1151; hardware path currently unreliable—use when validated.
+  - name: SQ_INSTS_DUAL_VALU_WAVE32
+    description: The number of dual-issue VALU (VOPD) instructions issued in Wave32 mode.
     properties: []
     definitions:
     - architectures:
@@ -4055,13 +4050,13 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       expression: reduce(SQ_INSTS_WAVE32_LDS_PARAM_LOAD,sum)
-  - name: sq_insts_dual_valu_wave32_sum
+  - name: SQ_INSTS_DUAL_VALU_WAVE32_sum
     description: ''
     properties: []
     definitions:
     - architectures:
       - gfx1151
-      expression: reduce(sq_insts_dual_valu_wave32,sum)
+      expression: reduce(SQ_INSTS_DUAL_VALU_WAVE32,sum)
   - name: SQ_ITEMS_sum
     description: ''
     properties: []
