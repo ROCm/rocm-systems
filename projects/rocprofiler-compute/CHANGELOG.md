@@ -42,8 +42,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed empirical roofline benchmark to correctly produce double the Matrix BF16 Gflop/s on gfx90a (MI 200 series) GPUs
 
-* Fixed empty native counter-collection configuration when profiling a shell or shell-script workload, by republishing all ``ROCPROF``-prefixed env vars (``ROCPROF_*``, ``ROCPROFILER_*``, etc.) across the shell's fork/exec. Env changes after the script setup isn't propagated to the profiler.
-
 ### Upcoming changes
 
 ## ROCm Compute Profiler 3.6.0 for ROCm 7.13.0
