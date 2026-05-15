@@ -400,36 +400,36 @@ constexpr bool is_blocking(MemcpyKind k) {
   return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
 }
 
-template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll = 8>
-__device__ __forceinline__ void copy_bulk(uint8_t* dst_bytes, uint8_t* src_bytes, size_t n_chunks,
+template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
+__device__ __forceinline__ void copy_bulk(uint8_t* dst_bytes, uint8_t* src_bytes, int n_chunks,
                                           int tid, int stride) {
   using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
   using T = typename Acc::type;
+  T regs[Unroll];
 
-  size_t u_stride = static_cast<size_t>(stride);
-  size_t chunk_batch = u_stride * Unroll;
-  size_t offset = 0;
+  int chunk_batch = stride * Unroll;
+  int offset = 0;
 
   // Unrolled block copy to hide latency
   for (; offset + chunk_batch <= n_chunks; offset += chunk_batch) {
-    T regs[Unroll];
 
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
-      regs[u] = Acc::load(src_bytes + (offset + tid + u * u_stride) * ChunkSize);
+      regs[u] = Acc::load(src_bytes + (offset + tid + u * stride) * ChunkSize);
     }
 
     #pragma unroll
     for (int u = 0; u < Unroll; ++u) {
       if constexpr (LoadPolicy != CachePolicy::Standard) {
         pipeline_wait_on_loads(Unroll - 1 - u);
+        // __builtin_amdgcn_s_waitcnt(Unroll - 1);
       }
-      Acc::store(dst_bytes + (offset + tid + u * u_stride) * ChunkSize, regs[u]);
+      Acc::store(dst_bytes + (offset + tid + u * stride) * ChunkSize, regs[u]);
     }
   }
 
   // Tail loop for remaining ChunkSize-byte chunks
-  for (size_t i = offset + tid; i < n_chunks; i += u_stride) {
+  for (int i = offset + tid; i < n_chunks; i += stride) {
     T val = Acc::load(src_bytes + i * ChunkSize);
     if constexpr (LoadPolicy != CachePolicy::Standard) {
       pipeline_wait_on_loads(0);
@@ -442,17 +442,15 @@ __device__ __forceinline__ void copy_bulk(uint8_t* dst_bytes, uint8_t* src_bytes
 // SMART DISPATCHER (Register Pressure / Unroll Manager)
 // ==============================================================================
 template <CachePolicy LP, CachePolicy SP>
-__device__ __forceinline__ void copy_dispatcher(uint8_t* dst, uint8_t* src, size_t N16, int tid,
-                                                int stride) {
-  if (N16 == 0) return;
+__device__ __forceinline__ void copy_dispatcher(uint8_t* dst, uint8_t* src, int n_chunks,
+                                                int tid, int stride) {  
 
-  size_t u_stride = static_cast<size_t>(stride);
+  if (n_chunks == 0) return;
 
-  if (N16 < u_stride * 16) {
-    copy_bulk<16, LP, SP, 1>(dst, src, N16, tid, stride);
-  } else {
-    copy_bulk<16, LP, SP, 16>(dst, src, N16, tid, stride);
-  }
+  constexpr int ChunkSize = 16;
+  constexpr int Unroll = 16;                                         
+
+  copy_bulk<ChunkSize, LP, SP, Unroll>(dst, src, n_chunks, tid, stride);
 }
 
 // ==============================================================================
@@ -462,6 +460,8 @@ template <CachePolicy LP, CachePolicy SP>
 __device__ __forceinline__ void copy_remainder(uint8_t* dst, uint8_t* src, int remainder) {
   // Uses bitwise operations to jump directly to necessary loads
   // Executed exclusively by Thread 0 to sidestep wave divergence and sync overhead
+  if (remainder == 0) return;
+
   if (remainder & 8) {
     auto val = AsmAccess<8, LP, SP>::load(src);
     if constexpr (LP != CachePolicy::Standard) {
@@ -507,6 +507,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
+  constexpr int ChunkSize = 16;
   constexpr CachePolicy LP =
       (Kind == MemcpyKind::Put) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP =
@@ -515,20 +516,21 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   uint8_t* dst_bytes = static_cast<uint8_t*>(dst);
   uint8_t* src_bytes = static_cast<uint8_t*>(src);
 
-  size_t N16 = size / 16;
-  int remainder = size % 16;
+  int n_chunks = size / ChunkSize;
+  int remainder = size % ChunkSize;
 
-  copy_dispatcher<LP, SP>(dst_bytes, src_bytes, N16, 0, 1);
+  copy_dispatcher<LP, SP>(dst_bytes, src_bytes, n_chunks, 0, 1);
 
-  if (remainder > 0) {
-    copy_remainder<LP, SP>(dst_bytes + N16 * 16, src_bytes + N16 * 16, remainder);
-  }
+  copy_remainder<LP, SP>(dst_bytes + n_chunks * ChunkSize,
+                         src_bytes + n_chunks * ChunkSize,
+                         remainder);
 }
 
 template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
   if (size == 0) return;
-
+  
+  constexpr int ChunkSize = 16;
   constexpr CachePolicy LP =
       (Kind == MemcpyKind::Put) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP =
@@ -540,14 +542,16 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   uint8_t* dst_bytes = static_cast<uint8_t*>(dst);
   uint8_t* src_bytes = static_cast<uint8_t*>(src);
 
-  size_t N16 = size / 16;
-  int remainder = size % 16;
+  int n_chunks = size / ChunkSize;
+  int remainder = size % ChunkSize;
 
-  copy_dispatcher<LP, SP>(dst_bytes, src_bytes, N16, wave_tid, wave_size);
+  copy_dispatcher<LP, SP>(dst_bytes, src_bytes, n_chunks, wave_tid, wave_size);
 
   // Remainder handled uniquely by the first thread in the wave
-  if (remainder > 0 && wave_tid == 0) {
-    copy_remainder<LP, SP>(dst_bytes + N16 * 16, src_bytes + N16 * 16, remainder);
+  if (wave_tid == 0) {
+    copy_remainder<LP, SP>(dst_bytes + n_chunks * ChunkSize,
+                           src_bytes + n_chunks * ChunkSize, 
+                           remainder);
   }
 }
 
@@ -555,6 +559,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
   if (size == 0) return;
 
+  constexpr int ChunkSize = 16;
   constexpr CachePolicy LP =
       (Kind == MemcpyKind::Put) ? CachePolicy::Standard : CachePolicy::SystemScope;
   constexpr CachePolicy SP =
@@ -566,14 +571,16 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   uint8_t* dst_bytes = static_cast<uint8_t*>(dst);
   uint8_t* src_bytes = static_cast<uint8_t*>(src);
 
-  size_t N16 = size / 16;
-  int remainder = size % 16;
+  int n_chunks = size / ChunkSize;
+  int remainder = size % ChunkSize;
 
-  copy_dispatcher<LP, SP>(dst_bytes, src_bytes, N16, thread_id, block_size);
+  copy_dispatcher<LP, SP>(dst_bytes, src_bytes, n_chunks, thread_id, block_size);
 
   // Remainder handled uniquely by the first thread in the workgroup
-  if (remainder > 0 && thread_id == 0) {
-    copy_remainder<LP, SP>(dst_bytes + N16 * 16, src_bytes + N16 * 16, remainder);
+  if (thread_id == 0) {
+    copy_remainder<LP, SP>(dst_bytes + n_chunks * ChunkSize,
+                           src_bytes + n_chunks * ChunkSize,
+                           remainder);
   }
 }
 
