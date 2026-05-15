@@ -86,6 +86,9 @@ THE SOFTWARE.
 static_assert(LINE_BYTES % 8 == 0,         "LINE_BYTES must be a multiple of 8");
 static_assert(LINE_BYTES >= 16,            "LINE_BYTES must be at least 16");
 static_assert(256 % LINE_ELEMS == 0,       "NTHREADS (256) must be divisible by LINE_ELEMS");
+// SC variants use s_waitcnt vmcnt(0) and __any() to order/poll within a single
+// wavefront. LINE_ELEMS must fit in one wave; cap at 32 for wave32 portability.
+static_assert(LINE_ELEMS <= 32,            "LINE_ELEMS must fit in one wavefront (LINE_BYTES <= 256)");
 
 #define PROTO_SC    "LL" STR(LINE_BYTES) "-sc"
 #define PROTO_SC_WB "LL" STR(LINE_BYTES) "-sc+wb"
