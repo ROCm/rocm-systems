@@ -428,20 +428,21 @@ bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
 }
 
 void disableHostcalls(void* bfr) {
+  HostcallListener* listenerToTerminate = nullptr;
   {
     amd::ScopedLock lock(listenerLock);
-    if (!hostcallListener) {
-      return;
-    }
-    assert(bfr && "expected a hostcall buffer");
+    if (!hostcallListener) return;
     auto buffer = reinterpret_cast<HostcallBuffer*>(bfr);
     hostcallListener->removeBuffer(buffer);
+    if (hostcallListener->idle()) {
+      listenerToTerminate = hostcallListener;
+      hostcallListener = nullptr;
+    }
   }
-  if (hostcallListener->idle()) {
-    hostcallListener->terminate();
-    delete hostcallListener;
-    hostcallListener = nullptr;
+  if (listenerToTerminate) {
+    listenerToTerminate->terminate();
     ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Terminated hostcall listener");
+    delete listenerToTerminate;
   }
 }
 }  // namespace amd
