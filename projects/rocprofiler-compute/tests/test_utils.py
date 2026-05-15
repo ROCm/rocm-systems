@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import builtins
+import functools
 import io
 import logging
 import math
@@ -16,6 +17,7 @@ import pytest
 import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
+from utils.amdsmi_interface import _per_device_query
 from utils.tty import (
     format_duration,
     format_node_stats,
@@ -4503,7 +4505,7 @@ def test_amdsmi_get_gpu_cache_size():
             side_effect=Exception("Mock exception"),
         ):
             cache_info = get_gpu_cache_info()
-            assert cache_info == {}
+            assert cache_info is None
 
 
 def test_amdsmi_get_gpu_num_compute_units():
@@ -4525,6 +4527,27 @@ def test_amdsmi_get_gpu_num_compute_units():
         ):
             cu_count = get_gpu_num_compute_units()
             assert cu_count == 0
+
+
+def test_per_device_query_returns_default_and_logs_last_error_on_all_failure():
+    """When every device raises, return the default and warn with the last error."""
+
+    @functools.partial(
+        _per_device_query, default_return="DEFAULT", warning_label="test label"
+    )
+    def fn(device, amdsmi):
+        raise RuntimeError(f"boom-{device}")
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as handles_mock:
+        handles_mock.return_value = ["d1", "d2", "d3"]
+        with mock.patch("utils.amdsmi_interface.import_amdsmi_module"):
+            with mock.patch("utils.amdsmi_interface.console_warning") as warn_mock:
+                result = fn()
+                assert result == "DEFAULT"
+                warn_mock.assert_called_once()
+                warning_message = warn_mock.call_args[0][0]
+                assert "test label" in warning_message
+                assert "boom-d3" in warning_message
 
 
 # =============================================================================

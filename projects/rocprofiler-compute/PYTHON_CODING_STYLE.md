@@ -656,7 +656,7 @@ def create_filtered_stats(df_in, filter_nodes, ...) -> None:
 ### Rules
 
 - Module structure order: docstring → imports (stdlib → third-party → local, sorted within each group) → constants → public functions → private helpers → classes.
-- Public functions appear **before** private helpers in every file.
+- Public functions appear **before** private helpers in every file, except when a private helper is used as a decorator on those public functions. Python evaluates decorators at module load, so the helper must precede the functions it decorates.
 - The `_` prefix marks privacy for module-level helpers and class members only — do not use it for helpers in test files (`test_*.py`). Test modules are imported only by pytest for collection and should not import each other (use `conftest.py` for shared fixtures), so there is no internal API to mark private.
 - Use `is None` / `is not None` — never `== None` or `!= None`.
 

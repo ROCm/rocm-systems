@@ -18,16 +18,7 @@ from pathlib import Path as path
 from typing import Any, Optional, TypeVar
 
 import config
-from utils.amdsmi_interface import (
-    amdsmi_ctx,
-    get_amdgpu_driver_version,
-    get_gpu_cache_info,
-    get_gpu_compute_partition,
-    get_gpu_memory_partition,
-    get_gpu_num_compute_units,
-    get_gpu_vbios_part_number,
-    get_gpu_vram_size,
-)
+from utils import amdsmi_interface
 from utils.logger import (
     console_debug,
     console_error,
@@ -177,7 +168,7 @@ def generate_machine_specs(
     gpu_info = extract_gpu_info(gpu_arch=soc_info["gpu_arch"])
 
     # Combine all specifications
-    with amdsmi_ctx():
+    with amdsmi_interface.amdsmi_ctx():
         specs = MachineSpecs(
             version=specs_version,
             timestamp=timestamp,
@@ -186,9 +177,9 @@ def generate_machine_specs(
             cpu_model=machine_info["cpu_model"],
             sbios=machine_info["sbios"],
             linux_kernel_version=machine_info["linux_kernel_version"],
-            amd_gpu_kernel_version=get_amdgpu_driver_version(),
+            amd_gpu_kernel_version=amdsmi_interface.get_amdgpu_driver_version(),
             cpu_memory=machine_info["cpu_memory"],
-            gpu_memory=get_gpu_vram_size(),
+            gpu_memory=amdsmi_interface.get_gpu_vram_size(),
             linux_distro=machine_info["linux_distro"],
             rocm_version=get_rocm_ver().strip(),
             vbios=gpu_info["vbios"],
@@ -290,17 +281,17 @@ def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
         "gpu_cache_info": None,
     }
 
-    with amdsmi_ctx():
-        result["vbios"] = get_gpu_vbios_part_number()
+    with amdsmi_interface.amdsmi_ctx():
+        result["vbios"] = amdsmi_interface.get_gpu_vbios_part_number()
         if is_partition_supported:
-            result["compute_partition"] = get_gpu_compute_partition()
-            result["memory_partition"] = get_gpu_memory_partition()
+            result["compute_partition"] = amdsmi_interface.get_gpu_compute_partition()
+            result["memory_partition"] = amdsmi_interface.get_gpu_memory_partition()
         else:
             result["compute_partition"] = "N/A"
             result["memory_partition"] = "N/A"
 
-        result["num_compute_units"] = get_gpu_num_compute_units()
-        result["gpu_cache_info"] = get_gpu_cache_info()
+        result["num_compute_units"] = amdsmi_interface.get_gpu_num_compute_units()
+        result["gpu_cache_info"] = amdsmi_interface.get_gpu_cache_info() or {}
 
     # Apply defaults and warnings
     if is_partition_supported:
