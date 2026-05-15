@@ -20,27 +20,26 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// gfx12_def.h must be pulled in with the gfx1250 variant active before any
-// other header can include it with the default (gfx1200) variant.  In
-// particular, gfx12_cmd_builder.h (via gfx12_factory_base.hpp) transitively
-// includes gfx12_def.h; the include-guard ensures the gfx1200 register
-// headers are never loaded in this translation unit.
-#include "aqlprofile-sdk/aql_profile_v2.h"
-#include "def/gpu_block_info.h"
-#define GFX12_VARIANT 0x1250
-#include "def/gfx12_def.h"
-#include "core/hw/mi450_architecture.hpp"
-// gfx12_factory_base.hpp pulls in pm4_factory.h (which includes <assert.h>)
-// before the primitives provider header needs it.
-#include "core/hw/gfx12_factory_base.hpp"
-#include "pm4/gfx12/gfx1250_primitives_provider.hpp"
+#ifndef SRC_CORE_ARCHITECTURES_MI450_ARCHITECTURE_HPP_
+#define SRC_CORE_ARCHITECTURES_MI450_ARCHITECTURE_HPP_
+
+#include "core/hw/gfx12_architecture.hpp"
 
 namespace aql_profile {
 
-Pm4Factory* Pm4Factory::Mi450Create(const AgentInfo* agent_info) {
-  return new Gfx12FactoryBase(new Mi450Architecture(agent_info),
-                              new pm4_builder::Gfx1250PrimitivesProvider(),
-                              agent_info);
-}
+/// MI450 architecture implementation (gfx1250).
+/// Inherits Gfx12Architecture and overrides the block table for the MI450
+/// block set.  xcc_per_aid is pre-patched to 4 by RegisterAgent before
+/// AgentInfo is cached; this class reads it directly from agent_info.
+class Mi450Architecture : public Gfx12Architecture {
+ public:
+  explicit Mi450Architecture(const AgentInfo* agent_info);
+  ~Mi450Architecture() override = default;
+
+ protected:
+  void InitializeBlockTable() override;
+};
 
 }  // namespace aql_profile
+
+#endif  // SRC_CORE_ARCHITECTURES_MI450_ARCHITECTURE_HPP_

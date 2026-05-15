@@ -167,18 +167,29 @@ class CmdBuilder {
   /// @param wait_val value to apply for the func given above
   virtual void BuildWaitRegMemCommand(CmdBuffer* cmdbuf, bool mem_space, uint64_t wait_addr,
                                       bool func_eq, uint32_t mask_val, uint32_t wait_val) = 0;
+  virtual void BuildWaitRegMemCommand(CmdBuffer* cmdbuf, bool mem_space, const Register& wait_addr,
+                                      bool func_eq, uint32_t mask_val, uint32_t wait_val) {
+    BuildWaitRegMemCommand(cmdbuf, mem_space, static_cast<uint64_t>(get_addr(wait_addr)),
+                           func_eq, mask_val, wait_val);
+  }
 
   /// @brief Build CP command to program a Gpu register
   /// @param cmdbuf Pointer to command buffer to be appended
   /// @param addr Register to be programmed
   /// @param value Value to write into register
   virtual void BuildWriteUConfigRegPacket(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value) = 0;
+  virtual void BuildWriteUConfigRegPacket(CmdBuffer* cmdbuf, const Register& reg, uint32_t value) {
+    BuildWriteUConfigRegPacket(cmdbuf, get_addr(reg), value);
+  }
 
   /// @brief Build and copy WriteShReg command
   /// @param cmdbuf Pointer to command buffer to be appended
   /// @param addr Offset of the register
   /// @param value Value to write into register
   virtual void BuildWriteShRegPacket(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value) = 0;
+  virtual void BuildWriteShRegPacket(CmdBuffer* cmdbuf, const Register& reg, uint32_t value) {
+    BuildWriteShRegPacket(cmdbuf, get_addr(reg), value);
+  }
 
   /// @brief Build a Gpu command that copies data from a specified
   /// source register to destination
@@ -191,12 +202,19 @@ class CmdBuilder {
   /// operation has completed successfully
   virtual void BuildCopyRegDataPacket(CmdBuffer* cmdbuf, uint32_t src_reg_addr,
                                       const void* dst_addr, uint32_t size, bool wait) = 0;
+  virtual void BuildCopyRegDataPacket(CmdBuffer* cmdbuf, const Register& src_reg,
+                                      const void* dst_addr, uint32_t size, bool wait) {
+    BuildCopyRegDataPacket(cmdbuf, get_addr(src_reg), dst_addr, size, wait);
+  }
 
   /// @brief Same as the above function but with 64-bit src_reg_addr.
   virtual void BuildCopyRegDataPacket(CmdBuffer* cmdbuf, uint64_t src_reg_addr,
                                       const void* dst_addr, uint32_t size, bool wait) {
     BuildCopyRegDataPacket(cmdbuf, uint32_t(src_reg_addr), dst_addr, size, wait);
   }
+
+  virtual void BuildWriteRegDataPacket(CmdBuffer* cmdbuf, const Register& dst_reg,
+                                       const uint32_t* data, uint32_t count, bool wait) {}
 
   /// @brief Builds the Gpu command to reference indirectly a stream
   /// of other Gpu commands. The launch command is then copied into
@@ -250,11 +268,35 @@ class CmdBuilder {
   }
 
   virtual void BuildWriteConfigRegPacket(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value) = 0;
+  virtual void BuildWriteConfigRegPacket(CmdBuffer* cmdbuf, const Register& reg, uint32_t value) {
+    BuildWriteConfigRegPacket(cmdbuf, get_addr(reg), value);
+  }
+
+  virtual void BuildCacheFlushPacket(CmdBuffer* cmdbuf, size_t addr, size_t size) {}
 
   virtual void BuildWritePConfigRegPacketToChiplet(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value,
                                                    ChipletId chiplet, bool write_to_aid = true) {}
   virtual void BuildWritePConfigRegPacketToChiplet(CmdBuffer* cmdbuf, const Register& reg, uint32_t value,
-                                                   ChipletId chiplet, bool write_to_aid = true) {}
+                                                   ChipletId chiplet, bool write_to_aid = true) {
+    BuildWritePConfigRegPacketToChiplet(cmdbuf, get_addr(reg), value, chiplet, write_to_aid);
+  }
+
+  virtual void BuildPredExecPacket(CmdBuffer* cmdbuf, uint32_t xcc_id = 0, uint32_t exec_count = 0) {}
+
+  virtual void BuildWritePConfigRegPacket(CmdBuffer* cmdbuf, uint64_t addr, uint32_t value) {}
+  virtual void BuildWritePConfigRegPacket(CmdBuffer* cmdbuf, const Register& reg, uint32_t value) {
+    BuildWritePConfigRegPacket(cmdbuf, get_addr(reg), value);
+  }
+
+  virtual uint32_t BuildCopyCounterDataPacket(CmdBuffer* cmdbuf, uint64_t src_reg_addr_lo,
+                                              uint64_t src_reg_addr_hi, const uint32_t* dst_addr,
+                                              uint32_t dw_mask) { return 0; }
+  virtual void BuildCopyCounterDataPacket(CmdBuffer* cmdbuf, const Register& reg_lo,
+                                          const Register& reg_hi, const uint32_t* dst_addr,
+                                          uint32_t dw_mask) {
+    BuildCopyCounterDataPacket(cmdbuf, (dw_mask & 1 << 0) ? get_addr(reg_lo) : 0u,
+                               (dw_mask & 1 << 1) ? get_addr(reg_hi) : 0u, dst_addr, dw_mask);
+  }
 
   virtual uint32_t BuildCopyCounterDataPacketFromChiplet(CmdBuffer* cmdbuf, const Register& reg_lo,
                                                          const Register& reg_hi, const void* dst_addr,

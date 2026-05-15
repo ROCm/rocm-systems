@@ -37,6 +37,7 @@
 #include "aqlprofile-sdk/aql_profile_v2.h"
 #include "core/aql_profile.hpp"
 #include "core/aql_profile_exception.h"
+#include "core/hw/hardware_architecture.hpp"
 #include "def/gpu_block_info.h"
 #include "pm4/cmd_builder.h"
 #include "pm4/pmc_builder.h"
@@ -157,7 +158,39 @@ class Pm4Factory {
   uint32_t GetXccPerAid() const { return agent_info_->xcc_per_aid; }
 
   // SPM specific
-  virtual uint32_t GetSpmSampleDelayMax() { return 0; }
+  virtual uint32_t GetSpmSampleDelayMax() {
+    if (architecture_) return architecture_->GetSpmSampleDelayMax();
+    return 0;
+  }
+
+  // Capability queries — replaces GetGpuId() comparisons in callers.
+  // For GFX12/MI450 these delegate to the HardwareArchitecture; for legacy
+  // GPUs they use the stored gpu_id_ to reproduce the old behaviour.
+  bool HasSpmCore1() const {
+    if (architecture_) return architecture_->GetConfig().has_spm_core1;
+    return (gpu_id_ == MI100_GPU_ID || gpu_id_ == MI200_GPU_ID);
+  }
+  bool HasWptrRelativeAddressing() const {
+    if (architecture_) return architecture_->GetConfig().has_wptr_relative_addressing;
+    return (gpu_id_ == GFX11_GPU_ID);
+  }
+  bool HasSqttStatus2Register() const {
+    if (architecture_) return architecture_->GetConfig().has_sqtt_status2_register;
+    return false;
+  }
+  bool NeedsSqttHeaderPacket() const {
+    if (architecture_) return architecture_->GetConfig().needs_sqtt_header_packet;
+    return (gpu_id_ == GFX9_GPU_ID || gpu_id_ == MI100_GPU_ID ||
+            gpu_id_ == MI200_GPU_ID || gpu_id_ == MI300_GPU_ID ||
+            gpu_id_ == MI350_GPU_ID);
+  }
+  bool HasSriovSpmRestriction() const {
+    if (architecture_) return architecture_->GetConfig().has_sriov_spm_restriction;
+    return false;
+  }
+
+  // Access the underlying architecture object (nullptr for legacy GPUs).
+  const HardwareArchitecture* GetArchitecture() const { return architecture_; }
 
   const GpuBlockInfo* GetBlockInfo(const aqlprofile_pmc_event_t* event) const {
     const GpuBlockInfo* info = block_map_.Get(event->block_name);
@@ -220,8 +253,14 @@ class Pm4Factory {
     return 1;
   };
 
-  virtual int GetAccumLowID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
-  virtual int GetAccumHiID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
+  virtual int GetAccumLowID() const {
+    if (architecture_) return architecture_->GetAccumLowID();
+    throw HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  virtual int GetAccumHiID() const {
+    if (architecture_) return architecture_->GetAccumHiID();
+    throw HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
  protected:
   explicit Pm4Factory(const BlockInfoMap& map)
@@ -230,14 +269,27 @@ class Pm4Factory {
         spm_builder_(NULL),
         sqtt_builder_(NULL),
         agent_info_(NULL),
+        architecture_(nullptr),
         concurrent_mode_(concurrent_create_mode_),
         block_map_(map) {}
+
+  // Constructor for GFX12/MI450: owns the architecture and derives BlockInfoMap from it.
+  explicit Pm4Factory(HardwareArchitecture* arch)
+      : cmd_builder_(NULL),
+        pmc_builder_(NULL),
+        spm_builder_(NULL),
+        sqtt_builder_(NULL),
+        agent_info_(NULL),
+        architecture_(arch),
+        concurrent_mode_(concurrent_create_mode_),
+        block_map_(arch->GetBlockTable(), arch->GetBlockCount() * sizeof(const GpuBlockInfo*)) {}
 
   virtual ~Pm4Factory() {
     delete cmd_builder_;
     delete pmc_builder_;
     delete spm_builder_;
     delete sqtt_builder_;
+    delete architecture_;
   }
 
   // PM4 command builder
@@ -251,6 +303,8 @@ class Pm4Factory {
   // agent info
   const AgentInfo* agent_info_;
   gpu_id_t gpu_id_;
+  // Architecture metadata (non-null for GFX12/MI450 only; nullptr for legacy GPUs)
+  HardwareArchitecture* architecture_;
   // Concurrent mode
   static bool concurrent_create_mode_;
   static bool spm_kfd_mode_;
@@ -279,8 +333,8 @@ class Pm4Factory {
   static Pm4Factory* Gfx11Create(const AgentInfo* agent_info);
   // Create GFX11.5 factory
   static Pm4Factory* Gfx115xCreate(const AgentInfo* agent_info);
-  // Create GFX12 generic factory
-  static Pm4Factory* Gfx12Create(const AgentInfo* agent_info);
+  // Create GFX1200 factory
+  static Pm4Factory* Gfx1200Create(const AgentInfo* agent_info);
   // Create MI100 factory
   static Pm4Factory* Mi100Create(const AgentInfo* agent_info);
   // Create MI200 factory
@@ -335,7 +389,7 @@ inline Pm4Factory* Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_
         it->second = Gfx115xCreate(agent_info);
         break;
       case GFX12_GPU_ID:
-        it->second = Gfx12Create(agent_info);
+        it->second = Gfx1200Create(agent_info);
         break;
       // Create MI100 generic factory
       case MI100_GPU_ID:

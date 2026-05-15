@@ -20,27 +20,32 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// gfx12_def.h must be pulled in with the gfx1250 variant active before any
-// other header can include it with the default (gfx1200) variant.  In
-// particular, gfx12_cmd_builder.h (via gfx12_factory_base.hpp) transitively
-// includes gfx12_def.h; the include-guard ensures the gfx1200 register
-// headers are never loaded in this translation unit.
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "core/hw/hardware_architecture.hpp"
 #include "def/gpu_block_info.h"
-#define GFX12_VARIANT 0x1250
-#include "def/gfx12_def.h"
-#include "core/hw/mi450_architecture.hpp"
-// gfx12_factory_base.hpp pulls in pm4_factory.h (which includes <assert.h>)
-// before the primitives provider header needs it.
-#include "core/hw/gfx12_factory_base.hpp"
-#include "pm4/gfx12/gfx1250_primitives_provider.hpp"
 
 namespace aql_profile {
 
-Pm4Factory* Pm4Factory::Mi450Create(const AgentInfo* agent_info) {
-  return new Gfx12FactoryBase(new Mi450Architecture(agent_info),
-                              new pm4_builder::Gfx1250PrimitivesProvider(),
-                              agent_info);
+size_t HardwareArchitecture::GetNumEventsForBlock(uint32_t block_id) const {
+  const GpuBlockInfo* block_info = GetBlockInfo(block_id);
+  if (!block_info) return 0;
+
+  const auto& config = GetConfig();
+  size_t se_number = config.GetSEPerXCC();
+  size_t sa_number = config.sa_per_se_count;
+  size_t count = 1;
+
+  if (block_info->attr & CounterBlockSeAttr)
+    count *= se_number;
+  if (block_info->attr & CounterBlockSaAttr)
+    count *= sa_number;
+  if (block_info->attr & CounterBlockWgpAttr)
+    count *= static_cast<size_t>(GetNumWGPs());
+
+  return count;
+}
+
+size_t HardwareArchitecture::GetBytesNeededForBlock(uint32_t block_id) const {
+  return GetNumEventsForBlock(block_id) * GetConfig().xcc_count * sizeof(uint64_t);
 }
 
 }  // namespace aql_profile

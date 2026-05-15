@@ -20,27 +20,24 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// gfx12_def.h must be pulled in with the gfx1250 variant active before any
-// other header can include it with the default (gfx1200) variant.  In
-// particular, gfx12_cmd_builder.h (via gfx12_factory_base.hpp) transitively
-// includes gfx12_def.h; the include-guard ensures the gfx1200 register
-// headers are never loaded in this translation unit.
+#include <cstring>
 #include "aqlprofile-sdk/aql_profile_v2.h"
 #include "def/gpu_block_info.h"
-#define GFX12_VARIANT 0x1250
-#include "def/gfx12_def.h"
-#include "core/hw/mi450_architecture.hpp"
+#include "core/hw/gfx12_architecture.hpp"
 // gfx12_factory_base.hpp pulls in pm4_factory.h (which includes <assert.h>)
 // before the primitives provider header needs it.
 #include "core/hw/gfx12_factory_base.hpp"
-#include "pm4/gfx12/gfx1250_primitives_provider.hpp"
+#include "pm4/gfx12/gfx1200_primitives_provider.hpp"
 
 namespace aql_profile {
 
-Pm4Factory* Pm4Factory::Mi450Create(const AgentInfo* agent_info) {
-  return new Gfx12FactoryBase(new Mi450Architecture(agent_info),
-                              new pm4_builder::Gfx1250PrimitivesProvider(),
-                              agent_info);
+Pm4Factory* Pm4Factory::Gfx1200Create(const AgentInfo* agent_info) {
+  HardwareArchitecture* arch;
+  if (strncmp(agent_info->name, "gfx1201", 7) == 0)
+    arch = new Gfx1201Architecture(agent_info);
+  else
+    arch = new Gfx12Architecture(agent_info);
+  return new Gfx12FactoryBase(arch, new pm4_builder::Gfx1200PrimitivesProvider(), agent_info);
 }
 
 }  // namespace aql_profile

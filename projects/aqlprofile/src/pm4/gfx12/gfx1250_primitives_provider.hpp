@@ -20,27 +20,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// gfx12_def.h must be pulled in with the gfx1250 variant active before any
-// other header can include it with the default (gfx1200) variant.  In
-// particular, gfx12_cmd_builder.h (via gfx12_factory_base.hpp) transitively
-// includes gfx12_def.h; the include-guard ensures the gfx1200 register
-// headers are never loaded in this translation unit.
-#include "aqlprofile-sdk/aql_profile_v2.h"
-#include "def/gpu_block_info.h"
-#define GFX12_VARIANT 0x1250
-#include "def/gfx12_def.h"
-#include "core/hw/mi450_architecture.hpp"
-// gfx12_factory_base.hpp pulls in pm4_factory.h (which includes <assert.h>)
-// before the primitives provider header needs it.
-#include "core/hw/gfx12_factory_base.hpp"
-#include "pm4/gfx12/gfx1250_primitives_provider.hpp"
+#ifndef SRC_PM4_GFX1250_PRIMITIVES_PROVIDER_HPP_
+#define SRC_PM4_GFX1250_PRIMITIVES_PROVIDER_HPP_
 
-namespace aql_profile {
+// gfx1250_def.h brings in the gfx1250 register set and puts
+// gfxip::gfx12::gfx1250::Primitives into scope via using-declarations.
+#include "def/gfx1250_def.h"
+#include "pm4/gfx12/gfx12_primitives_provider_base.hpp"
 
-Pm4Factory* Pm4Factory::Mi450Create(const AgentInfo* agent_info) {
-  return new Gfx12FactoryBase(new Mi450Architecture(agent_info),
-                              new pm4_builder::Gfx1250PrimitivesProvider(),
-                              agent_info);
-}
+namespace pm4_builder {
 
-}  // namespace aql_profile
+class Gfx1250PrimitivesProvider
+    : public Gfx12PrimitivesProviderBase<Primitives> {};
+
+}  // namespace pm4_builder
+
+#endif  // SRC_PM4_GFX1250_PRIMITIVES_PROVIDER_HPP_

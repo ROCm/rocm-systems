@@ -186,7 +186,15 @@ SET(AQLPROFILE_V2_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../navi_reg_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../vega20_reg_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../spm_data.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx12_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../hw/hardware_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../pm4/gfx12/gfx12_cmd_builder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../pm4/gfx12/gfx12_pmc_builder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../pm4/gfx12/gfx12_spm_builder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../pm4/gfx12/gfx12_sqtt_builder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../pm4/gfx12/gfx12_primitives_provider.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../core/hw/gfx12_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../core/hw/mi450_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx1200_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx1250_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx11_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx115x_factory.cpp
