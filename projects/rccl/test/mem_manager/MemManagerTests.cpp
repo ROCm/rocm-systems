@@ -810,7 +810,7 @@ inline void AllocateVmmPosixFd(int dev, size_t requestedSize, VmmPosixAllocation
     prop.type                            = hipMemAllocationTypePinned;
     prop.location.type                   = hipMemLocationTypeDevice;
     prop.location.id                     = dev;
-    prop.requestedHandleTypes            = hipMemHandleTypePosixFileDescriptor;
+    prop.requestedHandleType             = hipMemHandleTypePosixFileDescriptor;
     prop.allocFlags.gpuDirectRDMACapable = 1;
 
     size_t granularity = 0;
