@@ -890,7 +890,10 @@ int GDABackend::backend_can_run() {
   GDAProvider requested = requested_provider();
 
   /* Libnuma ? */
-  if (!numa.is_available()) return ROCSHMEM_ERROR;
+  if (!numa.is_available()) {
+    LOG_WARN("GDA backend unavailable: libnuma support is missing");
+    return ROCSHMEM_ERROR;
+  }
 
   /* Basic verbs? */
   if (!ibv.is_initialized) return ROCSHMEM_ERROR;
