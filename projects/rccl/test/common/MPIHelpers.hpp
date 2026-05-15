@@ -21,6 +21,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <optional>
@@ -256,9 +257,10 @@ struct TestLogAssertionOptions
     int mpi_rank{0};
 
     bool capture_nccl_debug_file{false};
-    /** If capture_nccl_debug_file and empty, auto-path is:
-     *    GTest binary : /tmp/rccl_<Suite>.<Test>_rank<R>.log   (human-readable)
-     *    Standalone   : /tmp/rccl_nccl_rank<R>_pid<P>.log      (pid-based fallback)
+    /** If capture_nccl_debug_file and empty, auto-path is built from getLogBaseDir()
+     *  (priority: RCCL_TEST_LOG_DIR env var → binary directory → /tmp):
+     *    GTest binary : <logdir>/rccl_<Suite>.<Test>_rank<R>_pid<P>.log
+     *    Standalone   : <logdir>/rccl_rank<R>_pid<P>.log
      *  Path is derived from GTest current_test_info() at construction time. */
     std::string nccl_debug_file_path;
     /** When true, the log file is unlinked after a PASSING test.
@@ -326,18 +328,21 @@ TestLogAssertionOptions makeCombinedAssertionLogOptions(int mpi_rank);
 /**
  * @brief Return the effective value of a numeric NCCL env var (mirrors NCCL_PARAM semantics).
  * @param name        Env var name (e.g. "NCCL_CTA_POLICY").
- * @param ncclDefault NCCL compiled-in default (returned when the var is unset).
+ * @param ncclDefault NCCL compiled-in default (returned when the var is unset or empty).
+ *
+ * Mirrors ncclLoadParam behaviour: uses base 0 so that "0x10" parses as 16, "010" as 8, etc.
+ * An empty string is treated as unset (returns ncclDefault), consistent with RCCL's param code.
  */
 template<typename T>
 inline T getEnvParam(const char* name, T ncclDefault)
 {
     static_assert(std::is_integral_v<T>, "getEnvParam: T must be an integer type");
     const char* v = std::getenv(name);
-    if(!v) return ncclDefault;
+    if(!v || v[0] == '\0') return ncclDefault;
     if constexpr(std::is_unsigned_v<T>)
-        return static_cast<T>(std::strtoull(v, nullptr, 10));
+        return static_cast<T>(std::strtoull(v, nullptr, 0));
     else
-        return static_cast<T>(std::strtoll(v, nullptr, 10));
+        return static_cast<T>(std::strtoll(v, nullptr, 0));
 }
 
 /** RAII scoped set/restore of a single env var; restores (or unsets) on destruction.

@@ -23,13 +23,11 @@
     #include <sstream>
     #include <sys/stat.h>
     #include <unistd.h>
-    // GTest is available when building test binaries; standalone MPI binaries
-    // (benchmarks, performance tests) do not link against it.  __has_include
-    // lets us use GTest's current_test_info() when present and fall back to a
-    // pid-based log path when building without GTest.
-    #if __has_include(<gtest/gtest.h>)
+    // RCCL_MPIHelpers_HAS_GTEST is set by the build system (CMakeLists.txt) for
+    // targets that actually link against GTest, so this guard is guaranteed to
+    // match the link graph rather than relying on header presence alone.
+    #if defined(RCCL_MPIHelpers_HAS_GTEST)
         #include <gtest/gtest.h>
-        #define RCCL_MPIHelpers_HAS_GTEST 1
     #endif
 
     // resetNcclDebugFile() calls ncclResetDebugInit() via dlsym so that we
@@ -73,7 +71,8 @@ namespace
     //   1. RCCL_TEST_LOG_DIR env var — explicit override, useful in CI.
     //   2. Directory of the test binary (/proc/self/exe) — ties logs to the
     //      specific build that produced them; different builds never share logs.
-    //   3. /tmp — last-resort fallback if both above are unavailable.
+    //      Skipped if not writable (e.g. system-installed or read-only prefix).
+    //   3. /tmp — last-resort fallback.
     std::string getLogBaseDir()
     {
         const char* env = std::getenv("RCCL_TEST_LOG_DIR");
@@ -89,7 +88,9 @@ namespace
             if(slash)
             {
                 *slash = '\0';
-                return std::string{buf};
+                if(::access(buf, W_OK) == 0)
+                    return std::string{buf};
+                // Binary dir is not writable; fall through to /tmp.
             }
         }
 
@@ -621,45 +622,16 @@ TestLogAssertionContext::~TestLogAssertionContext()
     if(capture_nccl_ && !nccl_path_.empty())
     {
         // ---------------------------------------------------------------
-        // Prepend a one-line header to the log file so it is
-        // self-identifying regardless of whether the name is human-readable
-        // (GTest path) or opaque (pid-based standalone path).
-        //
-        // The header is written here (destructor) rather than in the
-        // constructor because NCCL opens the file with fopen("w") on its
-        // first lazy-init log call, which would truncate anything written
-        // earlier.  By writing in the destructor — after the communicator
-        // has already been torn down and fflush(nullptr) has drained NCCL's
-        // internal buffer — the file is complete and safe to rewrite.
+        // Decide whether this log will be kept or deleted BEFORE doing
+        // any file I/O: large NCCL_DEBUG=INFO logs on passing tests would
+        // otherwise add avoidable teardown I/O and rank skew if we read
+        // and rewrite a file we are about to delete.
         // ---------------------------------------------------------------
-        const std::string content = readTextFile(nccl_path_);
-        if(!content.empty())
-        {
-            std::ostringstream header;
-            header << "=== RCCL Test Log"
-                   << " | Test: "  << test_label_
-                   << " | Rank: "  << opts_.mpi_rank
-                   << " | PID: "   << ::getpid()
-                   << " ===\n";
-            const std::string hdr = header.str();
 
-            if(FILE* f = std::fopen(nccl_path_.c_str(), "w"))
-            {
-                std::fwrite(hdr.c_str(),     1, hdr.size(),     f);
-                std::fwrite(content.c_str(), 1, content.size(), f);
-                std::fclose(f);
-            }
-        }
-
-        // ---------------------------------------------------------------
-        // Keep the log when the test FAILED (so it is available
-        // for post-mortem inspection); delete it when the test PASSED to
-        // avoid accumulating noise in /tmp.
-        //
-        // Override: set RCCL_KEEP_TEST_LOGS=1 to keep ALL logs regardless
-        // of pass/fail — useful when stepping through a test run manually.
-        // ---------------------------------------------------------------
-        const bool keep_all = (std::getenv("RCCL_KEEP_TEST_LOGS") != nullptr);
+        // Treat RCCL_KEEP_TEST_LOGS=0 (or empty) as "don't keep"; any other
+        // non-empty value (typically "1") activates unconditional retention.
+        const char* keep_env = std::getenv("RCCL_KEEP_TEST_LOGS");
+        const bool  keep_all = keep_env && keep_env[0] != '\0' && keep_env[0] != '0';
 
         bool test_passed = false; // conservative default: keep when uncertain
 #if defined(RCCL_MPIHelpers_HAS_GTEST)
@@ -678,7 +650,42 @@ TestLogAssertionContext::~TestLogAssertionContext()
                   || (!auto_nccl_path_ && opts_.unlink_explicit_nccl_path));
 
         if(unlink_it)
+        {
             (void)::unlink(nccl_path_.c_str());
+        }
+        else
+        {
+            // ---------------------------------------------------------------
+            // Prepend a one-line header to the log file so it is
+            // self-identifying regardless of whether the name is human-readable
+            // (GTest path) or opaque (pid-based standalone path).
+            //
+            // The header is written here (destructor) rather than in the
+            // constructor because NCCL opens the file with fopen("w") on its
+            // first lazy-init log call, which would truncate anything written
+            // earlier.  By writing in the destructor — after the communicator
+            // has already been torn down and fflush(nullptr) has drained NCCL's
+            // internal buffer — the file is complete and safe to rewrite.
+            // ---------------------------------------------------------------
+            const std::string content = readTextFile(nccl_path_);
+            if(!content.empty())
+            {
+                std::ostringstream header;
+                header << "=== RCCL Test Log"
+                       << " | Test: "  << test_label_
+                       << " | Rank: "  << opts_.mpi_rank
+                       << " | PID: "   << ::getpid()
+                       << " ===\n";
+                const std::string hdr = header.str();
+
+                if(FILE* f = std::fopen(nccl_path_.c_str(), "w"))
+                {
+                    std::fwrite(hdr.c_str(),     1, hdr.size(),     f);
+                    std::fwrite(content.c_str(), 1, content.size(), f);
+                    std::fclose(f);
+                }
+            }
+        }
     }
 }
 
