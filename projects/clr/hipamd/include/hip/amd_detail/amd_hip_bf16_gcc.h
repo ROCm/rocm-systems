@@ -76,6 +76,7 @@ static inline float __hip_bfloat_to_float(__hip_bfloat16_raw br) {
 // Fwd decls
 struct __hip_bfloat16;
 MAYBE_UNUSED static __hip_bfloat16 __float2bfloat16(const float in);
+MAYBE_UNUSED static float __bfloat162float(__hip_bfloat16 a);
 
 #if defined(__cplusplus)
 struct ALIGN_IT(2) __hip_bfloat16 {
@@ -99,7 +100,7 @@ struct ALIGN_IT(2) __hip_bfloat16 {
 
 
   operator __hip_bfloat16_raw() const { return __hip_bfloat16_raw{__x}; }
-  operator float() const { return __hip_bfloat_to_float(__hip_bfloat16_raw{__x}); }
+  operator float() const { return __bfloat162float(__hip_bfloat16_raw{__x}); }
 };
 
 struct ALIGN_IT(4) __hip_bfloat162 {
@@ -125,6 +126,10 @@ struct ALIGN_IT(4) __hip_bfloat162 {
 
 MAYBE_UNUSED static inline __hip_bfloat16 __float2bfloat16(const float in) {
   return __hip_float_to_bfloat_cvt(in);
+}
+
+MAYBE_UNUSED static inline float __bfloat162float(__hip_bfloat16 a) {
+  return __hip_bfloat_to_float(a);
 }
 #endif  // __cplusplus
 
