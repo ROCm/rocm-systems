@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "defines.hpp"
+#include "common/defines.h"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
 
 #if defined(TIMEMORY_PERFETTO_CATEGORIES)
@@ -117,6 +117,8 @@ ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_link_speed, ROCPROFSYS_CATEGOR
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_bandwidth_acc, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_BANDWIDTH_ACC, "device_pcie_bandwidth_acc", "PCIe Bandwidth Accumulated")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_bandwidth_inst, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_BANDWIDTH_INST, "device_pcie_bandwidth_inst", "PCIe Bandwidth Instantaneous")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_sdma_usage, ROCPROFSYS_CATEGORY_AMD_SMI_SDMA_USAGE, "device_sdma_usage", "SDMA Utilization percentage of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_gfx_clock, ROCPROFSYS_CATEGORY_AMD_SMI_GFX_CLOCK, "device_gfx_clock", "GFX clock frequency of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_mem_clock, ROCPROFSYS_CATEGORY_AMD_SMI_MEM_CLOCK, "device_mem_clock", "Memory clock frequency of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl, ROCPROFSYS_CATEGORY_ROCM_RCCL, "rccl", "ROCm Communication Collectives Library (RCCL) regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, pthread, ROCPROFSYS_CATEGORY_PTHREAD, "pthread", "POSIX threading functions")
 ROCPROFSYS_DEFINE_CATEGORY(category, kokkos, ROCPROFSYS_CATEGORY_KOKKOS, "kokkos", "KokkosTools regions")
@@ -127,6 +129,7 @@ ROCPROFSYS_DEFINE_CATEGORY(category, process_sampling, ROCPROFSYS_CATEGORY_PROCE
 ROCPROFSYS_DEFINE_CATEGORY(category, comm_data, ROCPROFSYS_CATEGORY_COMM_DATA, "comm_data", "MPI/RCCL/UCX counters for tracking amount of data sent or received")
 ROCPROFSYS_DEFINE_CATEGORY(category, causal, ROCPROFSYS_CATEGORY_CAUSAL, "causal", "Causal profiling data")
 ROCPROFSYS_DEFINE_CATEGORY(category, cpu_freq, ROCPROFSYS_CATEGORY_CPU_FREQ, "cpu_frequency", "CPU frequency (collected in background thread)")
+ROCPROFSYS_DEFINE_CATEGORY(category, cpu_load, ROCPROFSYS_CATEGORY_CPU_LOAD, "cpu_load", "CPU load percentage (collected in background thread)")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_page, ROCPROFSYS_CATEGORY_PROCESS_PAGE, "process_physical_memory", "Physical memory usage (RSS) in process in MB (collected in background thread)")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_virt, ROCPROFSYS_CATEGORY_PROCESS_VIRT, "process_virtual_memory", "Virtual memory usage in process in MB (collected in background thread)")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_peak, ROCPROFSYS_CATEGORY_PROCESS_PEAK, "process_memory_hwm", "Memory High-Water Mark i.e. peak memory usage (collected in background thread)")
@@ -213,6 +216,8 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_bandwidth_acc),              \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_bandwidth_inst),             \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_sdma_usage),                      \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_gfx_clock),                       \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_mem_clock),                       \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl),                               \
         ROCPROFSYS_PERFETTO_CATEGORY(category::pthread),                                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::kokkos),                                  \
@@ -224,6 +229,7 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::comm_data),                               \
         ROCPROFSYS_PERFETTO_CATEGORY(category::causal),                                  \
         ROCPROFSYS_PERFETTO_CATEGORY(category::cpu_freq),                                \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::cpu_load),                                \
         ROCPROFSYS_PERFETTO_CATEGORY(category::process_page),                            \
         ROCPROFSYS_PERFETTO_CATEGORY(category::process_virt),                            \
         ROCPROFSYS_PERFETTO_CATEGORY(category::process_peak),                            \

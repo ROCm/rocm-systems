@@ -19,9 +19,9 @@ struct version
 {
     struct
     {
-        uint32_t major   = 0;
-        uint32_t minor   = 0;
-        uint32_t release = 0;
+        std::uint32_t major   = 0;
+        std::uint32_t minor   = 0;
+        std::uint32_t release = 0;
     } numeric_representation;
     std::string string_representation;
 };
@@ -29,7 +29,7 @@ struct version
 /**
  * @brief Device type for provider enumeration.
  */
-enum class device_type : uint8_t
+enum class device_type : std::uint8_t
 {
     GPU,  ///< GPU device
     NIC   ///< Network interface device
@@ -38,7 +38,7 @@ enum class device_type : uint8_t
 /**
  * @brief Device selection mode for filtering devices.
  */
-enum class device_selection_mode : uint8_t
+enum class device_selection_mode : std::uint8_t
 {
     ALL,      ///< Include all devices
     NONE,     ///< Exclude all devices

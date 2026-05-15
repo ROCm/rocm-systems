@@ -514,10 +514,18 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
 
     if (has_work) {
       core::Agent* copy_agent = nullptr;
-      if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST || is_multi) {
+      if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST ||
+          (is_multi && op.type != HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP)) {
         if (src_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice)
           return HSA_STATUS_ERROR_INVALID_AGENT;
         copy_agent = src_agent;
+      } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP && is_multi) {
+        // Swap: pick the GPU agent, same as DmaCopy does.
+        // Multi-entry swap has no single dst_agent, use dst_agent_list[0].
+        const bool src_gpu =
+            (src_agent->device_type() == core::Agent::DeviceType::kAmdGpuDevice);
+        copy_agent = src_gpu ? src_agent
+                             : core::Agent::Convert(op.dst_agent_list[0]);
       } else {
         core::Agent* eff_dst = rev_copy_dir ? src_agent : dst_agent;
         core::Agent* eff_src = rev_copy_dir ? dst_agent : src_agent;

@@ -22,6 +22,7 @@ CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION)
            -std=c++17 \
            -Wl,--gc-sections -fgpu-rdc \
            -Iinclude -Itest -Ihipify_rccl/include -Ihipify_rccl/include/plugin \
+		   -Ihipify_rccl/include/nccl_device \
            -Ihipify_rccl/src/device/include -Ihipify_rccl/graph -I/opt/rocm/include/ \
            -DTOPO_EXPL -DENABLE_TRACE -DENABLE_LL128 -DNVTX_NO_IMPL -DRCCL_EXPOSE_STATIC \
            -lpthread

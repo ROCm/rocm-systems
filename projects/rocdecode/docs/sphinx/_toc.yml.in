@@ -64,6 +64,8 @@ subtrees:
         title: FFMpeg decoder class
   - file: reference/rocDecode-logging-control.rst
     title: Logging levels 
+  - file: reference/rocDecode-env-vars.rst
+    title: Environment variables
   - file: reference/rocDecode-formats-and-architectures.rst
     title: rocDecode supported codecs and architectures
   - file: doxygen/html/files

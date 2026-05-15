@@ -78,7 +78,7 @@ streamperthread:
     tags: [stream]
   Unit_hipGetProcAddress_spt_Memcpy2D:
     <<: *level_2
-    tags: [stream]
+    tags: [stream, image]
   Unit_hipGetProcAddress_spt_Memcpy3D:
     <<: *level_2
     tags: [stream]

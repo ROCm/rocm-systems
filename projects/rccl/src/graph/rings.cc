@@ -6,6 +6,11 @@
 
 #include "core.h"
 
+#include <stdio.h>      
+#include <stdlib.h>     
+#include <stdint.h>    
+#include <string.h> 
+
 void dumpLine(int* values, int nranks, const char* prefix) {
   constexpr int line_length = 128;
   char line[line_length];
@@ -60,4 +65,109 @@ ncclResult_t ncclBuildRings(int nrings, int* rings, int rank, int nranks, int* p
     }
   }
   return ncclSuccess;
+}
+
+/**
+ * rcclBuildRings: Functionally same as ncclBuildRings, Linearizes linked-list neighbor pointers into a rank array.
+ * This function converts 'next' and 'prev' adjacency arrays into a flat list 
+ * of ranks (a ring) for each communication channel.
+ *
+ * PRE-CONDITIONS & ASSUMPTIONS:
+ * 1. Global Connectivity: It assumes that 'next' and 'prev' arrays represent 
+ * a complete graph of all 'nranks' global participants.
+ * 2. Array Sizing: 
+ * - 'rings' must be allocated to at least (nrings * nranks * sizeof(int)).
+ * - 'prev' and 'next' must be (nrings * nranks) in size.
+ * 3. Identity: 'rank' must be the global rank of the local process, and 
+ * 0 <= rank < nranks.
+ * 4. Path Discovery: It assumes the caller has already performed topology search 
+ * to populate 'next' and 'prev' such that they form a Hamiltonian cycle.
+ *
+ * DESCRIPTION:
+ * - Loop-back: Ensures the ring returns to the starting rank after exactly 'nranks' steps.
+ * - Full Coverage: Ensures no rank is skipped or duplicated (O(N) check).
+ * - Bi-directional: Verifies that 'prev' and 'next' are perfect mirrors.
+ * - O( nRings * nRanks ) Algorithmic complexity 
+ */
+ncclResult_t rcclBuildRings(int nrings, int* rings, int rank, int nranks, int* prev, int* next) {
+  // Use a stack-allocated buffer for O(N) validation.
+  // If nranks > 1024, consider using malloc/free
+  if( (nrings < 0) || (rank < 0) ||  (nranks < 0) || ( rings == NULL) || (prev == NULL) || (next == NULL)) return ncclInvalidArgument;
+  ncclResult_t res = ncclSuccess;
+  uint8_t* found = (uint8_t*)malloc(nranks * sizeof(uint8_t));
+  if (found == NULL) return ncclInternalError;
+
+  for (int r = 0; r < nrings; r++) {
+    int* current_ring = rings + (r * nranks);
+    int* current_next = next + (r * nranks);
+    int* current_prev = prev + (r * nranks);
+
+    int current = rank;
+    // Initilize to not found
+    memset(found, 0, nranks * sizeof(uint8_t));
+
+    for (int i = 0; i < nranks; i++) {
+      // Safety: Check for out-of-bounds rank pointers
+      if (current < 0 || current >= nranks) {
+        WARN("Ring %d: Found invalid rank index %d", r, current);
+        res = ncclInternalError;
+        goto exit;
+      }
+
+      // Check for sub-loops/cycles before we finish (Safety check)
+      if (found[current] == 1) {
+        WARN("Ring %d: Unexpected sub-loop detected at rank %d", r, current);
+        res = ncclInternalError;
+        goto exit;
+      }
+
+      current_ring[i] = current;
+      found[current] = 1;
+
+      // --- The Consistency Check ---
+      int next_rank = current_next[current];
+      if (next_rank >= 0 && next_rank < nranks) {
+        // Verify that if I think 'next_rank' is my next, 
+        // 'next_rank' must think I am its previous.
+        if (current_prev[next_rank] != current) {
+          WARN("Ring %d: Asymmetric link! Rank %d -> %d, but %d -> %d", 
+               r, current, next_rank, next_rank, current_prev[next_rank]);
+          res = ncclInternalError;
+          goto exit;
+        }
+      } else {
+        WARN("Ring %d: Rank %d pointed to invalid next_rank %d", r, current, next_rank);
+        res = ncclInternalError;
+        goto exit;
+      }
+
+      current = next_rank;
+    }
+
+    // Assumptions check
+    if (rank == 0) {
+      char prefix[40];
+      snprintf(prefix, sizeof(prefix), "Channel %02d/%02d :", r, nrings);
+      dumpLine(rings + r * nranks, nranks, prefix);
+    }
+
+    // 1. Must close the loop
+    if (current != rank) {
+      WARN("Ring %d: Failed to loop back. Ended at %d instead of %d", r, current, rank);
+      res = ncclInternalError;
+      goto exit;
+    }
+
+    // 2. Must visit every rank (already partially checked by sub-loop check)
+    for (int i = 0; i < nranks; i++) {
+      if (found[i] == 0) {
+        WARN("Ring %d: Incomplete. Rank %d is missing.", r, i);
+        res = ncclInternalError;
+        goto exit;
+      }
+    }
+  }
+exit:
+  if(found) free(found);
+  return res;
 }

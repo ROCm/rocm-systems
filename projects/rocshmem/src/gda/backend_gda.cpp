@@ -124,6 +124,12 @@ void GDABackend::init() {
 
   setup_ipc();
 
+  /*
+   * setup_team_shared() must follow setup_ipc() because it uses
+   * ipcImpl.pes_with_ipc_avail to determine shared-memory membership.
+   */
+  setup_team_shared();
+
   setup_ibv();
   setup_heap_memory_rkey();
   setup_gpu_qps();
@@ -136,8 +142,15 @@ GDABackend::~GDABackend() {
   cleanup_ctxs();
 
   cleanup_teams();
-  auto *team_world{team_tracker.get_team_world()};
-  team_world->~Team();
+
+  auto *team_shared{static_cast<GDATeam*>(team_tracker.get_team_shared())};
+  if (team_shared) {
+    team_shared->~GDATeam();
+    CHECK_HIP(hipFree(team_shared));
+  }
+
+  auto *team_world{static_cast<GDATeam*>(team_tracker.get_team_world())};
+  team_world->~GDATeam();
   CHECK_HIP(hipFree(team_world));
 
   cleanup_wrk_sync_buffer();
@@ -266,7 +279,7 @@ void GDABackend::setup_host_ctx() {
 
 void GDABackend::setup_default_ctx() {
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
-  default_context_proxy_ = GDADefaultContextProxyT(this, tinfo, gda_provider);
+  default_context_proxy_ = GDADefaultContextProxy(this, tinfo, gda_provider);
 }
 
 void GDABackend::log_ctx_nics([[maybe_unused]] unsigned int ctx_id,
@@ -381,6 +394,63 @@ void GDABackend::setup_team_world() {
   set_team_world_device(host::ROCSHMEM_TEAM_WORLD);
 }
 
+void GDABackend::setup_team_shared() {
+#if defined(USE_IPC)
+  if (ipcImpl.pes_with_ipc_avail == nullptr) {
+    host::ROCSHMEM_TEAM_SHARED = ROCSHMEM_TEAM_INVALID;
+    set_team_shared_device(ROCSHMEM_TEAM_INVALID);
+    return;
+  }
+
+  int shm_size = ipcImpl.shm_size;
+  int shm_rank = ipcImpl.shm_rank;
+
+  /*
+   * Determine pe_start/stride from the IPC PE list. The list is on
+   * device memory, so copy it to host for inspection.
+   */
+  std::vector<int> team_shared_pes(shm_size);
+  CHECK_HIP(hipMemcpy(team_shared_pes.data(), ipcImpl.pes_with_ipc_avail,
+                       shm_size * sizeof(int), hipMemcpyDeviceToHost));
+
+  int pe_start = team_shared_pes[0];
+  int stride = (shm_size > 1) ? (team_shared_pes[1] - team_shared_pes[0]) : 1;
+  bool uniform = (stride > 0);
+  for (int i = 2; i < shm_size && uniform; i++) {
+    if (team_shared_pes[i] - team_shared_pes[i - 1] != stride) {
+      uniform = false;
+    }
+  }
+
+  if (!uniform) {
+    /*
+     * Node-local ranks are not uniformly strided, so TEAM_SHARED
+     * cannot be represented with pe_start/stride. Mark it invalid
+     * since context-based operations rely on the strided formula.
+     */
+    host::ROCSHMEM_TEAM_SHARED = ROCSHMEM_TEAM_INVALID;
+    set_team_shared_device(ROCSHMEM_TEAM_INVALID);
+    return;
+  }
+
+  TeamInfo team_info_wrt_parent(nullptr, 0, 1, shm_size);
+  TeamInfo team_info_wrt_world(nullptr, pe_start, stride, shm_size);
+
+  GDATeam *team_shared{nullptr};
+  CHECK_HIP(hipMalloc(&team_shared, sizeof(GDATeam)));
+  new (team_shared) GDATeam(this, team_info_wrt_parent, team_info_wrt_world,
+                             shm_size, shm_rank, MPI_COMM_NULL, 1);
+
+  team_tracker.set_team_shared(team_shared);
+
+  host::ROCSHMEM_TEAM_SHARED = reinterpret_cast<rocshmem_team_t>(team_shared);
+  set_team_shared_device(host::ROCSHMEM_TEAM_SHARED);
+#else
+  host::ROCSHMEM_TEAM_SHARED = ROCSHMEM_TEAM_INVALID;
+  set_team_shared_device(ROCSHMEM_TEAM_INVALID);
+#endif
+}
+
 void GDABackend::team_destroy(rocshmem_team_t team) {
   GDATeam *team_obj = get_internal_gda_team(team);
 
@@ -407,24 +477,25 @@ void GDABackend::Alltoall_char_inplace (char *inoutbuf, size_t num_bytes, rocshm
 
 //TODO: factorize somewhere else, maybe backend_bc?
 void GDABackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes,
-                                      Team *team) {
+                                      const TeamInfo& new_team_info_wrt_world,
+                                      int num_pes, int my_pe_in_new_team) {
 
   // Implement an Allreduce outside of MPI. This is specialized for the scenario
   // required for the team creation, i.e. assuming bytes and using BAND operation.
   // Implementation uses an Allgather operation followed a local reduction.
-
-  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
-  int num_pes = team_obj->num_pes;
-  std::vector<int> pes_in_world;
+  // Note: Only PEs in the new team call this function.
 
   char *tmp_buffer = new char[num_pes * num_bytes];
   std::memset(tmp_buffer, 0, num_pes * num_bytes);
-  std::memcpy(&tmp_buffer[my_pe * num_bytes], inbuf, num_bytes);
+  std::memcpy(&tmp_buffer[my_pe_in_new_team * num_bytes], inbuf, num_bytes);
 
+  // Build a vector of world ranks for the new team
+  std::vector<int> world_ranks;
+  world_ranks.reserve(num_pes);
   for (int i = 0; i < num_pes; i++) {
-    pes_in_world.push_back(team_obj->get_pe_in_world(i));
+    world_ranks.push_back(new_team_info_wrt_world.pe_start + i * new_team_info_wrt_world.stride);
   }
-  backend_bootstr->groupAllGather(tmp_buffer, num_bytes, pes_in_world);
+  backend_bootstr->groupAllGather(tmp_buffer, num_bytes, world_ranks);
 
   for (size_t i = 0; i < num_bytes; i++) {
     outbuf[i] = tmp_buffer[i];
@@ -440,17 +511,18 @@ void GDABackend::create_new_team([[maybe_unused]] Team *parent_team,
                                 const TeamInfo& team_info_wrt_parent,
                                 const TeamInfo& team_info_wrt_world,
                                 int num_pes, int my_pe_in_new_team,
-                                MPI_Comm team_comm,
+                                MPI_Comm new_team_comm,
                                 rocshmem_team_t *new_team) {
   /**
    * Read the bit mask and find out a common index into
    * the pool of available work arrays.
    */
-  if (team_comm != MPI_COMM_NULL) {
+  if (new_team_comm != MPI_COMM_NULL) {
     NET_CHECK(mpilib_ftable_.Allreduce(team_pool_bitmask_, team_reduced_bitmask_, team_bitmask_size_,
-                            MPI_CHAR, MPI_BAND, team_comm));
+                            MPI_CHAR, MPI_BAND, new_team_comm));
   } else {
-    Allreduce_char_BAND (team_pool_bitmask_, team_reduced_bitmask_, team_bitmask_size_, parent_team);
+    Allreduce_char_BAND (team_pool_bitmask_, team_reduced_bitmask_, team_bitmask_size_,
+                         team_info_wrt_world, num_pes, my_pe_in_new_team);
   }
 
   /* Pick the least significant non-zero bit (logical layout) in the reduced
@@ -475,7 +547,7 @@ void GDABackend::create_new_team([[maybe_unused]] Team *parent_team,
   CHECK_HIP(hipMalloc(&new_team_obj, sizeof(GDATeam)));
   new (new_team_obj)
       GDATeam(this, team_info_wrt_parent, team_info_wrt_world, num_pes,
-                my_pe_in_new_team, team_comm, common_index);
+                my_pe_in_new_team, new_team_comm, common_index);
 
   *new_team = get_external_team(new_team_obj);
 }
@@ -493,6 +565,17 @@ GDAHostContext *get_internal_gda_net_ctx(Context *ctx) {
 void GDABackend::ctx_destroy(Context *ctx) {
   GDAHostContext *gda_host_ctx{get_internal_gda_net_ctx(ctx)};
   delete gda_host_ctx;
+}
+
+int GDABackend::buffer_register([[maybe_unused]] void *addr,
+                                [[maybe_unused]] size_t length) {
+  LOG_ERROR("GDABackend::buffer_register not supported");
+  return ROCSHMEM_ERROR;
+}
+
+int GDABackend::buffer_unregister([[maybe_unused]] void *addr) {
+  LOG_ERROR("GDABackend::buffer_unregister not supported");
+  return ROCSHMEM_ERROR;
 }
 
 void GDABackend::reset_backend_stats() {
@@ -665,8 +748,8 @@ void GDABackend::setup_teams() {
 
   memset(team_pool_bitmask_, 0, team_bitmask_size_);
   memset(team_reduced_bitmask_, 0, team_bitmask_size_);
-  /* Set all to available except the 0th one (reserved for TEAM_WORLD) */
-  for (int bit_i = 1; bit_i < max_num_teams; bit_i++) {
+  /* Set all to available except reserved teams (TEAM_WORLD and TEAM_SHARED) */
+  for (int bit_i = TeamTracker::NUM_RESERVED_TEAMS; bit_i < max_num_teams; bit_i++) {
     int byte_i = bit_i / CHAR_BIT;
     team_pool_bitmask_[byte_i] |= 1 << (bit_i % CHAR_BIT);
   }

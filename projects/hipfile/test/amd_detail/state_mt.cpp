@@ -399,7 +399,7 @@ main()
         cerr << "RLIMIT_NOFILE (ulimit -n) is to low" << endl;
         exit(EXIT_FAILURE);
     }
-    n_free_files = (nofile.rlim_cur - n_file_reserved) / n_fds_per_registered_file;
+    n_free_files = (nofile.rlim_cur - n_file_reserved) / n_fds_per_registered_file - 2 * N_THREADS;
 
     array<thread, N_THREADS> threads;
 

@@ -290,7 +290,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
 
 __device__ void QueuePair::bnxt_post_wqe_rma(int32_t length,
     uintptr_t laddr, uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
-  if (wf_info.is_pe_group_leader) {
+  if (wf_info.is_pe_group_first) {
     lock(&bnxt_sq.lock);
   }
 
@@ -304,7 +304,7 @@ __device__ void QueuePair::bnxt_post_wqe_rma(int32_t length,
     }
   }
 
-  if (wf_info.is_pe_group_leader) {
+  if (wf_info.is_pe_group_first) {
     unlock(&bnxt_sq.lock);
   }
 }
@@ -391,7 +391,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr,
     ActiveWFInfo &wf_info) {
   uint32_t atomic_idx = 0;
 
-    if (wf_info.is_pe_group_leader) {
+    if (wf_info.is_pe_group_first) {
     lock(&bnxt_sq.lock);
   }
 
@@ -404,7 +404,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr,
     }
   }
 
-  if (wf_info.is_pe_group_leader) {
+  if (wf_info.is_pe_group_first) {
     unlock(&bnxt_sq.lock);
   }
 

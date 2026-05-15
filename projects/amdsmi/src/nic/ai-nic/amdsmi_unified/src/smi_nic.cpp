@@ -519,21 +519,25 @@ std::optional<std::string> SmiNic::perm_address() const {
   }
 
   const std::string& port_iface = ports_[0].interface();
-  struct ethtool_perm_addr permaddr;
-  permaddr.cmd = ETHTOOL_GPERMADDR;
-  permaddr.size = 6;
+  constexpr size_t addr_len = 6;
+  // ethtool_perm_addr has a flexible array member data[], so we must
+  // allocate extra space beyond the struct header for the address bytes.
+  std::vector<uint8_t> buf(sizeof(struct ethtool_perm_addr) + addr_len, 0);
+  auto* permaddr = reinterpret_cast<struct ethtool_perm_addr*>(buf.data());
+  permaddr->cmd = ETHTOOL_GPERMADDR;
+  permaddr->size = addr_len;
 
-  int ret = smi_ethtool_ioctl(port_iface, &permaddr);
+  int ret = smi_ethtool_ioctl(port_iface, permaddr);
   if (ret != 0) {
     return std::nullopt;
   }
 
-  if (permaddr.size == 6) {
+  if (permaddr->size == addr_len) {
     std::stringstream ss;
     ss << std::hex << std::setfill('0');
-    for (int i = 0; i < 6; i++) {
+    for (size_t i = 0; i < addr_len; i++) {
       if (i > 0) ss << ":";
-      ss << std::setw(2) << static_cast<unsigned int>(permaddr.data[i]);
+      ss << std::setw(2) << static_cast<unsigned int>(permaddr->data[i]);
     }
     return ss.str();
   }

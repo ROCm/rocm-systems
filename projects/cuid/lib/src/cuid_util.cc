@@ -159,6 +159,31 @@ CuidUtilities::bdf_to_device_path(const std::string &bdf,
       }
       closedir(dir);
     }
+  } else if (device_type == AMDCUID_DEVICE_TYPE_NPU) {
+    subsystem_dir = pci_device_path + "/accel";
+    DIR *dir = opendir(subsystem_dir.c_str());
+    if (dir) {
+      struct dirent *entry;
+      while ((entry = readdir(dir)) != nullptr) {
+        // Skip . and ..
+        if (entry->d_name[0] == '.')
+          continue;
+        // Match accelN entries
+        if (strncmp(entry->d_name, "accel", 5) == 0 &&
+            isdigit(entry->d_name[5])) {
+          std::string device_path =
+              "/sys/class/accel/" + std::string(entry->d_name) + "/device";
+          closedir(dir);
+          return device_path;
+        }
+      }
+      closedir(dir);
+    }
+    // Fallback: when /sys/class/accel/ is not populated (e.g., amdxdna
+    // driver not loaded), return the PCI device path itself if it exists.
+    if (access(pci_device_path.c_str(), F_OK) == 0) {
+      return pci_device_path;
+    }
   }
 
   return "";
@@ -615,6 +640,8 @@ std::string CuidUtilities::device_type_to_string(amdcuid_device_type_t type) {
     return "GPU";
   case AMDCUID_DEVICE_TYPE_NIC:
     return "NIC";
+  case AMDCUID_DEVICE_TYPE_NPU:
+    return "NPU";
   default:
     return "UNKNOWN";
   }

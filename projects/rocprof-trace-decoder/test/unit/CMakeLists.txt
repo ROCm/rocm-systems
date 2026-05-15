@@ -38,7 +38,8 @@ set(TEST_FILES
     gfx11_test.cpp
     gfx12_test.cpp
     token_stream_test.cpp
-    sqttparser_test.cpp)
+    sqttparser_test.cpp
+    mi400_test.cpp)
 
 # Function to create a test executable with specific sanitizer options Re-list library sources for sanitizer builds
 # (must be recompiled with sanitizer flags)
@@ -53,7 +54,8 @@ file(
     ${SRC_DIR}/gfx9/*.cpp
     ${SRC_DIR}/gfx10/*.cpp
     ${SRC_DIR}/gfx11/*.cpp
-    ${SRC_DIR}/gfx12/*.cpp)
+    ${SRC_DIR}/gfx12/*.cpp
+    ${SRC_DIR}/mi400/*.cpp)
 
 function(add_unit_test_executable TARGET_NAME SANITIZER_TYPE)
     if(SANITIZER_TYPE STREQUAL "regular")

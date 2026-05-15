@@ -2,7 +2,7 @@
 
 ## Quick Install Guide
 
-hipFile depends on ROCm 7.2. Install ROCm and amdgpu-dkms, as described in the [ROCm quick start installation guide](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html).
+hipFile depends on ROCm 7.2.x or greater. TheRock technology preview releases (e.g. 7.9) may not be based on the 7.2 release and may not support hipFile. Install ROCm and amdgpu-dkms, as described in the [ROCm quick start installation guide](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html).
 
 On Ubuntu 24.04, the installation process is as follows. First, install a couple of needed packages.
 
@@ -100,10 +100,11 @@ sudo systemctl reboot
 #### Build Tools
 * CMake >= 3.21
 * C++ >= 17 (tested w/ clang++ & g++, we don't use GNU extensions)
-* The `ais-check` script requires Python 3.x
+* The `ais-check` tool requires Python >= 3.6
+* The hipFile Python bindings require Python >= 3.10
 
 #### AMD Components
-* ROCm >= 7.2
+* ROCm >= 7.2.x
     * `hip-dev` (Debian/Ubuntu)
     * `hip-devel` (RHEL/Fedora/openSUSE)
 * amdgpu-dkms >= 30.20.1

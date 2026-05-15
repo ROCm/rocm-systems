@@ -91,7 +91,7 @@ The behaviors of ``rocJpegDecode()`` and ``rocJpegDecodeBatched()`` depend on ``
 .. csv-table::
   :header: "Output format", "Meaning"
 
-  "ROCJPEG_OUTPUT_NATIVE", "Return native unchanged decoded YUV image from the VCN JPEG deocder."
+  "ROCJPEG_OUTPUT_NATIVE", "Return native unchanged decoded YUV image from the VCN JPEG decoder."
   "ROCJPEG_OUTPUT_YUV_PLANAR", "Return in the YUV planar format."
   "ROCJPEG_OUTPUT_Y", "Return the Y component only."
   "ROCJPEG_OUTPUT_RGB", "Convert to interleaved RGB."

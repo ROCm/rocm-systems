@@ -82,5 +82,27 @@ private:
                                         void* callback_data);
 };
 
+// ---------------------------------------------------------------------------
+// Template definitions that must be visible to all translation units
+// so that roctx_client can be instantiated with any MarkerWriterPolicy.
+// ---------------------------------------------------------------------------
+
+template <typename MarkerWriterPolicy>
+thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
+    roctx_client<MarkerWriterPolicy>::m_pushed_ranges{};
+
+template <typename MarkerWriterPolicy>
+thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
+    roctx_client<MarkerWriterPolicy>::m_started_ranges{};
+
+template <typename MarkerWriterPolicy>
+roctx_client<MarkerWriterPolicy>::roctx_client(const roctx_client_config& roctx_cfg)
+: m_config{ roctx_cfg }
+, m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory,
+            roctx_cfg.perfetto_annotations }
+, m_controller{ std::make_shared<control::trace_control>(
+      roctx_cfg.selected_trace_regions) }
+{}
+
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys

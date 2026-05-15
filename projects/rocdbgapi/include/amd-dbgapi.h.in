@@ -497,6 +497,8 @@
 #  define AMD_DBGAPI_EXPORT_DECORATOR __declspec(dllexport)
 # elif defined(__GNUC__)
 #  define AMD_DBGAPI_EXPORT_DECORATOR __attribute__ ((visibility ("default")))
+# else
+#  define AMD_DBGAPI_EXPORT_DECORATOR
 # endif
 #endif /* !defined (AMD_DBGAPI_EXPORT_DECORATOR) */
 
@@ -508,15 +510,19 @@
 # endif
 #endif /* !defined (AMD_DBGAPI_IMPORT_DECORATOR) */
 
-#define AMD_DBGAPI_EXPORT AMD_DBGAPI_EXPORT_DECORATOR AMD_DBGAPI_CALL
-#define AMD_DBGAPI_IMPORT AMD_DBGAPI_IMPORT_DECORATOR AMD_DBGAPI_CALL
+/* True if dbgapi was built as a static library.  */
+#define AMD_DBGAPI_STATIC_LIB @AMD_DBGAPI_STATIC_LIB@
 
 #if !defined(AMD_DBGAPI)
-#if defined(AMD_DBGAPI_EXPORTS)
-#define AMD_DBGAPI AMD_DBGAPI_EXPORT
-#else /* !defined (AMD_DBGAPI_EXPORTS) */
-#define AMD_DBGAPI AMD_DBGAPI_IMPORT
-#endif /* !defined (AMD_DBGAPI_EXPORTS) */
+# if AMD_DBGAPI_STATIC_LIB
+#  define AMD_DBGAPI AMD_DBGAPI_CALL
+# else
+#  if defined(AMD_DBGAPI_EXPORTS)
+#   define AMD_DBGAPI AMD_DBGAPI_EXPORT_DECORATOR AMD_DBGAPI_CALL
+#  else
+#   define AMD_DBGAPI AMD_DBGAPI_IMPORT_DECORATOR AMD_DBGAPI_CALL
+#  endif
+# endif
 #endif /* !defined (AMD_DBGAPI) */
 
 /* By default, MSVC reports 199711L (C++98) for the __cplusplus macro,

@@ -26,6 +26,8 @@
 #define LIBRARY_SRC_SYNC_ABQL_BLOCK_MUTEX_HPP_
 
 #include "device_proxy.hpp"
+#include "memory/hip_allocator.hpp"
+#include "memory/default_allocator.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -111,12 +113,13 @@ class ABQLBlockMutex {
   Turn turns_[memory_channels_]{};
 };
 
-template <typename ALLOCATOR>
 class ABQLBlockMutexProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, ABQLBlockMutex>;
+  using ProxyT = DeviceProxy<HIPDefaultFinegrainedAllocator, ABQLBlockMutex>;
 
  public:
-  ABQLBlockMutexProxy(size_t num_elems = 1) : proxy_{num_elems} {}
+  explicit ABQLBlockMutexProxy([[maybe_unused]] const MemoryAllocator& alloc = *get_default_allocator(),
+                               size_t num_elems = 1)
+      : proxy_{num_elems} {}
 
   ABQLBlockMutexProxy(const ABQLBlockMutexProxy& other) = delete;
 

@@ -187,18 +187,16 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_FOR_THEROCK "Build rocprofiler-s
     ADVANCED NO_FEATURE
 )
 
-if(ROCPROFSYS_BUILD_FOR_THEROCK)
-    # TheRock injects these variables, which takes precedence over our
-    # own python discovery, even when versions differ. Unset them to prevent this.
-    unset(Python3_EXECUTABLE CACHE)
+# TheRock injects these variables, which takes precedence over our
+# own python discovery, even when versions differ. Unset them to prevent this.
+unset(Python3_EXECUTABLE CACHE)
 
-    set(ROCPROFSYS_INSTALL_TESTING
-        ON
-        CACHE BOOL
-        "Install testing scripts and pytest package"
-        FORCE
-    )
+# TODO: Deprecate once TheRock switches to CTests
+if(ROCPROFSYS_BUILD_FOR_THEROCK AND NOT DEFINED ROCPROFSYS_USE_PYTESTS)
+    set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
+    set(ROCPROFSYS_INSTALL_EXAMPLES ON CACHE BOOL "Enable installing examples" FORCE)
     set(ROCPROFSYS_USE_PYTESTS ON CACHE BOOL "Enable pytest suite" FORCE)
+
     # Lulesh does not build with TheRock
     if(NOT DEFINED ROCPROFSYS_DISABLE_EXAMPLES)
         set(ROCPROFSYS_DISABLE_EXAMPLES
@@ -212,6 +210,8 @@ if(ROCPROFSYS_BUILD_FOR_THEROCK)
             list(APPEND ROCPROFSYS_DISABLE_EXAMPLES "lulesh")
         endif()
     endif()
+else()
+    set(ROCPROFSYS_USE_PYTESTS OFF CACHE BOOL "Enable pytest suite" FORCE)
 endif()
 
 include(Compilers) # compiler identification
@@ -320,6 +320,12 @@ endif()
 
 if(ROCPROFSYS_BUILD_TESTING)
     set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
+endif()
+
+# Examples are built independently on TheRock
+if(ROCPROFSYS_BUILD_FOR_THEROCK AND NOT ROCPROFSYS_USE_PYTESTS)
+    set(ROCPROFSYS_BUILD_EXAMPLES OFF CACHE BOOL "Enable building the examples" FORCE)
+    set(ROCPROFSYS_INSTALL_EXAMPLES OFF CACHE BOOL "Enable installing examples" FORCE)
 endif()
 
 include(ProcessorCount)

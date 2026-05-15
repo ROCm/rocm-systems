@@ -50,6 +50,7 @@ class Bootstrap {
   virtual int getNranks() = 0;
   virtual int getNranksPerNode() = 0;
   virtual std::vector<int> getLocalRanks() = 0;
+  virtual std::vector<int> getIpcCapableRanks() = 0;
   virtual void send(void* data, int size, int peer, int tag) = 0;
   virtual void recv(void* data, int size, int peer, int tag) = 0;
   virtual void allGather(void* allData, int size) = 0;
@@ -124,6 +125,9 @@ class TcpBootstrap : public Bootstrap {
 
   /// Provide list of ranks that are local to the calling process
   std::vector<int> getLocalRanks() override;
+
+  /// Provide list of ranks that are IPC-capable with the calling process
+  std::vector<int> getIpcCapableRanks() override;
 
   /// Gather data from all processes.
   ///
