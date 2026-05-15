@@ -79,6 +79,39 @@ def test_data_structure(input_data):
     node_exists("names", sdk_data["buffer_records"])
 
 
+def test_size_entries(input_data):
+    """Every ``size`` field across the JSON is > 0 (except size-named args).
+
+    Verbatim equivalent of ``tests/rocdecode/validate.py:test_size_entries``
+    and ``tests/rocjpeg/validate.py:test_size_entries``. Recursively walks
+    the entire input dict/list tree and asserts every dict carrying a
+    ``size`` key has a positive value. Skips the assertion when ``size``
+    appears inside a function ``args`` block: user-provided argument names
+    can legitimately collide with the field name and may be a string or a
+    non-positive integer.
+    """
+
+    def check_size(data, bt):
+        if "size" in data.keys():
+            if isinstance(data["size"], str) and bt.endswith('["args"]'):
+                pass
+            else:
+                assert data["size"] > 0, f"origin: {bt}"
+
+    def iterate_data(data, bt):
+        if isinstance(data, (list, tuple)):
+            for i, itr in enumerate(data):
+                if isinstance(itr, dict):
+                    check_size(itr, f"{bt}[{i}]")
+                iterate_data(itr, f"{bt}[{i}]")
+        elif isinstance(data, dict):
+            check_size(data, f"{bt}")
+            for key, itr in data.items():
+                iterate_data(itr, f'{bt}["{key}"]')
+
+    iterate_data(input_data, "input_data")
+
+
 def test_rocshmem_domain_registered(input_data):
     """The ROCSHMEM_API buffer-tracing kind exposes exactly 9 operation names."""
     sdk_data = _get_sdk_data(input_data)
@@ -180,6 +213,43 @@ def test_callback_records_contain_all_apis(input_data):
     )
 
 
+def test_timestamps(input_data):
+    """Callback phase-1/phase-2 ordering and buffer start <= end.
+
+    Mirrors ``tests/rocdecode/validate.py:test_timestamps`` and
+    ``tests/rocjpeg/validate.py:test_timestamps``. For every rocshmem
+    callback record, the ``phase 1`` (enter) timestamp must be <= the
+    matching ``phase 2`` (exit) timestamp identified by correlation id.
+    For every buffer record, ``start_timestamp <= end_timestamp``.
+
+    Complements ``test_timestamps_within_session`` which checks records
+    fall inside the json-tool init/fini window. Both checks are kept
+    because they protect against orthogonal bugs (relative ordering vs.
+    absolute window placement).
+    """
+    sdk_data = _get_sdk_data(input_data)
+
+    cb_start = {}
+    for rec in sdk_data["callback_records"].get("rocshmem_api_traces", []):
+        cid = rec["correlation_id"]["internal"]
+        phase = rec["phase"]
+        if phase == 1:
+            cb_start[cid] = rec["timestamp"]
+        elif phase == 2:
+            assert cid in cb_start, f"phase 2 without matching phase 1: {rec}"
+            assert cb_start[cid] <= rec["timestamp"], (
+                f"phase 2 timestamp ({rec['timestamp']}) precedes "
+                f"phase 1 ({cb_start[cid]}) for corr_id {cid}: {rec}"
+            )
+        else:
+            assert phase in (1, 2), f"unexpected phase {phase}: {rec}"
+
+    for rec in sdk_data["buffer_records"].get("rocshmem_api_traces", []):
+        assert (
+            rec["start_timestamp"] <= rec["end_timestamp"]
+        ), f"buffer record start > end: {rec}"
+
+
 def test_timestamps_within_session(input_data):
     """All buffer records fall between the json-tool init/fini timestamps."""
     sdk_data = _get_sdk_data(input_data)
@@ -226,15 +296,23 @@ def test_callback_record_payloads(input_data):
 def test_external_correlation_ids(input_data):
     """External correlation IDs flow correctly through buffer + callback streams.
 
-    Mirrors `tests/async-copy-tracing/validate.py:test_external_correlation_ids`.
-    On this branch json-tool sets the external correlation id to the issuing
-    thread id, so that invariant is checked end-to-end.
+    Mirrors `tests/async-copy-tracing/validate.py:test_external_correlation_ids`
+    and ``tests/rocjpeg/validate.py:test_external_correlation_ids``. On this
+    branch json-tool sets the external correlation id to the issuing thread id,
+    so that invariant is checked end-to-end.
+
+    Skip only when BOTH the callback and buffer streams are empty (i.e.
+    rocSHMEM tracing isn't supported at all on this host). If either stream
+    has records, run the assertions: the "buffer populated, callback empty"
+    partial state would otherwise mask a real bug where the SDK loses
+    callback delivery while still emitting buffer records.
     """
     sdk_data = _get_sdk_data(input_data)
 
     cb_records = sdk_data["callback_records"].get("rocshmem_api_traces", [])
-    if not cb_records:
-        pytest.skip("rocshmem tracing unavailable (no callback records captured)")
+    bf_records = sdk_data["buffer_records"].get("rocshmem_api_traces", [])
+    if not cb_records and not bf_records:
+        pytest.skip("rocshmem tracing unavailable (no records captured)")
 
     extern_corr_ids = set()
     for rec in cb_records:
@@ -245,11 +323,14 @@ def test_external_correlation_ids(input_data):
         ), f"thread_id ({rec['thread_id']}) != external ({ext}): {rec}"
         extern_corr_ids.add(ext)
 
-    assert (
-        len(extern_corr_ids) > 0
-    ), "no external correlation ids observed in callback stream"
+    # If buffer records exist, callbacks should have produced ids too. Failing
+    # here surfaces the partial-state SDK bug that the old over-eager skip hid.
+    if bf_records:
+        assert (
+            len(extern_corr_ids) > 0
+        ), "buffer-stream rocshmem records exist but callback stream produced no external ids"
 
-    for rec in sdk_data["buffer_records"].get("rocshmem_api_traces", []):
+    for rec in bf_records:
         ext = rec["correlation_id"]["external"]
         assert ext > 0, f"non-positive external correlation id: {rec}"
         assert (
@@ -260,7 +341,127 @@ def test_external_correlation_ids(input_data):
         ), f"buffer-stream external id {ext} not seen in callback stream"
 
 
-def test_perfetto_data(request):
+def test_internal_correlation_ids(input_data):
+    """Internal correlation ids are unique per stream and densely allocated.
+
+    Mirrors ``tests/rocdecode/validate.py:test_internal_correlation_ids`` and
+    ``tests/rocjpeg/validate.py:test_internal_correlation_ids``. The same id
+    appears at most once in each *buffer* stream (one API call -> one record),
+    but it surfaces twice in the *callback* stream (phase 1 + phase 2), so the
+    union has duplicates by construction. After dedup, the unique-id set must
+    densely cover 1..N within the process.
+
+    No skip-on-empty: even when rocSHMEM tracing isn't supported on the host
+    (rocshmem_api_traces empty), this test still validates the HSA + HIP
+    correlation-id invariants. Matches rocdecode/rocjpeg semantics.
+    """
+    sdk_data = _get_sdk_data(input_data)
+
+    api_corr_ids = []
+    for titr in ("hsa_api_traces", "hip_api_traces", "rocshmem_api_traces"):
+        for itr in sdk_data["callback_records"].get(titr, []):
+            api_corr_ids.append(itr["correlation_id"]["internal"])
+        for itr in sdk_data["buffer_records"].get(titr, []):
+            api_corr_ids.append(itr["correlation_id"]["internal"])
+
+    api_corr_ids_sorted = sorted(api_corr_ids)
+    api_corr_ids_unique = set(api_corr_ids)
+
+    # Memory-allocation records reuse the corr_id of the triggering API, so
+    # every alloc corr_id must already be in the api set.
+    for itr in sdk_data["buffer_records"].get("memory_allocations", []):
+        assert (
+            itr["correlation_id"]["internal"] in api_corr_ids_unique
+        ), f"memory_allocation corr_id not seen in any api stream: {itr}"
+
+    # Buffer + callback duplication guarantees len(all) > len(unique).
+    assert len(api_corr_ids) != len(
+        api_corr_ids_unique
+    ), "expected duplicate correlation ids (callback + buffer share ids)"
+
+    # Per-process corr_ids should be densely allocated 1..N.
+    assert max(api_corr_ids_sorted) == len(api_corr_ids_unique), (
+        f"max corr_id ({max(api_corr_ids_sorted)}) != "
+        f"unique corr_id count ({len(api_corr_ids_unique)}); allocator gap?"
+    )
+
+
+def test_retired_correlation_ids(input_data):
+    """Every API correlation id is eventually retired with retired_ts > end_ts.
+
+    Mirrors ``tests/rocdecode/validate.py:test_retired_correlation_ids``. The
+    SDK populates the ``retired_correlation_ids`` buffer stream once the
+    pipeline drains; every API + memory-allocation corr_id must appear there
+    with a timestamp strictly greater than the originating record's
+    ``end_timestamp``.
+
+    No skip-on-empty: even when rocSHMEM tracing isn't supported on the host
+    (rocshmem_api_traces empty), this test still validates the HSA + HIP
+    retired-id invariants. Matches rocdecode/rocjpeg semantics.
+    """
+    sdk_data = _get_sdk_data(input_data)
+
+    def _sort_dict(inp):
+        return dict(sorted(inp.items()))
+
+    api_corr_ids = {}
+    for titr in ("hsa_api_traces", "hip_api_traces", "rocshmem_api_traces"):
+        for itr in sdk_data["buffer_records"].get(titr, []):
+            corr_id = itr["correlation_id"]["internal"]
+            assert (
+                corr_id not in api_corr_ids
+            ), f"duplicate corr_id {corr_id} across buffer streams: {itr}"
+            api_corr_ids[corr_id] = itr
+
+    alloc_corr_ids = {}
+    for itr in sdk_data["buffer_records"].get("memory_allocations", []):
+        corr_id = itr["correlation_id"]["internal"]
+        assert (
+            corr_id not in alloc_corr_ids
+        ), f"duplicate corr_id {corr_id} in memory_allocations: {itr}"
+        alloc_corr_ids[corr_id] = itr
+
+    retired_corr_ids = {}
+    for itr in sdk_data["buffer_records"].get("retired_correlation_ids", []):
+        corr_id = itr["internal_correlation_id"]
+        assert (
+            corr_id not in retired_corr_ids
+        ), f"duplicate corr_id {corr_id} in retired stream: {itr}"
+        retired_corr_ids[corr_id] = itr
+
+    api_corr_ids = _sort_dict(api_corr_ids)
+    alloc_corr_ids = _sort_dict(alloc_corr_ids)
+    retired_corr_ids = _sort_dict(retired_corr_ids)
+
+    for cid, itr in alloc_corr_ids.items():
+        assert (
+            cid in retired_corr_ids
+        ), f"memory_allocation corr_id {cid} never retired: {itr}"
+        retired_ts = retired_corr_ids[cid]["timestamp"]
+        end_ts = itr["end_timestamp"]
+        assert retired_ts - end_ts > 0, (
+            f"retired_ts ({retired_ts}) <= end_ts ({end_ts}) "
+            f"for alloc corr_id {cid}: {itr}"
+        )
+
+    for cid, itr in api_corr_ids.items():
+        assert cid in retired_corr_ids, f"api corr_id {cid} never retired: {itr}"
+        retired_ts = retired_corr_ids[cid]["timestamp"]
+        end_ts = itr["end_timestamp"]
+        assert retired_ts - end_ts > 0, (
+            f"retired_ts ({retired_ts}) <= end_ts ({end_ts}) "
+            f"for api corr_id {cid}: {itr}"
+        )
+
+    # alloc corr_ids are a subset of api corr_ids (allocs reuse the triggering
+    # API's id), so api == retired counts.
+    assert len(api_corr_ids) == len(retired_corr_ids), (
+        f"corr_id count mismatch: api={len(api_corr_ids)}, "
+        f"retired={len(retired_corr_ids)}"
+    )
+
+
+def test_perfetto_data(request, input_data):
     """The Perfetto trace emitted by json-tool contains rocshmem activity.
 
     json-tool writes a sibling `.pftrace` next to the JSON output. Mirrors
@@ -270,9 +471,17 @@ def test_perfetto_data(request):
     `pytest-packages/tests/rocprofv3.py:test_perfetto_data` (that helper is
     extended on the rocprofv3-rocshmem branch).
     """
+    sdk_data = _get_sdk_data(input_data)
+    bf_records = sdk_data["buffer_records"].get("rocshmem_api_traces", [])
+
     json_path = request.config.getoption("--input")
     pftrace_path = json_path[: json_path.rfind(".json")] + ".pftrace"
     if not os.path.isfile(pftrace_path):
+        if bf_records:
+            pytest.fail(
+                f"rocshmem buffer records exist but no perfetto trace was produced: "
+                f"{pftrace_path}"
+            )
         return pytest.skip(f"perfetto trace not produced: {pftrace_path}")
 
     from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
@@ -293,6 +502,15 @@ def test_perfetto_data(request):
     ]
 
     if name_hits.empty and cat_hits.empty:
+        if bf_records:
+            # rocSHMEM tracing IS working at the SDK level (buffer records
+            # exist) but the perfetto serializer dropped them - real bug.
+            pytest.fail(
+                f"rocshmem buffer records exist but perfetto trace has no rocshmem "
+                f"activity (categories: "
+                f"{sorted(dataframe['category'].astype(str).unique())[:10]}). "
+                "Perfetto serializer wiring regression?"
+            )
         # On rocshmem-trace, the rocshmem perfetto category may not be wired
         # into the SDK's compile-time perfetto category list yet (that wiring
         # lands on the rocprofv3-rocshmem branch). The JSON tests above
@@ -316,6 +534,18 @@ def test_perfetto_data(request):
         assert observed == EXPECTED_OPERATIONS, (
             "perfetto slices missing some rocshmem APIs."
             f"\n  missing: {sorted(EXPECTED_OPERATIONS - observed)}"
+        )
+        return
+
+    # name_hits empty BUT cat_hits non-empty: perfetto has a 'rocshmem' category
+    # but no slice names containing 'rocshmem'. If buffer records exist, the
+    # SDK is tracing rocSHMEM, so the per-API slice naming convention must
+    # have regressed - fail loudly rather than passing silently.
+    if bf_records:
+        pytest.fail(
+            "rocshmem buffer records exist and perfetto has a 'rocshmem' "
+            "category, but no slice names contain 'rocshmem'. "
+            "Per-API slice-name regression in perfetto serializer?"
         )
 
 
