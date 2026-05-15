@@ -195,19 +195,6 @@ unsigned int FamilyIdFromNode(const HsaNodeProperties *props) {
     unsigned int familyId = FAMILY_UNKNOWN;
 
     switch (props->EngineId.ui32.Major) {
-    case 7:
-        if (props->EngineId.ui32.Minor == 0) {
-            if (props->EngineId.ui32.Stepping == 0)
-                familyId = FAMILY_KV;
-            else
-                familyId = FAMILY_CI;
-        }
-        break;
-    case 8:
-        familyId = FAMILY_VI;
-        if (props->EngineId.ui32.Stepping == 1)
-            familyId = FAMILY_CZ;
-        break;
     case 9:
         familyId = FAMILY_AI;
         if (props->EngineId.ui32.Minor >= 4)
@@ -257,15 +244,6 @@ void GetHwQueueInfo(const HsaNodeProperties *props,
 
     if (p_num_cp_queues)
         *p_num_cp_queues = props->NumCpQueues;
-}
-
-bool isTonga(const HsaNodeProperties *props) {
-    /* Tonga has some workarounds in the thunk that cause certain failures */
-    if (props->EngineId.ui32.Major == 8 && props->EngineId.ui32.Stepping == 2) {
-        return true;
-    }
-
-    return false;
 }
 
 const uint32_t GetGfxVersion(const HsaNodeProperties *props) {

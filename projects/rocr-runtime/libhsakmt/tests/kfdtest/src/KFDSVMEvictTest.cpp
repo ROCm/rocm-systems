@@ -213,7 +213,7 @@ void KFDSVMEvictTest::WaitChildProcesses() {
  * ALLOCATE_BUF_SIZE_MB buf allocation size
  *
  * number of buf is equal to (vramSizeMB / (vramBufSizeMB * N_PROCESSES) ) + 8
- * Total vram all processes allocated: 8GB for 4GB Fiji, and 20GB for 16GB Vega10
+ * Total vram all processes allocated: 20GB for 16GB Vega10
  *
  * many times of eviction and restore will happen:
  * ttm will evict buffers of another process if not enough free vram
@@ -324,8 +324,8 @@ TEST_P(KFDSVMEvictTest, QueueTest) {
 
     const HsaNodeProperties *pNodeProperties = m_NodeInfo.HsaDefaultGPUNodeProperties();
 
-    /* Skip test for chip it doesn't have CWSR, which the test depends on */
-    if (m_FamilyId < FAMILY_VI || isTonga(pNodeProperties) || m_FamilyId >= FAMILY_NV) {
+    /* Skip test on Navi and later */
+    if (m_FamilyId >= FAMILY_NV) {
         LOG() << std::hex << "Test is skipped for family ID 0x" << m_FamilyId << std::endl;
         return;
     }

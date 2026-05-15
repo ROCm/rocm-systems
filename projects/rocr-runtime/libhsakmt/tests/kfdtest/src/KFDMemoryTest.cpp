@@ -572,13 +572,6 @@ TEST_F(KFDMemoryTest, MemoryRegisterSamePtr) {
 #define SCRATCH_SLICE_OFFSET(i) ((i) * SCRATCH_SLICE_SIZE)
 
 void KFDMemoryTest::FlatScratchAccess(int gpuNode) {
-
-	HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
-    if (m_FamilyId == FAMILY_CI || m_FamilyId == FAMILY_KV) {
-        LOG() << "Skipping test: VI-based shader not supported on other ASICs." << std::endl;
-        return;
-    }
-
     Assembler* m_pAsm;
     m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);

@@ -704,11 +704,6 @@ void KFDQMTest::OverSubscribeCpQueues(int gpuNode) {
 
     const HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
-    if (m_FamilyId == FAMILY_CI || m_FamilyId == FAMILY_KV) {
-        LOG() << "Skipping test: CI doesn't have HW scheduling." << std::endl;
-        return;
-    }
-
     /* The max queues per process is 1024 limited by
      * KFD, so MAX_CP_QUEUES is needed to adapt it
      * when total queues exceed it.

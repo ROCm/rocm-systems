@@ -44,8 +44,8 @@ TEST_F(KFDTopologyTest , BasicTest) {
                 uniqueid = pNodeProperties->UniqueID;
             LOG() << "UniqueID : " << std::dec << uniqueid <<
                      " Node index: " << node << std::endl;
-            // Checking for cpu core only if it's a cpu only node or if its KAVERI apu.
-            if (pNodeProperties->DeviceId == 0 || FamilyIdFromNode(pNodeProperties) == FAMILY_KV) {
+            // Checking for cpu core only if it's a cpu only node.
+            if (pNodeProperties->DeviceId == 0) {
                 EXPECT_GT(pNodeProperties->NumCPUCores, HSAuint32(0)) << "Node index: " << node
                                                                       << " No CPUs core are connected for node index";
             }
@@ -56,7 +56,7 @@ TEST_F(KFDTopologyTest , BasicTest) {
                                                                            << "No GPUs core are connected.";
                 // EngineId only applies to GPU, not CPU-only nodes
                 EXPECT_GT(pNodeProperties->EngineId.ui32.uCode, 0) << "uCode version is 0";
-                EXPECT_GE(pNodeProperties->EngineId.ui32.Major, 7) << "Major Version is less than 7";
+                EXPECT_GE(pNodeProperties->EngineId.ui32.Major, 9) << "Major Version is less than 9";
                 EXPECT_LT(pNodeProperties->EngineId.ui32.Minor, 10) << "Minor Version is greater than 9";
                 EXPECT_GT(pNodeProperties->uCodeEngineVersions.uCodeSDMA, 0) << "sDMA firmware version is 0";
 
@@ -126,8 +126,8 @@ TEST_F(KFDTopologyTest, GpuvmApertureValidate) {
     for (unsigned i = 0; i < GpuNodes.size(); i++) {
         pNodeProperties = m_NodeInfo.GetNodeProperties(GpuNodes.at(i));
         if (pNodeProperties != NULL) {
-            if (!hsakmt_is_dgpu() && !(FamilyIdFromNode(pNodeProperties) == FAMILY_KV)) {
-                LOG() << "Skipping test: GPUVM framebuffer heap not exposed on APU except Kaveri." << std::endl;
+            if (!hsakmt_is_dgpu()) {
+                LOG() << "Skipping test: GPUVM framebuffer heap not exposed on APU." << std::endl;
                 return;
             }
             HsaMemoryProperties *memoryProperties =  new HsaMemoryProperties[pNodeProperties->NumMemoryBanks];

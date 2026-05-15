@@ -50,7 +50,7 @@ PERMANENT_BLACKLIST_ALL_ASICS=\
 "KFDLocalMemoryTest.CheckZeroInitializationVram"
 
 # This is the temporary blacklist for all ASICs. This is to be used when a test is failing consistently
-# on every ASIC (Kaveri, Carrizo, Hawaii, Tonga, Fiji, Polaris10, Polaris11 and Vega10 .
+# on every supported ASIC (Vega10 and later).
 # TODO means that a JIRA ticket needs to be created for this issue, as no documentation regarding
 # failures can be found
 # NOTE: If you update this alphabetical listing, add the corresponding JIRA ticket for reference
@@ -79,7 +79,7 @@ BLACKLIST_ALL_ASICS=\
 "$TEMPORARY_BLACKLIST_ALL_ASICS"
 
 # SDMA-based tests (KFDIPCTest.BasicTest, KFDQM.*Sdma*, KFDMemoryTest.MMBench) are all
-# disabled on non-Hawaii due to SDMA instability - SWDEV-101666
+# disabled by default due to historical SDMA instability - SWDEV-101666
 SDMA_BLACKLIST=\
 "KFDIPCTest.*:"\
 "KFDLocalMemoryTest.CheckZeroInitializationVram:"\
@@ -93,18 +93,6 @@ SDMA_BLACKLIST=\
 "KFDQMTest.P2PTest:"\
 "KFDPerformanceTest.P2PBandWidthTest:"\
 "KFDPerformanceTest.P2POverheadTest"
-
-# Anything involving CP queue creation is failing on Kaveri. Separate them here for convenience (KFD-336)
-KV_QUEUE_BLACKLIST=\
-"KFDExceptionTest.AddressFault:"\
-"KFDExceptionTest.PermissionFault:"\
-"KFDLocalMemoryTest.*:"\
-"KFDEventTest.Signal*Event*:"\
-"KFDQMTest.CreateQueueStressSingleThreaded:"\
-"KFDQMTest.*CpQueue*:"\
-"KFDQMTest.*Dispatch*:"\
-"KFDQMTest.Atomics:"\
-"KFDQMTest.GPUDoorbellWrite"
 
 # KFDCWSRTest.BasicTest*: SWDEV-353206
 BLACKLIST_GFX10=\
@@ -131,58 +119,6 @@ BLACKLIST_GFX12=\
 "KFDMemoryTest.FlatScratchAccess:"\
 "KFDMemoryTest.BigSysBufferStressTest:"\
 "KFDGWSTest.*"
-
-# KFDQMTest.CpuWriteCoherence fails. 0 dwordsAvailable (KFD-338)
-# KFDMemoryTest.MemoryRegister fails on SDMA queue creation (KFD-337)
-FILTER[kaveri]=\
-"$BLACKLIST_ALL_ASICS:"\
-"$SDMA_BLACKLIST:"\
-"$KV_QUEUE_BLACKLIST:"\
-"KFDMemoryTest.MemoryRegister:"\
-"KFDQMTest.CpuWriteCoherence"
-
-# KFDLocalMemoryTest.BasicTest is failing intermittently (KFD-368)
-# KFDMemoryTest.BigSysBufferStressTest was failing intermittently on 4.9
-# and hangs when executed twice (KFD-312)
-# KFDQMTest.GPUDoorbellWrite fails on Hawaii. Could be HW-related (KFD-342)
-FILTER[hawaii]=\
-"$BLACKLIST_ALL_ASICS:"\
-"KFDLocalMemoryTest.BasicTest:"\
-"KFDMemoryTest.BigSysBufferStressTest:"\
-"KFDQMTest.GPUDoorbellWrite"
-
-FILTER[carrizo]=\
-"$BLACKLIST_ALL_ASICS:"\
-"$SDMA_BLACKLIST:"\
-"KFDExceptionTest.PermissionFault"
-
-# KFDPerfCountersTest.*Trace fail (KFD-339)
-# KFDMemoryTest.QueryPointerInfo/MemoryRegister* (KFD-341)
-# The remaining tests listed here fail on map memory to GPU with a VA conflict (KFD-340)
-FILTER[tonga]=\
-"$BLACKLIST_ALL_ASICS:"\
-"$SDMA_BLACKLIST:"\
-"KFDCWSRTest.BasicTest:"\
-"KFDPerfCountersTest.*:"\
-"KFDQMTest.OverSubscribeCpQueues"
-
-# Since Navi10 was merged, the PM4Event test takes 6min to run
-FILTER[fiji]=\
-"$BLACKLIST_ALL_ASICS:"\
-"KFDQMTest.PM4EventInterrupt:"\
-"$SDMA_BLACKLIST"
-
-FILTER[polaris10]=\
-"$BLACKLIST_ALL_ASICS:"\
-"$SDMA_BLACKLIST"
-
-FILTER[polaris11]=\
-"$BLACKLIST_ALL_ASICS:"\
-"$SDMA_BLACKLIST"
-
-FILTER[polaris12]=\
-"$BLACKLIST_ALL_ASICS:"\
-"$SDMA_BLACKLIST"
 
 # KFDIPCTest.BasicTest (ROCMOPS-459) .CMABasicTest (ROCMOPS-460) .CrossMemoryAttachTest (ROCMOPS-461)
 # KFDQMTest.AllSdmaQueues (ROCMOPS-463)
