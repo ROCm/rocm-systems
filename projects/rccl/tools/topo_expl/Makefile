@@ -123,6 +123,13 @@ hipify:
 	echo 'inline void initNvtxRegisteredEnums() {}' >> hipify_rccl/include/nvtx.h
 	# PATCH 5: Add nccl_tuner.h include to get NCCL_NUM_ALGORITHMS and NCCL_NUM_PROTOCOLS macros
 	sed -i '/#include "core.h"/a #include "plugin/nccl_tuner.h"' hipify_rccl/include/rccl_common.h
+	# PATCH 7: hipify-perl rewrites __CUDACC__ -> __HIPCC__ in nccl_device/utility.h,
+	# which then enables a `#if __HIP_PLATFORM_AMD__` block whose macro can be
+	# defined-but-empty during host preprocessing (causing 'expected value in
+	# expression'), and whose #else branch pulls in <cuda/atomic>. Restore the
+	# original __CUDACC__ guard so the whole block is skipped under hipcc.
+	find hipify_rccl/include/nccl_device -type f -name '*.h' \
+	    -exec sed -i 's|__HIPCC__|__CUDACC__|g' {} +
 	# PATCH 6: Guard RCCL_EXPOSE_STATIC so -DRCCL_EXPOSE_STATIC from CXXFLAGS does not trigger redefinition warning
 	sed -i 's|^#define RCCL_EXPOSE_STATIC \(.*\)|#ifndef RCCL_EXPOSE_STATIC\n#define RCCL_EXPOSE_STATIC \1\n#endif|' hipify_rccl/include/rccl_vars.h
 	@echo ">>> Hipify complete."
