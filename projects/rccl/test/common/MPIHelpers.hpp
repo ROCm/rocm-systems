@@ -35,6 +35,19 @@
 namespace MPIHelpers
 {
 
+// Returns the MPI world rank as a string for diagnostic messages.
+// Probes OpenMPI, MPICH/PMIx, and SLURM env vars in order; returns "?" if none set.
+inline const char* getMpiRankStr()
+{
+    for(const char* var : {"OMPI_COMM_WORLD_RANK", "PMI_RANK", "PMIX_RANK", "SLURM_PROCID"})
+    {
+        const char* val = std::getenv(var);
+        if(val)
+            return val;
+    }
+    return "?";
+}
+
 /**
  * @struct MPIContext
  * @brief MPI environment context information
