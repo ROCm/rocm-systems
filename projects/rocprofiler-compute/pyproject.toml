@@ -22,13 +22,16 @@ extend-exclude = [
 # Enable Pyflakes (F), pycodestyle (E, W for PEP8), aisort (I),
 # type annotation (ANN), and f-string (UP) rules.
 select = ["E", "W", "F", "I", "ANN", "UP", "PTH"]
+extend-select = ["PLW1514"]
 ignore = ["E713", "E711", "UP045", "PTH123", "PTH207", "ANN003"]
 fixable = ["ALL"]
 unfixable = []
+preview = true
+explicit-preview-rules = true
 
 [tool.ruff.lint.per-file-ignores]
-# Ignore ANN and UP rules for all files except those in src/
-"!src/**" = ["ANN", "UP", "PTH"]
+# Ignore ANN, UP, PTH, and PLW1514 for all files except those in src/
+"!src/**" = ["ANN", "UP", "PTH", "PLW1514"]
 
 [tool.ruff.lint.flake8-annotations]
 allow-star-arg-any = true  #allow Any for *args

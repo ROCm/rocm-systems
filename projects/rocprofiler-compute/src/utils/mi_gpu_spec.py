@@ -60,7 +60,7 @@ class MIGPUSpecs:
         """
 
         console_debug("mi_gpu_spec", "[load_yaml]")
-        with open(file_path) as file:
+        with open(file_path, encoding="utf-8") as file:
             data = yaml.safe_load(file)
             return data or {}
 

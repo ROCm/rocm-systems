@@ -147,7 +147,7 @@ class Bench_base(ABC):
 
         lock_file = lock_dir / f"rocprof-compute-benchmark-{gpu_uuid}.lock"
 
-        with open(lock_file, "a") as f:
+        with open(lock_file, "a", encoding="utf-8") as f:
             try:
                 fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
@@ -819,7 +819,7 @@ class Bench_base(ABC):
     def dump_csv(self, metrics: dict[PerfMetrics], file_path: str) -> None:
         """Generate a csv file containing the collected benchmark metrics."""
         # TODO: Better way to map CSV column names?
-        with open(file_path, "w") as f:
+        with open(file_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
 
             types = self.csv_cols_map.keys()
