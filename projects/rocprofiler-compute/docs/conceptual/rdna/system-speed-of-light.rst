@@ -14,57 +14,79 @@ shipped gfx1151 analysis configuration.
 metrics for how your workload is performing on the target GPU, so you can spot
 bottlenecks before diving into block-specific panels.
 
-VALU FLOPs rows use aggregate VALU instruction counters (they include FP16, FP32,
-and FP64). WMMA follows a separate ISA path and is not broken out in this panel.
+The VALU FLOPs rows use aggregate VALU instruction counters, which include FP16,
+FP32, and FP64 contributions together. WMMA instructions follow a separate ISA
+path and are not broken out in this panel.
 
 Wavefronts and FLOPs accounting
---------------------------------
+-------------------------------
 
-RDNA 3.5 supports both Wave32 (typical primary mode) and Wave64 wavefronts;
-wavefront size is fixed per kernel at compile time. The profiler's ``$wave_size``
-depends on the hardware architecture (i.e., ``rocminfo``), while the executing kernel
-may use a different size—treat peaks as an approximation when those differ. VALU FLOPs
-in this panel scale roughly as ``wave_size * SQ_INSTS_VALU_sum / time``.
+RDNA 3.5 supports both Wave32 (the typical primary mode) and Wave64 wavefronts.
+The wavefront size is fixed per kernel at compile time. The profiler reads
+``$wave_size`` from the hardware specs reported by ``rocminfo``, but a given
+kernel may have been compiled for the other size. When that happens, treat the
+peak rates here as approximations. The VALU FLOPs row in this panel scales as
+``wave_size * SQ_INSTS_VALU_sum / time``.
 
-Peak theoretical VALU rates (per CU, before multiplying by CU count and clock)
----------------------------------------------------------------------------------
+.. _rdna-dual-issue-valu:
 
-These ceilings explain how POP (% of peak) is anchored for FLOPs-oriented rows:
+Dual-issue VALU (VOPD)
+----------------------
 
-* FP32 FMA, single-issue: 128 FLOPs/CU/cycle — two SIMD32 lanes per CU
-  (``$simd_per_cu``), Wave32 (``$wave_size`` 32), times two for FMA.
-* FP32 VOPD dual-issue: 256 FLOPs/CU/cycle (paired dual-VALU ops such as
-  ``V_DUAL_ADD_F32`` / ``V_DUAL_MUL_F32``).
-* FP16 packed FMA, single-issue: 256 FLOPs/CU/cycle (packed half-rate vs FP32).
-* FP16 packed VOPD dual-issue: 512 FLOPs/CU/cycle (dual-issue packed half ops).
-* FP64 FMA: 4 FLOPs/CU/cycle — 1/32 of the FP32 single-issue FMA rate on RDNA.
-* Mixed FP32 single-issue plus FP16 packed dual-issue (illustrative ceiling):
+RDNA 3 and RDNA 3.5 add a dual-issue path to the VALU. A pair of independent
+VALU operations can be encoded into a single instruction and issued together in
+the same cycle. The RDNA ISA refers to this encoding as **VOPD**. Hardware
+accepts the pairing only when register, opcode, and operand constraints are
+satisfied, and the compiler emits VOPD when those constraints hold.
+
+When dual-issue runs successfully, peak VALU throughput per CU per cycle
+doubles relative to single-issue: FP32 from 128 to 256 FLOPs/CU/cycle, and
+packed FP16 from 256 to 512 FLOPs/CU/cycle.
+
+The aggregate ``VALU FLOPs`` row in this panel uses the FP32 single-issue FMA
+ceiling (128 FLOPs/CU/cycle) as the peak. A workload that issues VOPD heavily,
+or that runs packed FP16, can therefore report a percentage of peak above
+100%. To gauge how much of the throughput is coming from VOPD, inspect the
+``Instructions - Dual VALU (VOPD)`` row on the :doc:`wgp` panel, which counts
+``SQ_INSTS_DUAL_VALU_WAVE32``.
+
+Peak theoretical VALU rates
+---------------------------
+
+The values below are per CU, before multiplying by the CU count and the shader
+clock. They anchor the percentage of peak reported for the FLOPs related rows.
+
+* FP32 FMA, single-issue: 128 FLOPs/CU/cycle. Two SIMD32 lanes per CU
+  (``$simd_per_cu``), Wave32 (``$wave_size`` 32), multiplied by two for FMA.
+* FP32 VOPD dual-issue: 256 FLOPs/CU/cycle. Paired dual-VALU instructions such
+  as ``V_DUAL_ADD_F32`` and ``V_DUAL_MUL_F32``.
+* FP16 packed FMA, single-issue: 256 FLOPs/CU/cycle. Packed FP16 runs at twice
+  the FP32 rate.
+* FP16 packed VOPD dual-issue: 512 FLOPs/CU/cycle. Dual-issue packed FP16
+  pairings.
+* FP64 FMA: 4 FLOPs/CU/cycle. RDNA 3.5 runs FP64 FMA at 1/32 of the FP32
+  single-issue FMA rate.
+* Mixed FP32 single-issue with FP16 packed dual-issue (illustrative ceiling):
   about 384 FLOPs/CU/cycle combined (128 + 256).
 
 Scaling and clocks
 ------------------
 
-``$cu_per_gpu`` is the total CU count from system info, not WGP count. On RDNA 3.5,
-each WGP pairs two CUs, so CU count is approximately twice the WGP count; peak
-FLOPs scale with CUs. ``$max_sclk`` is the shader/engine clock in MHz from profiler
-system specs.
+``$cu_per_gpu`` is the total Compute Unit count from system info, not the WGP
+count. On RDNA 3.5 each WGP pairs two CUs, so the CU count is about twice the
+WGP count, and peak FLOPs scale with the CU count. ``$max_sclk`` is the shader
+engine clock in MHz from system info.
 
-Bandwidth and cache POP rows
-----------------------------
+Bandwidth and cache rows
+------------------------
 
-TCP, GL1, GL2, and SQC throughput POP values use heuristic ceilings (bytes per
-cycle * instance count * clock). They are not tied to a single public RDNA 3.5 table—
-treat Pct of Peak as indicative, not exact.
+The throughput rows for TCP, GL1, GL2, and SQC use heuristic ceilings (bytes
+per cycle, multiplied by instance count and clock). They are not anchored to a
+single public RDNA 3.5 table, so the percentage of peak reported for these
+rows is indicative rather than exact.
 
-Memory hierarchy (for context): GL0 (TCP) → GL1 → GL2 → system memory (GCEA).
-
-.. tip::
-
-   If Pct of Peak for VALU FLOPs goes above 100%, the assumed peak likely underestimates
-   achievable throughput—for example when the kernel uses VOPD dual-issue or heavy packed
-   FP16 instead of the single-issue FP32 FMA baseline. Inspect the ``Instructions - Dual VALU (VOPD)``
-   metric on the :doc:`wgp` panel (counter ``SQ_INSTS_DUAL_VALU_WAVE32``) to gauge dual-issue
-   activity and interpret POP accordingly.
+For context, the memory hierarchy is GL0 (TCP Cache), then GL1, then GL2, then
+system memory through GCEA and Data Fabric.
 
 .. Note::
    For AMD Instinct accelerators (CDNA-CDNA4), see

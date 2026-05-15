@@ -1,8 +1,8 @@
 # =============================================================================
-# RDNA3.5 (gfx1151) — System Speed-of-Light
+# RDNA3.5 (gfx1151) - System Speed-of-Light
 # Layout aligned with gfx950/0200_system_speed_of_light.yaml (throughput first,
 # then core/memory, then cache hierarchy). RDNA 3.5: FLOP rows use SQ_INSTS_VALU*
-# (aggregate VALU instruction counter—does not differentiate FP16/FP32/FP64).
+# (aggregate VALU instruction counter-does not differentiate FP16/FP32/FP64).
 # WMMA is a separate ISA path and is not split out here.
 #
 # RDNA 3.5 wavefront model:
@@ -14,17 +14,17 @@
 # Peak theoretical model (per-CU basis):
 #   - FP32 FMA single-issue: 128 FLOPs/CU/cycle = $simd_per_cu(2) * $wave_size(32) * 2 (FMA)
 #   - FP32 VOPD dual-issue: 256 FLOPs/CU/cycle (V_DUAL_ADD_F32 + V_DUAL_MUL_F32)
-#   - FP16 packed FMA single-issue: 256 FLOPs/CU/cycle (2× FP32 due to packed ops)
+#   - FP16 packed FMA single-issue: 256 FLOPs/CU/cycle (2* FP32 due to packed ops)
 #   - FP16 packed VOPD dual-issue: 512 FLOPs/CU/cycle (V_DUAL_*_F16 pairings)
 #   - FP64 FMA: 4 FLOPs/CU/cycle = FP32 FMA / 32 (1/32 rate on RDNA)
 #   - Mixed FP32+FP16 dual-issue: 128+256 = 384 FLOPs/CU/cycle combined
 #
 # $cu_per_gpu = total Compute Unit count from sysinfo (NOT WGP count). On RDNA 3.5,
-# one WGP contains two CUs — CU count ≈ 2 × WGP count. Peaks scale with CUs.
+# one WGP contains two CUs - CU count ~ 2 * WGP count. Peaks scale with CUs.
 # $max_sclk = shader/engine clock in MHz (rocprofiler system specs).
 #
-# TCP / GL1C / GL2C / SQC bandwidth peaks: heuristic ceilings (assumed B/cycle ×
-# instance count × clock); not itemized in public RDNA 3.5 tables — % of peak is
+# TCP / GL1C / GL2C / SQC bandwidth peaks: heuristic ceilings (assumed B/cycle *
+# instance count * clock); not itemized in public RDNA 3.5 tables - % of peak is
 # indicative only.
 #
 # Cache: Cache hierarchy: GL0 Cache (TCP) -> GL1 Cache -> GL2 Cache -> System Memory via GCEA
@@ -117,7 +117,7 @@ Panel Config:
           peak: 100
           pop: SUM(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum)) / SUM(GL1C_REQ_sum)
         GL1 Cache Read BW:
-          # Same bins as Memory Chart table 307 (GL1–GL2 read bandwidth).
+          # Same bins as Memory Chart table 307 (GL1-GL2 read bandwidth).
           value: SUM(GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: None
@@ -167,8 +167,8 @@ Panel Config:
     Wavefront Occupancy: >-
       Average number of wavefronts resident on the GPU during kernel execution. Higher
       occupancy provides more opportunities to hide memory latency through wavefront
-      switching. However, maximum occupancy is not always optimal—excessive register or
-      LDS usage per wavefront may limit occupancy.
+      switching. However, maximum occupancy is not always optimal. Excessive register
+      or LDS usage per wavefront may limit occupancy.
     GL2 Cache Hit Rate: >-
       Percentage of GL2 cache requests that are serviced from cache without accessing
       system memory. Higher hit rates reduce memory bandwidth pressure and improve

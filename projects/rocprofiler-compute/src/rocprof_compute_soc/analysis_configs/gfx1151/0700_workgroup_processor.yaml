@@ -326,8 +326,8 @@ Panel Config:
       overall measure of computational work. Compare with specific instruction types
       to understand the workload characteristics.
     Instructions - Internal: >-
-      Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit — bookkeeping
-      or non-user-visible work attributed to the scheduler.
+      Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit. These
+      represent bookkeeping or non-user-visible work issued by the SQ.
     Instructions - VALU: >-
       Number of Vector ALU instructions executed. VALU handles arithmetic and logic
       operations across all work-items in a wavefront. High VALU counts indicate
@@ -341,12 +341,13 @@ Panel Config:
       data through the scalar cache. High counts may indicate heavy use of constant
       buffers or kernel arguments.
     Instructions - Transcendental: >-
-      Transcendental VALU instructions (SQ_INSTS_VALU_TRANS), per normalization unit —
-      e.g. sin/cos/log approximations on the vector ALU.
+      Transcendental VALU instructions (SQ_INSTS_VALU_TRANS) per normalization unit.
+      These cover hardware approximations such as sin, cos, and log on the vector
+      ALU.
     Instructions - Dual VALU (VOPD): >-
-      Dual-issue VALU (VOPD) instructions issued in wave32 mode (SQ_INSTS_DUAL_VALU_WAVE32_sum),
-      per normalization unit. Hardware perf select SQ_PERF_SEL_INSTS_DUAL_VALU_WAVE32 (Strix2 chip
-      interface); emulated counter.
+      Dual-issue VALU instructions executed in wave32 mode
+      (SQ_INSTS_DUAL_VALU_WAVE32) per normalization unit. The VOPD encoding pairs
+      two independent VALU operations that issue in the same cycle.
     Instructions - VMEM: >-
       Number of vector memory instructions executed, including global, buffer, and
       texture operations. High VMEM counts relative to VALU may indicate memory-bound

@@ -2552,8 +2552,7 @@ rocprofiler-sdk:
       block: SQ
       event: 173
   - name: SQ_INSTS_DUAL_VALU_WAVE32
-    description: >-
-      Number of dual VALU (VOPD) instructions issued in wave32 mode. {emulated} Matches SQ_PERF_SEL_INSTS_DUAL_VALU_WAVE32 in Strix2 chip interface public RAI.
+    description: The number of dual-issue VALU (VOPD) instructions issued in Wave32 mode.
     properties: []
     definitions:
     - architectures:
@@ -4052,7 +4051,7 @@ rocprofiler-sdk:
       - gfx1152
       expression: reduce(SQ_INSTS_WAVE32_LDS_PARAM_LOAD,sum)
   - name: SQ_INSTS_DUAL_VALU_WAVE32_sum
-    description: sum of SQ INSTS DUAL VALU WAVE32.
+    description: ''
     properties: []
     definitions:
     - architectures:
