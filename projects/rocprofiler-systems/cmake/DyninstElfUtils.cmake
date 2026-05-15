@@ -135,7 +135,7 @@ else()
     # If we didn't find a suitable version on the system, then download one from the web
     rocprofiler_systems_add_cache_option(
         ELFUTILS_DOWNLOAD_VERSION "Version of elfutils to download and install" STRING
-        "0.188"
+        "0.195"
     )
     set(ELFUTILS_DOWNLOAD_VERSION ${ElfUtils_DOWNLOAD_VERSION})
 
@@ -209,9 +209,10 @@ else()
         BUILD_IN_SOURCE 1
         ${_eu_patch_args}
         CONFIGURE_COMMAND
-            ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3
-            CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3
-            [=[LDFLAGS=-Wl,-rpath='$$ORIGIN']=] <SOURCE_DIR>/configure
+            ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER}
+            CFLAGS=-fPIC\ -O3\ -Wno-error=maybe-uninitialized CXX=${CMAKE_CXX_COMPILER}
+            CXXFLAGS=-fPIC\ -O3\ -Wno-error=maybe-uninitialized
+            [=[LDFLAGS=-Wl,-rpath='$$ORIGIN' -pthread]=] <SOURCE_DIR>/configure
             --enable-install-elfh --prefix=${_eu_root} --disable-libdebuginfod
             --disable-debuginfod --enable-thread-safety --disable-nls
             ${ElfUtils_CONFIG_OPTIONS} --libdir=${_eu_root}/lib
