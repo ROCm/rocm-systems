@@ -609,7 +609,7 @@ struct ncclKernelComm {
   int p2pChunkSize;
   int isAllNvlink;
   int p2pnChannelsPerPeer;
-  int warpLevelComm;
+
   int* collNetDenseToUserRank;
 
   // Flag to ask NCCL kernels to abort
@@ -665,6 +665,9 @@ struct channelMasks {
 
 struct alignas(16) ncclDevKernelArgs {
   struct ncclKernelComm* comm;
+#ifdef ENABLE_WARP_SPEED
+  int warpLevelComm;
+#endif
   struct channelMasks channelMask;
   enum ncclDevWorkStorageType workStorageType;
   uint32_t workMask;
