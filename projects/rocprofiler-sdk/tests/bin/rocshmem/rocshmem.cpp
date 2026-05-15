@@ -74,7 +74,19 @@ main(int /*argc*/, char** /*argv*/)
         return 0;
     }
 
-    CHECK_HIP(hipSetDevice(std::atoi(ompi_local_rank)));
+    // Map the local MPI rank onto a visible GPU. On a typical multi-GPU box this
+    // is the identity (rank 0 -> device 0, rank 1 -> device 1, ...). On CI runners
+    // where HIP_VISIBLE_DEVICES limits visibility to a single device, the modulo
+    // makes ranks share the GPU instead of failing with "invalid device ordinal".
+    int device_count = 0;
+    CHECK_HIP(hipGetDeviceCount(&device_count));
+    if(device_count <= 0)
+    {
+        std::fprintf(stderr,
+                     "[rocshmem-demo] no HIP devices visible; skipping rocSHMEM exercise.\n");
+        return 0;
+    }
+    CHECK_HIP(hipSetDevice(std::atoi(ompi_local_rank) % device_count));
 
     rocshmem_init();
 
