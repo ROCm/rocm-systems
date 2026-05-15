@@ -326,31 +326,43 @@ parse_funcmap_section(std::string_view blob, bool silent)
 // sh_offset+sh_size). Bounds checks use subtraction against `elf_size` to
 // avoid uint64 wrap on adversarial sh_size values.
 //
+// ELF64 layout (typical; section data and shdr table may be in any order):
+//
 //   +-------------------------+  <- elf_data
-//   | ELF header (Elf64_Ehdr) |     e_shoff     -> section header table
-//   |                         |     e_shnum     = N entries
+//   | Elf64_Ehdr              |     e_shoff     ----.    shdr table offset
+//   |                         |     e_shnum     = N |
 //   |                         |     e_shentsize = sizeof(Elf64_Shdr)
-//   |                         |     e_shstrndx  = index of .shstrtab in shdrs
-//   +-------------------------+
-//   | section data            |
-//   |   .text                 |
-//   |   .rodata               |
-//   |   .sqtt_funcmap         |  <- returned on a hit
-//   |   .shstrtab        <----+-- shstr.sh_offset / sh_size point here
-//   +-------------------------+
-//   | Section header table    |  <- e_shoff
-//   |   [0] SHT_NULL          |
-//   |   [1] .text     name=1  |-- sh_name = offset into .shstrtab bytes
-//   |   [2] .rodata   name=7  |
-//   |   [3] .sqtt_..  name=15 |
-//   |   [4] .shstrtab name=29 |
+//   |                         |     e_shstrndx  = K --.  index of .shstrtab shdr
+//   +-------------------------+                     | |
+//   | section data            |                     | |
+//   |   ...                   |                     | |
+//   |   .sqtt_funcmap         |  <- returned bytes  | |
+//   |   .shstrtab   <-----.   |                     | |
+//   +-------------------------+                     | |
+//   | shdr[0..N)              |  <-- e_shoff -------' |
+//   |   [0]  SHT_NULL         |                       |
+//   |   [1]  .text     name=1 |  sh_name = byte       |
+//   |   [3]  .sqtt_..  name=15|  offset into          |
+//   |   [K]  .shstrtab name=29|  .shstrtab  <---------'
+//   |          sh_offset -----'   (located via shdr[K])
 //   +-------------------------+
 //
-// .shstrtab bytes (NUL-terminated strings packed end-to-end):
+// .shstrtab is a packed NUL-terminated string blob; sh_name is a byte offset
+// into it (NOT an index into a string array):
+//
 //   offset:  0   1     6  7      13 14 15            28 29
 //   bytes:  \0 . t e x t \0 . r o d a t a \0 . s q t t _ f u n c m a p \0 . s h s t r t a b \0
 //                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
 //                                            sh_name=15 -> ".sqtt_funcmap"
+//
+// Flow:
+//   1. Validate the ELF header (magic, ELFCLASS64, sizes, e_shoff in bounds,
+//      whole shdr table fits, e_shstrndx < e_shnum).
+//   2. Read shdr[e_shstrndx] to locate the .shstrtab bytes (sh_offset/sh_size).
+//   3. Linear scan shdr[0..N): for each entry, resolve its name as
+//      .shstrtab + sh_name and string-compare against `section_name`.
+//   4. On match, bounds-check sh_offset/sh_size and return a view of the
+//      section's bytes; otherwise return nullopt.
 inline std::optional<std::string_view>
 extract_elf_section(const char* elf_data, size_t elf_size, std::string_view section_name)
 {
