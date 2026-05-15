@@ -548,3 +548,127 @@ HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_3D) {
     }
   }
 }
+
+// Corner-case coverage for the __amd_rocclr_fillBufferUnAligned kernel rewrite.
+// These exercise the head/body/body_tile/body_tail/tail cleanup-region paths
+// that the rewrite changed behavior on, and the precondition error propagation.
+TEST_CASE("Unit_hipMemset_UnalignedKernelCornerCases", "[fillBuffer][unaligned]") {
+  SECTION("Byte-misaligned hipHostRegister patternSize=1") {
+    // Register a host buffer at an odd offset to obtain a byte-misaligned
+    // device-visible pointer, then run hipMemset (D8, patternSize=1) at sizes
+    // including 30 — which is the exact case where the cleanup-region sum
+    // hits 16 (head=7, body=1, body_tail=1, tail=7) and exposed the original
+    // off-by-one in the host-side assertion.
+    constexpr size_t kSlack = 64;
+    constexpr size_t kMaxFill = 64;
+    std::vector<unsigned char> host(kSlack + kMaxFill + kSlack, 0);
+    void* registered = host.data() + 1;  // odd address inside the slack region
+    HIP_CHECK(hipHostRegister(registered, kMaxFill + 32, hipHostRegisterDefault));
+    void* devPtr = nullptr;
+    HIP_CHECK(hipHostGetDevicePointer(&devPtr, registered, 0));
+
+    for (size_t fillSize : {16U, 17U, 30U, 31U, 32U, 33U, 47U, 48U}) {
+      const unsigned char value = 0xA5;
+      // Reset the surrounding region so we can check no overrun occurred.
+      std::fill(host.begin(), host.end(), 0u);
+      HIP_CHECK(hipMemset(devPtr, value, fillSize));
+      HIP_CHECK(hipDeviceSynchronize());
+      const unsigned char* base = static_cast<const unsigned char*>(registered);
+      for (size_t i = 0; i < fillSize; ++i) {
+        CAPTURE(fillSize, i);
+        HIP_ASSERT(base[i] == value);
+      }
+      // First byte after the fill region should still be zero (no overrun).
+      CAPTURE(fillSize);
+      HIP_ASSERT(base[fillSize] == 0u);
+    }
+
+    HIP_CHECK(hipHostUnregister(registered));
+  }
+
+  SECTION("Body-cleanup path across pattern sizes 1/2/4 at varied sizes") {
+    // hipMalloc returns a base VA aligned to >= 256 bytes, so devPtr is
+    // 16-aligned. By offsetting the fill start by +8 we land on an address
+    // that is 8-aligned but not 16-aligned, which is the only configuration
+    // that produces body_count=1. Combined with sizes whose tail also lands
+    // 8-aligned-but-not-16-aligned, this exercises body_count=1 +
+    // body_tail_count=1 — the path that surfaces the Windows tile_size bug
+    // (sizeof(unsigned long)*2 == 8 on MSVC LLP64 instead of 16).
+    //
+    // HIP only exposes patternSize 1/2/4 via D8/D16/D32; patternSize 8 and 16
+    // are reachable from OpenCL clEnqueueFillBuffer (not tested here).
+    constexpr size_t kAllocBytes = 256;
+    void* base = nullptr;
+    HIP_CHECK(hipMalloc(&base, kAllocBytes));
+
+    auto runFill = [&](size_t patternSize, uint64_t patternValue,
+                       size_t fillBytes) {
+      // Reset whole buffer to a sentinel.
+      HIP_CHECK(hipMemset(base, 0u, kAllocBytes));
+      void* dst = static_cast<unsigned char*>(base) + 8;  // 8-aligned, not 16
+      switch (patternSize) {
+        case 1:
+          HIP_CHECK(hipMemsetD8(reinterpret_cast<hipDeviceptr_t>(dst),
+                                static_cast<unsigned char>(patternValue),
+                                fillBytes));
+          break;
+        case 2:
+          HIP_CHECK(hipMemsetD16(reinterpret_cast<hipDeviceptr_t>(dst),
+                                 static_cast<unsigned short>(patternValue),
+                                 fillBytes / 2));
+          break;
+        case 4:
+          HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(dst),
+                                 static_cast<int>(patternValue),
+                                 fillBytes / 4));
+          break;
+      }
+      HIP_CHECK(hipDeviceSynchronize());
+      std::vector<unsigned char> hostCopy(kAllocBytes, 0);
+      HIP_CHECK(hipMemcpy(hostCopy.data(), base, kAllocBytes,
+                          hipMemcpyDeviceToHost));
+      for (size_t i = 0; i < 8; ++i) {
+        CAPTURE(patternSize, fillBytes, i);
+        HIP_ASSERT(hostCopy[i] == 0u);  // head sentinel preserved
+      }
+      for (size_t i = 0; i < fillBytes; ++i) {
+        const size_t patternIdx = i % patternSize;
+        const unsigned char expected =
+            static_cast<unsigned char>(patternValue >> (8 * patternIdx));
+        CAPTURE(patternSize, fillBytes, i);
+        HIP_ASSERT(hostCopy[8 + i] == expected);
+      }
+      for (size_t i = 8 + fillBytes; i < kAllocBytes; ++i) {
+        CAPTURE(patternSize, fillBytes, i);
+        HIP_ASSERT(hostCopy[i] == 0u);  // tail sentinel preserved
+      }
+    };
+
+    for (size_t fillBytes : {16U, 24U, 32U, 40U, 48U, 56U, 64U, 72U}) {
+      runFill(1, 0xA5ULL, fillBytes);
+    }
+    for (size_t fillBytes : {16U, 24U, 32U, 40U, 48U, 56U, 64U, 72U}) {
+      runFill(2, 0xA53CULL, fillBytes);
+    }
+    for (size_t fillBytes : {16U, 24U, 32U, 40U, 48U, 56U, 64U, 72U}) {
+      runFill(4, 0xA53C7E91ULL, fillBytes);
+    }
+
+    HIP_CHECK(hipFree(base));
+  }
+
+  SECTION("Sub-pattern-misaligned VA returns hipError") {
+    // hipMalloc base is aligned >= 16. Offsetting by 1 gives an odd VA;
+    // calling hipMemsetD16 (patternSize=2) violates the precondition
+    // (VA + origin) % patternSize == 0 and must surface as a non-success
+    // hipError after the ihipMemset propagation fix in commit 1.
+    void* base = nullptr;
+    HIP_CHECK(hipMalloc(&base, 256));
+    void* misaligned = static_cast<unsigned char*>(base) + 1;
+    hipError_t err = hipMemsetD16(reinterpret_cast<hipDeviceptr_t>(misaligned),
+                                  0xBEEF, /*count=*/16);
+    CAPTURE(err);
+    HIP_ASSERT(err != hipSuccess);
+    HIP_CHECK(hipFree(base));
+  }
+}
