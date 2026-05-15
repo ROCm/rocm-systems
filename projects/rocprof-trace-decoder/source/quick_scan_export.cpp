@@ -44,16 +44,6 @@
 #    define DELTA(x)
 #endif
 
-//#define GET_TIMING
-
-#ifdef GET_TIMING
-#    define TIMING(x)   auto x = std::chrono::steady_clock::now();
-#    define DELTA(x, y) " t" #    x << " " << (t##x - t##y).count() / 10000 / 100.0f <<
-#else
-#    define TIMING(x)
-#    define DELTA(x)
-#endif
-
 #define PUBLIC_API extern "C" __attribute__((visibility("default")))
 
 namespace
@@ -293,8 +283,6 @@ PUBLIC_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick
         status = process_events_gfx9<true>(local, raw, ntokens, header_skip, trace_callback, userdata);
     else
         status = process_events_none(local, raw, ntokens, header_skip, trace_callback, userdata);
-
-    TIMING(t4);
 
     TIMING(t4);
 
