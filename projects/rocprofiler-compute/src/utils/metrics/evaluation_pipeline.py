@@ -238,14 +238,9 @@ def validate_dual_issue_metrics(
     raw_pmc_df: pd.DataFrame,
 ) -> None:
     """Warn when VALU metrics exceed peak in the eval_metric results."""
-    valu2_series = (
-        raw_pmc_df[ValuDualIssueDetector.valu2_counter]
-        if ValuDualIssueDetector.valu2_counter in raw_pmc_df.columns
-        else None
-    )
     detector = ValuDualIssueDetector(
         gpu_arch=sys_info.get("gpu_arch", ""),
-        valu2_series=valu2_series,
+        raw_pmc_df=raw_pmc_df,
     )
 
     for df_id, df in dfs.items():
@@ -253,24 +248,21 @@ def validate_dual_issue_metrics(
             continue
         if "Metric" not in df.columns or "Value" not in df.columns:
             continue
-
-        has_peak_column = "Peak (Empirical)" in df.columns or "Peak" in df.columns
-        peak_col = "Peak (Empirical)" if "Peak (Empirical)" in df.columns else "Peak"
-
-        if not has_peak_column:
+        if "Peak (Empirical)" in df.columns:
+            peak_col = "Peak (Empirical)"
+        elif "Peak" in df.columns:
+            peak_col = "Peak"
+        else:
             continue
 
         for _, row in df.iterrows():
             metric_name = row.get("Metric", "")
-
-            if metric_name not in ValuDualIssueDetector.metrics:
+            if metric_name not in ValuDualIssueDetector.candidate_metrics:
                 continue
-
             try:
                 value = float(row.get("Value", 0))
                 peak = float(row.get(peak_col, 0))
             except (ValueError, TypeError):
-                # Skip if the value or peak cannot be converted to a float
+                # DB cells may be non-numeric (e.g. "N/A"); skip those.
                 continue
-
             detector.check(metric_name, value, peak)

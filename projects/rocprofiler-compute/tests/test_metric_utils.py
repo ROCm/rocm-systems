@@ -448,7 +448,7 @@ class TestEvaluationPipeline:
         assert "Test Metric" in variance_calls[0].args[0]
         mock_print_summary.assert_called_once()
 
-    def _make_dual_issue_dfs(
+    def make_dual_issue_dfs(
         self, metric_name: str, value: float, peak: float, peak_col: str = "Peak"
     ):
         """Build the (dfs, dfs_type) fixture used by dual-issue tests."""
@@ -461,7 +461,7 @@ class TestEvaluationPipeline:
 
     def test_validate_dual_issue_metrics_emits_valu_utilization_warning(self):
         """VALU Utilization above peak triggers the dual-issue warning."""
-        dfs, dfs_type = self._make_dual_issue_dfs(
+        dfs, dfs_type = self.make_dual_issue_dfs(
             "VALU Utilization", value=150.0, peak=100.0
         )
         sys_info = pd.Series({"gpu_arch": "gfx942"})
@@ -478,7 +478,7 @@ class TestEvaluationPipeline:
 
     def test_validate_dual_issue_metrics_emits_valu_flops_warning(self):
         """VALU FLOPs (F64) above peak triggers the FLOPs-flavored warning."""
-        dfs, dfs_type = self._make_dual_issue_dfs(
+        dfs, dfs_type = self.make_dual_issue_dfs(
             "VALU FLOPs (F64)", value=600.0, peak=400.0
         )
         sys_info = pd.Series({"gpu_arch": "gfx942"})
@@ -493,7 +493,7 @@ class TestEvaluationPipeline:
 
     def test_validate_dual_issue_metrics_silent_below_peak(self):
         """Below-peak VALU Utilization stays silent."""
-        dfs, dfs_type = self._make_dual_issue_dfs(
+        dfs, dfs_type = self.make_dual_issue_dfs(
             "VALU Utilization", value=80.0, peak=100.0
         )
         sys_info = pd.Series({"gpu_arch": "gfx942"})
@@ -507,7 +507,7 @@ class TestEvaluationPipeline:
 
     def test_validate_dual_issue_metrics_appends_valu2_suffix_on_gfx950(self):
         """gfx950 with non-zero SQ_ACTIVE_INST_VALU2 appends the confirmation."""
-        dfs, dfs_type = self._make_dual_issue_dfs(
+        dfs, dfs_type = self.make_dual_issue_dfs(
             "VALU Utilization", value=150.0, peak=100.0
         )
         sys_info = pd.Series({"gpu_arch": "gfx950"})
@@ -521,7 +521,7 @@ class TestEvaluationPipeline:
 
     def test_validate_dual_issue_metrics_uses_peak_empirical_fallback(self):
         """Peak (Empirical) column is used when present alongside Value."""
-        dfs, dfs_type = self._make_dual_issue_dfs(
+        dfs, dfs_type = self.make_dual_issue_dfs(
             "VALU Utilization",
             value=150.0,
             peak=100.0,

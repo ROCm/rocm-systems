@@ -9,11 +9,27 @@ import numpy as np
 import pandas as pd
 
 from rocprof_compute_analyze.analysis_db import db_analysis
-from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
 )
+
+
+def make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
+    """Build an arch_config stub with a metric_table carrying one VALU row."""
+    metric_df = pd.DataFrame(
+        {
+            "Metric": [metric_name],
+            "Value": ["unused_expression"],
+            peak_col: ["unused_peak_expression"],
+        },
+        index=pd.Index(["1.1"], name="Metric_ID"),
+    )
+    arch_config = MagicMock()
+    arch_config.dfs = {201: metric_df}
+    arch_config.dfs_type = {201: "metric_table"}
+    return arch_config
+
 
 # =============================================================================
 # db_analysis.evaluate() tests
@@ -414,25 +430,9 @@ def test_calc_expressions_noise_clamp():
 # =============================================================================
 
 
-def _make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
-    """Build an arch_config stub with a metric_table carrying one VALU row."""
-    metric_df = pd.DataFrame(
-        {
-            "Metric": [metric_name],
-            "Value": ["unused_expression"],
-            peak_col: ["unused_peak_expression"],
-        },
-        index=pd.Index(["1.1"], name="Metric_ID"),
-    )
-    arch_config = MagicMock()
-    arch_config.dfs = {201: metric_df}
-    arch_config.dfs_type = {201: "metric_table"}
-    return arch_config
-
-
 def test_validate_dual_issue_metrics_emits_warning_above_peak():
     """Long-format VALU Utilization above peak triggers the dual-issue warning."""
-    arch_config = _make_dual_issue_arch_config("VALU Utilization")
+    arch_config = make_dual_issue_arch_config("VALU Utilization")
     workload_values_df = pd.DataFrame({
         "metric_id": ["1.1", "1.1"],
         "value_name": ["Value", "Peak"],
@@ -455,7 +455,7 @@ def test_validate_dual_issue_metrics_emits_warning_above_peak():
 
 def test_validate_dual_issue_metrics_silent_below_peak():
     """Below-peak VALU Utilization stays silent."""
-    arch_config = _make_dual_issue_arch_config("VALU Utilization")
+    arch_config = make_dual_issue_arch_config("VALU Utilization")
     workload_values_df = pd.DataFrame({
         "metric_id": ["1.1", "1.1"],
         "value_name": ["Value", "Peak"],
@@ -476,7 +476,7 @@ def test_validate_dual_issue_metrics_silent_below_peak():
 
 def test_validate_dual_issue_metrics_uses_peak_empirical_fallback():
     """Peak (Empirical) wins when present; falls back to Peak otherwise."""
-    arch_config = _make_dual_issue_arch_config(
+    arch_config = make_dual_issue_arch_config(
         "VALU FLOPs (F64)", peak_col="Peak (Empirical)"
     )
     workload_values_df = pd.DataFrame({
@@ -501,15 +501,13 @@ def test_validate_dual_issue_metrics_uses_peak_empirical_fallback():
 
 def test_validate_dual_issue_metrics_appends_valu2_suffix_on_gfx950():
     """gfx950 with non-zero SQ_ACTIVE_INST_VALU2 appends the confirmation."""
-    arch_config = _make_dual_issue_arch_config("VALU Utilization")
+    arch_config = make_dual_issue_arch_config("VALU Utilization")
     workload_values_df = pd.DataFrame({
         "metric_id": ["1.1", "1.1"],
         "value_name": ["Value", "Peak"],
         "value": [150.0, 100.0],
     })
-    pmc_df = pd.DataFrame({
-        ValuDualIssueDetector.valu2_counter: [1, 2, 3],
-    })
+    pmc_df = pd.DataFrame({"SQ_ACTIVE_INST_VALU2": [1, 2, 3]})
 
     with patch("utils.metrics.common.console_warning") as console_warning_mock:
         db_analysis.validate_dual_issue_metrics(
@@ -525,7 +523,7 @@ def test_validate_dual_issue_metrics_appends_valu2_suffix_on_gfx950():
 
 def test_validate_dual_issue_metrics_skips_non_metric_table_dfs():
     """dfs entries whose dfs_type is not metric_table are ignored."""
-    arch_config = _make_dual_issue_arch_config("VALU Utilization")
+    arch_config = make_dual_issue_arch_config("VALU Utilization")
     arch_config.dfs_type = {201: "raw_csv_table"}
     workload_values_df = pd.DataFrame({
         "metric_id": ["1.1", "1.1"],

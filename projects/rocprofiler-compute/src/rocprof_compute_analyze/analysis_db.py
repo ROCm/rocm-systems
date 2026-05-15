@@ -601,14 +601,9 @@ class db_analysis(OmniAnalyze_Base):
         arch_config: schema.ArchConfig,
     ) -> None:
         """Warn when VALU metrics exceed peak in the workload-level results."""
-        valu2_series = (
-            pmc_df[ValuDualIssueDetector.valu2_counter]
-            if ValuDualIssueDetector.valu2_counter in pmc_df.columns
-            else None
-        )
         detector = ValuDualIssueDetector(
             gpu_arch=sys_info.get("gpu_arch", ""),
-            valu2_series=valu2_series,
+            raw_pmc_df=pmc_df,
         )
 
         candidates: list[tuple[str, str, str]] = []
@@ -625,7 +620,7 @@ class db_analysis(OmniAnalyze_Base):
                 continue
             for metric_id, row in df.iterrows():
                 metric_name = row.get("Metric", "")
-                if metric_name in ValuDualIssueDetector.metrics:
+                if metric_name in ValuDualIssueDetector.candidate_metrics:
                     candidates.append((metric_id, metric_name, peak_col))
         if not candidates:
             return
