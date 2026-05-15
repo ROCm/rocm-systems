@@ -361,26 +361,16 @@ if(HIP_ENABLE_LTTNG_UST)
     set(ENV{PKG_CONFIG_PATH} "${LTTNG_VENDORED_PKGCONFIG}:$ENV{PKG_CONFIG_PATH}")
     pkg_check_modules(LTTNG_UST REQUIRED IMPORTED_TARGET lttng-ust>=2.13)
 
+    # Vendored .so exist only after ExternalProject build: add -L + link dep, PRE_LINK copy
+    # beside libamdhip64 for NEEDED/co-build consumers, and mirror HIP+LTTng includes on rocclr.
     target_compile_definitions(amdhip64 PRIVATE HIP_ENABLE_LTTNG_UST=1)
     target_include_directories(amdhip64 PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/lttng
         ${LTTNG_VENDORED_INCLUDE_DIR})
-    # Explicitly add the vendored lib directory to the link search path.
-    # pkg_check_modules(IMPORTED_TARGET) generated PkgConfig::LTTNG_UST from
-    # the stub .pc file written at configure time; in some pkg-config / CMake
-    # combinations the -L directive in the stub is dropped from the imported
-    # target's interface (the .so files do not exist yet at configure time
-    # because the ExternalProject builds them later), leaving only -llttng-ust
-    # / -llttng-ust-common in the link line and the linker fails with
-    # "cannot find -llttng-ust". Adding the directory directly guarantees
-    # the search path is present at link time.
+
     target_link_directories(amdhip64 PRIVATE ${LTTNG_VENDORED_LIB_DIR})
     target_link_libraries(amdhip64 PRIVATE PkgConfig::LTTNG_UST ${CMAKE_DL_LIBS})
 
-    # Build amdhip64 only after the vendored libs exist (the .pc query
-    # above happens at configure time, but the actual .so files are only
-    # produced when the lttng_ust_vendored ExternalProject runs at build
-    # time; without this dependency, the link step races the build).
     add_dependencies(amdhip64 lttng_ust_vendored)
 
     # RPATH:
@@ -394,34 +384,7 @@ if(HIP_ENABLE_LTTNG_UST)
         BUILD_RPATH   "${LTTNG_VENDORED_LIB_DIR}"
         INSTALL_RPATH "\$ORIGIN")
 
-    # Stage the vendored .so files into the same build-tree directory as
-    # libamdhip64.so. This is what fixes downstream link failures (e.g.
-    # TheRock CI: rocFFT, rocRoller, rocprofiler-systems link against
-    # -lamdhip64 / -lhsa-runtime64; the linker reads NEEDED entries like
-    # liblttng-ust.so.1 and resolves them via the same -L path used to
-    # find libamdhip64.so). With the vendored .so files co-located in
-    # the build dir, no extra -rpath-link or downstream coordination is
-    # required. Mirrors the installed flat layout under /opt/rocm/lib/.
-    #
-    # PRE_LINK runs after object compilation but before the link step,
-    # so the vendored .so files are present when the linker resolves
-    # -llttng-ust via the target's link directory. Attaching to the
-    # amdhip64 target directly (rather than using add_custom_target +
-    # add_dependencies) avoids the cyclic dependency that arises when
-    # $<TARGET_FILE_DIR:amdhip64> is used in a separate custom target.
     if(NOT WIN32)
-        # Use a sane shell-based existence check rather than
-        # `cp ... 2>/dev/null || true`. The previous form silently
-        # masked the case where the vendored .so files were missing
-        # (e.g. the FetchContent build failed in a hard-to-spot way),
-        # which then broke downstream link consumers later. Now we
-        # explicitly probe for liblttng-ust.so* (the canonical
-        # vendored library) and fail the build with an actionable
-        # error message if absent. The cp itself uses the original
-        # glob style and lets `set -e` surface any real failures.
-        #
-        # Single-line shell script: make's recipe parser does not
-        # allow bare newlines inside a command argument.
         add_custom_command(TARGET amdhip64 PRE_LINK
             COMMAND ${CMAKE_COMMAND} -E make_directory
                     "$<TARGET_FILE_DIR:amdhip64>"
@@ -430,26 +393,6 @@ if(HIP_ENABLE_LTTNG_UST)
             VERBATIM)
     endif()
 
-    # NB: install rule for the vendored .so files lives in
-    # hipamd/packaging/CMakeLists.txt under COMPONENT binary so the
-    # files end up in the .deb/.rpm alongside libamdhip64.so.
-
-    # Per-packet AQL kernel-dispatch tracepoint lives at the HIP CLR packet-
-    # write site (rocclr/device/rocm/rocvirtual.cpp). rocclr is built as a
-    # static archive and linked into amdhip64; the tracepoint emit symbols
-    # live in amdhip64 (via lttng/rocm_hip_tp.cpp), but rocvirtual.cpp needs
-    # the include path, the HIP_ENABLE_LTTNG_UST macro, and the LTTng-UST
-    # headers to compile the call sites. Apply all to the rocclr target here.
-    #
-    # rocm_trace_emit_curated.h transitively #include <hip/hip_runtime_api.h>
-    # for the HIP types in the per-API typed-emit signatures, which in turn
-    # pulls in <hip/hip_version.h> (generated at configure time into
-    # ${PROJECT_BINARY_DIR}/include/hip/) and other headers from
-    # ${PROJECT_SOURCE_DIR}/include. Mirror the three include directories
-    # amdhip64 itself uses (see the target_include_directories above), so
-    # rocclr — which is built as a static archive and linked into amdhip64
-    # but does not normally inherit the HIP include wiring — can compile the
-    # call sites in device/rocm/rocvirtual.cpp.
     if(TARGET rocclr)
         target_compile_definitions(rocclr PRIVATE HIP_ENABLE_LTTNG_UST=1)
         target_include_directories(rocclr PRIVATE

@@ -14,11 +14,6 @@
  * (field add/remove/rename/type-change) so consumers can detect they
  * are reading a stream produced by a different schema generation.
  *
- * Version history:
- *   2 - corr_id / parent_corr_id / tid carried as explicit event fields.
- *   3 - corr_id / parent_corr_id / tid removed from every event; identity
- *       and parent attribution derive from the (vpid, vtid, timestamp)
- *       channel contexts. See rocm_trace_emit.h for the consumer recipe.
  */
 #define ROCM_HSA_TP_SCHEMA_VERSION 3
 

@@ -480,16 +480,6 @@ uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
 }
 
 void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
-  /* Universal kernel-dispatch chokepoint for AMD GPU agents. AqlQueue is
-   * its own DoorbellSignal, so every HSA submit on a hardware AQL queue
-   * (HIP launches, direct HSA enqueues, PM4 IB submits) ends up here.
-   * Emit a single rocm_hsa:hsa_doorbell_ring tracepoint with a
-   * packet_type discriminator so consumers can filter at LTTng-event
-   * level (--filter 'packet_type == 0' to keep only KERNEL_DISPATCH).
-   *
-   * For PM4 packets the AQL header sniff returns UNKNOWN; the PM4 path
-   * (ExecutePM4) sets a TLS hint to ROCM_PKT_PM4 before ringing, which
-   * we consume here to override the sniff result. */
   uint8_t pkt_type = rocm_trace_consume_packet_type_hint();
   if (pkt_type == ROCM_PKT_UNKNOWN /* hint not set: do AQL header sniff */) {
     pkt_type = rocm_trace_sniff_packet_type(
