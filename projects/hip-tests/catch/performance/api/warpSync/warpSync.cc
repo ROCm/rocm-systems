@@ -10,6 +10,7 @@
 #include "warp_common.hh"
 #include <hip/hip_runtime.h>
 #include <hip/cooperative_groups/hip_reduce.h>
+#include <hip/cooperative_groups/hip_scan.h>
 #include <hip/hip_fp16.h>
 #include <hip_test_common.hh>
 #include <performance_common.hh>
@@ -115,7 +116,7 @@ __global__ void reduceOpSync(T* __restrict__ output, const T* __restrict__ input
   }
 }
 
-template <size_t TileSize, bool ExcludeFirst, class Functor, class T>
+template <size_t TileSize, bool ExcludeFirst, class Functor, class T, AggregationType aggType>
 __global__ void reduceCoop(T* __restrict__ output, const T* __restrict__ input)
 {
   namespace cg = cooperative_groups;
@@ -132,7 +133,15 @@ __global__ void reduceCoop(T* __restrict__ output, const T* __restrict__ input)
     }
   }
 
-  result = cg::reduce(mytile, input[idx], Functor());
+  if constexpr (aggType == AggregationType::Reduce) {
+    result = cg::reduce(mytile, input[idx], Functor());
+  } else if constexpr (aggType == AggregationType::InclusiveScan) {
+    result = cg::inclusive_scan(mytile, input[idx], Functor());
+  } else if constexpr (aggType == AggregationType::ExclusiveScan) {
+    result = cg::exclusive_scan(mytile, input[idx], Functor());
+  } else {
+    static_assert(__hip_internal::is_void<T>::value, "Unsupported aggType");
+  }
 
   if (laneId / TileSize  == numTiles - 1) {
     // it's always the higher order tile reduction the one that gets calculated
@@ -219,8 +228,8 @@ void checkResults(T* d_lhs, T* d_rhs, size_t numBytes, unsigned long long mask) 
 
 // in this case, instead of using masks, the TileSize would define the mask
 // at compile time
-template <size_t TileSize, bool ExcludeFirst, class T, template <typename> class Op> class CoopBenchmark
-  : public Benchmark<CoopBenchmark<TileSize, ExcludeFirst, T, Op>> {
+template <size_t TileSize, bool ExcludeFirst, class T, template <typename> class Op, AggregationType aggType> class CoopBenchmark
+  : public Benchmark<CoopBenchmark<TileSize, ExcludeFirst, T, Op, aggType>> {
 public:
   void operator()(T* output, const T* input, int numItems)
   {
@@ -233,17 +242,17 @@ public:
 
     TIMED_SECTION(kTimerTypeEvent) {
       if constexpr (std::is_same<Op<T>, std::plus<T>>::value) {
-        reduceCoop<TileSize, ExcludeFirst, cg::plus<T>, T><<<gridDim, blockDim>>>(output, input);
+        reduceCoop<TileSize, ExcludeFirst, cg::plus<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
       } else if constexpr (std::is_same<Op<T>, MinOp<T>>::value) {
-        reduceCoop<TileSize, ExcludeFirst, cg::less<T>, T><<<gridDim, blockDim>>>(output, input);
+        reduceCoop<TileSize, ExcludeFirst, cg::less<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
       } else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value) {
-        reduceCoop<TileSize, ExcludeFirst, cg::greater<T>, T><<<gridDim, blockDim>>>(output, input);
+        reduceCoop<TileSize, ExcludeFirst, cg::greater<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
       } else if constexpr (std::is_same<Op<T>, AndOp<T>>::value) {
-        reduceCoop<TileSize, ExcludeFirst, cg::bit_and<T>, T><<<gridDim, blockDim>>>(output, input);
+        reduceCoop<TileSize, ExcludeFirst, cg::bit_and<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
       } else if constexpr (std::is_same<Op<T>, OrOp<T>>::value) {
-        reduceCoop<TileSize, ExcludeFirst, cg::bit_or<T>, T><<<gridDim, blockDim>>>(output, input);
+        reduceCoop<TileSize, ExcludeFirst, cg::bit_or<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
       } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
-        reduceCoop<TileSize, ExcludeFirst, cg::bit_xor<T>, T><<<gridDim, blockDim>>>(output, input);
+        reduceCoop<TileSize, ExcludeFirst, cg::bit_xor<T>, T, aggType><<<gridDim, blockDim>>>(output, input);
       } else {
         static_assert(std::is_void<T>::value, "Unsupported operator");
       }
@@ -283,6 +292,47 @@ template <> struct HasAtomicOps<long long> {
   static constexpr bool value = false;
 };
 
+template <class T, template <typename> class Op, AggregationType aggType>
+void benchmarkCoop(LinearAllocGuard<T>* d_outputCoop,
+                   const LinearAllocGuard<T>& d_input,
+                   const std::map<std::string, unsigned long long>& masks,
+                   int numItems)
+{
+  int wavefrontSize = getWarpSize();
+  int halfWaveSize = wavefrontSize / 2;
+  unsigned long long halfBitsOn = (1ul << (wavefrontSize / 2)) - 1;
+  unsigned long long fullMask = -1ul, halfHighBitsOn = halfBitsOn << halfWaveSize,
+                     high16BitsOn = halfBitsOn << (wavefrontSize - 16),
+                     high8BitsOn = halfBitsOn << (wavefrontSize - 8),
+                     high4BitsOn = halfBitsOn << (wavefrontSize - 4);
+
+  for (const auto& mask : masks) {
+    printf("%s %llx\n", mask.first.c_str(), mask.second);
+    unsigned long warpMask = wavefrontSize == 64? ~0ull : 0xFFFFFFFF;
+
+    if (mask.second == (fullMask & warpMask)) {
+      if (wavefrontSize == 64) {
+        CoopBenchmark<64, false, T, Op, aggType> benchmark;
+        benchmark.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
+      } else {
+        CoopBenchmark<32, false, T, Op, aggType> benchmark;
+        benchmark.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
+      }
+    } else if (wavefrontSize == 64 && mask.second == (halfHighBitsOn & warpMask)) {
+      CoopBenchmark<32, false, T, Op, aggType> benchmark;
+      benchmark.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
+    } else if (mask.second == (high16BitsOn & warpMask)) {
+      CoopBenchmark<16, false, T, Op, aggType> benchmark;
+      benchmark.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
+    } else if (mask.second == (high8BitsOn & warpMask)) {
+      CoopBenchmark<8, false, T, Op, aggType> benchmark;
+      benchmark.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
+    } else if (mask.second == (high4BitsOn & warpMask)) {
+      CoopBenchmark<4, false, T, Op, aggType> benchmark;
+      benchmark.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
+    }
+  }
+}
 template <class T, template <typename> class Op> struct ReduceBenchmark {
   void Run() {
     static constexpr int numMasks = 6;
@@ -371,57 +421,34 @@ template <class T, template <typename> class Op> struct ReduceBenchmark {
       benchmarkReduce.Run((d_outputReduce++)->ptr(), d_input.ptr(), numItems, mask.second);
     }
 
-    printf("\n--- reduce cooperative groups %s %s--- \n", opStr, typeStr);
-
-    for (const auto& mask : masks) {
-      printf("%s %llx\n", mask.first.c_str(), mask.second);
-      unsigned long warpMask = wavefrontSize == 64? ~0ull : 0xFFFFFFFF;
-
-      if (mask.second == (fullMask & warpMask)) {
-
-        if (wavefrontSize == 64) {
-          CoopBenchmark<64, false, T, Op> benchmarkCoop;
-          benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
-        } else {
-          CoopBenchmark<32, false, T, Op> benchmarkCoop;
-          benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
-        }
-      } else if (wavefrontSize == 64 && mask.second == (halfHighBitsOn & warpMask)) {
-        CoopBenchmark<32, false, T, Op> benchmarkCoop;
-        benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
-      } else if (mask.second == (high16BitsOn & warpMask)) {
-        CoopBenchmark<16, false, T, Op> benchmarkCoop;
-        benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
-      } else if (mask.second == (high8BitsOn & warpMask)) {
-        CoopBenchmark<8, false, T, Op> benchmarkCoop;
-        benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
-      } else if (mask.second == (high4BitsOn & warpMask)) {
-        CoopBenchmark<4, false, T, Op> benchmarkCoop;
-        benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
-      } else if (mask.second == (allButOne & warpMask)) {
-        if (wavefrontSize == 64) {
-          CoopBenchmark<64, true, T, Op> benchmarkCoop; 
-          benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
-        } else {
-          CoopBenchmark<32, true, T, Op> benchmarkCoop; 
-          benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
-        }
-      }
-    }
-
-    printf("\n");
-
     if constexpr (HasAtomicOps<T>::value) {
       printf("Checking results...\n");
 
       for (const auto& mask : masks) {
         checkResults<T, Op>(d_outputsAtomic[pos].ptr(), d_outputsReduce[pos].ptr(), outputNumBytes,
                             mask.second);
-        checkResults<T, Op>(d_outputsReduce[pos].ptr(), d_outputsCoop[pos].ptr(), outputNumBytes,
-                            mask.second);
+
+        // allButOne is not supported in tiled cooperative groups; all the threads of the tile must
+        // be active
+        if (mask.second != allButOne) {
+          checkResults<T, Op>(d_outputsReduce[pos].ptr(), d_outputsCoop[pos].ptr(), outputNumBytes,
+                              mask.second);
+        }
         pos++;
       }
     }
+
+    printf("\n--- reduce cooperative groups %s %s--- \n", opStr, typeStr);
+    benchmarkCoop<T, Op, AggregationType::Reduce>(d_outputCoop, d_input, masks, numItems);
+    printf("\n");
+
+    printf("\n--- inclusive scan cooperative groups %s %s--- \n", opStr, typeStr);
+    benchmarkCoop<T, Op, AggregationType::InclusiveScan>(d_outputCoop, d_input, masks, numItems);
+    printf("\n");
+
+    printf("\n--- exclusive scan cooperative groups %s %s--- \n", opStr, typeStr);
+    benchmarkCoop<T, Op, AggregationType::ExclusiveScan>(d_outputCoop, d_input, masks, numItems);
+    printf("\n");
   }
 };
 
