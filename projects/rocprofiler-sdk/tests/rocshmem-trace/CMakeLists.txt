@@ -1,0 +1,88 @@
+# MIT License
+#
+# Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+#
+cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+
+project(
+    rocprofiler-sdk-tests-rocshmem-tracing
+    LANGUAGES CXX
+    VERSION 0.0.0)
+
+find_package(rocprofiler-sdk REQUIRED)
+
+# rocSHMEM needs an Open MPI launcher (mpirun / mpiexec) to bootstrap the symmetric heap,
+# so this integration test is only enabled when (a) the in-tree rocshmem-demo target is
+# built (which itself depends on rocshmem >= 3.3.0 + rocprofiler-register being
+# installed), and (b) an mpirun / mpiexec executable is on PATH. Allow root execution for
+# container CI (matches the mpi-ranks test pattern).
+find_program(MPIRUN_EXECUTABLE NAMES mpirun mpiexec)
+
+set(IS_DISABLED OFF)
+if(NOT TARGET rocshmem-demo)
+    set(IS_DISABLED ON)
+endif()
+if(NOT MPIRUN_EXECUTABLE)
+    set(IS_DISABLED ON)
+endif()
+
+set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
+
+# Build the LD_PRELOAD value: the rocprofiler-sdk-json-tool library captures every tracing
+# domain it knows about (including ROCSHMEM_API on this branch) and writes a single JSON
+# file at tool finalization. Memory checker preload (if set) is concatenated in front so
+# memcheck still works.
+if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
+    set(PRELOAD_ENV
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}:$<TARGET_FILE:rocprofiler-sdk-json-tool>"
+        )
+else()
+    set(PRELOAD_ENV "$<TARGET_FILE:rocprofiler-sdk-json-tool>")
+endif()
+
+# Each MPI rank writes to its own JSON file so the two rocshmem-demo processes do not race
+# on the same path. json-tool reads ROCPROFILER_TOOL_OUTPUT_FILE verbatim (no built-in
+# placeholder expansion), so use a `bash -c` shim to expand $OMPI_COMM_WORLD_RANK at the
+# per-rank level. Validation only inspects rank 0's trace; both ranks exercise the same
+# set of APIs.
+rocprofiler_add_integration_execute_test(
+    rocshmem-tracing
+    COMMAND
+        ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPIRUN_EXECUTABLE} -np 2 bash -c
+        "ROCPROFILER_TOOL_OUTPUT_FILE='${CMAKE_CURRENT_BINARY_DIR}/rocshmem-tracing-test.rank-'\${OMPI_COMM_WORLD_RANK}.json exec '$<IF:$<TARGET_EXISTS:rocshmem-demo>,$<TARGET_FILE:rocshmem-demo>,rocshmem-demo>'"
+    DEPENDS rocshmem-demo
+    TIMEOUT 60
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocshmem-tracing
+    DISABLED "${IS_DISABLED}")
+
+rocprofiler_add_integration_validate_test(
+    rocshmem-tracing
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    LABELS "integration-tests"
+    TIMEOUT 45
+    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-tracing-test.rank-0.json
+    FIXTURES_REQUIRED rocshmem-tracing
+    DISABLED "${IS_DISABLED}")
