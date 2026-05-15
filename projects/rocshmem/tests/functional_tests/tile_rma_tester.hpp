@@ -40,12 +40,12 @@ class TileRMATester : public Tester {
   virtual ~TileRMATester();
 
  protected:
-  virtual void resetBuffers(size_t size) override;
+  virtual void resetBuffers(uint64_t size) override;
 
   virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+                            uint64_t size) override;
 
-  virtual void verifyResults(size_t size) override;
+  virtual void verifyResults(uint64_t size) override;
 
   float *source = nullptr;
   float *dest = nullptr;

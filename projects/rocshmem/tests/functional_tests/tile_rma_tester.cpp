@@ -470,7 +470,7 @@ TileRMATester::~TileRMATester() {
   }
 }
 
-void TileRMATester::resetBuffers(size_t size) {
+void TileRMATester::resetBuffers(uint64_t size) {
   // Use the same buffer size calculation as constructor
   size_t tile_size = 64 * 64;
   size_t buffer_elements_per_thread;
@@ -499,7 +499,7 @@ void TileRMATester::resetBuffers(size_t size) {
 }
 
 void TileRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                 size_t size) {
+                                 uint64_t size) {
   size_t shared_bytes = 0;
 
   // Default to 64x64 tiles
@@ -517,7 +517,7 @@ void TileRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   num_timed_msgs = loop * gridSize.x * blockSize.x;
 }
 
-void TileRMATester::verifyResults(size_t size) {
+void TileRMATester::verifyResults(uint64_t size) {
   int check_id;
   switch (_type) {
     case TileGetContiguousTestType:
