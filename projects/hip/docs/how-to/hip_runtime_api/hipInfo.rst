@@ -7,7 +7,7 @@
 Using hipInfo
 =============
 
-``hipInfo`` is a diagnostic utility that displays information about AMD GPU devices available on your system. It queries and reports device properties, architectural features, memory information, and peer-to-peer capabilities through the HIP runtime API. ``hipInfo`` is similar to ``rocminfo``, though they are different as described in :ref:`hip-v-rocm-info`. For more information, see `rocminfo <https://rocm.docs.amd.com/projects/rocminfo/en/latest/index.html>`__.
+``hipInfo`` is a diagnostic utility that displays information about AMD GPU devices available on your system. It queries and reports device properties, architectural features, memory information, and peer-to-peer capabilities through the HIP runtime API. While ``hipInfo`` is similar to ``rocminfo``, the two tools differ in scope and usage, as described in :ref:`hip-v-rocm-info`. For more information, see `rocminfo <https://rocm.docs.amd.com/projects/rocminfo/en/latest/index.html>`__.
 
 ``hipInfo`` can be used for:
 
