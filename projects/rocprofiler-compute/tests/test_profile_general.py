@@ -67,7 +67,7 @@ ROOF_ONLY_FILES = sorted([
 ])
 
 METRIC_THRESHOLDS = {
-    "2.1.12": {"absolute": 0, "relative": 8},
+    "2.1.11": {"absolute": 0, "relative": 8},
     "3.1.1": {"absolute": 0, "relative": 10},
     "3.1.10": {"absolute": 0, "relative": 10},
     "3.1.11": {"absolute": 0, "relative": 1},
@@ -611,7 +611,7 @@ def test_path(binary_handler_profile_rocprof_compute):
 def test_path_rocflop(binary_handler_profile_rocprof_compute):
     # Test whether multiprocess workloads like rocflop are handled correctly
     workload_dir = common.get_output_dir()
-    options = ["--block", "2.1.1"]
+    options = ["--block", "2.1.0"]
     _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,

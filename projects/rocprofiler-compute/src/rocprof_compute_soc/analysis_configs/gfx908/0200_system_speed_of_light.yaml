@@ -18,11 +18,6 @@ Panel Config:
           unit: GFLOP/s
           peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
           pop: None
-        VALU IOPs:
-          value: None
-          unit: GIOP/s
-          peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
-          pop: None
         MFMA FLOPs (BF16):
           value: None
           unit: GFLOP/s
@@ -182,11 +177,6 @@ Panel Config:
       This is also presented as a percent of the peak theoretical FLOPs achievable
       on the specific accelerator. Note: this does not include any floating-point
       operations from MFMA instructions.
-    VALU IOPs: >-
-      The total integer operations executed per second on the VALU. This is
-      also presented as a percent of the peak theoretical IOPs achievable on the
-      specific accelerator. Note: this does not include any integer operations from
-      MFMA instructions.
     MFMA FLOPs (BF16): >-
       The total number of 16-bit brain floating point MFMA operations executed
       per second. Note: this does not include any 16-bit brain floating point operations
