@@ -3186,10 +3186,6 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   // Early-out on invalid or revoked communicator
   ncclResult_t ret = CommCheck(info->comm, info->opName, "comm");
   if (ret != ncclSuccess) return ncclGroupErrCheck(ret);
-  if (info->comm->revokedFlag) {
-    WARN("%s: communicator was revoked", info->opName);
-    return ncclGroupErrCheck(ncclInvalidUsage);
-  }
   // Profiler - If a group API event has already started, update the profilerGroupDepth so that the depth
   // updates correctly for implicit ncclGroupStartInternal and ncclGroupEndInternal calls
   if (ncclProfilerApiState.profilerGroupDepth > 0) {
@@ -3200,6 +3196,13 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   int devOld = -1;
   // Check whether communicator is ready to communicate
   NCCLCHECKGOTO(ncclCommEnsureReady(info->comm), ret, fail);
+
+  if (__atomic_load_n(&info->comm->revokedFlag, __ATOMIC_ACQUIRE)) {
+    WARN("%s: communicator %p has been revoked; no new collectives may be enqueued",
+         info->opName, info->comm);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
 
   if (info->comm->checkPointers) {
     CUDACHECKGOTO(cudaGetDevice(&devOld), ret, fail);
