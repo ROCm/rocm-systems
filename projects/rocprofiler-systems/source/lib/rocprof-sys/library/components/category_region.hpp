@@ -695,6 +695,7 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
 
     if constexpr(sizeof...(Args) > 0)
     {
+        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         set_cache_args(_data.tool_id.c_str(), get_serialized_annotation_args(_args...));
     }
 }
@@ -731,6 +732,7 @@ category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
 
     if constexpr(sizeof...(Args) > 0)
     {
+        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         set_cache_args(_name.data(), get_serialized_annotation_args(_args...));
     }
 }
